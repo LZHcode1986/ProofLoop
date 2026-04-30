@@ -22,7 +22,7 @@
 ## 标准配置顺序
 
 1. 开始配置前，默认按 `test-driven-development` 处理，不再询问是否需要。
-2. 再迁移 `config.yaml.example`、schema 和三个 gate 文档。
+2. 再迁移 `config.yaml.example`、schema、质量门禁与用户说明。
 3. 用 `skills/openspec-propose/SKILL.md` 覆盖目标项目原有的 `propose` skill。
 4. 用 `skills/openspec-apply-change/SKILL.md` 覆盖目标项目原有的 `apply` skill。
 5. 同时修改 `config.yaml` 和 schema，把代码变更前默认要求 `test-driven-development` 的规则写入项目配置。

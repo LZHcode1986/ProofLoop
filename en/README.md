@@ -11,7 +11,7 @@ Before using this repository, you must complete the base OpenSpec configuration 
 ## What this is
 
 - A methodology for adapting OpenSpec to a specific project
-- A set of documents for validation, archive safety, and change control
+- A set of documents for validation, archive usage rules, and change control
 - A reusable schema and template skeleton
 - A guide for helping AI work according to project constraints
 
@@ -78,7 +78,6 @@ When adapting this workflow to another project:
 | Migration pack overview | [openspec-migration-pack/README.md](openspec-migration-pack/README.md) | How to reuse the assets |
 | Quality gate | [openspec-migration-pack/QUALITY-GATE.md](openspec-migration-pack/QUALITY-GATE.md) | Proposal readiness check |
 | User guide | [openspec-migration-pack/USER-GUIDE.md](openspec-migration-pack/USER-GUIDE.md) | User-facing change guidance |
-| Archive checklist | [openspec-migration-pack/ARCHIVE-CHECKLIST.md](openspec-migration-pack/ARCHIVE-CHECKLIST.md) | Post-archive normalization |
 | Schema example | [openspec-migration-pack/schemas/project-schema/README.md](openspec-migration-pack/schemas/project-schema/README.md) | Project schema skeleton |
 | Propose redesign notes | [openspec-migration-pack/propose-redesign.md](openspec-migration-pack/propose-redesign.md) | Required workflow asset for `propose` hardening |
 | Apply redesign notes | [openspec-migration-pack/apply-redesign.md](openspec-migration-pack/apply-redesign.md) | Design notes, with apply entering TDD first |

@@ -455,7 +455,7 @@ archive 只做：
    - 是否把“可启动但不可玩=失败”写入验收
 4. 删除 `Archive Safety` 相关 gate 语义
 
-### 8.7 `openspec/ARCHIVE-CHECKLIST.md`
+### 8.7 Archive 收口规则
 
 当前问题：
 
@@ -463,7 +463,7 @@ archive 只做：
 
 整改目标：
 
-- 让 archive checklist 只做归档安全收口
+- 让 archive 规则只做归档安全收口
 - 不包含任何质量校验或“是否已经做完验证”的判断
 
 具体改法：

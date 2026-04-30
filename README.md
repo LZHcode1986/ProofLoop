@@ -11,7 +11,7 @@ Before using this repository, you must complete the base OpenSpec configuration 
 ## What this is
 
 - A methodology for adapting OpenSpec to a specific project
-- A set of documents for validation, archive safety, and change control
+- A set of documents for validation, archive usage rules, and change control
 - A reusable schema and template skeleton
 - A guide for helping AI work according to project constraints
 
@@ -78,7 +78,6 @@ When adapting this workflow to another project:
 | Migration pack overview | [en/openspec-migration-pack/README.md](en/openspec-migration-pack/README.md) | How to reuse the assets |
 | Quality gate | [en/openspec-migration-pack/QUALITY-GATE.md](en/openspec-migration-pack/QUALITY-GATE.md) | Proposal readiness check |
 | User guide | [en/openspec-migration-pack/USER-GUIDE.md](en/openspec-migration-pack/USER-GUIDE.md) | User-facing change guidance |
-| Archive checklist | [en/openspec-migration-pack/ARCHIVE-CHECKLIST.md](en/openspec-migration-pack/ARCHIVE-CHECKLIST.md) | Post-archive normalization |
 | Schema example | [en/openspec-migration-pack/schemas/project-schema/README.md](en/openspec-migration-pack/schemas/project-schema/README.md) | Project schema skeleton |
 | Skills guide | [skills/README.md](skills/README.md) | Skill roles and configuration order |
 | Propose skill | [skills/openspec-propose/SKILL.md](skills/openspec-propose/SKILL.md) | Primary migration source for `propose` |

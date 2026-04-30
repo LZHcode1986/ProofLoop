@@ -6,7 +6,7 @@
 2. Read `./OpenSpec-Workflow-Customization-Methodology.md` to understand the main methodology.
 3. Read `./openspec-migration-pack/README.md` to understand how the migration pack works.
 4. Read `./skills/README.md` and `./skills/openspec-propose/SKILL.md` to understand the skill roles and the primary `propose` migration asset.
-5. Read `./openspec-migration-pack/QUALITY-GATE.md`, `USER-GUIDE.md`, and `ARCHIVE-CHECKLIST.md` together.
+5. Read `./openspec-migration-pack/QUALITY-GATE.md` and `USER-GUIDE.md` together.
 6. Read `./openspec-migration-pack/schemas/project-schema/README.md` and `config.yaml.example` to understand the schema and project-context skeleton.
 7. Read `./skills/openspec-apply-change/SKILL.md` and `./skills/test-driven-development/SKILL.md` to understand the default implementation workflow.
 8. Read `./OpenSpec-vs-This-Workflow.md` last if you want the comparison with upstream OpenSpec.

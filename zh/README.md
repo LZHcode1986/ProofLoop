@@ -11,7 +11,7 @@
 ## 这是什么
 
 - 一套面向具体项目定制 OpenSpec 的方法论
-- 一组用于校验 OpenSpec 生成文档和归档准确性的文档
+- 一组用于校验 OpenSpec 生成文档、约束归档行为和变更控制的文档
 - 一套可迁移的 schema 和模板骨架
 - 一份教 AI 按项目约束工作的说明
 
@@ -28,7 +28,7 @@
 - 更明确的 schema 固化，把项目约束写进模板和生成结构
 - 更统一的质量门禁，把 proposal 是否可进入 apply 的判断集中起来
 - 更明确的 Active Change 规则，要求实施中新认知回写到文档
-- 更严格的归档检查，防止主 spec 退化成变更残留
+- 更明确的归档规则，避免主 spec 退化成变更残留
 - 更清晰的 proposal / design / tasks 分工，让每一层各自承担职责
 - 默认接入 TDD 工作流程，作为实施阶段的基础约束
 
@@ -75,7 +75,6 @@
 | 迁移包说明 | [zh/openspec 资产迁移/README.md](zh/openspec 资产迁移/README.md) | 迁移资产怎么用 |
 | 质量门禁 | [zh/openspec 资产迁移/QUALITY-GATE.md](zh/openspec 资产迁移/QUALITY-GATE.md) | 提案就绪检查 |
 | 用户说明 | [zh/openspec 资产迁移/用户说明.md](zh/openspec 资产迁移/用户说明.md) | 给用户看的变更使用说明 |
-| 归档清单 | [zh/openspec 资产迁移/ARCHIVE-CHECKLIST.md](zh/openspec 资产迁移/ARCHIVE-CHECKLIST.md) | 归档后正规化检查 |
 | schema 示例 | [zh/openspec 资产迁移/schemas/project-schema/README.md](zh/openspec 资产迁移/schemas/project-schema/README.md) | 项目 schema 骨架 |
 | Skills 导览 | [skills/README.md](../skills/README.md) | skill 角色与配置顺序 |
 | propose skill | [skills/openspec-propose/SKILL.md](../skills/openspec-propose/SKILL.md) | `propose` 的主迁移源资产 |

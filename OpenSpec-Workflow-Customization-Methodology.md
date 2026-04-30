@@ -184,19 +184,18 @@ Key rule:
 - finishing code is not the same as archiving
 - a change is ready to archive only after the change is fully closed
 
-### Step 7: Add an archive normalization check
+### Step 7: Close changes through the upstream archive behavior
 
-Keep a separate checklist, for example:
+Do not maintain a separate archive checklist file.
 
-- `openspec/ARCHIVE-CHECKLIST.md`
+Use the upstream `archive` workflow directly:
 
-After archive, verify:
-
-- the main spec still has the correct structure
-- delta semantics are gone
-- `Purpose` no longer behaves like a placeholder
-- the spec can still be read independently
-- `openspec validate --all --strict` still passes
+- identify the target change with `openspec list --json` or `openspec status --change "<name>" --json`
+- treat incomplete artifacts or incomplete `tasks.md` as warnings only
+- prefer `openspec archive "<name>" --yes`
+- use `--skip-specs` only for changes that are clearly docs/tooling-only and do not affect the main spec
+- do not manually merge delta specs
+- do not manually move `openspec/changes/...`
 
 ## 4. How to customize each artifact
 

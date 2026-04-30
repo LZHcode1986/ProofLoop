@@ -194,19 +194,18 @@ schema 的职责：
 - 代码写完，不等于 archive
 - change 收口完成，才 archive
 
-### 第七步：建立 archive 后正规化检查
+### 第七步：按官方 archive 行为收口
 
-建议单独落文档，例如：
+不再单独维护单独的 archive checklist 文件。
 
-- `openspec/ARCHIVE-CHECKLIST.md`
+推荐直接遵循官方 `archive` 行为：
 
-archive 后必须检查：
-
-- 主 spec 结构是否仍正确
-- 是否残留 delta 语义
-- `Purpose` 是否退化为占位
-- 是否仍能独立阅读
-- `openspec validate --all --strict` 是否通过
+- 先用 `openspec list --json` 或 `openspec status --change "<name>" --json` 确认目标 change
+- 对未完成 artifacts 或未完成 `tasks.md` 只发出警告，不再手工补做归档前收口
+- 默认直接执行 `openspec archive "<name>" --yes`
+- 只有明确是 docs/tooling 且不影响主 spec 的 change，才使用 `--skip-specs`
+- 不再手工 merge delta specs
+- 不再手工移动 `openspec/changes/...`
 
 ## 4. 各 artifact 的个性化方法
 
@@ -358,9 +357,10 @@ readiness gate 的原则：
 - 是否有验证命令
 - 若采用切片任务法：是否有 MVP、blocking、slice 验收标准、并行机会
 
-### 5.5 archive safety 检查
+### 5.5 archive 适用性检查
 
-- 这次 change 是否能安全合并回主 spec
+- 这次 change 是否允许直接执行官方 `openspec archive`
+- 是否明确属于 docs/tooling-only，只有这种场景才允许 `--skip-specs`
 
 ## 6. active change 的个性化方法
 
@@ -399,18 +399,25 @@ archive 前建议确认：
 - 验证命令已通过
 - 新认知已回写
 - 归档后主 spec 不会退化
+- 目标 change 已通过 `openspec list --json` 或 `openspec status --change "<name>" --json` 确认
+
+archive 时建议规则：
+
+- 优先直接执行 `openspec archive "<name>" --yes`
+- 对 CLI 报告的未完成 artifacts 或未完成 `tasks.md` 保持警告语义，不额外发明手工收口步骤
+- 仅 docs/tooling-only change 才使用 `--skip-specs`
+- 不再手工 merge delta specs，也不再手工移动 `openspec/changes/...`
 
 ## 8. 可以直接迁移到其他项目的最小组合
 
-如果要把当前这套做法迁移到别的项目，建议最少复制这 7 类资产：
+如果要把当前这套做法迁移到别的项目，建议最少复制这 6 类资产：
 
 1. `openspec/config.yaml` 的写法框架
 2. `openspec/schemas/<project-schema>/`
 3. `openspec/QUALITY-GATE.md`
 4. `openspec/用户说明.md`
-5. `openspec/ARCHIVE-CHECKLIST.md`
-6. `skills/openspec-propose/SKILL.md`
-7. `skills/README.md`
+5. `skills/openspec-propose/SKILL.md`
+6. `skills/README.md`
 
 迁移时不要直接复制业务内容，只复制方法：
 
@@ -438,11 +445,10 @@ archive 前建议确认：
 2. 再建 custom schema
 3. 再落 `QUALITY-GATE.md`
 4. 再落 `用户说明.md`
-5. 再落 `ARCHIVE-CHECKLIST.md`
-6. 再用 `skills/openspec-propose/SKILL.md` 覆盖目标项目原有的 `propose` skill
-7. 再覆盖 `skills/openspec-apply-change/SKILL.md`，并写入对应 TDD 约束
-8. 再检查目标项目是否已有 `skills/test-driven-development/SKILL.md` 对应 skill，缺失则补齐
-9. 最后再做主 spec 正规化
+5. 再用 `skills/openspec-propose/SKILL.md` 覆盖目标项目原有的 `propose` skill
+6. 再覆盖 `skills/openspec-apply-change/SKILL.md`，并写入对应 TDD 约束
+7. 再检查目标项目是否已有 `skills/test-driven-development/SKILL.md` 对应 skill，缺失则补齐
+8. 最后确认归档直接走官方 `openspec archive`
 
 不要一开始就先改 tasks 模板。
 
