@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires openspec CLI.
 metadata:
   author: openspec
-  version: "1.1"
+  version: "1.2"
   generatedBy: "1.3.1"
 ---
 
@@ -87,6 +87,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
    - `design.md` drafted
    - `specs/*` drafted
    - `tasks.md` drafted
+   - verifier tasks readiness check started
    - tasks readiness check complete
 
    **IMPORTANT**: gate checks are in-process blockers, not end-of-flow clean-up work. Do not postpone them until after all artifacts are written.
@@ -121,11 +122,12 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
       - Immediately after `specs/*` + `tasks.md`, run **Tasks Readiness Check** using `openspec/QUALITY-GATE.md` before declaring the change ready
-      - By default, **Tasks Readiness Check** MUST be executed by an independent `verifier` sub-agent
-      - Only if the current environment cannot spawn an independent `verifier` sub-agent may the main agent perform the check itself
 
       Required gate enforcement:
       - **Proofability Check** (BLOCKS design.md)
+        - This is an author-side process gate, not a standalone artifact and not a readiness review
+        - The main agent performs this check directly unless the user explicitly asks for independent review
+        - Use the `Proofability Check` section in `openspec/QUALITY-GATE.md` as checklist reference only
         - BEFORE writing design.md, verify proposal has a real-entry minimal loop, user action order, authority source, explicit non-evidence, and a proof method
         - If the change is `interactive`, verify the proposal states `can start but cannot be interacted with = failure`
         - Summarize the check result in the conversation
@@ -133,15 +135,18 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - DO NOT proceed to design.md until proofability is explicit
       - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
         - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
-        - Verify proposal -> design -> specs -> tasks still describes one closure loop
-        - Verify tasks are executable, include verification commands, every implementation slice has a `verifier`, and if `interactive`, front-load a `Proof Task`
-        - Default path: dispatch an independent `verifier` sub-agent to perform this check against the change artifacts and `openspec/QUALITY-GATE.md`
-        - Fallback path: only when the environment cannot dispatch an independent `verifier` sub-agent may the main agent perform the check directly
+        - ALWAYS spawn an independent `verifier` sub-agent to execute this check
+        - Give the `verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
+        - The `verifier` must review independently rather than inheriting the main agent's conclusion
         - The readiness result summary in the conversation MUST use this format:
           - first line: `PASS` or `FAIL`
           - then `findings`, ordered by severity
           - if result is `PASS`, still include `residual risks`
-        - If any item fails: update the deficient artifact and re-run the check
+        - Summarize the `verifier` result in the conversation
+        - If any item fails: update the deficient artifact and re-run the `verifier`
+        - Only after the `verifier` returns `PASS` may the main agent mark `Tasks Readiness Check` complete
+        - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path
+        - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status
         - DO NOT report apply-ready status until Tasks Readiness Check passes
 
       Task decomposition requirements:
@@ -153,7 +158,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Mark parallelizable tasks with `[P]`
       - Mark slice ownership with `[Slice-1]`, `[Slice-2]`, ... `[Slice-N]` or equivalent numbered tags
       - Every task must specify file scope and a verification command
-      - The independent `verifier` sub-agent used for Tasks Readiness Check must review artifacts independently and must not inherit the main agent's conclusion as evidence
+      - Every `verifier` task must explicitly include `Inspection Scope`, `Inspection Content`, and `PASS/FAIL Gate`
 
    b. **Continue until all `applyRequires` artifacts are complete**
       - After creating each artifact, re-run `openspec status --change "<name>" --json`
@@ -174,6 +179,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
 After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
+- State that Tasks Readiness Check was passed by independent `verifier`
 - What's ready: "All artifacts created! Ready for implementation."
 - Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
 
@@ -204,7 +210,10 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
-- Do not use the main agent for `tasks readiness check` when an independent `verifier` sub-agent is available
+- Do not self-mark `Tasks Readiness Check` as passed before an independent `verifier` returns `PASS`
+- Do not replace independent verifier review with self-review, even temporarily
+- Do not declare the change ready, apply-ready, or fully gated if verifier execution has not happened
+- If verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum
