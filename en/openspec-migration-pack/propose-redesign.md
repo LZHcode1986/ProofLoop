@@ -19,7 +19,8 @@ This document explains how to upgrade OpenSpec `propose` from repeated coverage 
    - final validation method
 3. Do not keep proposal coverage or design coverage as separate gates.
 4. Run `tasks readiness check` after `tasks.md` is written to confirm apply readiness.
-5. Make the `propose` output state clearly show:
+5. By default, run `tasks readiness check` with an independent `verifier` sub-agent.
+6. Make the `propose` output state clearly show:
    - what is already satisfied
    - what must be written back into proposal / design / specs / tasks
 

@@ -59,7 +59,7 @@ artifacts:
     instruction: >
       生成任务清单，将实施工作拆成可验证步骤。
 
-      Setup -> Blocking -> Slice A -> Slice B -> Reconciliation。
+      Setup -> Blocking -> Slice 1..N -> Reconciliation。
 
       任务必须包含：
       - MVP 范围
@@ -67,9 +67,9 @@ artifacts:
       - 并行机会
       - 切片目标
       - 独立验收标准
-      - `Slice A` 结束后必须显式加入 `verifier` 子代理独立校验任务，`Slice B` 结束后也必须显式加入。
-      - 两个 `verifier` 任务必须写清校验范围、`verifier` 需要检查的内容，以及 `PASS/FAIL` gate 条件。
-      - 执行顺序必须保证 `Slice A verifier PASS` 前不得进入 `Slice B`，`Slice B verifier PASS` 前不得进入 `Reconciliation`。
+      - 每个实现切片结束后都必须显式加入 `verifier` 子代理独立校验任务。
+      - 每个 `verifier` 任务都必须写清校验范围、`verifier` 需要检查的内容，以及 `PASS/FAIL` gate 条件。
+      - 执行顺序必须保证前一切片的 `verifier PASS` 前不得进入后一切片，最后一个切片的 `verifier PASS` 前不得进入 `Reconciliation`。
 
       每个任务保留 `1.1 / 1.2` 风格，并支持 `[P]` 和 `[Slice-X]` 标签。
 
@@ -91,12 +91,12 @@ apply:
     进入实施前，先读取 change 产物和项目自己的实施规范。
     编写或改动代码前默认先执行 `test-driven-development`，再推进后续实现。
     OpenSpec apply 不替代项目原有的编码、测试、交付规则。
-    如果 `tasks.md` 显式定义了 `Slice A` 或 `Slice B` 的 `verifier` gate，执行时必须真正调用对应的 `verifier` 子代理。
+    如果 `tasks.md` 为实现切片显式定义了 `verifier` gate，执行时必须真正调用对应的 `verifier` 子代理。
     `verifier` 必须独立读取 change artifacts、相关实现、相关测试与验证结果，不得继承主代理在实现过程中的口头结论。
     按 change 类型分支推进：
     - `standard`：按 tasks 顺序推进
     - `interactive`：先完成 `Blocking` 中的 `Proof Task`，再推进后续切片
     当存在 `verifier` gate 时，必须先满足：
-    - `Slice A verifier PASS`，再进入 `Slice B`
-    - `Slice B verifier PASS`，再进入 `Reconciliation`
+    - 前一实现切片的 `verifier PASS`，再进入后一实现切片
+    - 最后一个实现切片的 `verifier PASS`，再进入 `Reconciliation`
     完成后必须执行 `implementation done check`，再考虑进入 archive。

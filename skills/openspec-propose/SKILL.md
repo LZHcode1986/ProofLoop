@@ -6,7 +6,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.1"
-  generatedBy: "1.2.0"
+  generatedBy: "1.3.1"
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.
@@ -116,11 +116,13 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Immediately after `proposal.md`, run **Proofability Check** before writing `design.md`
       - `design.md`: write the implementation structure, interfaces, sequencing, and validation strategy for every non-deferred proposal item
       - `specs/*` and `tasks.md`: derive them only from the validated proposal/design pair
-      - `tasks.md` must follow the OpenSpec x spec-kit blended structure: Setup -> Blocking -> Slice A -> Slice B -> Reconciliation
+      - `tasks.md` must follow the OpenSpec x spec-kit blended structure: Setup -> Blocking -> Slice 1..N -> Reconciliation
       - `tasks.md` must include MVP scope, dependencies, parallel opportunities, slice goals, and independent acceptance criteria
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
       - Immediately after `specs/*` + `tasks.md`, run **Tasks Readiness Check** using `openspec/QUALITY-GATE.md` before declaring the change ready
+      - By default, **Tasks Readiness Check** MUST be executed by an independent `verifier` sub-agent
+      - Only if the current environment cannot spawn an independent `verifier` sub-agent may the main agent perform the check itself
 
       Required gate enforcement:
       - **Proofability Check** (BLOCKS design.md)
@@ -132,20 +134,26 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
         - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
         - Verify proposal -> design -> specs -> tasks still describes one closure loop
-        - Verify tasks are executable, include verification commands, and if `interactive`, front-load a `Proof Task`
-        - Summarize the readiness result in the conversation
+        - Verify tasks are executable, include verification commands, every implementation slice has a `verifier`, and if `interactive`, front-load a `Proof Task`
+        - Default path: dispatch an independent `verifier` sub-agent to perform this check against the change artifacts and `openspec/QUALITY-GATE.md`
+        - Fallback path: only when the environment cannot dispatch an independent `verifier` sub-agent may the main agent perform the check directly
+        - The readiness result summary in the conversation MUST use this format:
+          - first line: `PASS` or `FAIL`
+          - then `findings`, ordered by severity
+          - if result is `PASS`, still include `residual risks`
         - If any item fails: update the deficient artifact and re-run the check
         - DO NOT report apply-ready status until Tasks Readiness Check passes
 
       Task decomposition requirements:
       - Write `Setup` tasks first for context preparation and basic scaffolding
       - Then write `Blocking` tasks for shared prerequisites that must be completed first; if the change is `interactive`, the first item must be `Proof Task`
-      - Split implementation by capability slice, and each slice must be independently verifiable
+      - Split implementation by capability slice, using as many numbered slices as needed, and each slice must be independently verifiable
       - Each slice must include a `slice goal` and `independent acceptance criteria`
       - Finish with `Reconciliation` tasks for wrap-up, documentation, compatibility, regression, and alignment work
       - Mark parallelizable tasks with `[P]`
-      - Mark slice ownership with `[Slice-A]`, `[Slice-B]`, or similar tags
+      - Mark slice ownership with `[Slice-1]`, `[Slice-2]`, ... `[Slice-N]` or equivalent numbered tags
       - Every task must specify file scope and a verification command
+      - The independent `verifier` sub-agent used for Tasks Readiness Check must review artifacts independently and must not inherit the main agent's conclusion as evidence
 
    b. **Continue until all `applyRequires` artifacts are complete**
       - After creating each artifact, re-run `openspec status --change "<name>" --json`
@@ -196,6 +204,7 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
+- Do not use the main agent for `tasks readiness check` when an independent `verifier` sub-agent is available
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum

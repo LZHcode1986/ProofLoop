@@ -7,7 +7,7 @@ This document explains how to upgrade OpenSpec `apply` from "implement tasks dir
 - Make `apply` actually honor the dynamic `apply.instruction` from the schema.
 - Enter `test-driven-development` before implementation and execute `RED -> GREEN -> REFACTOR` before coding.
 - Keep `tasks.md` focused on scope and progress while `apply` controls the execution order.
-- If `tasks.md` explicitly defines `Slice A` or `Slice B` verifier gates, `apply` must actually invoke the independent `verifier` sub-agent at those boundaries.
+- If `tasks.md` explicitly defines verifier gates, `apply` must actually invoke the independent `verifier` sub-agent at those boundaries.
 - For `interactive` changes, complete the `Blocking` section's first `Proof Task` before later slice work.
 
 ## Recommended changes
@@ -17,7 +17,7 @@ This document explains how to upgrade OpenSpec `apply` from "implement tasks dir
 3. Do not treat `tasks.md` as the only source of order; it should track slices, scope, and checkboxes.
 4. For `standard` changes, follow tasks in order.
 5. For `interactive` changes, complete the first `Proof Task` before later slice work.
-6. `Slice A verifier` and `Slice B verifier` must each return an explicit `PASS` or `FAIL` before the next stage proceeds.
+6. Each slice verifier must return an explicit `PASS` or `FAIL` before the next stage proceeds.
 7. Only mark tasks done after the corresponding TDD step has been completed and verified.
 8. Guardrails should explicitly forbid skipping `RED -> GREEN -> REFACTOR`.
 

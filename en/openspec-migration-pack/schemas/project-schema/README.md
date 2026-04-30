@@ -16,7 +16,7 @@ This is a reusable OpenSpec schema skeleton for project-specific adaptation.
 - Put project-specific constraints into `schema.yaml`.
 - Use the templates to preserve the required artifact shape.
 - Encode the default `test-driven-development` requirement in `apply.instruction` instead of stuffing the full TDD flow into the proposal or task body.
-- If `tasks.md` explicitly defines `Slice A` or `Slice B` verifier gates, represent them as separate boundary-check tasks and make the inspection scope and `PASS/FAIL` conditions explicit.
+- If `tasks.md` explicitly defines implementation-slice verifier gates, represent them as separate boundary-check tasks and make the inspection scope and `PASS/FAIL` conditions explicit.
 
 ## Migration principles
 
