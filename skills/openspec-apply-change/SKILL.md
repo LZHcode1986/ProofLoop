@@ -54,15 +54,14 @@ Implement tasks from an OpenSpec change.
    Read the dynamic `instruction` returned by `openspec instructions apply`.
 
    - You MUST follow the required implementation workflow before implementation starts.
-   - For this repository, that means reading and entering `Tdd workflow` (`tdd-workflow`) before any task execution begins.
+   - For this repository, that means reading and entering `test-driven-development` before any task execution begins.
    - If the change is classified as `interactive`, you MUST complete the `Blocking` section's first `Proof Task` before any later slice work begins.
    - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `verifier` sub-agent at those boundaries and wait for an explicit `PASS` or `FAIL`.
    - Treat `tasks.md` as scope and progress tracking; it does not override the required
      implementation order from the apply instruction.
-   - Read the `Tdd workflow` (`tdd-workflow`) skill before writing code.
-   - Execute implementation in `Step 0-> Step 7` order.
-   - Do not skip `RED -> GREEN -> REFACTOR`.
-   - Only mark the related task complete after the required TDD step is actually verified.
+   - Read the `test-driven-development` skill before writing code.
+   - Follow `RED -> GREEN -> REFACTOR`: write the failing test first, watch it fail for the expected reason, then write the minimal implementation and refactor only after green.
+   - Only mark the related task complete after the required TDD checks are actually verified.
 
 5. **Read context files**
 
@@ -84,7 +83,7 @@ Implement tasks from an OpenSpec change.
    For each pending task:
    - Show which task is being worked on
    - Follow the apply-stage workflow before or during implementation
-     (for example, complete the relevant `Tdd workflow` (`tdd-workflow`) step before moving to the next coding step)
+     (for example, complete the relevant `RED -> GREEN -> REFACTOR` cycle before moving to the next coding step)
    - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`
    - If the change defines verifier gates, enforce `Slice 1 -> Slice 1 verifier -> Slice 2 -> Slice 2 verifier -> ... -> Slice N -> Slice N verifier -> Reconciliation` at the relevant boundaries
    - Make the code changes required
@@ -172,7 +171,7 @@ What would you like to do?
 - Keep going through tasks until done or blocked
 - Always honor the dynamic apply instruction before implementing tasks
 - Always read context files before starting (from the apply instructions output)
-- If the schema or project rules require `tdd-workflow`, read it and follow `RED -> GREEN -> REFACTOR`
+- If the schema or project rules require TDD, read `test-driven-development` and follow `RED -> GREEN -> REFACTOR`
   before declaring implementation complete
 - If the change is `interactive`, do not skip the first `Proof Task`
 - If `tasks.md` defines verifier gates, do not replace them with self-review; use the independent `verifier` sub-agent
