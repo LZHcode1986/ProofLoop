@@ -133,11 +133,14 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - Summarize the check result in the conversation
         - If any item is missing: update proposal.md, then re-check
         - DO NOT proceed to design.md until proofability is explicit
-      - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
-        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
-        - ALWAYS spawn an independent `verifier` sub-agent to execute this check
-        - Give the `verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
-        - The `verifier` must review independently rather than inheriting the main agent's conclusion
+	      - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
+	        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
+	        - ALWAYS spawn an independent `verifier` sub-agent to execute this check
+	        - Give the `verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
+	        - The `verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
+	        - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
+	        - The `verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
+	        - The `verifier` must review independently rather than inheriting the main agent's conclusion
         - The readiness result summary in the conversation MUST use this format:
           - first line: `PASS` or `FAIL`
           - then `findings`, ordered by severity

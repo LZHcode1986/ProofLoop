@@ -56,7 +56,7 @@ Implement tasks from an OpenSpec change.
    - You MUST follow the required implementation workflow before implementation starts.
    - For this repository, that means reading and entering `Tdd workflow` (`tdd-workflow`) before any task execution begins.
    - If the change is classified as `interactive`, you MUST complete the `Blocking` section's first `Proof Task` before any later slice work begins.
-   - If `tasks.md` defines explicit verifier gates, you MUST invoke the independent `verifier` sub-agent at those boundaries and wait for an explicit `PASS` or `FAIL`.
+   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `verifier` sub-agent at those boundaries and wait for an explicit `PASS` or `FAIL`.
    - Treat `tasks.md` as scope and progress tracking; it does not override the required
      implementation order from the apply instruction.
    - Read the `Tdd workflow` (`tdd-workflow`) skill before writing code.
@@ -86,7 +86,7 @@ Implement tasks from an OpenSpec change.
    - Follow the apply-stage workflow before or during implementation
      (for example, complete the relevant `Tdd workflow` (`tdd-workflow`) step before moving to the next coding step)
    - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`
-   - If the change defines verifier gates, enforce each slice -> its verifier -> the next slice -> its verifier -> Reconciliation at the relevant boundaries
+   - If the change defines verifier gates, enforce `Slice 1 -> Slice 1 verifier -> Slice 2 -> Slice 2 verifier -> ... -> Slice N -> Slice N verifier -> Reconciliation` at the relevant boundaries
    - Make the code changes required
    - Keep changes minimal and focused
    - Mark task complete in the tasks file: `- [ ]` → `- [x]`
@@ -95,6 +95,7 @@ Implement tasks from an OpenSpec change.
    **Pause if:**
    - Task is unclear → ask for clarification
    - Implementation reveals a design issue → suggest updating artifacts
+   - The current slice is missing a necessary prerequisite task or artifact → stop the slice, report the missing prerequisite and impacted task, and suggest the minimal artifact/task update
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
