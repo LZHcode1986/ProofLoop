@@ -1,34 +1,55 @@
 # Skills Guide
 
-本目录存放本仓库提供的技能实现，它们是迁移 OpenSpec 工作流时的直接源资产。
+本目录里的技能分成两层，不要混为一谈。
 
-## 角色划分
+## 1. OpenSpec canonical skills
+
+这些名字是 OpenSpec 分发、安装、profile 映射、tool detection 会用到的 canonical skill surface。若要保持 OpenSpec 兼容，**不要随意改名**。
 
 - `skills/openspec-propose/SKILL.md`
-  - `propose` 的默认实现
-  - 配置本仓库到其他项目时的必配资产
-  - Agent 必须用它覆盖用户原有的 `propose` skill
+  - 正式 propose 工件生成能力
+  - 由 `propose` agent 加载
+
+- `skills/openspec-explore/SKILL.md`
+  - 本地探索与技术澄清能力
 
 - `skills/openspec-apply-change/SKILL.md`
-  - `apply` 的实施实现
-  - Agent 必须用它覆盖用户原有的 `apply` skill，并在进入任务执行前显性先走 `test-driven-development`
+  - 正式 apply 执行能力
+  - 由 `executor` agent 加载
+
+- `skills/openspec-archive-change/SKILL.md`
+  - 正式 archive 能力
 
 - `skills/test-driven-development/SKILL.md`
-  - `test-driven-development` 的参考实现
-  - 默认实施约束
-  - Agent 必须检查目标项目是否已有该 skill
-  - 如果目标项目没有该 skill，Agent 必须帮助用户把它配置到 OpenSpec skills 目录
+  - 代码实施时的默认测试纪律
 
-## 标准配置顺序
+## 2. Workflow orchestration skills
 
-1. 开始配置前，默认按 `test-driven-development` 处理，不再询问是否需要。
-2. 再迁移 `config.yaml.example`、schema、质量门禁与用户说明。
-3. 用 `skills/openspec-propose/SKILL.md` 覆盖目标项目原有的 `propose` skill。
-4. 用 `skills/openspec-apply-change/SKILL.md` 覆盖目标项目原有的 `apply` skill。
-5. 同时修改 `config.yaml` 和 schema，把代码变更前默认要求 `test-driven-development` 的规则写入项目配置。
-6. 然后检查目标项目是否已有 `test-driven-development` skill；如果没有，则帮助用户把 `skills/test-driven-development/SKILL.md` 配置到 OpenSpec skills 目录。
+这些技能是 Brain 和上层编排使用的补充能力，不替代 OpenSpec canonical skills。
+
+- `skills/workflow-intake/SKILL.md`
+  - Brain 前置 intake 能力
+  - 把用户原始需求沉淀成 `PRD.md`、决策账本与 stage plan
+
+当前只保留已经落地的编排层技能；不再保留空目录占位，避免制造“流程已经存在”的假象。
+
+## 推荐职责分层
+
+1. Brain 先加载 `workflow-intake`，把用户需求变成 `PRD.md` 与 stage plan。
+2. Brain 再加载 `grill-me-prd`，只补关键缺口，不重复做开放式发现。
+3. Brain 按根级 `AGENTS.md` 的 stage 划分规则选择一个 stage，然后 dispatch `propose` agent；`propose` agent 再加载 `openspec-propose`，并把 Brain 给出的验收标准原样传给 `spec-verifier`。
+4. `executor` agent 加载 `openspec-apply-change` 并编排 `worker`、`code-verifier`、`spec-verifier`、`committer`，同时把 Brain 给出的验收标准原样传给 `code-verifier`。
+5. Brain 在阶段边界 dispatch `implementation-reviewer` 做阶段级验收；`code-verifier` 仍只负责切片级验收。
+6. 代码任务默认继续由 `test-driven-development` 约束。
+
+## 标准迁移顺序
+
+1. 先迁移 `config.yaml.example`、schema 与质量门禁。
+2. 保留 OpenSpec canonical skills 的原名并安装到目标工具目录。
+3. 如需 Brain 层治理，再额外安装 `workflow-intake` 和相关 agents。
+4. 检查目标项目是否已有 `test-driven-development`；如果没有，再补装它。
 
 ## 说明
 
 - `zh/openspec 资产迁移/propose-改造思路.md` 与 `apply-改造思路.md` 现在只用于解释设计思路，不再是主迁移入口。
-- 如果用户目标是 1:1 复刻本仓库，则仍按上述顺序执行，只是第一轮 TDD 询问更可能得到“是”。
+- 本仓库中的 workflow-* 技能是编排层补充，不是对 openspec-* canonical skills 的重命名替代。

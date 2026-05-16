@@ -87,7 +87,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
    - `design.md` drafted
    - `specs/*` drafted
    - `tasks.md` drafted
-   - verifier tasks readiness check started
+   - spec-verifier tasks readiness check started
    - tasks readiness check complete
 
    **IMPORTANT**: gate checks are in-process blockers, not end-of-flow clean-up work. Do not postpone them until after all artifacts are written.
@@ -121,6 +121,9 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - `tasks.md` must include MVP scope, dependencies, parallel opportunities, slice goals, and independent acceptance criteria
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
+      - Every task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, and `Skill Reason`
+      - Any task that changes code must use `Execution Type: test-first-code` and `Required Skills: test-driven-development`
+      - Non-code tasks must not load TDD by default
       - Immediately after `specs/*` + `tasks.md`, run **Tasks Readiness Check** using `openspec/QUALITY-GATE.md` before declaring the change ready
 
       Required gate enforcement:
@@ -133,35 +136,54 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - Summarize the check result in the conversation
         - If any item is missing: update proposal.md, then re-check
         - DO NOT proceed to design.md until proofability is explicit
-	      - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
-	        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
-	        - ALWAYS spawn an independent `verifier` sub-agent to execute this check
-	        - Give the `verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
-	        - The `verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
-	        - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
-	        - The `verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
-	        - The `verifier` must review independently rather than inheriting the main agent's conclusion
+      - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
+        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
+        - ALWAYS spawn an independent `spec-verifier` sub-agent to execute this check
+        - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
+        - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
+        - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
+        - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
+        - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion
         - The readiness result summary in the conversation MUST use this format:
           - first line: `PASS` or `FAIL`
           - then `findings`, ordered by severity
           - if result is `PASS`, still include `residual risks`
-        - Summarize the `verifier` result in the conversation
-        - If any item fails: update the deficient artifact and re-run the `verifier`
-        - Only after the `verifier` returns `PASS` may the main agent mark `Tasks Readiness Check` complete
+        - Summarize the `spec-verifier` result in the conversation
+        - **Handling FAIL results (Integrated Optimization)**:
+          1. Parse the "Logical Gap / Conflict" and "Actionable Missing Piece" from the findings.
+          2. DO NOT just patch the single reported artifact. Trace the requirement logic from `proposal.md` -> `design.md` -> `specs/*` -> `tasks.md`.
+          3. Perform a **Batch Repair**: Update ALL affected artifacts in a single coherent step before re-running the verifier.
+          4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `FAIL` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
+        - Only after the `spec-verifier` returns `PASS` may the main agent mark `Tasks Readiness Check` complete
         - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path
         - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status
         - DO NOT report apply-ready status until Tasks Readiness Check passes
 
       Task decomposition requirements:
       - Write `Setup` tasks first for context preparation and basic scaffolding
-      - Then write `Blocking` tasks for shared prerequisites that must be completed first; if the change is `interactive`, the first item must be `Proof Task`
+      - Then write `Blocking` tasks for shared prerequisites that must be completed first; if the change is `interactive`, the first item must be `Proof Task` with `Execution Type: proof` and `Required Skills: None`
       - Split implementation by capability slice, using as many numbered slices as needed, and each slice must be independently verifiable
       - Each slice must include a `slice goal` and `independent acceptance criteria`
       - Finish with `Reconciliation` tasks for wrap-up, documentation, compatibility, regression, and alignment work
       - Mark parallelizable tasks with `[P]`
       - Mark slice ownership with `[Slice-1]`, `[Slice-2]`, ... `[Slice-N]` or equivalent numbered tags
-      - Every task must specify file scope and a verification command
+      - **Verification Standards**: Every task must specify file scope and a **concrete, executable verification command** (e.g., `uv run pytest`, `npm test`, or a script execution). Avoid generic commands like `grep` unless raw content inspection is the specific goal.
+      - **Execution Type Standards**:
+        - `setup`: context preparation, environment setup, scaffolding that does not modify product code
+        - `docs-sync`: artifact or documentation synchronization
+        - `test-first-code`: every task that changes code; must include `Required Skills: test-driven-development`
+        - `proof`: only the first Blocking task of an `interactive` change; if it needs code changes, make it `test-first-code`
+        - `verifier-gate`: explicit independent Code Verifier gate
+        - `reconciliation`: final alignment, docs, compatibility, or cleanup checks
+      - **Required Skills Standards**:
+        - Code-changing tasks: `test-driven-development`
+        - Diagnose tasks are not generated during propose; Executor adds `diagnose` only during rescue
+        - Non-code tasks: `None`, unless a concrete task-specific skill is explicitly needed
+      - **Required Review Skills Standards**:
+        - Verifier gate tasks: `code-review-and-quality`
+        - Add `security-and-hardening` only when user input, auth, permissions, storage, upload, external integration, or network boundary is in scope
       - Every `verifier` task must explicitly include `Inspection Scope`, `Inspection Content`, and `PASS/FAIL Gate`
+      - **Branch Logic**: If a task or slice contains conditional branches (e.g., "if test fails, stop and log"), these MUST be explicitly documented in the tasks.
 
    b. **Continue until all `applyRequires` artifacts are complete**
       - After creating each artifact, re-run `openspec status --change "<name>" --json`
@@ -182,7 +204,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
 After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
-- State that Tasks Readiness Check was passed by independent `verifier`
+- State that Tasks Readiness Check was passed by independent `spec-verifier`
 - What's ready: "All artifacts created! Ready for implementation."
 - Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
 
@@ -213,10 +235,10 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
-- Do not self-mark `Tasks Readiness Check` as passed before an independent `verifier` returns `PASS`
-- Do not replace independent verifier review with self-review, even temporarily
-- Do not declare the change ready, apply-ready, or fully gated if verifier execution has not happened
-- If verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `PASS`
+- Do not replace independent spec-verifier review with self-review, even temporarily
+- Do not declare the change ready, apply-ready, or fully gated if spec-verifier execution has not happened
+- If spec-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum

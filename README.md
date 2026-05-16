@@ -1,92 +1,256 @@
-# Let AI Optimize Your OpenSpec Workflow
+# ProofLoop
 
-This repository is a methodology pack for customizing OpenSpec around project constraints.
+A proof-first AI development workflow built on OpenSpec.
 
-中文页面: [`zh/README.md`](zh/README.md)
+ProofLoop prevents AI agents from producing valid-looking proposals, tasks, implementations, and archives that do not actually close the product loop.
 
-Upstream OpenSpec: <https://github.com/Fission-AI/OpenSpec>
+It keeps OpenSpec as the artifact and schema substrate, then adds an explicit agent hierarchy on top so AI cannot claim completion before it proves completion.
 
-Before using this repository, you must complete the base OpenSpec configuration first.
+> Make AI prove completion before it claims completion.
 
-## What this is
+## Why this exists
 
-- A methodology for adapting OpenSpec to a specific project
-- A set of documents for validation, archive usage rules, and change control
-- A reusable schema and template skeleton
-- A guide for helping AI work according to project constraints
+Stock OpenSpec is strong at change artifacts, but a harder delivery environment usually needs more than:
 
-## What problem this solves
+- proposal generation
+- tasks checkboxes
+- local tests
+- archive sync
 
-OpenSpec works well for lightweight planning, but many projects need stronger constraints.
+The common failure mode is not missing documents. It is a false closed loop:
 
-The common failure modes are:
+- the paperwork looks complete
+- the tasks look done
+- the implementation drift is hidden in slices
+- the main workflow guidance is underspecified, so subagents keep guessing
 
-- `propose` generates documents but leaves gaps
-- `tasks.md` is too coarse, so execution falls into guessing, hallucination, or drift
-- `archive` syncs specs back into the main library in a way that degrades the source of truth
+ProofLoop adds a Brain-governed execution layer to stop that drift.
 
-## What this adds beyond stock OpenSpec
+## Install
 
-- Project context is defined first: boundaries, authority sources, canonical objects, and state machines
-- Schema is used to encode project constraints into templates and generated structure
-- A proofability / tasks-readiness / implementation-done gate decides whether a proposal can enter `apply`
-- Active Change rules require implementation discoveries to be written back into documents
-- Archive checks prevent the main spec from degrading into leftover change deltas
-- Proposal, design, and tasks each have a clearer responsibility
-- TDD is the default implementation discipline
+Choose the fastest path for an existing project:
 
-## Who it is for
+1. One-command local install with PowerShell:
 
-- People who like the lightweight and automated OpenSpec workflow, but need stronger control over project drift
-- Projects with clear boundaries, authority sources, canonical objects, or state machines
-- New projects that already have a technical direction and want OpenSpec to help with SDD-style execution
-- People who want AI to help organize project specifications
+```powershell
+pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-project>
+```
 
-## Who it is not for
+2. One-command GitHub bootstrap after the repo is published:
 
-- Users who do not want to configure OpenSpec
-- Projects where a single sentence is enough for AI to understand and start implementing
-- Users who do not want to maintain config, schema, or gate documents and just want to start immediately
-- Users who do not want AI to follow project rules and prefer free-form generation
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
+	$bootstrap = Join-Path $env:TEMP 'proofloop-bootstrap.ps1'
+	Invoke-WebRequest 'https://raw.githubusercontent.com/LZHcode1986/ProofLoop/main/install/bootstrap-proofloop.ps1' -OutFile $bootstrap
+	& $bootstrap -RepositoryZipUrl 'https://github.com/LZHcode1986/ProofLoop/archive/refs/heads/main.zip' -TargetProjectPath '<path-to-target-project>'
+}"
+```
 
-## How AI should use this repo
+3. AI-assisted install with the ready-made prompt in [install/agent-install-prompt.md](install/agent-install-prompt.md).
+4. Manual fallback in [install/manual-install.md](install/manual-install.md).
 
-Tell the agent: "Configure this repository for me: https://github.com/LZHcode1986/Openspec-Harness".
+The installer uses three destinations by default:
 
-When adapting this workflow to another project:
+- project files such as `AGENTS.md` and `openspec/**` go into the target project
+- agent definitions go into `$HOME/.opencode/agents`
+- skills go into `$HOME/.agents/skills`
 
-- Replace the target project's existing `propose` skill with `skills/openspec-propose/SKILL.md`
-- Replace the target project's `apply` skill with `skills/openspec-apply-change/SKILL.md`
-- Check whether the target project already has `test-driven-development`; if not, help configure `skills/test-driven-development/SKILL.md` into the OpenSpec skills directory
+If your local runtime uses different user directories, the installer supports path overrides.
 
-## Recommended reading order
+See [install/README.md](install/README.md) for the full install entry.
 
-1. Read this `README.md` first.
-2. Then read [`en/Repository-Guide.md`](en/Repository-Guide.md).
-3. Then read [`en/OpenSpec-Workflow-Customization-Methodology.md`](en/OpenSpec-Workflow-Customization-Methodology.md).
-4. Then read [`en/openspec-migration-pack/README.md`](en/openspec-migration-pack/README.md).
-5. Then read [`skills/README.md`](skills/README.md) and [`skills/openspec-propose/SKILL.md`](skills/openspec-propose/SKILL.md).
-6. Then read the three gate documents, schema, `config.yaml.example`, [`skills/openspec-apply-change/SKILL.md`](skills/openspec-apply-change/SKILL.md), and [`skills/test-driven-development/SKILL.md`](skills/test-driven-development/SKILL.md).
-7. Read the comparison page when you want a direct comparison with stock OpenSpec.
+## Quick start
 
-## Detailed contents
+1. Keep this ProofLoop repository available locally.
+2. Run the installer or paste the AI install prompt in the target project.
+3. Fill any remaining placeholders in `openspec/config.yaml` if the installer created it from the example.
+4. Run your normal OpenSpec validation command inside the target project.
 
-| Area | English entry | Purpose |
-| --- | --- | --- |
-| Repository guide | [en/Repository-Guide.md](en/Repository-Guide.md) | Reading order and navigation |
-| Main methodology | [en/OpenSpec-Workflow-Customization-Methodology.md](en/OpenSpec-Workflow-Customization-Methodology.md) | Core methodology |
-| Migration pack overview | [en/openspec-migration-pack/README.md](en/openspec-migration-pack/README.md) | How to reuse the assets |
-| Quality gate | [en/openspec-migration-pack/QUALITY-GATE.md](en/openspec-migration-pack/QUALITY-GATE.md) | Proposal readiness check |
-| User guide | [en/openspec-migration-pack/USER-GUIDE.md](en/openspec-migration-pack/USER-GUIDE.md) | User-facing change guidance |
-| Schema example | [en/openspec-migration-pack/schemas/project-schema/README.md](en/openspec-migration-pack/schemas/project-schema/README.md) | Project schema skeleton |
-| Skills guide | [skills/README.md](skills/README.md) | Skill roles and configuration order |
-| Propose skill | [skills/openspec-propose/SKILL.md](skills/openspec-propose/SKILL.md) | Primary migration source for `propose` |
-| Apply skill | [skills/openspec-apply-change/SKILL.md](skills/openspec-apply-change/SKILL.md) | Apply enters TDD first, then implementation |
-| Test-driven-development skill | [skills/test-driven-development/SKILL.md](skills/test-driven-development/SKILL.md) | Default implementation discipline; check whether the target project already has it and configure it if missing |
-| Propose redesign notes | [en/openspec-migration-pack/propose-redesign.md](en/openspec-migration-pack/propose-redesign.md) | Design notes, not the main migration entry anymore |
-| Apply redesign notes | [en/openspec-migration-pack/apply-redesign.md](en/openspec-migration-pack/apply-redesign.md) | Design notes, not the main migration entry anymore |
-| TDD integration | [en/openspec-migration-pack/TDD-apply-integration.md](en/openspec-migration-pack/TDD-apply-integration.md) | Reference for apply-first-TDD flow |
-| Comparison page | [en/OpenSpec-vs-This-Workflow.md](en/OpenSpec-vs-This-Workflow.md) | Difference from stock OpenSpec |
+## PRD to stage flow
+
+Brain does not send the whole PRD to Propose in one pass.
+
+The intended flow is:
+
+1. `workflow-intake` turns the raw request into `PRD.md`.
+2. Brain partitions the PRD into stages.
+3. Each stage represents one independently valuable function or one coherent module boundary.
+4. Brain dispatches exactly one stage to Propose.
+5. Propose either decomposes that stage into OpenSpec artifacts and `tasks.md`, or returns `Stage repartition required`.
+
+This protects task decomposition from drifting across unrelated modules and keeps later verification aligned with the stage acceptance criteria.
+
+## Workflow
+
+```mermaid
+flowchart TD
+		U[User] --> B[Brain\nL0 governance]
+		B --> I[workflow-intake\nPRD and acceptance criteria]
+		B --> P[Propose\nL1 planner]
+		B --> X[Executor\nL1 stage executor]
+		B --> W[Web Scraper\nL1 external research]
+		B --> R[Implementation Reviewer\nL1 stage review]
+
+		P --> SV[Spec Verifier\nL2 plan review]
+		X --> WK[Worker\nL2 implementation]
+		X --> CV[Code Verifier\nL2 slice review]
+		X --> CM[Committer\nGit boundary]
+
+		W --> B
+		SV --> P
+		WK --> X
+		CV --> X
+		CM --> X
+		X --> R
+		R --> B
+```
+
+## Agent hierarchy
+
+### L0
+
+- Brain
+	- Owns `PRD.md`, `CLARIFY.md`, `tech-spec.md`, and authoritative workflow guidance such as `AGENTS.md`, config, schemas, and gate documents.
+	- Owns the top-level acceptance criteria.
+	- Dispatches L1 agents.
+
+### L1
+
+- Propose
+	- Converts one Brain-selected stage from a stable PRD into `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
+	- Passes Brain-owned acceptance criteria to `spec-verifier` without changing them.
+
+- Executor
+	- Runs apply-stage orchestration.
+	- Passes Brain-owned acceptance criteria to `code-verifier` without changing them.
+
+- Web Scraper
+	- Gathers external facts.
+	- Does not hot-inject knowledge into Worker.
+
+- Implementation Reviewer
+	- Performs stage-level acceptance and archive-readiness review.
+	- Does not replace slice-level or artifact-level verification.
+
+### L2
+
+- Spec Verifier
+	- Reviews planning artifacts for readiness and acceptance coverage.
+
+- Worker
+	- Implements exactly one task packet.
+
+- Code Verifier
+	- Reviews one implementation slice.
+
+- Committer
+	- Closes git boundaries only.
+
+## Acceptance criteria contract
+
+Acceptance criteria start at Brain and remain immutable downstream.
+
+1. Brain defines and owns the acceptance criteria in the PRD and dispatch packets.
+2. Propose and Executor may map them to artifacts, slices, and task packets, but must not rewrite or weaken them.
+3. Spec Verifier and Code Verifier validate against the caller-supplied criteria, not against criteria they invent during review.
+4. Implementation Reviewer performs stage-level judgment using the same criteria plus the accumulated verifier evidence.
+
+## Config example
+
+[openspec/config.yaml.example](openspec/config.yaml.example) is a reference template for new projects, not a Brain-maintained runtime file.
+
+In a new project, the config should at minimum define:
+
+- `schema`
+- `context`
+- `rules`
+
+For this workflow, it is also useful to keep:
+
+- authority order
+- canonical objects
+- state model
+- testing posture
+- optional `traceability` links to stable authority sources
+
+To install the schema cleanly in another project, see [openspec/schemas/README.md](openspec/schemas/README.md).
+To install the whole ProofLoop workflow, not just the reusable schema, see [install/README.md](install/README.md).
+
+## Schema layout
+
+The live reusable schema is stored in [openspec/schemas/proofloop](openspec/schemas/proofloop).
+
+This repository now follows the normal OpenSpec schema layout:
+
+- one schema per folder under `openspec/schemas/`
+- one `schema.yaml` at the schema root
+- one `templates/` folder for the artifact templates
+
+The important invariant is simple: folder name, `schema.yaml` `name:`, and `openspec/config.yaml` `schema:` should match.
+
+## Relationship to OpenSpec and opencode
+
+- OpenSpec remains the source of truth for change artifacts, schemas, config, and archive flow.
+- This repository still keeps OpenSpec-compatible installed skill names such as `openspec-propose` and `openspec-apply-change`.
+- opencode provides the runtime model for primary agent, subagent, task dispatch, permissions, and tool execution.
+- ProofLoop is the orchestration layer that binds them into a stricter closed loop.
+
+## What Brain can update
+
+If execution exposes a workflow defect rather than a product defect, Brain is allowed to tune the authoritative workflow documents instead of forcing more retries.
+
+Typical write-back targets:
+
+- `PRD.md`
+- `CLARIFY.md`
+- `tech-spec.md`
+- `AGENTS.md`
+- `openspec/config.yaml`
+- `openspec/QUALITY-GATE.md`
+- `openspec/schemas/**`
+- gate documents such as `QUALITY-GATE.md`
+
+## Git worktree flow
+
+The current MVP uses git worktree as an execution-isolation policy, not as a fully automated manager feature.
+
+1. Brain or the human operator chooses the active change and, when needed, a dedicated worktree for that change.
+2. Propose works from the planning home and writes formal change artifacts under `openspec/changes/<change-id>/`.
+3. Executor runs inside the selected worktree and assumes that worktree is already active.
+4. Worker implements one task at a time in that worktree.
+5. Committer closes a git boundary after each completed Worker attempt.
+6. Code Verifier validates slice gates in the same worktree.
+7. Implementation Reviewer performs stage-level review before archive or next-stage promotion.
+
+Current non-goals:
+
+- no automatic worktree creation
+- no automatic worktree cleanup
+- no automatic rebase across multiple worktrees
+- no parallel worktree manager yet
+
+Those belong to a future `manager` role if the workflow grows beyond the current MVP.
+
+## Repository map
+
+- `agents/`
+	- Agent definitions for Brain, Propose, Executor, Worker, verifiers, and git boundary roles.
+- `openspec/`
+	- OpenSpec-compatible schema, schema install guidance, config example, gate documents, and formal change artifacts.
+- `install/`
+	- One-command installer, AI install prompt, and manual fallback instructions.
+- `skills/`
+	- OpenSpec canonical skills plus Brain-layer orchestration skills.
+
+## Start here
+
+1. Read [install/README.md](install/README.md) if you want to install ProofLoop into another project quickly.
+2. Read [skills/README.md](skills/README.md) to understand canonical OpenSpec skills versus orchestration-layer skills.
+3. Read [agents/brain.md](agents/brain.md) for the top-level routing and governance contract.
+4. Read [agents/propose.md](agents/propose.md) and [agents/executor.md](agents/executor.md) for the L1 planning and execution contracts.
+5. Read [openspec/QUALITY-GATE.md](openspec/QUALITY-GATE.md) for the current gate model.
+6. Read [openspec/schemas/README.md](openspec/schemas/README.md) if you want to install the reusable schema in another OpenSpec project.
+7. Read [OpenSpec-Agents-1+4+3-可行落地方案.md](OpenSpec-Agents-1+4+3-%E5%8F%AF%E8%A1%8C%E8%90%BD%E5%9C%B0%E6%96%B9%E6%A1%88.md) for the target architecture rationale.
 
 ## License
 

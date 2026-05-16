@@ -1,0 +1,57 @@
+# Example config for projects that adopt this ProofLoop workflow.
+# Copy this file to `openspec/config.yaml` in the target project and replace placeholders.
+# OpenSpec-standard core fields are `schema`, `context`, and `rules`.
+# `traceability` is optional, but recommended when you want explicit links back to
+# project-specific authority sources.
+# If you intentionally rename the installed schema, update both `schema:` here and
+# `openspec/schemas/<name>/schema.yaml` together.
+schema: proofloop
+
+context: |
+  Project: <project name>
+  Domain: <business domain or product area>
+  Product boundary: <product boundary; define what the system does and does not do>
+  MVP scope: <MVP scope; ideally a single closed loop>
+  Primary use cases: <list of primary use cases>
+  Explicit non-goals for MVP: <things the MVP will not do>
+  Tech stack: <tech stack, filled in according to the project>
+  Architecture: <architecture constraints or layering>
+  Core roles: <core roles or system participants>
+  Shared principles: <list of shared principles>
+  State model: <state machine or lifecycle model; list authoritative state names>
+  Canonical objects: <list of canonical objects or authoritative data structures>
+  API principles: <API / contract principles>
+  Testing posture: <testing strategy such as TDD-first, contract tests, E2E, etc.>
+  Documentation language: <documentation language requirements>
+  Authority order: <authority source order; explain which document has the highest priority>
+
+rules:
+  proposal:
+    - <hard requirement 1 for the proposal stage>
+    - <hard requirement 2 for the proposal stage>
+    - <hard requirement 3 for the proposal stage>
+  specs:
+    - <hard requirement 1 for the spec stage>
+    - <hard requirement 2 for the spec stage>
+  design:
+    - <hard requirement 1 for the design stage>
+    - <hard requirement 2 for the design stage>
+  tasks:
+    - <hard requirement 1 for the task stage>
+    - <hard requirement 2 for the task stage>
+  implementation:
+    - <hard requirement 1 for the implementation stage>
+    - <hard requirement 2 for the implementation stage>
+    - <require test-driven-development before any code is written or modified>
+
+traceability:
+  <reference-change-or-arch-slice>:
+    artifact: <artifact-name>
+    description: <description>
+    reference: <reference path or link>
+    enabled: true
+  <another-reference>:
+    artifact: <artifact-name>
+    description: <description>
+    applies_to: <proposal|design|specs|tasks|implementation>
+

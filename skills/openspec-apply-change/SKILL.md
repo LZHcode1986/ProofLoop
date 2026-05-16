@@ -20,7 +20,7 @@ Implement tasks from an OpenSpec change.
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select
+   - If ambiguous, run `openspec list --json` to get available changes. In apply-stage executor orchestration, stop and report a blocker with the candidate changes; do not use `question`. `question` is reserved for the propose primary agent.
 
    Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
 
@@ -53,15 +53,16 @@ Implement tasks from an OpenSpec change.
 
    Read the dynamic `instruction` returned by `openspec instructions apply`.
 
-   - You MUST follow the required implementation workflow before implementation starts.
-   - For this repository, that means reading and entering `test-driven-development` before any task execution begins.
+   - You MUST follow the task-level implementation workflow declared in `tasks.md`.
+   - Do not load `test-driven-development` globally for all apply work.
+   - Every task that changes code must be marked `Execution Type: test-first-code` and must include `Required Skills: test-driven-development`.
+   - Non-code tasks such as setup, docs-sync, proof, verifier-gate, and reconciliation do not load TDD unless they explicitly change code.
    - If the change is classified as `interactive`, you MUST complete the `Blocking` section's first `Proof Task` before any later slice work begins.
-   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `verifier` sub-agent at those boundaries and wait for an explicit `PASS` or `FAIL`.
+   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `code-verifier` sub-agent at those boundaries and wait for `Verification passed` or `Verification failed`.
    - Treat `tasks.md` as scope and progress tracking; it does not override the required
      implementation order from the apply instruction.
-   - Read the `test-driven-development` skill before writing code.
-   - Follow `RED -> GREEN -> REFACTOR`: write the failing test first, watch it fail for the expected reason, then write the minimal implementation and refactor only after green.
-   - Only mark the related task complete after the required TDD checks are actually verified.
+   - Worker owns implementation task checkboxes after local completion evidence.
+   - Code Verifier does not update normal implementation task checkboxes; it updates only its assigned verifier gate checkbox on `Verification passed`.
 
 5. **Read context files**
 
@@ -80,22 +81,24 @@ Implement tasks from an OpenSpec change.
 
 7. **Implement tasks (loop until done or blocked)**
 
-   For each pending task:
+For each pending task:
    - Show which task is being worked on
-   - Follow the apply-stage workflow before or during implementation
-     (for example, complete the relevant `RED -> GREEN -> REFACTOR` cycle before moving to the next coding step)
-   - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`
-   - If the change defines verifier gates, enforce `Slice 1 -> Slice 1 verifier -> Slice 2 -> Slice 2 verifier -> ... -> Slice N -> Slice N verifier -> Reconciliation` at the relevant boundaries
-   - Make the code changes required
-   - Keep changes minimal and focused
-   - Mark task complete in the tasks file: `- [ ]` → `- [x]`
-   - Continue to next task
+   - Follow the task-level workflow before or during implementation. If `Required Skills` includes `test-driven-development`, delegate RED -> GREEN -> REFACTOR explicitly.
+   - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`  
+   - **Dispatch `@worker`**: Delegate implementation or proof work using a full Task Packet. Provide `Execution Type`, `Required Skills`, `Skill Reason`, context files, allowed file scope, verification commands, and checkbox ownership. **Do NOT write code or edit files yourself.**
+   - Wait for `@worker` to report `Implementation finished`, `Implementation blocked`, or `Implementation failed`.
+   - Worker updates only its assigned implementation task checkbox after local completion evidence.
+   - Ordinary Worker tasks become `passed-for-now`; they are not final slice trust.
+   - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, invoke independent `@code-verifier` for the whole covered slice.
+   - Wait for `@code-verifier` to return `Verification passed` or `Verification failed`.
+   - **Task Completion & Checkbox**: Normal implementation checkboxes are Worker-owned. Code Verifier owns only its assigned verifier gate checkbox and updates it on `Verification passed`. Failed slice verifier gates remain unchecked until PASS.
+   - Continue to next task.
 
    **Pause if:**
-   - Task is unclear → ask for clarification
-   - Implementation reveals a design issue → suggest updating artifacts
+   - Task is unclear → stop and report a blocker with the exact missing decision/input
+   - Worker/Verifier reveals a design issue → suggest updating artifacts
    - The current slice is missing a necessary prerequisite task or artifact → stop the slice, report the missing prerequisite and impacted task, and suggest the minimal artifact/task update
-   - Error or blocker encountered → report and wait for guidance
+   - Fatal error or upstream blocker encountered → report and wait for guidance
    - User interrupts
 
 8. **Run implementation done check**
@@ -104,7 +107,7 @@ Implement tasks from an OpenSpec change.
    - Read `openspec/QUALITY-GATE.md`
    - Run the `Implementation Done Check`
    - Confirm the declared verification commands were actually executed
-   - Confirm any required `verifier` gates were actually executed by an independent verifier sub-agent and reached `PASS`
+   - Confirm any required `code-verifier` gates were actually executed by an independent verifier sub-agent and reached `PASS`
    - If the change is `interactive`, confirm the proof used a real entry path instead of internal direct calls
    - Report failures before suggesting archive
 
@@ -123,11 +126,11 @@ Implement tasks from an OpenSpec change.
 
 Working on task 3/7: <task description>
 [...implementation happening...]
-✓ Task complete
+✓ Worker self-check complete
 
 Working on task 4/7: <task description>
 [...implementation happening...]
-✓ Task complete
+✓ Slice verifier gate passed
 ```
 
 **Output On Completion**
@@ -169,19 +172,17 @@ What would you like to do?
 
 **Guardrails**
 - Keep going through tasks until done or blocked
-- Always honor the dynamic apply instruction before implementing tasks
+- Always honor the dynamic apply instruction before dispatching tasks
 - Always read context files before starting (from the apply instructions output)
-- If the schema or project rules require TDD, read `test-driven-development` and follow `RED -> GREEN -> REFACTOR`
-  before declaring implementation complete
-- If the change is `interactive`, do not skip the first `Proof Task`
-- If `tasks.md` defines verifier gates, do not replace them with self-review; use the independent `verifier` sub-agent
-- If task is ambiguous, pause and ask before implementing
-- If implementation reveals issues, pause and suggest artifact updates
-- Keep code changes minimal and scoped to each task
-- Update task checkbox immediately after completing each task
-- Do not skip `RED -> GREEN -> REFACTOR` when TDD is required
+- **NEVER implement tasks yourself**. Always use `@worker` for implementation.
+- If a task changes code, it must be `test-first-code` and include `test-driven-development`; explicitly instruct `@worker` to follow `RED -> GREEN -> REFACTOR`. Do not let `@worker` skip this.
+- If the change is `interactive`, do not skip dispatching the first `Proof Task`; this proof is Worker self-checked and is not a Code Verifier gate.
+- If `tasks.md` defines verifier gates, do not replace them with self-review; ALWAYS use the independent `@code-verifier` sub-agent.
+- **Enforce Worker Scope**: Always instruct `@worker` to keep code changes minimal and strictly scoped to each task.
+- **Enforce Checkbox Rules**: Worker owns normal implementation task checkboxes after local completion evidence. Code Verifier does not update normal implementation checkboxes; it owns only assigned verifier gate checkboxes.
+- If task is ambiguous, pause and report a blocker before dispatching
 - Do not suggest archive before `Implementation Done Check` is complete
-- Pause on errors, blockers, or unclear requirements - don't guess
+- Pause on fatal errors, upstream blockers, or unclear requirements - don't guess
 - Use contextFiles from CLI output, don't assume specific file names
 
 **Fluid Workflow Integration**
