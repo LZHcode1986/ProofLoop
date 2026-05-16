@@ -1,7 +1,7 @@
 ---
 description: Brain-dispatched OpenSpec planning subagent that turns a stable PRD or planning brief into formal change artifacts.
 mode: subagent
-model: github-copilot/gpt-5.4
+model: 
 color: "#efcde3"
 permission:
   edit:

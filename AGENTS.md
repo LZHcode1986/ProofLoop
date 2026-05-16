@@ -17,56 +17,40 @@
 ## Source Of Truth
 
 - Workflow and change rules: `openspec/`
-- Product intent and stage plan: `PRD.md`
-- Top-level technical constraints: `tech-spec.md`
+- Product intent and stage plan: 
+- Top-level technical constraints: 
 - Repo-wide operating constraints: `AGENTS.md`
 
 ## Environment Notes
 
-- OS: Windows
-- Shell: PowerShell (`pwsh`)
+- OS:  
+- Shell:  
 - Command style: prefer PowerShell-native commands and `;` for sequencing
-- Live OpenSpec assets now live in `openspec/`, not `adapters/openspec/`
+
 
 ## Design Philosophy
 
-Use these ideas when choosing stage boundaries, module boundaries, and task shapes:
-
-- Manage complexity first.
-  Complexity shows up as change amplification, high cognitive load, and unknown unknowns.
-
-- Prefer deep modules over shallow wrappers.
-  A good stage should move one meaningful capability or module boundary, not scatter thin changes across unrelated areas.
-
-- Protect information hiding.
-  Avoid stages that leak many internal details across module boundaries or require callers to learn hidden sequencing rules.
-
-- Favor strategic design over tactical patching.
-  Do not optimize only for this prompt if the boundary clearly harms future maintainability.
-
-- Design twice when the boundary matters.
-  If a stage or module split is important, compare at least two different partitions before choosing one.
+- Manage complexity before optimizing for local convenience.
+- Prefer stage and module boundaries that hide internal sequencing from callers.
+- Do not introduce shallow wrapper stages that move work without creating a clearer module boundary.
+- If the boundary matters and two partitions are plausible, compare both before choosing.
+- Do not optimize only for the current prompt when the boundary would increase future change amplification.
 
 ## Stage Planning Rules
 
 - Brain owns PRD decomposition into stages.
-- Each stage should represent one independently valuable function or one coherent module boundary.
-- One stage should not mix multiple unrelated modules or multiple top-level user capabilities.
-- A stage must include:
-  - objective
-  - boundary
-  - explicit out-of-scope items
-  - immutable acceptance criteria
-  - major dependencies or design risks
-- Prefer stage boundaries that reduce change amplification and keep the cognitive load local.
-- If a proposed stage combines unrelated features, hidden cross-module coupling, or ambiguous ownership, reject the partition and repartition before task decomposition.
+- Define the stage objective, boundary, explicit out-of-scope, immutable acceptance criteria, and major risks before task decomposition.
+- Decompose only stages that represent one independently valuable capability or one coherent module boundary.
+- Do not decompose a stage that mixes unrelated capabilities, unrelated modules, or ambiguous ownership.
+- If the stage boundary increases change amplification without a clear module or delivery benefit, reject it and repartition before writing tasks.
 
 ## Task Decomposition Rules
 
 - Propose decomposes exactly one stage at a time.
 - Do not let a single `tasks.md` smear work across multiple independent stages.
-- Every task must trace back to the current stage objective and acceptance criteria.
-- Keep tasks narrow enough for direct execution, but do not split into shallow pass-through tasks that add ceremony without reducing complexity.
+- Make every task trace directly to the current stage objective and acceptance criteria.
+- Do not create pass-through tasks that only hand work between agents without changing an artifact or verification boundary.
+- If a task cannot be verified or mapped to acceptance criteria, rewrite or remove it before execution.
 - Acceptance criteria are immutable once Brain dispatches them. L1 agents may map them; L2 reviewers may verify them; neither may rewrite them.
 
 ## Verification Boundaries

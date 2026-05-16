@@ -1,7 +1,7 @@
 ---
 description: Brain-dispatched OpenSpec apply-stage orchestrator with slice gates and bounded rescue.
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: 
 color: "#ae89bc"
 permission:
   edit: deny

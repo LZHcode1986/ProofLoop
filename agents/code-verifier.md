@@ -1,7 +1,7 @@
 ---
 description: OpenSpec Code Verifier - slice-level implementation quality gate.
 mode: subagent
-model: github-copilot/gpt-5.4
+model: 
 hidden: true
 permission:
   edit:

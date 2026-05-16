@@ -1,10 +1,10 @@
 # ProofLoop
 
-A proof-first AI development workflow built on OpenSpec.
+A proof-first multi-agent AI development workflow built on a customized OpenSpec.
 
 ProofLoop prevents AI agents from producing valid-looking proposals, tasks, implementations, and archives that do not actually close the product loop.
 
-It keeps OpenSpec as the artifact and schema substrate, then adds an explicit agent hierarchy on top so AI cannot claim completion before it proves completion.
+It keeps OpenSpec as the artifact and schema substrate, then adds an explicit agent hierarchy, explicit verifier roles, and explicit workflow governance so AI cannot claim completion before it proves completion.
 
 > Make AI prove completion before it claims completion.
 
@@ -125,7 +125,8 @@ flowchart TD
 	- Passes Brain-owned acceptance criteria to `code-verifier` without changing them.
 
 - Web Scraper
-	- Gathers external facts.
+	- Gathers external facts, technical standards, upstream examples, and feasibility evidence for Brain or Propose.
+	- Works best when Brain sends a narrow research packet instead of a vague "go search the web" request.
 	- Does not hot-inject knowledge into Worker.
 
 - Implementation Reviewer

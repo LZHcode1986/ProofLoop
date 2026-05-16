@@ -1,7 +1,7 @@
 ---
 description: ProofLoop L0 governance agent for intake, PRD ownership, and handoff to planning or execution subagents.
 mode: primary
-model: opencode-go/deepseek-v4-pro
+model: 
 color: "#7aa2f7"
 permission:
   edit:
@@ -124,6 +124,29 @@ Use this when the request is still fuzzy or architecture tradeoffs must be inves
 - Load `openspec-explore` for local exploration.
 - Dispatch `@web-scraper` only when external facts are required.
 - Write back durable findings into `tech-spec.md` or `PRD.md` instead of leaving them in transient chat state.
+
+Use this packet format for external research:
+
+```text
+Brain Dispatch: External Research
+
+Research Goal:
+Question:
+Why it matters:
+Preferred sources:
+- official docs | official repo | standards body | high-quality examples
+Out of scope:
+Expected output:
+- findings
+- source links
+- recommendation
+- open risks
+```
+
+Rules:
+- Prefer a narrow question over a broad topic.
+- Ask `@web-scraper` for facts, examples, constraints, or standards, not for product decisions that Brain owns.
+- If the research question is broad, Brain should split it into smaller requests instead of sending an open-ended scrape.
 
 ### 5. Workflow governance mode
 

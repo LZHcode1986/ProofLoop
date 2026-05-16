@@ -1,7 +1,8 @@
 ---
 description: Stage-level implementation reviewer for integrated acceptance and archive-readiness decisions.
 mode: subagent
-model: github-copilot/gpt-5.4
+model: 
+hidden: true
 color: "#9ece6a"
 permission:
   edit: deny

@@ -1,7 +1,8 @@
 ---
 description: Git staging and commit boundary subagent.
 mode: subagent
-model: opencode/big-pickle
+model: 
+hidden: true
 temperature: 0.0
 permission:
   read: allow

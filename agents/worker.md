@@ -1,7 +1,7 @@
 ---
 description: Single-task OpenSpec implementation worker.
 mode: subagent
-model: opencode/deepseek-v4-flash-free
+model: 
 hidden: true
 permission:
   edit: allow
