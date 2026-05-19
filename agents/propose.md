@@ -142,6 +142,15 @@ When using `openspec-propose` to generate `tasks.md`, ensure:
 - `Execution Type: proof` appears only for the first blocking task of an interactive change
 - task file scopes and verification commands are concrete enough for later worker dispatch
 
+### Spec Delta Header Rule
+
+When writing MODIFIED requirements in `openspec/changes/<change>/specs/<capability>/spec.md`:
+
+1. You MUST read the corresponding base spec at `openspec/specs/<capability>/spec.md` before writing any MODIFIED requirement.
+2. MODIFIED requirement headers MUST be copied verbatim from the base spec (exact text, including punctuation and whitespace). The `openspec archive` command uses exact-match (trim-only) — any difference causes archive failure.
+3. If you need to change a requirement header text, use `## RENAMED Requirements` to rename it first, then `## MODIFIED Requirements` with the new name. Never rename a header inside a MODIFIED block.
+4. If a base spec does not exist at `openspec/specs/<capability>/spec.md`, use only `## ADDED Requirements`. MODIFIED and RENAMED operations require an existing base spec.
+
 ## L2 Plan Review Contract
 
 When dispatching `@spec-verifier`, pass these fields verbatim from the caller:

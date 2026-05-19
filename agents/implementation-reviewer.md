@@ -10,17 +10,22 @@ permission:
     "*": deny
     "openspec status*": allow
     "openspec validate*": allow
+    "openspec archive*": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
     "git show*": allow
+    "git add *": allow
+    "git commit*": allow
     "rg *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
   task:
     "*": deny
-  skill: deny
+  skill:
+    "*": deny
+    "openspec-archive-change": allow
   question: deny
 ---
 
@@ -65,6 +70,24 @@ For implementation-stage review, confirm:
 - implementation-done evidence is credible
 - code, tasks, verifier results, and stage summary are aligned
 - archive should proceed or stop
+
+## Archive Execution
+
+When `Archive recommendation: ready` in the output, you MUST execute the
+archive immediately after returning the review result:
+
+1. If the working tree has uncommitted changes within `openspec/changes/<change-name>/`,
+   commit them first (they are planning-artifact fixes, not implementation regressions):
+   `git add openspec/changes/<change-name>/` and `git commit -m "archive: finalize spec deltas"`.
+2. Run `openspec archive <change-name>` (with the exact change name from
+   the dispatch).
+3. If the archive command leaves additional unstaged changes, handle them
+   with `git add` / `git commit` using a concise archival commit message.
+4. Report the archive result:
+   `Archive complete: <change-name>` or `Archive failed: <reason>`.
+
+When `Archive recommendation: not-ready`, do not attempt to archive.
+Report the blocking findings to Brain so it can decide the next action.
 
 ## Hard Constraints
 
