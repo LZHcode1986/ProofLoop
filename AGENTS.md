@@ -60,6 +60,20 @@
 - `implementation-reviewer` checks stage-level integrated outcomes.
 - `committer` only closes git boundaries.
 
+### Subagent Reliability
+
+**Session Reuse**: For subsequent operations on the same Change / Stage / task, you must reuse existing subagent sessions (via the `task_id` parameter) and must not create new sessions each time. Creating new sessions loses context, leading to repeated exploration and token waste.
+
+- When Brain dispatches L1 subagents (`@propose`, `@executor`, `@implementation-reviewer`): if it is a continuation of the same Change, pass the `task_id` returned last time to restore the session.
+- When Executor dispatches L2 subagents (`@code-verifier`, `@spec-verifier`, `@worker`): if it is a re-verification of the same Slice, similarly reuse the `task_id`.
+- New sessions may only be created in the following cases: ① A completely new Change/Stage ② The previous session has completed and context is no longer needed ③ The subagent returns an unrecoverable error after reusing `task_id`.
+
+**Stall Recovery**: Any subagent (L1/L2) may become unresponsive due to security scanning, network timeout, resource contention, etc. When the parent agent dispatches, it should estimate a reasonable timeout in the task description (default 120 seconds). If not returned by the deadline, it is considered `stalled`. Recovery process:
+
+1. Re-dispatch using **the same `task_id`**, appending in the task description: "Previous timeout, please continue from the completed checkpoint."
+2. If retrying with the same `task_id` twice still yields no response, create a new session (excluding the operation that caused the stall in the task description).
+3. If the new session still fails → Executor reports to Brain as `Execution blocked`; Brain reports to the user as `Blocked`, with the reason and retry history.
+
 ## Git Worktree Policy
 
 - Current MVP policy is manual selection, not automatic management.
