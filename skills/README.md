@@ -38,8 +38,8 @@
 1. Brain 先加载 `workflow-intake`，把用户需求变成 `PRD.md` 与 stage plan。
 2. Brain 再加载 `grill-me-prd`，只补关键缺口，不重复做开放式发现。
 3. Brain 按根级 `AGENTS.md` 的 stage 划分规则选择一个 stage，然后 dispatch `propose` agent；`propose` agent 再加载 `openspec-propose`，并把 Brain 给出的验收标准原样传给 `spec-verifier`。
-4. `executor` agent 加载 `openspec-apply-change` 并编排 `worker`、`code-verifier`、`spec-verifier`、`committer`，同时把 Brain 给出的验收标准原样传给 `code-verifier`。
-5. Brain 在阶段边界 dispatch `implementation-reviewer` 做阶段级验收；`code-verifier` 仍只负责切片级验收。
+4. `executor` agent 加载 `openspec-apply-change` 并编排 `worker`、`code-verifier`、`spec-verifier`、`committer`；`code-verifier` 只接收当前切片/校验门的标准。
+5. Brain 在阶段边界 dispatch `implementation-reviewer` 做阶段级验收；完整 stage 验收标准由 `implementation-reviewer` 组合检查。
 6. 代码任务默认继续由 `test-driven-development` 约束。
 
 ## 标准迁移顺序

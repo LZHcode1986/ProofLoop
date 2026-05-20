@@ -85,11 +85,13 @@ For each pending task:
    - Show which task is being worked on
    - Follow the task-level workflow before or during implementation. If `Required Skills` includes `test-driven-development`, delegate RED -> GREEN -> REFACTOR explicitly.
    - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`  
-   - **Dispatch `@worker`**: Delegate implementation or proof work using a full Task Packet. Provide `Execution Type`, `Required Skills`, `Skill Reason`, context files, allowed file scope, verification commands, and checkbox ownership. **Do NOT write code or edit files yourself.**
+   - **Dispatch `@worker`**: Delegate implementation or proof work using a full Task Packet built from `tasks.md` and the loaded context files. **Do NOT write code or edit files yourself.**
    - Wait for `@worker` to report `Implementation finished`, `Implementation blocked`, or `Implementation failed`.
    - Worker updates only its assigned implementation task checkbox after local completion evidence.
    - Ordinary Worker tasks become `passed-for-now`; they are not final slice trust.
    - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, invoke independent `@code-verifier` for the whole covered slice.
+   - Code Verifier dispatch must include only the assigned slice/gate contract from `tasks.md` plus covered Worker evidence.
+   - Do not dispatch full Stage Acceptance Criteria to `@code-verifier`; stage-level composition belongs to `@implementation-reviewer`.
    - Wait for `@code-verifier` to return `Verification passed` or `Verification failed`.
    - **Task Completion & Checkbox**: Normal implementation checkboxes are Worker-owned. Code Verifier owns only its assigned verifier gate checkbox and updates it on `Verification passed`. Failed slice verifier gates remain unchecked until PASS.
    - Continue to next task.
@@ -105,10 +107,8 @@ For each pending task:
 
    After all implementation tasks are done:
    - Read `openspec/QUALITY-GATE.md`
-   - Run the `Implementation Done Check`
-   - Confirm the declared verification commands were actually executed
-   - Confirm any required `code-verifier` gates were actually executed by an independent verifier sub-agent and reached `PASS`
-   - If the change is `interactive`, confirm the proof used a real entry path instead of internal direct calls
+   - Run the mechanical `Implementation Done Check`
+   - Confirm task ownership, recorded verification commands, required slice verifier `PASS` results, interactive proof evidence when applicable, and the stage-review package
    - Report failures before suggesting archive
 
 9. **On completion or pause, show status**

@@ -34,7 +34,8 @@ The Executor must provide a Task Packet with:
 - Task ID / name
 - Work Request
 - Task text
-- Acceptance criteria
+- Task acceptance criteria
+- Slice goal and Slice Acceptance Criteria, when the task belongs to a slice
 - Fix Mode and Verifier Failure, when the dispatch is `Worker Fix`
 - Workflow constraints
 - Execution Type
@@ -52,7 +53,7 @@ You must:
 
 - work only inside the assigned task and allowed file scope
 - update only the assigned implementation task checkbox, and only after implementation plus required local checks pass
-- report concrete evidence for each acceptance criterion
+- report concrete evidence for each assigned task acceptance criterion
 
 You must not:
 
@@ -70,6 +71,9 @@ You must not:
   - RED: the failing test output before implementation.
   - GREEN: the passing test output after implementation.
   - REFACTOR: the refactoring changes applied (if any) and test still passing.
+- When `test-driven-development` is listed, the Task Packet defines the task's interface and behavior scope. If that scope is not testable, return `Implementation blocked`.
+- Missing RED, GREEN, or REFACTOR evidence prevents `Implementation finished`.
+- TDD tests should verify observable behavior through the public interface available to the task, not only private implementation details.
 - Every code-changing task should arrive as `Execution Type: test-first-code` with `Required Skills: test-driven-development`. If asked to change code without TDD, return `Implementation blocked` and explain the missing Required Skill.
 - If `diagnose` is listed, load `diagnose` and follow its disciplined loop. Do not infer `diagnose`; it must be explicitly listed. Report evidence for each phase: reproduce, minimize, hypothesize, instrument, fix, regression-test.
 - If `Required Skills: None`, do not load build skills just for formality.
@@ -78,6 +82,7 @@ You must not:
 
 - One task, one logical goal. If the task is too large, complete the smallest working sub-goal and report the remaining sub-goals.
 - Prefer the simplest working implementation. Do not add generic abstractions, framework layers, or config-driven mechanisms without a current concrete need.
+- Do not broaden scope to satisfy future slice or stage concerns outside the Task Packet.
 - Keep changes reversible: avoid mixing additions, deletions, broad replacements, and unrelated refactors.
 - Run the smallest relevant check set after changes. If a command already passed and code has not changed since, do not rerun the same command.
 - If you notice unrelated issues, report them under `Noticed but not changed` and leave them untouched.
@@ -102,8 +107,9 @@ For both modes, keep the original task constraints active. Do not reset scope, i
 Before returning `Implementation finished`, ensure:
 
 - required skills were loaded and followed, with concrete evidence for each required skill phase
+- if `test-driven-development` was required, RED/GREEN/REFACTOR evidence is present
 - required local checks passed
-- each acceptance criterion has concrete evidence
+- each assigned task acceptance criterion has concrete evidence
 - only allowed files were changed
 - the assigned implementation checkbox in `tasks.md` was changed from unchecked to checked
 - the updated checkbox line was re-read from disk after editing and exactly matches the assigned task
@@ -120,6 +126,7 @@ Implementation finished | Implementation blocked | Implementation failed
 Task:
 Skills used:
 Required skills evidence:
+TDD evidence:
 Files changed:
 Checkbox updated:
 - Updated line:

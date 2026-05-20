@@ -1,7 +1,7 @@
 ---
 description: Brain-dispatched OpenSpec planning subagent that turns a stable PRD or planning brief into formal change artifacts.
 mode: subagent
-model: 
+model: opencode-go/deepseek-v4-pro
 color: "#efcde3"
 permission:
   edit:
@@ -135,12 +135,10 @@ Before doing anything else, load and follow the `openspec-propose` skill as the 
 
 When using `openspec-propose` to generate `tasks.md`, ensure:
 - caller-supplied acceptance criteria remain the source contract and are not rewritten
-- every slice is independent and verifiable
-- every verifier task lists required review skills
-- every task includes `Execution Type`, `Required Skills`, `Required Review Skills`, and `Skill Reason`
-- every code-changing task uses `Execution Type: test-first-code` and `Required Skills: test-driven-development`
-- `Execution Type: proof` appears only for the first blocking task of an interactive change
-- task file scopes and verification commands are concrete enough for later worker dispatch
+- `tasks.md` follows the current ProofLoop/OpenSpec template and readiness gate
+- tasks remain inside the selected stage and trace to the selected stage objective
+- execution task standards and verifier gate standards are consistent
+- if any caller-supplied acceptance criterion is not covered by the task plan, return `Planning blocked` or repair the decomposition before declaring readiness
 
 ### Spec Delta Header Rule
 

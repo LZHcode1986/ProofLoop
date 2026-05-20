@@ -1,6 +1,6 @@
-name: proofloop
+name: spec-driven
 version: 1
-description: ProofLoop reusable OpenSpec workflow schema with proposal, design, specs, tasks, and unified readiness gates before apply
+description: <project name> reusable OpenSpec workflow schema with proposal, design, specs, tasks, and unified readiness gates before apply
 
 artifacts:
   - id: proposal
@@ -65,10 +65,12 @@ artifacts:
       - MVP scope
       - dependencies
       - parallel opportunities
+      - Stage Acceptance Coverage Map showing how every Brain-supplied Stage Acceptance Criterion is covered by slice verifier gates or reconciliation checks
       - slice goals
       - independent acceptance criteria
       - Every implementation slice must explicitly include a separate independent `verifier` sub-agent task.
-      - Each `verifier` task must state the inspection scope, what the verifier must check, and the `PASS/FAIL` gate conditions.
+      - Each `verifier` task must state covered tasks, inspection scope, what the verifier must check, out-of-scope boundaries, and the `PASS/FAIL` gate conditions.
+      - Each verifier `PASS/FAIL` gate must align with the current slice acceptance criteria and must not expand into unrelated full-stage review.
       - Execution order must ensure the previous slice's `verifier PASS` before the next slice begins, and the final slice's `verifier PASS` before `Reconciliation`.
 
       Keep the `1.1 / 1.2` style for each task, and support `[P]` and `[Slice-X]` tags.

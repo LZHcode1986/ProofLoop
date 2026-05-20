@@ -117,8 +117,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Immediately after `proposal.md`, run **Proofability Check** before writing `design.md`
       - `design.md`: write the implementation structure, interfaces, sequencing, and validation strategy for every non-deferred proposal item
       - `specs/*` and `tasks.md`: derive them only from the validated proposal/design pair
-      - `tasks.md` must follow the OpenSpec x spec-kit blended structure: Setup -> Blocking -> Slice 1..N -> Reconciliation
-      - `tasks.md` must include MVP scope, dependencies, parallel opportunities, slice goals, and independent acceptance criteria
+      - `tasks.md` must follow the OpenSpec x spec-kit blended structure and the current tasks template
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
       - Every task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, and `Skill Reason`
@@ -142,6 +141,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
         - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
         - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
+        - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, or if verifier gate standards do not match the slice acceptance criteria they are supposed to verify
         - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
         - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion
         - The readiness result summary in the conversation MUST use this format:
@@ -164,6 +164,8 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Then write `Blocking` tasks for shared prerequisites that must be completed first; if the change is `interactive`, the first item must be `Proof Task` with `Execution Type: proof` and `Required Skills: None`
       - Split implementation by capability slice, using as many numbered slices as needed, and each slice must be independently verifiable
       - Each slice must include a `slice goal` and `independent acceptance criteria`
+      - Include a Stage Acceptance Coverage Map that shows which slice verifier gate or reconciliation check covers each caller-supplied Stage Acceptance Criterion
+      - If any Stage Acceptance Criterion is not covered by a slice verifier gate or reconciliation check, repair the decomposition before declaring the tasks ready
       - Finish with `Reconciliation` tasks for wrap-up, documentation, compatibility, regression, and alignment work
       - Mark parallelizable tasks with `[P]`
       - Mark slice ownership with `[Slice-1]`, `[Slice-2]`, ... `[Slice-N]` or equivalent numbered tags
@@ -182,7 +184,9 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - **Required Review Skills Standards**:
         - Verifier gate tasks: `code-review-and-quality`
         - Add `security-and-hardening` only when user input, auth, permissions, storage, upload, external integration, or network boundary is in scope
-      - Every `verifier` task must explicitly include `Inspection Scope`, `Inspection Content`, and `PASS/FAIL Gate`
+      - Every `verifier` task must explicitly include `Covered Tasks`, `Inspection Scope`, `Inspection Content`, `Out of Scope`, and `PASS/FAIL Gate`
+      - Every verifier `PASS/FAIL Gate` must align with the current slice acceptance criteria and must not expand into unrelated stage-level review
+      - Implementation task verification commands and verifier gate standards must be consistent; do not add extra gates to compensate for unclear task decomposition
       - **Branch Logic**: If a task or slice contains conditional branches (e.g., "if test fails, stop and log"), these MUST be explicitly documented in the tasks.
 
    b. **Continue until all `applyRequires` artifacts are complete**

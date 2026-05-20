@@ -18,13 +18,21 @@
 
 <!-- List tasks or task groups that can be done in parallel. -->
 
+## Stage Acceptance Coverage Map
+
+<!-- Map each Brain-supplied Stage Acceptance Criterion to the slice verifier gate or reconciliation check that proves it. -->
+
+| Stage Acceptance Criterion | Covered By | Evidence / Gate |
+| --- | --- | --- |
+| <criterion> | <Slice 1 verifier / Reconciliation task> | <slice acceptance criterion, verification command, or PASS/FAIL gate> |
+
 ## Task Order
 
 <!-- Keep the five-stage structure: Setup, Blocking, Slice 1..N, Reconciliation. -->
 
 ### Implementation Constraints
 
-- When entering `apply`, execute `test-driven-development` first and follow `RED -> GREEN -> REFACTOR`.
+- Code-changing tasks must use `test-driven-development` and follow `RED -> GREEN -> REFACTOR`.
 - `tasks.md` is only for scope breakdown and progress tracking; do not repeat the full TDD details here.
 - If the change is `interactive`, the first item in `Blocking` must be `Proof Task`.
 - If `tasks.md` explicitly defines implementation-slice verifier gates, you must actually invoke the independent `verifier` sub-agent.
@@ -68,7 +76,10 @@
 - [ ] 3.3 [Slice-1] <Slice 1 verifier>
   - **Files:** <change-artifacts, Slice 1 implementation, Slice 1 tests, verification results>
   - **Verification:** independent `verifier` sub-agent check
+  - **Covered Tasks:** <3.1, 3.2>
   - **Inspection Scope:** <Slice 1 change artifacts + related implementation + related tests + validation results>
+  - **Inspection Content:** <what the verifier must check>
+  - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
   - **PASS/FAIL Gate:** <conditions for pass/fail>
 
 ## 4. Slice 2: <slice-name>
@@ -87,7 +98,10 @@
 - [ ] 4.2 [Slice-2] <Slice 2 verifier>
   - **Files:** <change-artifacts, Slice 2 implementation, Slice 2 tests, verification results>
   - **Verification:** independent `verifier` sub-agent check
+  - **Covered Tasks:** <4.1>
   - **Inspection Scope:** <Slice 2 change artifacts + related implementation + related tests + validation results>
+  - **Inspection Content:** <what the verifier must check>
+  - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
   - **PASS/FAIL Gate:** <conditions for pass/fail>
 
 ## N. More Slices (as needed)
@@ -114,13 +128,15 @@
 <!-- Unified checks before entering apply. -->
 - [ ] File scope is explicit
 - [ ] MVP scope is explicit
+- [ ] Stage Acceptance Coverage Map covers every Brain-supplied Stage Acceptance Criterion
 - [ ] Blocking tasks are separated
 - [ ] Every slice has a slice goal
 - [ ] Every slice has independent acceptance criteria
 - [ ] Parallel opportunities are marked
 - [ ] Task order is coherent
 - [ ] Every implementation slice explicitly includes an independent `verifier` sub-agent check
-- [ ] Each `verifier` task clearly states inspection scope and `PASS/FAIL` gate
+- [ ] Each `verifier` task clearly states covered tasks, inspection scope, inspection content, out-of-scope boundaries, and `PASS/FAIL` gate
+- [ ] Each `verifier` task's `PASS/FAIL` gate aligns with the current slice acceptance criteria
 - [ ] Each slice verifier must pass before entering the next slice
 - [ ] The final slice verifier must pass before entering `Reconciliation`
 - [ ] Every step has a verification command

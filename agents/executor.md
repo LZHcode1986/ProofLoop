@@ -57,7 +57,7 @@ Relevant Risks:
 Expected Result:
 ```
 
-Treat caller-supplied acceptance criteria as an immutable contract. You may map them to slices and tasks, but you must not rewrite or weaken them. If stage metadata is provided, treat the execution as scoped to that stage.
+Treat caller-supplied acceptance criteria as an immutable contract. Use the prepared mappings in `tasks.md`; do not redefine task scope, verifier scope, or stage acceptance criteria during execution. If stage metadata is provided, treat the execution as scoped to that stage.
 
 ## Git Worktree Policy
 
@@ -222,11 +222,11 @@ Work Request: implement the assigned task
 
 Task Text:
 
-Acceptance Criteria:
+Task Acceptance Criteria:
 
-Stage Acceptance Criteria Source:
+Slice Goal:
 
-Stage Acceptance Criteria:
+Slice Acceptance Criteria:
 
 Workflow Constraints:
 
@@ -236,7 +236,6 @@ Required Skills:
 
 Skill Instructions:
 - Load every listed skill before implementation.
-- If test-driven-development is listed, follow RED -> GREEN -> REFACTOR.
 - If `diagnose` is listed, load `diagnose` and follow its disciplined diagnosis loop.
 - Report evidence that each required skill was used for Executor decision-making.
 - Evidence is not user-facing by default; Executor will not relay full evidence unless blocked, failed, or explicitly asked.
@@ -260,6 +259,7 @@ Rules:
 - Do not commit.
 - Do not invoke subagents.
 - Do not broaden scope.
+- Do not broaden scope to satisfy future slice or stage concerns.
 - If required context is missing, return `Implementation blocked: insufficient task context` with the missing files and reason.
 ```
 
@@ -303,9 +303,11 @@ Task ID:
 Task Name:
 Slice / Gate:
 Covered Tasks:
-Acceptance Criteria Source:
-Acceptance Criteria:
- - <immutable acceptance criterion from caller>
+Slice Acceptance Criteria:
+Inspection Scope:
+Inspection Content:
+Out of Scope:
+PASS/FAIL Gate:
 Original Task Packets:
 Worker Summaries:
 Files Changed In Slice:
@@ -316,12 +318,8 @@ Required Review Skills:
 - security-and-hardening, if user input/auth/storage/external integration is touched
 
 Verification Required:
-- Treat caller acceptance criteria as immutable.
-- Independently verify acceptance criteria.
-- Verify required skills were actually followed.
-- Verify tests/checks are real and relevant.
-- Verify the whole slice, not only the final verifier task.
-- Verify Worker-updated checkboxes are consistent with implementation evidence.
+- Verify the assigned slice / verifier gate according to `code-verifier.md`.
+- Use only the supplied gate fields and covered Worker evidence.
 - Do not implement fixes.
 - Do not commit.
 - Do not update normal implementation task checkboxes.
@@ -373,7 +371,8 @@ Verifier Failure:
 - Failed attempts: <only include when Fix Mode is diagnose; otherwise None>
 
 Original Task Constraints:
-- Acceptance Criteria:
+- Task Acceptance Criteria:
+- Slice Acceptance Criteria:
 - Workflow Constraints:
 - Allowed File Scope:
 - Verification Commands:

@@ -66,6 +66,7 @@ Examples:
 
 For implementation-stage review, confirm:
 - the stage acceptance criteria are covered by the combined implementation evidence
+- the Stage Acceptance Coverage Map is credible and matches the actual slice verifier results
 - required slice gates actually passed
 - implementation-done evidence is credible
 - code, tasks, verifier results, and stage summary are aligned

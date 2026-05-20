@@ -46,12 +46,10 @@
 
 ## Task Decomposition Rules
 
-- Propose decomposes exactly one stage at a time.
-- Do not let a single `tasks.md` smear work across multiple independent stages.
-- Make every task trace directly to the current stage objective and acceptance criteria.
-- Do not create pass-through tasks that only hand work between agents without changing an artifact or verification boundary.
-- If a task cannot be verified or mapped to acceptance criteria, rewrite or remove it before execution.
-- Acceptance criteria are immutable once Brain dispatches them. L1 agents may map them; L2 reviewers may verify them; neither may rewrite them.
+- Brain supplies one selected stage and immutable acceptance criteria before task decomposition begins.
+- Propose turns that single stage into verifiable `tasks.md` work; it must not plan across unrelated stages.
+- Executor consumes prepared tasks; it must not redefine task scope, acceptance criteria, or stage boundaries during execution.
+- Acceptance criteria are immutable after Brain dispatch. Propose may decompose them into task and verifier-gate standards; Executor consumes those prepared standards. Reviewers verify only their assigned scope; no agent may rewrite the original criteria.
 
 ## Verification Boundaries
 
@@ -62,17 +60,12 @@
 
 ### Subagent Reliability
 
-**Session Reuse**: For subsequent operations on the same Change / Stage / task, you must reuse existing subagent sessions (via the `task_id` parameter) and must not create new sessions each time. Creating new sessions loses context, leading to repeated exploration and token waste.
-
-- When Brain dispatches L1 subagents (`@propose`, `@executor`, `@implementation-reviewer`): if it is a continuation of the same Change, pass the `task_id` returned last time to restore the session.
-- When Executor dispatches L2 subagents (`@code-verifier`, `@spec-verifier`, `@worker`): if it is a re-verification of the same Slice, similarly reuse the `task_id`.
-- New sessions may only be created in the following cases: ① A completely new Change/Stage ② The previous session has completed and context is no longer needed ③ The subagent returns an unrecoverable error after reusing `task_id`.
-
-**Stall Recovery**: Any subagent (L1/L2) may become unresponsive due to security scanning, network timeout, resource contention, etc. When the parent agent dispatches, it should estimate a reasonable timeout in the task description (default 120 seconds). If not returned by the deadline, it is considered `stalled`. Recovery process:
-
-1. Re-dispatch using **the same `task_id`**, appending in the task description: "Previous timeout, please continue from the completed checkpoint."
-2. If retrying with the same `task_id` twice still yields no response, create a new session (excluding the operation that caused the stall in the task description).
-3. If the new session still fails → Executor reports to Brain as `Execution blocked`; Brain reports to the user as `Blocked`, with the reason and retry history.
+- Reuse the existing `task_id` for any continuation of the same Change, Stage, Slice, or task. Do not start a fresh session to recover context.
+- Start a new session only when the scope is new, the previous session is complete and no longer needed, or the reused session returns an unrecoverable error.
+- Every subagent dispatch must include an expected timeout. Default to 120 seconds when no better estimate exists.
+- On timeout, retry once with the same `task_id` and instruct the subagent to continue from the last completed checkpoint.
+- If the same-session retry also stalls, start one fresh session with a narrower packet that excludes the suspected stall trigger.
+- If the fresh session fails, stop. Executor reports `Execution blocked` to Brain; Brain reports `Blocked` to the user with the reason and retry history.
 
 ## Git Worktree Policy
 

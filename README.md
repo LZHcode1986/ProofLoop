@@ -122,7 +122,7 @@ flowchart TD
 
 - Executor
 	- Runs apply-stage orchestration.
-	- Passes Brain-owned acceptance criteria to `code-verifier` without changing them.
+	- Uses the prepared slice/gate standards from `tasks.md` for slice verification.
 
 - Web Scraper
 	- Gathers external facts, technical standards, upstream examples, and feasibility evidence for Brain or Propose.
@@ -152,9 +152,11 @@ flowchart TD
 Acceptance criteria start at Brain and remain immutable downstream.
 
 1. Brain defines and owns the acceptance criteria in the PRD and dispatch packets.
-2. Propose and Executor may map them to artifacts, slices, and task packets, but must not rewrite or weaken them.
-3. Spec Verifier and Code Verifier validate against the caller-supplied criteria, not against criteria they invent during review.
-4. Implementation Reviewer performs stage-level judgment using the same criteria plus the accumulated verifier evidence.
+2. Propose maps them to artifacts, slices, task packets, and verifier gates without rewriting or weakening them.
+3. Spec Verifier validates planning artifacts against the caller-supplied criteria.
+4. Code Verifier validates only the assigned slice/gate criteria derived from the stage contract.
+5. Executor consumes the prepared task and gate standards; it does not redefine acceptance scope during execution.
+6. Implementation Reviewer performs stage-level judgment using the original criteria plus the accumulated verifier evidence.
 
 ## Config example
 
