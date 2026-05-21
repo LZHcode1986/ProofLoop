@@ -16,6 +16,8 @@ This document is used between `propose` and `apply`. It keeps only three gates.
 - [ ] Does `tasks.md` include a Stage Acceptance Coverage Map that covers every Brain-supplied Stage Acceptance Criterion?
 - [ ] Does `tasks.md` explicitly include `verifier` sub-agent checks after each implementation slice?
 - [ ] Does each implementation task declare an allowed file scope and whether a boundary receipt is required?
+- [ ] Does each code-changing slice list its TDD test files, RED command, and GREEN command?
+- [ ] Does each `verifier` task's inspection scope include the TDD test files declared for that slice?
 - [ ] Does each `verifier` task clearly define covered tasks, inspection scope, inspection content, out-of-scope boundaries, boundary evidence requirements, and a `PASS/FAIL` gate?
 - [ ] Does each `verifier` task's `PASS/FAIL` gate align with the current slice acceptance criteria instead of expanding into unrelated full-stage review?
 - [ ] Does every key task include a file scope and verification command?

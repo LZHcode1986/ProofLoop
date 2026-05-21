@@ -33,7 +33,9 @@
 ### Implementation Constraints
 
 - Code-changing tasks must use `test-driven-development` and follow `RED -> GREEN -> REFACTOR`.
-- `tasks.md` is only for scope breakdown and progress tracking; do not repeat the full TDD details here.
+- Each code-changing slice must list TDD test files, `RED Verification` (pytest, expected fail), and `GREEN Verification` (pytest, expected pass). `GREEN Verification` targets the TDD test suite for the current slice; the task-level `Verification` field covers additional artifact checks (smoke, grep, import sanity) beyond TDD.
+- Non-code tasks (read-only diagnostic runs, docs-only, config-only) omit TDD fields or write `N/A`. Do not invent TDD artifacts for tasks that don't change production or executable code.
+- The verifier's inspection scope must include the TDD test files declared for that slice.
 - If the change is `interactive`, the first item in `Blocking` must be `Proof Task`.
 - If `tasks.md` explicitly defines implementation-slice verifier gates, you must actually invoke the independent `verifier` sub-agent.
 - Each slice verifier must state the inspection scope, what the verifier must check, and the `PASS/FAIL` gate conditions.
@@ -77,11 +79,17 @@
   - **Files:** <file-paths>
   - **Allowed File Scope:** <file-paths>
   - **Boundary Receipt Required:** yes | no-op allowed
+  - **TDD Test Files:** <test-file-paths>  *(required if code-changing)*
+  - **RED Verification:** <pytest command, expected to fail>  *(required if code-changing)*
+  - **GREEN Verification:** <pytest command, expected to pass>  *(required if code-changing)*
   - **Verification:** <verification-command>
 - [ ] 3.2 [P] [Slice-1] <task-description>
   - **Files:** <file-paths>
   - **Allowed File Scope:** <file-paths>
   - **Boundary Receipt Required:** yes | no-op allowed
+  - **TDD Test Files:** <test-file-paths>  *(required if code-changing)*
+  - **RED Verification:** <pytest command, expected to fail>  *(required if code-changing)*
+  - **GREEN Verification:** <pytest command, expected to pass>  *(required if code-changing)*
   - **Verification:** <verification-command>
 - [ ] 3.3 [Slice-1] <Slice 1 verifier>
   - **Files:** <change-artifacts, Slice 1 implementation, Slice 1 tests, verification results>
@@ -107,6 +115,9 @@
   - **Files:** <file-paths>
   - **Allowed File Scope:** <file-paths>
   - **Boundary Receipt Required:** yes | no-op allowed
+  - **TDD Test Files:** <test-file-paths>  *(required if code-changing)*
+  - **RED Verification:** <pytest command, expected to fail>  *(required if code-changing)*
+  - **GREEN Verification:** <pytest command, expected to pass>  *(required if code-changing)*
   - **Verification:** <verification-command>
 - [ ] 4.2 [Slice-2] <Slice 2 verifier>
   - **Files:** <change-artifacts, Slice 2 implementation, Slice 2 tests, verification results>
