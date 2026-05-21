@@ -63,6 +63,8 @@ Implement tasks from an OpenSpec change.
      implementation order from the apply instruction.
    - Worker owns implementation task checkboxes after local completion evidence.
    - Code Verifier does not update normal implementation task checkboxes; it updates only its assigned verifier gate checkbox on `Verification passed`.
+   - After every Worker result that changes files, dispatch `@committer` to close the Worker-output git boundary before any next Worker or Code Verifier dispatch.
+   - Do not dispatch `@code-verifier` until every covered Worker attempt has a boundary receipt or explicit no-op receipt.
 
 5. **Read context files**
 
@@ -91,6 +93,7 @@ For each pending task:
    - Ordinary Worker tasks become `passed-for-now`; they are not final slice trust.
    - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, invoke independent `@code-verifier` for the whole covered slice.
    - Code Verifier dispatch must include only the assigned slice/gate contract from `tasks.md` plus covered Worker evidence.
+   - Code Verifier dispatch must also include boundary receipts for every covered Worker attempt, changed files in slice, diff evidence requirements, and the relevant verification command outputs.
    - Do not dispatch full Stage Acceptance Criteria to `@code-verifier`; stage-level composition belongs to `@implementation-reviewer`.
    - Wait for `@code-verifier` to return `Verification passed` or `Verification failed`.
    - **Task Completion & Checkbox**: Normal implementation checkboxes are Worker-owned. Code Verifier owns only its assigned verifier gate checkbox and updates it on `Verification passed`. Failed slice verifier gates remain unchecked until PASS.
@@ -108,7 +111,8 @@ For each pending task:
    After all implementation tasks are done:
    - Read `openspec/QUALITY-GATE.md`
    - Run the mechanical `Implementation Done Check`
-   - Confirm task ownership, recorded verification commands, required slice verifier `PASS` results, interactive proof evidence when applicable, and the stage-review package
+   - Confirm task ownership, recorded verification commands, required slice verifier `PASS` results, boundary receipts for every covered Worker attempt, interactive proof evidence when applicable, and the stage-review package
+   - Do not suggest archive until boundary evidence is complete and stage review can be prepared
    - Report failures before suggesting archive
 
 9. **On completion or pause, show status**

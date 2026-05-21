@@ -54,6 +54,17 @@ Archive a completed change using the official OpenSpec archive flow.
 
    Do not try to manually sync specs or manually move files at this stage.
 
+### Brain-Authorized Non-Interactive Mode
+
+When called by `Implementation Reviewer` in Archive Execution Mode:
+
+- require an explicit change name
+- require explicit Brain authorization
+- do not ask the user questions
+- do not infer a different change
+- if multiple changes, incomplete tasks, or validation warnings create ambiguity, return `Archive blocked`
+- run only the official `openspec archive` command when the authorization packet is sufficient
+
 4. **Choose archive mode**
 
    Default command:
@@ -106,6 +117,17 @@ If specs were skipped:
 **Specs:** Skipped by request / change type
 ```
 
+If archive is blocked in Brain-authorized mode:
+
+```
+## Archive Blocked
+
+**Change:** <change-name>
+**Schema:** <schema-name>
+**Reason:** <blocker reason>
+**Command:** <not run>
+```
+
 **Guardrails**
 - Prefer `openspec archive` over any manual archive procedure
 - Do not manually compare and merge delta specs when the CLI is available
@@ -114,3 +136,4 @@ If specs were skipped:
 - Use `--skip-specs` only for changes that truly do not modify source-of-truth specs
 - Use `--no-validate` only with explicit user intent or a documented recovery scenario
 - If the CLI archive fails, report the failure and stop; do not silently fall back to manual file operations
+- Do not stage or commit archive output when running under ProofLoop Archive Execution Mode; the caller must route git changes through `Committer`

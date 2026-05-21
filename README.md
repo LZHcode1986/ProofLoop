@@ -145,7 +145,7 @@ flowchart TD
 	- Reviews one implementation slice.
 
 - Committer
-	- Closes git boundaries only.
+	- Closes git boundaries and returns receipts for worker-output and archive-output boundaries.
 
 ## Acceptance criteria contract
 
@@ -181,7 +181,8 @@ To install the whole ProofLoop workflow, not just the reusable schema, see [inst
 
 ## Schema layout
 
-The live reusable schema is stored in [openspec/schemas/proofloop](openspec/schemas/proofloop).
+The live reusable schema is stored in [openspec/schemas/spec-driven](openspec/schemas/spec-driven).
+ProofLoop keeps the schema identity as `spec-driven` for compatibility with OpenSpec's default SDD workflow.
 
 This repository now follows the normal OpenSpec schema layout:
 
@@ -193,10 +194,12 @@ The important invariant is simple: folder name, `schema.yaml` `name:`, and `open
 
 ## Relationship to OpenSpec and opencode
 
+- OpenSpec provides the artifact, schema, status, apply, and archive automation substrate.
+- opencode provides the runtime model for primary agent, subagent, task dispatch, permissions, and tool execution.
+- ProofLoop is the governance layer that binds them into a stricter closed loop.
 - OpenSpec remains the source of truth for change artifacts, schemas, config, and archive flow.
 - This repository still keeps OpenSpec-compatible installed skill names such as `openspec-propose` and `openspec-apply-change`.
-- opencode provides the runtime model for primary agent, subagent, task dispatch, permissions, and tool execution.
-- ProofLoop is the orchestration layer that binds them into a stricter closed loop.
+- Archive is a two-phase transition: Implementation Reviewer recommends archive, Brain authorizes it, Implementation Reviewer executes `openspec-archive-change`, and Committer closes the archive git boundary.
 
 ## What Brain can update
 
@@ -221,9 +224,10 @@ The current MVP uses git worktree as an execution-isolation policy, not as a ful
 2. Propose works from the planning home and writes formal change artifacts under `openspec/changes/<change-id>/`.
 3. Executor runs inside the selected worktree and assumes that worktree is already active.
 4. Worker implements one task at a time in that worktree.
-5. Committer closes a git boundary after each completed Worker attempt.
+5. Committer closes a git boundary and returns a receipt after each completed Worker attempt.
 6. Code Verifier validates slice gates in the same worktree.
 7. Implementation Reviewer performs stage-level review before archive or next-stage promotion.
+8. Archive output, if any, returns to Committer for boundary closure instead of being committed directly by Implementation Reviewer.
 
 Current non-goals:
 
@@ -253,7 +257,6 @@ Those belong to a future `manager` role if the workflow grows beyond the current
 4. Read [agents/propose.md](agents/propose.md) and [agents/executor.md](agents/executor.md) for the L1 planning and execution contracts.
 5. Read [openspec/QUALITY-GATE.md](openspec/QUALITY-GATE.md) for the current gate model.
 6. Read [openspec/schemas/README.md](openspec/schemas/README.md) if you want to install the reusable schema in another OpenSpec project.
-7. Read [OpenSpec-Agents-1+4+3-可行落地方案.md](OpenSpec-Agents-1+4+3-%E5%8F%AF%E8%A1%8C%E8%90%BD%E5%9C%B0%E6%96%B9%E6%A1%88.md) for the target architecture rationale.
 
 ## License
 

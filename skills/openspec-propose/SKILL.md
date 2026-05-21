@@ -120,7 +120,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - `tasks.md` must follow the OpenSpec x spec-kit blended structure and the current tasks template
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
-      - Every task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, and `Skill Reason`
+      - Every task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, `Skill Reason`, and `Boundary Receipt Required` for implementation tasks
       - Any task that changes code must use `Execution Type: test-first-code` and `Required Skills: test-driven-development`
       - Non-code tasks must not load TDD by default
       - Immediately after `specs/*` + `tasks.md`, run **Tasks Readiness Check** using `openspec/QUALITY-GATE.md` before declaring the change ready
@@ -141,7 +141,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
         - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
         - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
-        - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, or if verifier gate standards do not match the slice acceptance criteria they are supposed to verify
+      - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, if any implementation task lacks `Allowed File Scope` or `Boundary Receipt Required`, or if any verifier task lacks `Boundary Evidence Required` or gate standards do not match the slice acceptance criteria they are supposed to verify
         - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
         - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion
         - The readiness result summary in the conversation MUST use this format:
@@ -184,7 +184,8 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - **Required Review Skills Standards**:
         - Verifier gate tasks: `code-review-and-quality`
         - Add `security-and-hardening` only when user input, auth, permissions, storage, upload, external integration, or network boundary is in scope
-      - Every `verifier` task must explicitly include `Covered Tasks`, `Inspection Scope`, `Inspection Content`, `Out of Scope`, and `PASS/FAIL Gate`
+      - Every implementation task must explicitly include `Allowed File Scope` and `Boundary Receipt Required`
+      - Every `verifier` task must explicitly include `Covered Tasks`, `Inspection Scope`, `Inspection Content`, `Out of Scope`, `Boundary Evidence Required`, and `PASS/FAIL Gate`
       - Every verifier `PASS/FAIL Gate` must align with the current slice acceptance criteria and must not expand into unrelated stage-level review
       - Implementation task verification commands and verifier gate standards must be consistent; do not add extra gates to compensate for unclear task decomposition
       - **Branch Logic**: If a task or slice contains conditional branches (e.g., "if test fails, stop and log"), these MUST be explicitly documented in the tasks.

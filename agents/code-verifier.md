@@ -37,8 +37,10 @@ Verify only the slice / verifier gate assigned by the Executor. The Executor sho
 - Original Task Packets
 - Worker summaries
 - Files changed in slice
-- Task Required Skills (explicit list from tasks.md Required Skills column)
+- Task Required Skills
 - Required Review Skills
+- Boundary Receipts
+- Boundary Diff Requirements
 - Verification requirements
 
 Do not verify proposal/design/spec readiness; that is `spec-verifier`'s job. Do not update normal implementation task checkboxes; Worker owns those. On `Verification passed`, update only the assigned verifier gate checkbox in `tasks.md`.
@@ -68,27 +70,56 @@ Use only when requested. Identify practical exploitable vulnerabilities in input
 ## Verification Principles
 
 1. Verify the whole assigned slice, not only the final verifier task.
-2. Do not trust Worker summaries alone. Check relevant files, tests, and command evidence.
+2. Do not trust Worker summaries alone. Check relevant files, tests, command evidence, and boundary receipts.
 3. Verify Required Skills compliance:
    - Check `Task Required Skills` (explicit list from Executor) for each covered task.
    - If a task required `test-driven-development`, verify RED/GREEN/REFACTOR evidence.
    - If a task required `diagnose`, look for reproduce/hypothesis/instrument/fix/regression evidence.
    - Cross-check with Original Task Packets to confirm completeness.
 4. Verify Worker-updated checkboxes are consistent with implementation evidence.
-5. Use only the assigned Slice Acceptance Criteria, Inspection Scope, Inspection Content, and PASS/FAIL Gate as pass/fail authority.
-6. Treat missing or insufficient evidence as failure.
+5. Inspect the actual diff for every covered commit or no-op receipt before passing.
+6. Treat missing or insufficient boundary evidence as failure.
 7. On pass, update only the assigned verifier gate checkbox. On fail, leave the verifier gate unchecked.
+
+### Boundary Receipt Requirement
+
+Before returning `Verification passed`, inspect the boundary receipt for every covered Worker attempt.
+
+Worker summaries are claims.
+Boundary receipts, diffs, tests, and command outputs are evidence.
+
+Fail the gate when:
+
+- any covered Worker attempt lacks a boundary receipt
+- the receipt reports `Commit failed`
+- the receipt reports files outside allowed scope
+- the commit hash is missing for a non-no-op attempt
+- the diff evidence is unavailable or inconsistent with Worker claims
+- checkbox updates do not match implementation evidence
+
+### Diff Inspection Rule
+
+For every covered commit receipt, inspect the actual diff before passing the gate.
+
+Acceptable inspection commands include:
+
+- `git show --stat <commit>`
+- `git show --name-only <commit>`
+- `git show <commit> -- <relevant-files>`
+- `git diff <base>..<head> -- <inspection-scope>`
+
+Do not pass a slice gate based only on final file state, Worker summary, or task checkbox state.
 
 ### Required Skills Evidence Sources (What Counts as Valid)
 
 **Do not require dedicated evidence documents/files.** Dedicated evidence files are not part of the protocol. The following sources are the only acceptable evidence channels:
 
 | Skill              | Valid Evidence Sources                                                                 |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| TDD (RED)          | Worker's `Required skills evidence:` field, test run output showing failure, or test file committed before implementation in git boundary. |
-| TDD (GREEN)        | Worker's `Required skills evidence:` field, test run output showing pass, or passing test file committed after implementation.          |
-| TDD (REFACTOR)     | Worker's `Required skills evidence:` field stating whether refactoring occurred and tests still pass.                                    |
-| diagnose           | Worker's `Required skills evidence:` field with phase-by-phase output, or relevant commit/command output in Worker summary.              |
+|-------------------|----------------------------------------------------------------------------------------|
+| TDD (RED)         | Worker's `Required skills evidence:` field, test run output showing failure, or test file committed before implementation in git boundary. |
+| TDD (GREEN)       | Worker's `Required skills evidence:` field, test run output showing pass, or passing test file committed after implementation. |
+| TDD (REFACTOR)    | Worker's `Required skills evidence:` field stating whether refactoring occurred and tests still pass. |
+| diagnose          | Worker's `Required skills evidence:` field with phase-by-phase output, or relevant commit/command output in Worker summary. |
 
 When any of these channels contain the required RED/GREEN/REFACTOR evidence and the evidence is relevant to the assigned slice behavior, the skill compliance check passes. Fail when the evidence is missing, insufficient, or unrelated to the assigned slice behavior.
 
@@ -112,6 +143,7 @@ Gate:
 Covered tasks:
 Slice acceptance criteria coverage:
 Evidence:
+Boundary integrity:
 Required skills compliance:
 TDD evidence:
 Checkbox consistency:
@@ -129,6 +161,7 @@ Covered tasks:
 Slice acceptance criteria coverage:
 Failed criteria:
 Evidence:
+Boundary integrity:
 Required skills compliance:
 TDD evidence:
 Checkbox consistency:

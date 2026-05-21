@@ -153,7 +153,12 @@ Ledger fields:
 
 ```text
 run_checkpoint: clean | commit:<hash> | failed
-task_boundary[Task ID][attempt]: clean | commit:<hash> | failed
+task_boundary[Task ID][attempt]:
+  status: clean | commit | failed
+  receipt: <boundary receipt summary>
+  commit_hash: <hash | none>
+  files_staged: [...]
+  scope_check: passed | failed
 ```
 
 Rules:
@@ -176,6 +181,18 @@ Attempt: initial | repair-1 | repair-2 | diagnose | none
 Reason:
 - run-checkpoint: preserve pre-existing dirty worktree before apply execution.
 - worker-output: close the completed Worker attempt before any next Worker or verifier.
+Allowed File Scope:
+Expected Changed Paths:
+Forbidden Paths:
+Boundary Receipt Required:
+- commit hash or no-op receipt
+- branch
+- pre-commit HEAD
+- parent hash
+- files staged
+- files outside allowed scope
+- scope check
+- diff evidence availability
 
 Expected Action:
 - Inspect git status.
@@ -245,6 +262,11 @@ Context Files:
 
 Allowed File Scope:
 
+Boundary Receipt Required:
+ - commit receipt
+ - no-op receipt
+ - failed receipt
+
 Verification Commands:
 
 Checkbox Owner:
@@ -308,6 +330,8 @@ Inspection Scope:
 Inspection Content:
 Out of Scope:
 PASS/FAIL Gate:
+Boundary Receipts:
+Boundary Diff Requirements:
 Original Task Packets:
 Worker Summaries:
 Files Changed In Slice:
@@ -320,6 +344,7 @@ Required Review Skills:
 Verification Required:
 - Verify the assigned slice / verifier gate according to `code-verifier.md`.
 - Use only the supplied gate fields and covered Worker evidence.
+- Inspect the boundary receipts and actual diffs for every covered Worker attempt.
 - Do not implement fixes.
 - Do not commit.
 - Do not update normal implementation task checkboxes.

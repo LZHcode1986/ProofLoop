@@ -25,13 +25,13 @@ Steps:
    - AGENTS.md
    - openspec/QUALITY-GATE.md
    - openspec/config.yaml.example
-   - openspec/schemas/proofloop/schema.yaml
+   - openspec/schemas/spec-driven/schema.yaml
 4. Verify that these user-home paths now exist:
    - $HOME/.opencode/agents/brain.md
    - $HOME/.opencode/agents/executor.md
    - $HOME/.agents/skills/openspec-propose/SKILL.md
    - $HOME/.agents/skills/workflow-intake/SKILL.md
-5. Check that `openspec/config.yaml` uses `schema: proofloop`.
+5. Check that `openspec/config.yaml` uses `schema: spec-driven`.
 6. If `openspec/config.yaml` was created from the example, list the placeholders the user still needs to fill, especially `Project: <project name>`.
 7. Summarize what was installed, what was backed up, and any follow-up steps.
 ```

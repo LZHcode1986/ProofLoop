@@ -96,6 +96,47 @@ Reject the stage and return `Stage repartition required` when any of these are t
 
 Do not force task decomposition when the stage split is poor.
 
+## Task Decomposition Rules
+
+Propose receives exactly one Brain-selected stage.
+
+Before writing tasks, Propose must verify:
+
+- the stage objective is clear
+- the stage boundary is stable
+- the out-of-scope list prevents scope creep
+- the acceptance criteria are immutable and testable
+- the minimum closed loop is explicit
+- the target artifacts still describe one stage, not a whole PRD
+
+Propose must decompose the stage into:
+
+- Setup
+- Blocking
+- Slice 1..N
+- explicit verifier gates after each implementation slice
+- Reconciliation
+
+Each implementation task must include:
+
+- Execution Type
+- Required Skills
+- Required Review Skills, when applicable
+- Skill Reason
+- Allowed File Scope
+- Boundary Receipt Required
+
+Each verifier task must include:
+
+- Covered Tasks
+- Inspection Scope
+- Inspection Content
+- Out of Scope
+- Boundary Evidence Required
+- PASS/FAIL Gate
+
+Each implementation slice must remain independently verifiable. Each verifier gate must align with the current slice acceptance criteria and must not expand into unrelated full-stage review.
+
 ## Clarification Boundary
 
 If decomposition is blocked by a product-definition gap, stop and return `Clarification required`.
@@ -138,6 +179,8 @@ When using `openspec-propose` to generate `tasks.md`, ensure:
 - `tasks.md` follows the current ProofLoop/OpenSpec template and readiness gate
 - tasks remain inside the selected stage and trace to the selected stage objective
 - execution task standards and verifier gate standards are consistent
+- implementation tasks declare `Allowed File Scope` and `Boundary Receipt Required`
+- verifier tasks declare `Boundary Evidence Required`
 - if any caller-supplied acceptance criterion is not covered by the task plan, return `Planning blocked` or repair the decomposition before declaring readiness
 
 ### Spec Delta Header Rule

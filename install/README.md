@@ -34,7 +34,7 @@ ProofLoop is installed into three scopes by default:
 	- `openspec/QUALITY-GATE.md`
 	- `openspec/config.yaml.example`
 	- `openspec/schemas/README.md`
-	- `openspec/schemas/proofloop/`
+	- `openspec/schemas/spec-driven/`
 - user agent home: `$HOME/.opencode/agents`
 - user skill home: `$HOME/.agents/skills`
 
@@ -50,8 +50,8 @@ pwsh -File ./install/install-proofloop.ps1 `
 What the installer does with config:
 
 - if `openspec/config.yaml` does not exist, it creates it from `config.yaml.example`
-- if `openspec/config.yaml` already exists, it keeps the file and updates `schema:` to `proofloop`
-- before overwriting installer-managed files, it writes `.proofloop.bak-<timestamp>` backups
+- if `openspec/config.yaml` already exists, it keeps the file and updates `schema:` to `spec-driven`
+- before overwriting installer-managed files, it writes `.spec-driven.bak-<timestamp>` backups
 
 ## AI-assisted install
 

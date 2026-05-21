@@ -5,7 +5,7 @@
 # project-specific authority sources.
 # If you intentionally rename the installed schema, update both `schema:` here and
 # `openspec/schemas/<name>/schema.yaml` together.
-schema: proofloop
+schema: spec-driven
 
 context: |
   Project: <project name>

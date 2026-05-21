@@ -33,7 +33,7 @@ $projectFileAssets = @(
 )
 
 $projectDirectoryAssets = @(
-    'openspec/schemas/proofloop'
+    'openspec/schemas/spec-driven'
 )
 
 function Write-Info {
@@ -66,7 +66,7 @@ function Backup-ExistingPath {
         return
     }
 
-    $backupPath = "$Path.proofloop.bak-$timestamp"
+    $backupPath = "$Path.spec-driven.bak-$timestamp"
     if ($DryRun) {
         Write-Info "Would back up $Path -> $backupPath"
     }
@@ -173,30 +173,30 @@ function Set-ProofLoopSchema {
     }
 
     $raw = Get-Content -Path $configPath -Raw
-    if ($raw -match '(?m)^\s*schema\s*:\s*proofloop\s*$') {
-        Write-Info 'openspec/config.yaml already points to schema: proofloop'
-        $actions.Add('config: schema already proofloop') | Out-Null
+    if ($raw -match '(?m)^\s*schema\s*:\s*spec-driven\s*$') {
+        Write-Info 'openspec/config.yaml already points to schema: spec-driven'
+        $actions.Add('config: schema already spec-driven') | Out-Null
         return
     }
 
     $updated = $raw
     if ($raw -match '(?m)^\s*schema\s*:') {
-        $updated = [regex]::Replace($raw, '(?m)^\s*schema\s*:.*$', 'schema: proofloop', 1)
+        $updated = [regex]::Replace($raw, '(?m)^\s*schema\s*:.*$', 'schema: spec-driven', 1)
     }
     else {
-        $updated = "schema: proofloop`r`n`r`n$raw"
+        $updated = "schema: spec-driven`r`n`r`n$raw"
     }
 
     Backup-ExistingPath -Path $configPath
 
     if ($DryRun) {
-        Write-Info 'Would update openspec/config.yaml to use schema: proofloop'
+        Write-Info 'Would update openspec/config.yaml to use schema: spec-driven'
     }
     else {
         Set-Content -Path $configPath -Value $updated
     }
 
-    $actions.Add('config: updated schema to proofloop') | Out-Null
+    $actions.Add('config: updated schema to spec-driven') | Out-Null
 }
 
 Write-Info "Installing ProofLoop project assets into $targetRoot"

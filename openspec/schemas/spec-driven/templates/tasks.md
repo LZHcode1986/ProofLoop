@@ -44,9 +44,13 @@
 
 - [ ] 1.1 <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** no-op allowed
   - **Verification:** <verification-command>
 - [ ] 1.2 <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** no-op allowed
   - **Verification:** <verification-command>
 
 ## 2. Blocking
@@ -55,6 +59,8 @@
 
 - [ ] 2.1 <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** no-op allowed
   - **Verification:** <verification-command>
 
 ## 3. Slice 1: <slice-name>
@@ -69,9 +75,13 @@
 
 - [ ] 3.1 [Slice-1] <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** yes | no-op allowed
   - **Verification:** <verification-command>
 - [ ] 3.2 [P] [Slice-1] <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** yes | no-op allowed
   - **Verification:** <verification-command>
 - [ ] 3.3 [Slice-1] <Slice 1 verifier>
   - **Files:** <change-artifacts, Slice 1 implementation, Slice 1 tests, verification results>
@@ -80,7 +90,8 @@
   - **Inspection Scope:** <Slice 1 change artifacts + related implementation + related tests + validation results>
   - **Inspection Content:** <what the verifier must check>
   - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
-  - **PASS/FAIL Gate:** <conditions for pass/fail>
+  - **Boundary Evidence Required:** yes
+  - **PASS/FAIL Gate:** <conditions for pass or fail>
 
 ## 4. Slice 2: <slice-name>
 
@@ -94,6 +105,8 @@
 
 - [ ] 4.1 [Slice-2] <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** yes | no-op allowed
   - **Verification:** <verification-command>
 - [ ] 4.2 [Slice-2] <Slice 2 verifier>
   - **Files:** <change-artifacts, Slice 2 implementation, Slice 2 tests, verification results>
@@ -102,7 +115,8 @@
   - **Inspection Scope:** <Slice 2 change artifacts + related implementation + related tests + validation results>
   - **Inspection Content:** <what the verifier must check>
   - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
-  - **PASS/FAIL Gate:** <conditions for pass/fail>
+  - **Boundary Evidence Required:** yes
+  - **PASS/FAIL Gate:** <conditions for pass or fail>
 
 ## N. More Slices (as needed)
 
@@ -121,6 +135,8 @@
 
 - [ ] 5.1 <task-description>
   - **Files:** <file-paths>
+  - **Allowed File Scope:** <file-paths>
+  - **Boundary Receipt Required:** yes | no-op allowed
   - **Verification:** <verification-command>
 
 ## Readiness Gate
@@ -135,7 +151,9 @@
 - [ ] Parallel opportunities are marked
 - [ ] Task order is coherent
 - [ ] Every implementation slice explicitly includes an independent `verifier` sub-agent check
-- [ ] Each `verifier` task clearly states covered tasks, inspection scope, inspection content, out-of-scope boundaries, and `PASS/FAIL` gate
+- [ ] Each implementation task declares `Allowed File Scope`
+- [ ] Each implementation task declares `Boundary Receipt Required`
+- [ ] Each `verifier` task clearly states covered tasks, inspection scope, inspection content, out-of-scope boundaries, `Boundary Evidence Required`, and `PASS/FAIL` gate
 - [ ] Each `verifier` task's `PASS/FAIL` gate aligns with the current slice acceptance criteria
 - [ ] Each slice verifier must pass before entering the next slice
 - [ ] The final slice verifier must pass before entering `Reconciliation`

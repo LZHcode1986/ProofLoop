@@ -13,20 +13,28 @@
 - `skills/` contains reusable skill source files.
 - `agents/` contains opencode-style agent definitions and dispatch contracts.
 
-
 ## Source Of Truth
 
 - Workflow and change rules: `openspec/`
-- Product intent and stage plan: 
-- Top-level technical constraints: 
+- Product intent and stage plan: `PRD.md`, `CLARIFY.md`, `tech-spec.md`
+- Top-level technical constraints: `openspec/config.yaml`, `openspec/QUALITY-GATE.md`, schema and gate documents
 - Repo-wide operating constraints: `AGENTS.md`
+
+## Workflow Rule Ownership
+
+- Brain owns PRD intake, acceptance criteria, stage planning, and archive transition decisions. See `agents/brain.md`.
+- Propose owns one-stage OpenSpec decomposition into proposal, design, specs, and tasks. See `agents/propose.md`.
+- Executor owns apply orchestration, Worker dispatch, run ledger, git boundary dispatch, verifier dispatch, and rescue flow. See `agents/executor.md`.
+- Worker owns one implementation task only. See `agents/worker.md`.
+- Committer owns git boundary closure, mechanical scope checks, and boundary receipts. See `agents/committer.md`.
+- Code Verifier owns slice-level semantic verification after boundary receipts exist. See `agents/code-verifier.md`.
+- Implementation Reviewer owns stage-level integrated review and Brain-authorized archive execution. See `agents/implementation-reviewer.md`.
 
 ## Environment Notes
 
-- OS:  
-- Shell:  
+- OS:
+- Shell:
 - Command style: prefer PowerShell-native commands and `;` for sequencing
-
 
 ## Design Philosophy
 
@@ -36,20 +44,18 @@
 - If the boundary matters and two partitions are plausible, compare both before choosing.
 - Do not optimize only for the current prompt when the boundary would increase future change amplification.
 
-## Stage Planning Rules
+## Stage Planning Summary
 
 - Brain owns PRD decomposition into stages.
-- Define the stage objective, boundary, explicit out-of-scope, immutable acceptance criteria, and major risks before task decomposition.
-- Decompose only stages that represent one independently valuable capability or one coherent module boundary.
-- Do not decompose a stage that mixes unrelated capabilities, unrelated modules, or ambiguous ownership.
-- If the stage boundary increases change amplification without a clear module or delivery benefit, reject it and repartition before writing tasks.
+- Stages must represent one independently valuable capability or one coherent module boundary.
+- If a boundary is unclear, Brain should compare plausible partitions before choosing one.
+- Detailed stage planning rules live in `agents/brain.md`.
 
-## Task Decomposition Rules
+## Task Decomposition Summary
 
-- Brain supplies one selected stage and immutable acceptance criteria before task decomposition begins.
-- Propose turns that single stage into verifiable `tasks.md` work; it must not plan across unrelated stages.
-- Executor consumes prepared tasks; it must not redefine task scope, acceptance criteria, or stage boundaries during execution.
-- Acceptance criteria are immutable after Brain dispatch. Propose may decompose them into task and verifier-gate standards; Executor consumes those prepared standards. Reviewers verify only their assigned scope; no agent may rewrite the original criteria.
+- Propose receives exactly one Brain-selected stage.
+- Propose turns that stage into OpenSpec artifacts and verifier-gated `tasks.md`.
+- Detailed task decomposition rules live in `agents/propose.md`.
 
 ## Verification Boundaries
 

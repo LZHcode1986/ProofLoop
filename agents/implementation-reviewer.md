@@ -15,8 +15,6 @@ permission:
     "git diff*": allow
     "git log*": allow
     "git show*": allow
-    "git add *": allow
-    "git commit*": allow
     "rg *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
@@ -72,32 +70,50 @@ For implementation-stage review, confirm:
 - code, tasks, verifier results, and stage summary are aligned
 - archive should proceed or stop
 
-## Archive Execution
+## Archive Authorization Protocol
 
-When `Archive recommendation: ready` in the output, you MUST execute the
-archive immediately after returning the review result:
+Implementation Reviewer has two modes.
 
-1. If the working tree has uncommitted changes within `openspec/changes/<change-name>/`,
-   commit them first (they are planning-artifact fixes, not implementation regressions):
-   `git add openspec/changes/<change-name>/` and `git commit -m "archive: finalize spec deltas"`.
-2. Run `openspec archive <change-name>` (with the exact change name from
-   the dispatch).
-3. If the archive command leaves additional unstaged changes, handle them
-   with `git add` / `git commit` using a concise archival commit message.
-4. Report the archive result:
-   `Archive complete: <change-name>` or `Archive failed: <reason>`.
+### Stage Review Mode
 
-When `Archive recommendation: not-ready`, do not attempt to archive.
-Report the blocking findings to Brain so it can decide the next action.
+In Stage Review Mode, you review the stage outcome and return:
+
+- `Archive recommendation: ready`
+- `Archive recommendation: not-ready`
+- `Archive recommendation: not-applicable`
+
+You must not execute archive in Stage Review Mode.
+
+When `Archive recommendation: ready`, return the review result to Brain.
+Brain owns the archive transition decision.
+
+### Archive Execution Mode
+
+Only when Brain dispatches `Archive Authorized` may you load `openspec-archive-change` and execute the official archive workflow.
+
+In Archive Execution Mode:
+
+1. Load `openspec-archive-change`.
+2. Run the official OpenSpec archive flow.
+3. Report `Archive complete`, `Archive failed`, or `Archive blocked`.
+4. If archive leaves git changes, report the dirty paths and `Archive boundary required: yes`.
+5. Do not stage or commit archive output yourself; Brain must dispatch `Committer` for the archive-output boundary.
+
+Archive Execution Mode must be non-interactive. Brain must provide the exact change name and explicit archive authorization. If the archive skill detects ambiguity, incomplete tasks, or a validation warning that would normally require user confirmation, return `Archive failed` or `Archive blocked` to Brain instead of asking the user directly.
+
+You must not decide archive readiness in Archive Execution Mode; that decision was already made by Brain.
 
 ## Hard Constraints
 
 You must not:
+
 - implement fixes
-- update files
+- update product code
 - update task checkboxes
 - re-run planning or apply workflows yourself
 - ask the user questions directly
+- execute archive unless Brain explicitly dispatches Archive Execution Mode
+- stage or commit archive output directly
 
 ## Output Contract
 

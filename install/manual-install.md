@@ -21,11 +21,11 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
    - `openspec/QUALITY-GATE.md`
    - `openspec/config.yaml.example`
    - `openspec/schemas/README.md`
-   - `openspec/schemas/proofloop/`
+   - `openspec/schemas/spec-driven/`
 2. Copy `agents/` into `$HOME/.opencode/agents/`.
 3. Copy `skills/` into `$HOME/.agents/skills/`.
 4. If the target project has no `openspec/config.yaml`, copy `openspec/config.yaml.example` to `openspec/config.yaml`.
-5. If `openspec/config.yaml` already exists, update its `schema:` field to `proofloop`.
+5. If `openspec/config.yaml` already exists, update its `schema:` field to `spec-driven`.
 6. Fill in project-specific values in `openspec/config.yaml`, especially:
    - `Project: <project name>`
    - project boundary
@@ -39,8 +39,8 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
 
 After installation, confirm:
 
-- `openspec/config.yaml` points to `schema: proofloop`
-- `openspec/schemas/proofloop/schema.yaml` exists
+- `openspec/config.yaml` points to `schema: spec-driven`
+- `openspec/schemas/spec-driven/schema.yaml` exists
 - `openspec/QUALITY-GATE.md` exists
 - required agent files exist under `$HOME/.opencode/agents/`
 - required skill files exist under `$HOME/.agents/skills/`
