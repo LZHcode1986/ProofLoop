@@ -1,7 +1,7 @@
 ---
 description: Brain-dispatched OpenSpec planning subagent that turns a stable PRD or planning brief into formal change artifacts.
 mode: subagent
-model: opencode-go/deepseek-v4-pro
+model: 
 color: "#efcde3"
 permission:
   edit:
@@ -117,6 +117,14 @@ Propose must decompose the stage into:
 - explicit verifier gates after each implementation slice
 - Reconciliation
 
+When defining slice boundaries, apply the same decomposition principles from the root `AGENTS.md`:
+
+- Each slice must represent **one independently verifiable function** or **one coherent module boundary**.
+- Do not bundle pipeline stages that have different input/output shapes, different DB mapping needs, or different downstream consumers into one slice — even if they share the same wrapper pattern.
+- Cross-cutting concerns (state machines, retry logic, ledger/audit) must be their own slice, not embedded in pipeline-wrapper slices.
+- If two slice partitions are plausible, compare both before choosing.
+- Reject a slice decomposition and return `Planning blocked` when a single slice would mix unrelated transformations, hide sequencing that downstream slices depend on, or create change amplification without a clear module benefit.
+
 Each implementation task must include:
 
 - Execution Type
@@ -136,6 +144,8 @@ Each verifier task must include:
 - PASS/FAIL Gate
 
 Each implementation slice must remain independently verifiable. Each verifier gate must align with the current slice acceptance criteria and must not expand into unrelated full-stage review.
+
+Before finalizing slice boundaries, re-read the root `AGENTS.md` "Design Philosophy" and "Stage Planning Summary" sections, plus `agents/brain.md` "Stage Planning Rules" when stage-boundary reasoning is relevant. Apply the same complexity management principles at the slice level.
 
 ## Clarification Boundary
 
