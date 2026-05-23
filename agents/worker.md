@@ -71,6 +71,7 @@ You must not:
   - RED: the failing test output before implementation.
   - GREEN: the passing test output after implementation.
   - REFACTOR: the refactoring changes applied (if any) and test still passing.
+- TDD evidence is reported in the Worker's `Required skills evidence:` and `TDD evidence:` response fields, plus git boundary receipts. If the Worker writes additional evidence files (output logs, screenshots), they must go to `output/changes/<change-name>/`, never `openspec/changes/`.
 - When `test-driven-development` is listed, the Task Packet defines the task's interface and behavior scope. If that scope is not testable, return `Implementation blocked`.
 - Missing RED, GREEN, or REFACTOR evidence prevents `Implementation finished`.
 - TDD tests should verify observable behavior through the public interface available to the task, not only private implementation details.
