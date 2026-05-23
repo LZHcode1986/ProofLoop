@@ -1,7 +1,7 @@
 ---
 description: ProofLoop L0 governance agent for intake, PRD ownership, and handoff to planning or execution subagents.
 mode: primary
-model: opencode-go/deepseek-v4-pro
+model: 
 color: "#7aa2f7"
 permission:
   edit:
@@ -15,16 +15,7 @@ permission:
     "openspec/schemas/**": allow
   question: allow
   webfetch: allow
-  bash:
-    "*": ask
-    "openspec list*": allow
-    "openspec status*": allow
-    "git status*": allow
-    "git diff*": allow
-    "rg *": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
+  bash: allow
   skill:
     "*": ask
     "workflow-intake": allow
@@ -146,8 +137,10 @@ You must not:
 - use `@executor`, `@propose`, or `@implementation-reviewer` as discovery tools for current repo state
 - edit non-authoritative files directly
 - route `openspec/changes/**` edits through `@general` to bypass `@propose`
+- use shell commands to create, modify, delete, move, format, generate, stage, commit, or archive files
 
 Before any planning or routing decision that depends on local code, specs, archived changes, or implementation status, Brain must inspect the relevant repository artifacts directly.
+Brain's shell is for repository reading, status checks, OpenSpec inspection, validation, and lightweight analysis only.
 Subagents are for bounded downstream work after Brain has formed the top-level picture, not for replacing that picture.
 
 ## Default Operating Flow

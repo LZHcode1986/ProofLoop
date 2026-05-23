@@ -157,18 +157,12 @@
 - [ ] MVP scope is explicit
 - [ ] Stage Acceptance Coverage Map covers every Brain-supplied Stage Acceptance Criterion
 - [ ] Blocking tasks are separated
-- [ ] Every slice has a slice goal
-- [ ] Every slice has independent acceptance criteria
+- [ ] Every slice has a slice goal and independent acceptance criteria
 - [ ] Parallel opportunities are marked
-- [ ] Task order is coherent
+- [ ] Task order is coherent, numbered consistently, and granular enough to execute without guessing
 - [ ] Every implementation slice explicitly includes an independent `verifier` sub-agent check
-- [ ] Each implementation task declares `Allowed File Scope`
-- [ ] Each implementation task declares `Boundary Receipt Required`
-- [ ] Each `verifier` task clearly states covered tasks, inspection scope, inspection content, out-of-scope boundaries, `Boundary Evidence Required`, and `PASS/FAIL` gate
+- [ ] Each implementation task declares `Allowed File Scope`, `Boundary Receipt Required`, and `Verification`; code-changing tasks also declare `TDD Test Files`, `RED Verification`, and `GREEN Verification`
+- [ ] Each `verifier` task clearly states covered tasks, inspection scope including declared TDD test files, inspection content, out-of-scope boundaries, `Boundary Evidence Required`, and `PASS/FAIL` gate
 - [ ] Each `verifier` task's `PASS/FAIL` gate aligns with the current slice acceptance criteria
 - [ ] Each slice verifier must pass before entering the next slice
 - [ ] The final slice verifier must pass before entering `Reconciliation`
-- [ ] Every step has a verification command
-- [ ] Task items preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` labels
-- [ ] Task granularity is detailed enough that the implementer does not need to guess
-
