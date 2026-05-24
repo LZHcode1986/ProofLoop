@@ -11,38 +11,61 @@ context: |
   Project: <project name>
   Domain: <business domain or product area>
   Product boundary: <product boundary; define what the system does and does not do>
+  Planning scope: <current planning authority and its boundaries>
   MVP scope: <MVP scope; ideally a single closed loop>
+  Stage chain: <ordered stage or milestone chain for the project>
+  Default execution posture: <default delivery posture such as offline PoC, single-user runtime, local artifacts, etc.>
   Primary use cases: <list of primary use cases>
+  Supported inputs: <authoritative list of supported inputs for the active scope>
   Explicit non-goals for MVP: <things the MVP will not do>
   Tech stack: <tech stack, filled in according to the project>
   Architecture: <architecture constraints or layering>
   Core roles: <core roles or system participants>
   Shared principles: <list of shared principles>
   State model: <state machine or lifecycle model; list authoritative state names>
+  Runtime artifacts: <trace, audit, snapshot, or delivery artifacts that prove execution>
   Canonical objects: <list of canonical objects or authoritative data structures>
+  Stable working names: <stable capability names that should not drift without authority updates>
   API principles: <API / contract principles>
   Testing posture: <testing strategy such as TDD-first, contract tests, E2E, etc.>
   Documentation language: <documentation language requirements>
   Authority order: <authority source order; explain which document has the highest priority>
 
 rules:
+  classification:
+    - Every change MUST be classified as exactly one explicit change type before proposal work starts.
+    - Define a default change type for non-UI or non-interaction work, and define a stricter change type for work where implemented behavior and actually usable behavior can diverge.
+    - Document the exact boundaries that trigger the stricter change type, such as user interaction surfaces, operator workflows, or externally visible runtime behaviors.
   proposal:
-    - <hard requirement 1 for the proposal stage>
-    - <hard requirement 2 for the proposal stage>
-    - <hard requirement 3 for the proposal stage>
+    - Always state the active stage, minimum closed loop, scope, non-goals, dependencies, risks, acceptance criteria, and verification method.
+    - Default to the smallest proofable closed loop instead of the largest roadmap promise.
+    - If a requested capability depends on an unfinished earlier artifact or stage boundary, either include the dependency slice explicitly or mark the change as blocked.
+    - Proposal completion SHOULD be followed by an explicit proofability or readiness check before design work starts.
   specs:
-    - <hard requirement 1 for the spec stage>
-    - <hard requirement 2 for the spec stage>
+    - Reuse authoritative terms, state names, object names, and boundary labels exactly where they already exist.
+    - Do not introduce new stable terminology or lifecycle states without updating the relevant authority source.
+    - Any spec that affects traceable or auditable outputs SHOULD define how traceability is preserved end to end.
   design:
-    - <hard requirement 1 for the design stage>
-    - <hard requirement 2 for the design stage>
+    - Include input and output handoff, persistence or artifact implications, traceability impact, and how the design preserves stage or module boundaries.
+    - Avoid introducing architecture depth, service splits, or infrastructure scope that the active stage does not require.
+    - If the change affects runtime interaction boundaries, define user action boundaries, proof method, and false-positive boundaries explicitly.
   tasks:
-    - <hard requirement 1 for the task stage>
-    - <hard requirement 2 for the task stage>
+    - Break work into small, verifiable steps around the minimum closed loop for the active stage.
+    - Prefer TDD-oriented ordering when implementation is involved.
+    - Include exact verification commands or artifact checks for each slice.
+    - tasks.md SHOULD include an explicit verifier checkpoint for every implementation slice, with clear inspection scope and a PASS/FAIL gate.
+    - Use a canonical section order such as Setup -> Blocking -> Slice 1..N -> Reconciliation.
+    - Task planning SHOULD be followed by an explicit tasks readiness check before apply starts.
+    - For interaction-heavy changes, require both a baseline proof before implementation and a full acceptance proof in reconciliation.
   implementation:
-    - <hard requirement 1 for the implementation stage>
-    - <hard requirement 2 for the implementation stage>
-    - <require test-driven-development before any code is written or modified>
+    - Define a zero-regressions rule: implementation is not complete until the repo-level gate passes with exit code 0.
+    - When frontend files are touched, require a production build check before reporting completion.
+    - When backend or pipeline behavior changes, require targeted automated tests that prove the active slice.
+    - Implementation changes SHOULD reference the current authority sources and active stage plan before task execution begins.
+    - Implementation SHOULD not start before the tasks readiness check passes.
+    - For stricter interaction-boundary changes, define a two-phase proof model: baseline proof before implementation and full acceptance proof after all slices complete.
+    - Apply SHOULD end with an explicit implementation-done check rather than discovering proof gaps during archive or release work.
+    - Require test-driven development before any code is written or modified unless the project documents an approved exception.
 
 traceability:
   <reference-change-or-arch-slice>:
