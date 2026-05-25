@@ -92,12 +92,14 @@ flowchart TD
 		B --> R[Implementation Reviewer\nL1 stage review]
 
 		P --> SV[Spec Verifier\nL2 plan review]
+		P --> RV[Reality Verifier\nL2 reality readiness]
 		X --> WK[Worker\nL2 implementation]
 		X --> CV[Code Verifier\nL2 slice review]
 		X --> CM[Committer\nGit boundary]
 
 		W --> B
 		SV --> P
+		RV --> P
 		WK --> X
 		CV --> X
 		CM --> X
@@ -118,7 +120,7 @@ flowchart TD
 
 - Propose
 	- Converts one Brain-selected stage from a stable PRD into `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
-	- Passes Brain-owned acceptance criteria to `spec-verifier` without changing them.
+	- Passes Brain-owned acceptance criteria to `spec-verifier` and the configured reality readiness verifier without changing them.
 
 - Executor
 	- Runs apply-stage orchestration.
@@ -138,6 +140,10 @@ flowchart TD
 - Spec Verifier
 	- Reviews planning artifacts for readiness and acceptance coverage.
 
+- Reality Verifier
+	- Reviews planning artifacts against current repository reality before execution.
+	- The default verifier uses repository files and commands; projects with CodeGraph can opt into the CodeGraph-backed variant.
+
 - Worker
 	- Implements exactly one task packet.
 
@@ -154,9 +160,10 @@ Acceptance criteria start at Brain and remain immutable downstream.
 1. Brain defines and owns the acceptance criteria in the PRD and dispatch packets.
 2. Propose maps them to artifacts, slices, task packets, and verifier gates without rewriting or weakening them.
 3. Spec Verifier validates planning artifacts against the caller-supplied criteria.
-4. Code Verifier validates only the assigned slice/gate criteria derived from the stage contract.
-5. Executor consumes the prepared task and gate standards; it does not redefine acceptance scope during execution.
-6. Implementation Reviewer performs stage-level judgment using the original criteria plus the accumulated verifier evidence.
+4. Reality Verifier checks whether critical runtime assumptions and the minimum closed loop match current repository reality.
+5. Code Verifier validates only the assigned slice/gate criteria derived from the stage contract.
+6. Executor consumes the prepared task and gate standards; it does not redefine acceptance scope during execution.
+7. Implementation Reviewer performs stage-level judgment using the original criteria plus the accumulated verifier evidence.
 
 ## Config example
 
@@ -242,6 +249,7 @@ Those belong to a future `manager` role if the workflow grows beyond the current
 
 - `agents/`
 	- Agent definitions for Brain, Propose, Executor, Worker, verifiers, and git boundary roles.
+	- `agents/contracts/dispatch-packets.md` defines fixed Brain-to-subagent packet formats.
 - `openspec/`
 	- OpenSpec-compatible schema, schema install guidance, config example, gate documents, and formal change artifacts.
 - `install/`

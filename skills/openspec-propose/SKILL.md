@@ -57,9 +57,11 @@ If the request explicitly says `according to <file-path-list>, start task decomp
 
    Build a decomposition result from the supplied file(s):
    - extract requirement items, constraints, invariants, interfaces, contracts, and acceptance expectations
-   - group them into capability slices or work packages
+   - group them into independently verifiable capability slices or coherent module boundaries
    - identify dependencies, cross-cutting risks, and validation checkpoints
    - note any explicit ambiguity, conflict, or out-of-scope item
+
+   Do not decompose only by frontend / backend / db layers.
 
    This decomposition is part of the propose phase itself. Do not require the user to restate this workflow on every change.
 
@@ -77,18 +79,20 @@ If the request explicitly says `according to <file-path-list>, start task decomp
    - `applyRequires`: array of artifact IDs needed before implementation (e.g., `["tasks"]`)
    - `artifacts`: list of all artifacts with their status and dependencies
 
-5. **Create artifacts in sequence until apply-ready**
+5. **Create artifacts in sequence until readiness-review complete**
 
    Use the task-planning tool available in the environment (for example `update_plan`; if a checklist tool exists, use it) to track progress through the artifacts.
    The progress list MUST explicitly include these gate milestones in order:
    - source decomposition complete
+   - reality snapshot complete
    - `proposal.md` drafted
    - proofability check complete
    - `design.md` drafted
    - `specs/*` drafted
    - `tasks.md` drafted
    - spec-verifier tasks readiness check started
-   - tasks readiness check complete
+   - reality readiness verifier check started
+   - readiness checks complete
 
    **IMPORTANT**: gate checks are in-process blockers, not end-of-flow clean-up work. Do not postpone them until after all artifacts are written.
 
@@ -113,7 +117,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Show brief progress: "Created <artifact-id>"
 
       Artifact-specific workflow:
-      - `proposal.md`: write the change intent, scope, capability slices, risks, and rationale from the decomposition result
+      - `proposal.md`: write the change intent, scope, capability slices, risks, rationale, reality snapshot, and critical runtime assumptions from the decomposition result
       - Immediately after `proposal.md`, run **Proofability Check** before writing `design.md`
       - `design.md`: write the implementation structure, interfaces, sequencing, and validation strategy for every non-deferred proposal item
       - `specs/*` and `tasks.md`: derive them only from the validated proposal/design pair
@@ -135,29 +139,31 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - Summarize the check result in the conversation
         - If any item is missing: update proposal.md, then re-check
         - DO NOT proceed to design.md until proofability is explicit
-      - **Tasks Readiness Check** (BLOCKS declaring apply-ready)
+      - **Tasks Readiness Check** (BLOCKS declaring planning readiness back to Brain)
         - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
         - ALWAYS spawn an independent `spec-verifier` sub-agent to execute this check
         - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
         - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
-        - The check scope is artifact completeness, consistency, omissions, acceptance coverage, and implementation readiness
+        - The check scope is artifact completeness, consistency, omissions, and acceptance coverage. It does not decide implementation readiness.
       - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, if any implementation task lacks `Allowed File Scope` or `Boundary Receipt Required`, or if any verifier task lacks `Boundary Evidence Required` or gate standards do not match the slice acceptance criteria they are supposed to verify
         - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
         - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion
-        - The readiness result summary in the conversation MUST use this format:
-          - first line: `PASS` or `FAIL`
+        - The document-readiness result summary in the conversation MUST use this format:
+          - first line: `DOC READINESS PASS` or `DOC READINESS FAIL`
           - then `findings`, ordered by severity
-          - if result is `PASS`, still include `residual risks`
+          - if result is `DOC READINESS PASS`, still include `residual risks`
         - Summarize the `spec-verifier` result in the conversation
         - **Handling FAIL results (Integrated Optimization)**:
           1. Parse the "Logical Gap / Conflict" and "Actionable Missing Piece" from the findings.
           2. DO NOT just patch the single reported artifact. Trace the requirement logic from `proposal.md` -> `design.md` -> `specs/*` -> `tasks.md`.
           3. Perform a **Batch Repair**: Update ALL affected artifacts in a single coherent step before re-running the verifier.
-          4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `FAIL` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
-        - Only after the `spec-verifier` returns `PASS` may the main agent mark `Tasks Readiness Check` complete
+          4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `DOC READINESS FAIL` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
+        - Only after the `spec-verifier` returns `DOC READINESS PASS` may the main agent mark `Tasks Readiness Check` complete
         - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path
         - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status
-        - DO NOT report apply-ready status until Tasks Readiness Check passes
+        - AFTER `spec-verifier`, ALWAYS run the configured independent reality readiness verifier on the same change before reporting readiness back to Brain
+        - Use `reality-verifier` by default. Use an optional variant only when the target project explicitly configures one.
+        - DO NOT report apply-ready or implementation-ready status from propose; only report that the artifacts are ready for Brain review once both independent checks finish
 
       Task decomposition requirements:
       - Write `Setup` tasks first for context preparation and basic scaffolding
@@ -189,6 +195,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - Every verifier `PASS/FAIL Gate` must align with the current slice acceptance criteria and must not expand into unrelated stage-level review
       - Implementation task verification commands and verifier gate standards must be consistent; do not add extra gates to compensate for unclear task decomposition
       - **Branch Logic**: If a task or slice contains conditional branches (e.g., "if test fails, stop and log"), these MUST be explicitly documented in the tasks.
+      - Proposal assertions such as `existing`, `automatic`, `reused`, or `already supported` must include code anchors or be explicitly marked as unverified assumptions
 
    b. **Continue until all `applyRequires` artifacts are complete**
       - After creating each artifact, re-run `openspec status --change "<name>" --json`
@@ -209,9 +216,9 @@ If the request explicitly says `according to <file-path-list>, start task decomp
 After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
-- State that Tasks Readiness Check was passed by independent `spec-verifier`
-- What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
+- State the `spec-verifier` and configured reality readiness verifier results separately
+- What's ready: "All artifacts created. Ready for Brain review."
+- Prompt: "Brain should review structure, document readiness, and reality readiness before execution."
 
 **Artifact Creation Guidelines**
 
@@ -240,10 +247,11 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
-- Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `PASS`
+- Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `DOC READINESS PASS`
 - Do not replace independent spec-verifier review with self-review, even temporarily
-- Do not declare the change ready, apply-ready, or fully gated if spec-verifier execution has not happened
+- Do not declare the change ready, apply-ready, or fully gated if `spec-verifier` or the configured reality readiness verifier has not run
 - If spec-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- If reality readiness verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum

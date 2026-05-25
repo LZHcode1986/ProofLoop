@@ -11,7 +11,7 @@ artifacts:
       Generate a proposal document that explains why this change is needed.
 
       The proposal must be written in English and aligned with this project's `config.yaml`.
-      The proposal must cover: minimal closed loop, scope, non-goals, risks, acceptance criteria, impacted areas, state transition impact, and verification commands.
+      The proposal must cover: minimal closed loop, scope, non-goals, risks, acceptance criteria, impacted areas, state transition impact, reality snapshot, critical runtime assumptions, and verification commands.
 
       Important:
       - Research the existing specifications first, then fill in Capabilities.
@@ -79,6 +79,7 @@ artifacts:
       - Tasks must be written in English.
       - Each task must include file scope and a verification command.
       - Task granularity must be clear enough to execute directly.
+      - Do not decompose only by frontend / backend / db layers.
       - If the change is `interactive`, the first item in `Blocking` must be `Proof Task`.
       - Tasks must pass tasks readiness check before apply.
     requires:

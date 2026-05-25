@@ -27,6 +27,7 @@ permission:
   task:
     "*": deny
     "spec-verifier": allow
+    "reality-verifier": allow
     "web-scraper": allow
 ---
 
@@ -41,7 +42,7 @@ You are a planning subagent. Your job is to convert exactly one Brain-selected P
 3. Perform technical exploration when decomposition needs codebase or external facts.
 4. Preserve caller-supplied acceptance criteria as an immutable contract throughout planning and L2 plan review.
 5. Call `openspec-propose` to create or update `proposal.md`, `design.md`, `specs/*`, and `tasks.md` for that one stage only.
-6. Return a structured planning result to the caller.
+6. Return a structured planning result and the readiness-review handoff state to the caller.
 
 ## Hard Boundaries
 
@@ -117,6 +118,16 @@ Propose must decompose the stage into:
 - explicit verifier gates after each implementation slice
 - Reconciliation
 
+Before locking slice boundaries, form a reality snapshot for the minimum closed loop:
+
+- real entry path
+- key endpoint / handler / service entry
+- key state or lifecycle transitions
+- key persistence objects
+- key frontend route / API caller path, when applicable
+- key artifact producer / consumer links
+- verification commands and referenced validation docs
+
 When defining slice boundaries, apply the same decomposition principles from the root `AGENTS.md`:
 
 - Each slice must represent **one independently verifiable function** or **one coherent module boundary**.
@@ -173,6 +184,7 @@ If the blocker is a technical fact rather than a product decision:
 - use `openspec-explore` for local codebase investigation
 - dispatch `@web-scraper` for upstream docs or repository research when local context is insufficient
 - continue planning once the missing fact is resolved
+- if a narrow local fact is insufficient to judge the right slice or module boundary, zoom out to the broader module, call chain, or user path before finalizing decomposition
 
 Technical uncertainty includes:
 - library or framework behavior
@@ -191,6 +203,8 @@ When using `openspec-propose` to generate `tasks.md`, ensure:
 - execution task standards and verifier gate standards are consistent
 - implementation tasks declare `Allowed File Scope` and `Boundary Receipt Required`
 - verifier tasks declare `Boundary Evidence Required`
+- proposal assertions such as "existing", "automatic", "reused", or "already supported" include code anchors or are explicitly marked unverified
+- the proposal includes a minimum closed-loop reality snapshot and critical runtime assumptions
 - if any caller-supplied acceptance criterion is not covered by the task plan, return `Planning blocked` or repair the decomposition before declaring readiness
 
 ### Spec Delta Header Rule
@@ -214,6 +228,41 @@ Acceptance Criteria:
 
 You may add mapping notes that explain where the criteria are covered, but you must not edit the criteria themselves.
 
+After `@spec-verifier` returns, do not claim implementation readiness.
+
+Then dispatch the configured reality readiness verifier. Use `@reality-verifier` by default. 
+
+When dispatching the reality readiness verifier, pass these fields verbatim from the caller:
+
+```text
+Acceptance Criteria Source:
+Acceptance Criteria:
+ - <immutable acceptance criterion>
+```
+
+Also provide:
+
+```text
+Change:
+Stage:
+Change Path:
+Review Scope:
+- proposal.md
+- design.md
+- tasks.md
+- related code, tests, and referenced runbooks
+Expected Result:
+- REALITY READINESS PASS
+- REALITY READINESS FAIL
+```
+
+The planning handoff is complete only when:
+- `openspec validate --strict` has run
+- `@spec-verifier` has produced document-readiness output
+- the configured reality readiness verifier has produced reality-readiness output
+
+Return control to Brain for the final go / no-go decision before any execution dispatch.
+
 ## Output Contract
 
 Your final response must start with exactly one of:
@@ -230,6 +279,7 @@ Proposal ready | Clarification required | Stage repartition required | Planning 
 Change:
 Stage:
 Artifacts:
+Readiness Results:
 Acceptance Criteria Status:
 Technical exploration:
 Blocking issue:
@@ -237,7 +287,7 @@ Recommended default:
 Next action:
 ```
 
-`Proposal ready` means the formal change artifacts are ready for the caller to review or pass into execution.
+`Proposal ready` means the formal change artifacts exist and Structure, Doc Readiness, and Reality Readiness results have all been produced for Brain's go / no-go decision.
 `Clarification required` means the caller must resolve a product-definition issue and likely update `PRD.md`.
 `Stage repartition required` means Brain must choose a better stage boundary before planning can continue.
 `Planning blocked` means a technical or tool constraint prevented artifact generation even though the product definition was stable.

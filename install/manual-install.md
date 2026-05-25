@@ -43,4 +43,11 @@ After installation, confirm:
 - `openspec/schemas/spec-driven/schema.yaml` exists
 - `openspec/QUALITY-GATE.md` exists
 - required agent files exist under `$HOME/.opencode/agents/`
+  - `brain.md`
+  - `propose.md`
+  - `executor.md`
+  - `spec-verifier.md`
+  - `reality-verifier.md`
+  - `contracts/dispatch-packets.md`
+  - optional when selected: `reality-verifier-codegraph.md`
 - required skill files exist under `$HOME/.agents/skills/`

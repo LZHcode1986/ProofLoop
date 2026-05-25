@@ -367,6 +367,28 @@ If verification evidence is insufficient, treat it as `Verification failed` with
 
 Repair and diagnose are bound to the current slice verifier gate, not to an isolated small task.
 
+### Rescue Escalation Matrix
+
+| Trigger | Action | Limit | Escalation |
+| --- | --- | --- | --- |
+| `Verification failed` with Level 1 | Dispatch `@worker` with `Fix Mode: repair` | 2 attempts per slice gate | Diagnose after the second failed repair |
+| `Verification failed` with Level 2 | Dispatch `@worker` with `Fix Mode: diagnose` | 1 diagnose path | Block if diagnosis cannot produce a minimal fix |
+| Repeated document-readiness failure when explicitly using `@spec-verifier` | Return blocker to Brain or Propose | Do not self-rewrite planning artifacts | Planning owner repairs artifacts |
+| Product-definition or design blocker | Stop execution and report to Brain | Immediate | Brain clarifies or re-dispatches `@propose` |
+
+### Context GC
+
+Before every repair or diagnose dispatch, compact the failure context. Do not forward the full accumulated error history.
+
+The fix packet should include only:
+- the latest verifier failure
+- the current failed criteria
+- the minimal relevant command output or error excerpt
+- the relevant changed files and boundary receipts
+- the current hypothesis when Fix Mode is `diagnose`
+
+Drop stale logs, superseded hypotheses, and prior failed patch narratives unless they directly explain why the current attempt must avoid a specific approach.
+
 On `Verification failed`:
 
 - Level 1: dispatch `@worker` with `Fix Mode: repair`. Maximum 2 repair attempts per slice gate.
@@ -419,7 +441,7 @@ Do not roll back ordinary implementation checkboxes after verifier failure. The 
 
 ## Spec Verifier
 
-Dispatch `@spec-verifier` only for document readiness when explicitly required. Parse `PASS` / `FAIL` only as readiness results. Do not use `@spec-verifier` for implementation verification, and do not treat `Verification passed` as spec readiness.
+Dispatch `@spec-verifier` only for document readiness when explicitly required. Parse `DOC READINESS PASS` / `DOC READINESS FAIL` only as readiness results. Do not use `@spec-verifier` for implementation verification, and do not treat `Verification passed` as spec readiness.
 
 If you dispatch `@spec-verifier`, pass `Acceptance Criteria Source` and `Acceptance Criteria` verbatim from the caller.
 

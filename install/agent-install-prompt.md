@@ -28,7 +28,12 @@ Steps:
    - openspec/schemas/spec-driven/schema.yaml
 4. Verify that these user-home paths now exist:
    - $HOME/.opencode/agents/brain.md
+   - $HOME/.opencode/agents/propose.md
    - $HOME/.opencode/agents/executor.md
+   - $HOME/.opencode/agents/spec-verifier.md
+   - $HOME/.opencode/agents/reality-verifier.md
+   - $HOME/.opencode/agents/contracts/dispatch-packets.md
+   - Optional when selected: $HOME/.opencode/agents/reality-verifier-codegraph.md
    - $HOME/.agents/skills/openspec-propose/SKILL.md
    - $HOME/.agents/skills/workflow-intake/SKILL.md
 5. Check that `openspec/config.yaml` uses `schema: spec-driven`.

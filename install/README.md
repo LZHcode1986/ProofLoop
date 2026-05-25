@@ -36,6 +36,9 @@ ProofLoop is installed into three scopes by default:
 	- `openspec/schemas/README.md`
 	- `openspec/schemas/spec-driven/`
 - user agent home: `$HOME/.opencode/agents`
+	- includes `agents/contracts/dispatch-packets.md`
+	- includes default `reality-verifier.md`
+	- includes optional `reality-verifier-codegraph.md`
 - user skill home: `$HOME/.agents/skills`
 
 If a user's runtime expects different directories, override them with:
@@ -61,6 +64,8 @@ The expected agent behavior is:
 
 - run the installer script first
 - verify both user-home and project-home install targets
+- verify the Brain dispatch packet contract under `$HOME/.opencode/agents/contracts/dispatch-packets.md`
+- verify the default reality verifier is installed; use the CodeGraph-backed variant only when the project explicitly selects it
 - point out any remaining placeholders in `openspec/config.yaml`
 - report conflicts instead of silently guessing
 

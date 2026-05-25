@@ -35,10 +35,12 @@
 - Code-changing tasks must use `test-driven-development` and follow `RED -> GREEN -> REFACTOR`.
 - Each code-changing slice must list TDD test files, `RED Verification` (pytest, expected fail), and `GREEN Verification` (pytest, expected pass). `GREEN Verification` targets the TDD test suite for the current slice; the task-level `Verification` field covers additional artifact checks (smoke, grep, import sanity) beyond TDD.
 - Non-code tasks (read-only diagnostic runs, docs-only, config-only) omit TDD fields or write `N/A`. Do not invent TDD artifacts for tasks that don't change production or executable code.
+- Do not decompose only by frontend / backend / db layers.
 - The verifier's inspection scope must include the TDD test files declared for that slice.
 - If the change is `interactive`, the first item in `Blocking` must be `Proof Task`.
 - If `tasks.md` explicitly defines implementation-slice verifier gates, you must actually invoke the independent `verifier` sub-agent.
 - Each slice verifier must state the inspection scope, what the verifier must check, and the `PASS/FAIL` gate conditions.
+- If a non-project validation document participates in acceptance, state how it is mapped and how reality will be checked against current code.
 
 ## 1. Setup
 
@@ -166,3 +168,4 @@
 - [ ] Each `verifier` task's `PASS/FAIL` gate aligns with the current slice acceptance criteria
 - [ ] Each slice verifier must pass before entering the next slice
 - [ ] The final slice verifier must pass before entering `Reconciliation`
+- [ ] If non-project validation docs are referenced, their mapping and reality-check method are explicit
