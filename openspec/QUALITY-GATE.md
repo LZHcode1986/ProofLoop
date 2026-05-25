@@ -45,7 +45,8 @@ This document is used between `propose` and `apply`.
 - [ ] Does every completed Worker attempt have a commit/no-op boundary receipt?
 - [ ] Did every slice verifier inspect the relevant boundary receipts and diffs?
 - [ ] Are boundary scope checks clean for all covered Worker attempts?
-- [ ] Are all execution evidence files (boundary receipts, TDD evidence, verifier reports) stored in `output/changes/<change-name>/` and not in `openspec/changes/`?
+- [ ] Do the required execution evidence channels exist for the completed work (Worker evidence fields, verification command outputs, boundary receipts, and diff inspection results)?
+- [ ] If persistent evidence artifacts were produced (for example logs, screenshots, exported verifier notes), are they stored in `output/changes/<change-name>/` and not in `openspec/changes/`?
 - [ ] Have the required implementation-slice verifier gates run and reached `PASS`?
 - [ ] If the change is `interactive`, is the proof result recorded from a real entry path instead of internal direct calls?
 - [ ] Has the Executor prepared the stage-review package with slice verifier results, commands executed, and residual risks?

@@ -10,6 +10,7 @@ Inputs:
 - ProofLoop repository root: <proofloop-repo-path>
 - Agent install root: <optional, defaults to $HOME/.opencode>
 - Skill install root: <optional, defaults to $HOME/.agents>
+- Contract source directory: `.agents/contracts/` in the ProofLoop repo
 
 Requirements:
 1. Prefer the installer script over manual copy.
@@ -33,6 +34,7 @@ Steps:
    - $HOME/.opencode/agents/spec-verifier.md
    - $HOME/.opencode/agents/reality-verifier.md
    - $HOME/.opencode/agents/contracts/dispatch-packets.md
+   - $HOME/.opencode/agents/contracts/executor-dispatch-packets.md
    - Optional when selected: $HOME/.opencode/agents/reality-verifier-codegraph.md
    - $HOME/.agents/skills/openspec-propose/SKILL.md
    - $HOME/.agents/skills/workflow-intake/SKILL.md

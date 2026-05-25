@@ -36,7 +36,8 @@ ProofLoop is installed into three scopes by default:
 	- `openspec/schemas/README.md`
 	- `openspec/schemas/spec-driven/`
 - user agent home: `$HOME/.opencode/agents`
-	- includes `agents/contracts/dispatch-packets.md`
+	- includes `contracts/dispatch-packets.md`
+	- includes `contracts/executor-dispatch-packets.md`
 	- includes default `reality-verifier.md`
 	- includes optional `reality-verifier-codegraph.md`
 - user skill home: `$HOME/.agents/skills`

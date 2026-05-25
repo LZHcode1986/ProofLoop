@@ -28,22 +28,15 @@ Your final response must start with exactly one of:
 
 ## Task Reception
 
-The Executor must provide a Task Packet with:
+The Executor must provide a Task Packet that conforms to `contracts/executor-dispatch-packets.md`.
 
-- Change
-- Task ID / name
-- Work Request
-- Task text
-- Task acceptance criteria
-- Slice goal and Slice Acceptance Criteria, when the task belongs to a slice
-- Fix Mode and Verifier Failure, when the dispatch is `Worker Fix`
-- Workflow constraints
-- Execution Type
-- Required Skills
-- Context Files or excerpts
-- Allowed File Scope
-- Verification Commands
-- Checkbox ownership rules
+At minimum, verify that the packet includes:
+
+- task identity and work request
+- task acceptance criteria and slice acceptance criteria when applicable
+- fix mode and verifier failure when the dispatch is `Worker Fix`
+- required skills, context files or excerpts, allowed file scope, and verification commands
+- checkbox ownership rules
 
 If required context is missing, return `Implementation blocked: insufficient task context`. List the missing file(s), why they are needed, and the smallest context needed. Do not read the full proposal, design, or spec unless they are explicitly listed in the Task Packet.
 

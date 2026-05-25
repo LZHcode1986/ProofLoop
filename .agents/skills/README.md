@@ -6,28 +6,28 @@
 
 这些名字是 OpenSpec 分发、安装、profile 映射、tool detection 会用到的 canonical skill surface。若要保持 OpenSpec 兼容，**不要随意改名**。
 
-- `skills/openspec-propose/SKILL.md`
+- `openspec-propose/SKILL.md`
   - 正式 propose 工件生成能力
   - 由 `propose` agent 加载
 
-- `skills/openspec-explore/SKILL.md`
+- `openspec-explore/SKILL.md`
   - 本地探索与技术澄清能力
 
-- `skills/openspec-apply-change/SKILL.md`
+- `openspec-apply-change/SKILL.md`
   - 正式 apply 执行能力
   - 由 `executor` agent 加载
 
-- `skills/openspec-archive-change/SKILL.md`
+- `openspec-archive-change/SKILL.md`
   - 正式 archive 能力
 
-- `skills/test-driven-development/SKILL.md`
+- `test-driven-development/SKILL.md`
   - 代码实施时的默认测试纪律
 
 ## 2. Workflow orchestration skills
 
 这些技能是 Brain 和上层编排使用的补充能力，不替代 OpenSpec canonical skills。
 
-- `skills/workflow-intake/SKILL.md`
+- `workflow-intake/SKILL.md`
   - Brain 前置 intake 能力
   - 把用户原始需求沉淀成 `PRD.md`、决策账本与 stage plan
 

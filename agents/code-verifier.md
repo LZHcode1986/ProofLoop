@@ -24,24 +24,14 @@ Your final response must start with exactly one of:
 
 ## Scope
 
-Verify only the slice / verifier gate assigned by the Executor. The Executor should provide:
+Verify only the slice / verifier gate assigned by the Executor. The Executor must provide a packet that conforms to `contracts/executor-dispatch-packets.md`.
 
-- Change
-- Slice / gate
-- Covered tasks
-- Slice Acceptance Criteria
-- Inspection Scope
-- Inspection Content
-- Out of Scope
-- PASS/FAIL Gate
-- Original Task Packets
-- Worker summaries
-- Files changed in slice
-- Task Required Skills
-- Required Review Skills
-- Boundary Receipts
-- Boundary Diff Requirements
-- Verification requirements
+At minimum, verify that the packet includes:
+
+- the assigned slice / gate contract and covered tasks
+- original task packets and Worker summaries
+- files changed in slice, boundary receipts, and boundary diff requirements
+- task required skills, required review skills, and verification requirements
 
 Do not verify proposal/design/spec readiness; that is `spec-verifier`'s job. Do not update normal implementation task checkboxes; Worker owns those. On `Verification passed`, update only the assigned verifier gate checkbox in `tasks.md`.
 

@@ -10,9 +10,9 @@
 
 - This repo is the coordination hub for the ProofLoop workflow built on OpenSpec.
 - Live workflow assets live under `openspec/` at the repository root.
-- `skills/` contains reusable skill source files.
-- `agents/` contains opencode-style agent definitions and dispatch contracts.
-- Fixed Brain subagent packet formats live in `agents/contracts/dispatch-packets.md`.
+- `.agents/skills/` contains reusable skill source files.
+- Fixed Brain subagent packet formats live in `.agents/contracts/dispatch-packets.md`.
+- Fixed Executor subagent packet formats live in `.agents/contracts/executor-dispatch-packets.md`.
 
 ## Source Of Truth
 
@@ -23,15 +23,15 @@
 
 ## Workflow Rule Ownership
 
-- Brain owns PRD intake, acceptance criteria, stage planning, and archive transition decisions. See `agents/brain.md`.
-- Brain dispatch packet shapes are owned by `agents/contracts/dispatch-packets.md`.
-- Propose owns one-stage OpenSpec decomposition into proposal, design, specs, and tasks. See `agents/propose.md`.
-- Executor owns apply orchestration, Worker dispatch, run ledger, git boundary dispatch, verifier dispatch, and rescue flow. See `agents/executor.md`.
-- Worker owns one implementation task only. See `agents/worker.md`.
-- Committer owns git boundary closure, mechanical scope checks, and boundary receipts. See `agents/committer.md`.
-- Reality Verifier owns code-reality readiness after Propose creates formal artifacts. See `agents/reality-verifier.md`; projects with CodeGraph may opt into `agents/reality-verifier-codegraph.md`.
-- Code Verifier owns slice-level semantic verification after boundary receipts exist. See `agents/code-verifier.md`.
-- Implementation Reviewer owns stage-level integrated review and Brain-authorized archive execution. See `agents/implementation-reviewer.md`.
+- Brain owns PRD intake, acceptance criteria, stage planning, and archive transition decisions. 
+- Propose owns one-stage OpenSpec decomposition into proposal, design, specs, and tasks. 
+- Executor owns apply orchestration, Worker dispatch, run ledger, git boundary dispatch, verifier dispatch, and rescue flow. 
+- Worker owns one implementation task only. 
+- Committer owns git boundary closure, mechanical scope checks, and boundary receipts. 
+- Reality Verifier owns code-reality readiness after Propose creates formal artifacts. 
+- Code Verifier owns slice-level semantic verification after boundary receipts exist. 
+- Implementation Reviewer owns stage-level integrated review and Brain-authorized archive execution. 
+- Executor dispatch packet shapes for Worker, Code Verifier, and Committer are owned by `.agents/contracts/executor-dispatch-packets.md`.
 
 ## Environment Notes
 
@@ -52,13 +52,11 @@
 - Brain owns PRD decomposition into stages.
 - Stages must represent one independently valuable capability or one coherent module boundary.
 - If a boundary is unclear, Brain should compare plausible partitions before choosing one.
-- Detailed stage planning rules live in `agents/brain.md`.
 
 ## Task Decomposition Summary
 
 - Propose receives exactly one Brain-selected stage.
 - Propose turns that stage into OpenSpec artifacts and verifier-gated `tasks.md`.
-- Detailed task decomposition rules live in `agents/propose.md`.
 
 ## Verification Boundaries
 

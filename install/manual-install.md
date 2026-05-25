@@ -23,17 +23,17 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
    - `openspec/schemas/README.md`
    - `openspec/schemas/spec-driven/`
 2. Copy `agents/` into `$HOME/.opencode/agents/`.
-3. Copy `skills/` into `$HOME/.agents/skills/`.
-4. If the target project has no `openspec/config.yaml`, copy `openspec/config.yaml.example` to `openspec/config.yaml`.
-5. If `openspec/config.yaml` already exists, update its `schema:` field to `spec-driven`.
-6. Fill in project-specific values in `openspec/config.yaml`, especially:
+3. Copy `.agents/contracts/` into `$HOME/.opencode/agents/contracts/`.
+5. If the target project has no `openspec/config.yaml`, copy `openspec/config.yaml.example` to `openspec/config.yaml`.
+6. If `openspec/config.yaml` already exists, update its `schema:` field to `spec-driven`.
+7. Fill in project-specific values in `openspec/config.yaml`, especially:
    - `Project: <project name>`
    - project boundary
    - MVP scope
    - canonical objects
    - authority order
    - testing posture
-7. Run your normal OpenSpec validation command in the target project.
+8. Run your normal OpenSpec validation command in the target project.
 
 ## Recommended validation points
 

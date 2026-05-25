@@ -247,20 +247,20 @@ Those belong to a future `manager` role if the workflow grows beyond the current
 
 ## Repository map
 
+- `.agents/`
+	- `contracts/` — fixed Brain-to-subagent and Executor-to-subagent packet formats.
+	- `skills/` — OpenSpec canonical skills plus Brain-layer orchestration skills.
 - `agents/`
 	- Agent definitions for Brain, Propose, Executor, Worker, verifiers, and git boundary roles.
-	- `agents/contracts/dispatch-packets.md` defines fixed Brain-to-subagent packet formats.
 - `openspec/`
 	- OpenSpec-compatible schema, schema install guidance, config example, gate documents, and formal change artifacts.
 - `install/`
 	- One-command installer, AI install prompt, and manual fallback instructions.
-- `skills/`
-	- OpenSpec canonical skills plus Brain-layer orchestration skills.
 
 ## Start here
 
 1. Read [install/README.md](install/README.md) if you want to install ProofLoop into another project quickly.
-2. Read [skills/README.md](skills/README.md) to understand canonical OpenSpec skills versus orchestration-layer skills.
+2. Read `.agents/skills/README.md` to understand canonical OpenSpec skills versus orchestration-layer skills.
 3. Read [agents/brain.md](agents/brain.md) for the top-level routing and governance contract.
 4. Read [agents/propose.md](agents/propose.md) and [agents/executor.md](agents/executor.md) for the L1 planning and execution contracts.
 5. Read [openspec/QUALITY-GATE.md](openspec/QUALITY-GATE.md) for the current gate model.

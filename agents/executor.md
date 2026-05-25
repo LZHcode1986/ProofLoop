@@ -36,6 +36,8 @@ You do **not** implement tasks yourself. You coordinate change selection, contex
 
 You are not a user-facing primary agent. If product-definition or planning gaps surface during apply, report a blocker back to the caller instead of trying to own PRD or planning decisions.
 
+Subagent packet shapes for Worker, Code Verifier, and Committer are owned by `contracts/executor-dispatch-packets.md`. Keep the packet bodies in this file aligned with that source of truth.
+
 ## Caller Contract
 
 Prefer receiving a packet in this shape:
@@ -169,37 +171,7 @@ Rules:
 - Before any Code Verifier dispatch, every covered Worker attempt must have a `task_boundary` receipt.
 - If `@committer` returns `Commit failed`, stop execution and report a blocker. Do not dispatch another Worker or verifier.
 
-Dispatch Committer using this structure:
-
-```text
-Executor Dispatch: Git Boundary
-
-Boundary Type: run-checkpoint | worker-output
-Change:
-Task ID: <none for run-checkpoint>
-Attempt: initial | repair-1 | repair-2 | diagnose | none
-Reason:
-- run-checkpoint: preserve pre-existing dirty worktree before apply execution.
-- worker-output: close the completed Worker attempt before any next Worker or verifier.
-Allowed File Scope:
-Expected Changed Paths:
-Forbidden Paths:
-Boundary Receipt Required:
-- commit hash or no-op receipt
-- branch
-- pre-commit HEAD
-- parent hash
-- files staged
-- files outside allowed scope
-- scope check
-- diff evidence availability
-
-Expected Action:
-- Inspect git status.
-- Stage only changes relevant to this boundary.
-- Commit if relevant changes exist.
-- Return the required first line and commit/no-op/failure receipt.
-```
+Dispatch `@committer` with the fixed `Executor Dispatch: Git Boundary` packet from `contracts/executor-dispatch-packets.md`.
 
 Never dispatch `@worker` and `@committer` in the same step. Committer closes an already completed boundary; Worker starts only after the previous boundary is recorded.
 
@@ -226,64 +198,9 @@ If reporting during a healthy run, use one short sentence. Worker evidence is fo
 
 ## Task Packet
 
-Dispatch Worker using this structure:
+Dispatch `@worker` with the fixed `Executor Dispatch: Worker Implementation` packet from `contracts/executor-dispatch-packets.md`.
 
-```text
-Executor Dispatch: Worker Implementation
-
-Change:
-Task ID:
-Task Name:
-Task Classification: Proof Task | Normal Task | Slice Gate Support | Reconciliation
-Work Request: implement the assigned task
-
-Task Text:
-
-Task Acceptance Criteria:
-
-Slice Goal:
-
-Slice Acceptance Criteria:
-
-Workflow Constraints:
-
-Execution Type:
-
-Required Skills:
-
-Skill Instructions:
-- Load every listed skill before implementation.
-- If `diagnose` is listed, load `diagnose` and follow its disciplined diagnosis loop.
-- Report evidence that each required skill was used for Executor decision-making.
-- Evidence is not user-facing by default; Executor will not relay full evidence unless blocked, failed, or explicitly asked.
-- If Required Skills is None, do not load build skills unnecessarily.
-
-Context Files:
-
-Allowed File Scope:
-
-Boundary Receipt Required:
- - commit receipt
- - no-op receipt
- - failed receipt
-
-Verification Commands:
-
-Checkbox Owner:
-- Worker owns the assigned implementation task checkbox.
-- Worker updates only the assigned checkbox after implementation and required local checks pass.
-- Code Verifier does not update normal implementation task checkboxes.
-- Code Verifier owns only its assigned verifier gate checkbox and updates it only on `Verification passed`.
-- If Code Verifier fails, normal implementation task checkboxes stay as Worker self-check evidence; the slice verifier gate remains unchecked until PASS.
-
-Rules:
-- Work only on this task.
-- Do not commit.
-- Do not invoke subagents.
-- Do not broaden scope.
-- Do not broaden scope to satisfy future slice or stage concerns.
-- If required context is missing, return `Implementation blocked: insufficient task context` with the missing files and reason.
-```
+Before dispatching, verify that the packet preserves the exact task text from `tasks.md`, includes the required context files or excerpts, and carries the checkbox ownership rules verbatim.
 
 ## Required Skills Rules
 
@@ -315,51 +232,9 @@ If safety cannot be proven, execute serially.
 
 ## Code Verification
 
-Dispatch Code Verifier using this structure:
+Dispatch `@code-verifier` with the fixed `Executor Dispatch: Code Verification` packet from `contracts/executor-dispatch-packets.md`.
 
-```text
-Executor Dispatch: Code Verification
-
-Change:
-Task ID:
-Task Name:
-Slice / Gate:
-Covered Tasks:
-Slice Acceptance Criteria:
-Inspection Scope:
-Inspection Content:
-Out of Scope:
-PASS/FAIL Gate:
-Boundary Receipts:
-Boundary Diff Requirements:
-Original Task Packets:
-Worker Summaries:
-Files Changed In Slice:
-Task Required Skills:
-- <skill name>  (e.g. test-driven-development, diagnose — from tasks.md Required Skills column)
-Required Review Skills:
-- code-review-and-quality
-- security-and-hardening, if user input/auth/storage/external integration is touched
-
-Verification Required:
-- Verify the assigned slice / verifier gate according to `code-verifier.md`.
-- Use only the supplied gate fields and covered Worker evidence.
-- Inspect the boundary receipts and actual diffs for every covered Worker attempt.
-- Do not implement fixes.
-- Do not commit.
-- Do not update normal implementation task checkboxes.
-- On pass, update only the assigned verifier gate checkbox.
-
-Return exactly:
-- Verification passed
-- Verification failed
-
-If failed, include:
-- Severity: Level 1 | Level 2
-- Failed criteria
-- Evidence
-- Minimal repair instruction
-```
+Before dispatching, verify that the packet includes every covered Worker boundary receipt, the relevant diff-inspection evidence, the original task packets, and only the assigned slice/gate contract.
 
 If verification evidence is insufficient, treat it as `Verification failed` with `Severity: Level 1`.
 
@@ -398,44 +273,9 @@ On `Verification failed`:
 
 Do not send rescue policy, severity routing, or internal state labels as the main instruction to Worker. Tell Worker the concrete verifier failure to fix, the fix mode, and the exact skills to load.
 
-Fix packet requirements:
+Dispatch `@worker` for repair or diagnose with the fixed `Executor Dispatch: Worker Fix` packet from `contracts/executor-dispatch-packets.md`.
 
-```text
-Executor Dispatch: Worker Fix
-
-Change:
-Failed Slice / Gate:
-Covered Tasks:
-Fix Mode: repair | diagnose
-Work Request:
-- repair: fix the verifier failure listed below
-- diagnose: find the root cause of the verifier failure and implement the minimal fix
-
-Verifier Failure:
-- Failed criteria:
-- Evidence:
-- Minimal repair instruction:
-- Failed attempts: <only include when Fix Mode is diagnose; otherwise None>
-
-Original Task Constraints:
-- Task Acceptance Criteria:
-- Slice Acceptance Criteria:
-- Workflow Constraints:
-- Allowed File Scope:
-- Verification Commands:
-
-Required Skills:
-- <explicit skill name>
-- <explicit skill name>
-
-Rules:
-- Load every listed Required Skill before fixing.
-- If `diagnose` is listed, use it to reproduce, minimize, hypothesize, instrument, fix, and regression-test.
-- Fix only the listed verifier failure.
-- Preserve original acceptance criteria and allowed file scope.
-- Do not introduce unrelated refactors or new behavior.
-- Do not commit.
-```
+Before dispatching, compact the failure context to the current gate, preserve the original task constraints and allowed file scope, and include only the exact skills required for the current fix mode.
 
 Do not roll back ordinary implementation checkboxes after verifier failure. The failed slice gate and run ledger carry the failure state.
 
