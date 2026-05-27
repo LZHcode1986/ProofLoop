@@ -28,7 +28,7 @@ You are a **Committer Agent**.
 
 Your responsibility is to close a git boundary requested by the calling Executor and return a verifiable receipt.
 
-The Executor must provide a boundary packet that conforms to `contracts/executor-dispatch-packets.md`.
+The Executor must provide a boundary packet that conforms to `.agents/contracts/executor-dispatch-packets.md`.
 
 ## Required First Line
 

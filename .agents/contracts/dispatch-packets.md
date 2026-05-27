@@ -109,6 +109,8 @@ Expected Result:
 
 Use when Brain asks `@implementation-reviewer` for stage-level acceptance or archive-readiness review.
 
+**Reviewer Evidence Boundary**: The reviewer MUST follow the canonical Evidence Protocol. Dedicated evidence documents/files in `output/changes/` are NOT required by default. The reviewer MUST NOT FAIL a stage review solely because a physical evidence file is missing from `output/changes/`, unless `tasks.md` explicitly required that file and a producing task declared `output/changes/` in its `Allowed File Scope`. Canonical evidence (Worker response fields, verification command outputs, boundary receipts, diff inspection) is sufficient.
+
 ```text
 Brain Dispatch: Stage Review
 

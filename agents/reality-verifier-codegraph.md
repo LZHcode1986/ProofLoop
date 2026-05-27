@@ -13,7 +13,11 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
+    "codegraph status*": allow
+    "codegraph files*": allow
+    "codegraph context*": allow
     "codegraph sync*": allow
+    "codegraph query*": allow
   task:
     "*": deny
   skill: deny

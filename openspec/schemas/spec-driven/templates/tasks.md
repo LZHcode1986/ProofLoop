@@ -40,6 +40,8 @@
 - If the change is `interactive`, the first item in `Blocking` must be `Proof Task`.
 - If `tasks.md` explicitly defines implementation-slice verifier gates, you must actually invoke the independent `verifier` sub-agent.
 - Each slice verifier must state the inspection scope, what the verifier must check, and the `PASS/FAIL` gate conditions.
+- Slice verifier evidence defaults to canonical evidence channels: Worker response `required skills evidence` / `TDD evidence`, RED/GREEN verification command outputs, git boundary receipts (or no-op receipts), and diff inspection results. The verifier's `Boundary Evidence Required` field should reference these channels, not default to physical files in `output/changes/`.
+- Physical evidence files in `output/changes/<change>/` are only required when a specific implementation task explicitly declares `output/changes/<change>/` in its `Allowed File Scope` and the task description mandates producing that artifact (e.g., browser screenshots, screen recordings, exported verifier notes, proof evidence).
 - If a non-project validation document participates in acceptance, state how it is mapped and how reality will be checked against current code.
 
 ## 1. Setup
@@ -100,7 +102,7 @@
   - **Inspection Scope:** <Slice 1 change artifacts + related implementation + related tests + validation results>
   - **Inspection Content:** <what the verifier must check>
   - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
-  - **Boundary Evidence Required:** yes
+  - **Boundary Evidence Required:** canonical evidence channels (Worker evidence fields + verification command outputs + boundary receipts + diff inspection results)
   - **PASS/FAIL Gate:** <conditions for pass or fail>
 
 ## 4. Slice 2: <slice-name>
@@ -128,7 +130,7 @@
   - **Inspection Scope:** <Slice 2 change artifacts + related implementation + related tests + validation results>
   - **Inspection Content:** <what the verifier must check>
   - **Out of Scope:** <stage or later-slice concerns not judged by this gate>
-  - **Boundary Evidence Required:** yes
+  - **Boundary Evidence Required:** canonical evidence channels (Worker evidence fields + verification command outputs + boundary receipts + diff inspection results)
   - **PASS/FAIL Gate:** <conditions for pass or fail>
 
 ## N. More Slices (as needed)
@@ -168,4 +170,6 @@
 - [ ] Each `verifier` task's `PASS/FAIL` gate aligns with the current slice acceptance criteria
 - [ ] Each slice verifier must pass before entering the next slice
 - [ ] The final slice verifier must pass before entering `Reconciliation`
+- [ ] If any slice verifier task requires physical evidence files in `output/changes/`, at least one implementation task covered by or prior to that verifier must declare `output/changes/<change>/` in its `Allowed File Scope` and its task description must mandate producing that artifact
+- [ ] If any Reconciliation task requires physical evidence files in `output/changes/`, that Reconciliation task itself must declare `output/changes/<change>/` in its `Allowed File Scope` and its task description must mandate producing that artifact
 - [ ] If non-project validation docs are referenced, their mapping and reality-check method are explicit

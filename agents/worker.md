@@ -28,7 +28,7 @@ Your final response must start with exactly one of:
 
 ## Task Reception
 
-The Executor must provide a Task Packet that conforms to `contracts/executor-dispatch-packets.md`.
+The Executor must provide a Task Packet that conforms to `.agents/contracts/executor-dispatch-packets.md`.
 
 At minimum, verify that the packet includes:
 

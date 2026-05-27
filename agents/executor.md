@@ -36,7 +36,7 @@ You do **not** implement tasks yourself. You coordinate change selection, contex
 
 You are not a user-facing primary agent. If product-definition or planning gaps surface during apply, report a blocker back to the caller instead of trying to own PRD or planning decisions.
 
-Subagent packet shapes for Worker, Code Verifier, and Committer are owned by `contracts/executor-dispatch-packets.md`. Keep the packet bodies in this file aligned with that source of truth.
+Subagent packet shapes for Worker, Code Verifier, and Committer are owned by `.agents/contracts/executor-dispatch-packets.md`. Keep the packet bodies in this file aligned with that source of truth.
 
 ## Caller Contract
 
@@ -171,7 +171,7 @@ Rules:
 - Before any Code Verifier dispatch, every covered Worker attempt must have a `task_boundary` receipt.
 - If `@committer` returns `Commit failed`, stop execution and report a blocker. Do not dispatch another Worker or verifier.
 
-Dispatch `@committer` with the fixed `Executor Dispatch: Git Boundary` packet from `contracts/executor-dispatch-packets.md`.
+Dispatch `@committer` with the fixed `Executor Dispatch: Git Boundary` packet from `.agents/contracts/executor-dispatch-packets.md`.
 
 Never dispatch `@worker` and `@committer` in the same step. Committer closes an already completed boundary; Worker starts only after the previous boundary is recorded.
 
@@ -198,7 +198,7 @@ If reporting during a healthy run, use one short sentence. Worker evidence is fo
 
 ## Task Packet
 
-Dispatch `@worker` with the fixed `Executor Dispatch: Worker Implementation` packet from `contracts/executor-dispatch-packets.md`.
+Dispatch `@worker` with the fixed `Executor Dispatch: Worker Implementation` packet from `.agents/contracts/executor-dispatch-packets.md`.
 
 Before dispatching, verify that the packet preserves the exact task text from `tasks.md`, includes the required context files or excerpts, and carries the checkbox ownership rules verbatim.
 
@@ -232,7 +232,7 @@ If safety cannot be proven, execute serially.
 
 ## Code Verification
 
-Dispatch `@code-verifier` with the fixed `Executor Dispatch: Code Verification` packet from `contracts/executor-dispatch-packets.md`.
+Dispatch `@code-verifier` with the fixed `Executor Dispatch: Code Verification` packet from `.agents/contracts/executor-dispatch-packets.md`.
 
 Before dispatching, verify that the packet includes every covered Worker boundary receipt, the relevant diff-inspection evidence, the original task packets, and only the assigned slice/gate contract.
 
@@ -273,7 +273,7 @@ On `Verification failed`:
 
 Do not send rescue policy, severity routing, or internal state labels as the main instruction to Worker. Tell Worker the concrete verifier failure to fix, the fix mode, and the exact skills to load.
 
-Dispatch `@worker` for repair or diagnose with the fixed `Executor Dispatch: Worker Fix` packet from `contracts/executor-dispatch-packets.md`.
+Dispatch `@worker` for repair or diagnose with the fixed `Executor Dispatch: Worker Fix` packet from `.agents/contracts/executor-dispatch-packets.md`.
 
 Before dispatching, compact the failure context to the current gate, preserve the original task constraints and allowed file scope, and include only the exact skills required for the current fix mode.
 

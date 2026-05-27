@@ -24,7 +24,7 @@ Your final response must start with exactly one of:
 
 ## Scope
 
-Verify only the slice / verifier gate assigned by the Executor. The Executor must provide a packet that conforms to `contracts/executor-dispatch-packets.md`.
+Verify only the slice / verifier gate assigned by the Executor. The Executor must provide a packet that conforms to `.agents/contracts/executor-dispatch-packets.md`.
 
 At minimum, verify that the packet includes:
 
