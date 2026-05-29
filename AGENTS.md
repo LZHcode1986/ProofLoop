@@ -17,9 +17,34 @@
 ## Source Of Truth
 
 - Workflow and change rules: `openspec/`
-- Product intent and stage plan: `PRD.md`, `CLARIFY.md`, `tech-spec.md`
+- Product intent and stage plan: `PRD.md`, `CLARIFY.md`
+- Long-term technical specifications: `tech-spec.md`, `tech-spec/`
 - Top-level technical constraints: `openspec/config.yaml`, `openspec/QUALITY-GATE.md`, schema and gate documents
 - Repo-wide operating constraints: `AGENTS.md`
+
+## Authority Order
+
+When documents conflict, follow this priority:
+
+1. `openspec/` — change workflow, schema, proposal/design/spec/tasks format, apply, and archive rules
+2. `AGENTS.md` — repository-wide operating rules not encoded by OpenSpec
+3. `tech-spec.md` — long-term technical constraints, architecture, state model, canonical objects, and testing posture
+4. `PRD.md` — product intent, stage plan, and acceptance criteria for the active product scope
+5. `CLARIFY.md` — resolved clarifications and decision history, when present
+
+## Project Boundary
+
+- Project name:
+- Domain:
+- Product boundary:
+- Explicit non-goals:
+- Supported environments:
+
+## Shared Principles
+
+<!-- List technical principles that all slices and stages must follow. -->
+
+- <principle>: <brief description>
 
 ## Workflow Rule Ownership
 
