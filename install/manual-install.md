@@ -22,8 +22,8 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
    - `openspec/config.yaml.example`
    - `openspec/schemas/README.md`
    - `openspec/schemas/spec-driven/`
-2. Copy `agents/` into `$HOME/.opencode/agents/`.
-3. Copy `.agents/contracts/` into `$HOME/.opencode/agents/contracts/`.
+2. Copy `agents/` into `<target-project>/.opencode/agents/`.
+3. Copy `.agents/contracts/` into `<target-project>/.agents/contracts/`.
 5. If the target project has no `openspec/config.yaml`, copy `openspec/config.yaml.example` to `openspec/config.yaml`.
 6. If `openspec/config.yaml` already exists, update its `schema:` field to `spec-driven`.
 7. Fill in project-specific values in `openspec/config.yaml`, especially:
@@ -42,12 +42,14 @@ After installation, confirm:
 - `openspec/config.yaml` points to `schema: spec-driven`
 - `openspec/schemas/spec-driven/schema.yaml` exists
 - `openspec/QUALITY-GATE.md` exists
-- required agent files exist under `$HOME/.opencode/agents/`
+- required agent files exist under `<target-project>/.opencode/agents/`
   - `brain.md`
   - `propose.md`
   - `executor.md`
   - `spec-verifier.md`
   - `reality-verifier.md`
-  - `contracts/dispatch-packets.md`
   - optional when selected: `reality-verifier-codegraph.md`
-- required skill files exist under `$HOME/.agents/skills/`
+- required contract files exist under `<target-project>/.agents/contracts/`
+  - `dispatch-packets.md`
+  - `executor-dispatch-packets.md`
+- required skill files exist under `<target-project>/.agents/skills/`

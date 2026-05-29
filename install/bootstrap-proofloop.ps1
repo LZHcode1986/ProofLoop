@@ -9,10 +9,6 @@ param(
     [Parameter(ParameterSetName = 'local', Mandatory = $true)]
     [string]$SourceRepoPath,
 
-    [string]$AgentInstallRoot = (Join-Path $HOME '.opencode'),
-
-    [string]$SkillInstallRoot = (Join-Path $HOME '.agents'),
-
     [switch]$DryRun
 )
 
@@ -64,8 +60,6 @@ try {
 
     $installerParams = @{
         TargetProjectPath = $TargetProjectPath
-        AgentInstallRoot = $AgentInstallRoot
-        SkillInstallRoot = $SkillInstallRoot
     }
 
     if ($DryRun) {

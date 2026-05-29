@@ -27,7 +27,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
 
 ## Install destinations
 
-ProofLoop is installed into three scopes by default:
+ProofLoop is installed into the target project by default:
 
 - target project:
 	- `AGENTS.md`
@@ -35,21 +35,13 @@ ProofLoop is installed into three scopes by default:
 	- `openspec/config.yaml.example`
 	- `openspec/schemas/README.md`
 	- `openspec/schemas/spec-driven/`
-- user agent home: `$HOME/.opencode/agents`
-	- includes `contracts/dispatch-packets.md`
-	- includes `contracts/executor-dispatch-packets.md`
+- target project `.opencode/agents/`:
 	- includes default `reality-verifier.md`
 	- includes optional `reality-verifier-codegraph.md`
-- user skill home: `$HOME/.agents/skills`
-
-If a user's runtime expects different directories, override them with:
-
-```powershell
-pwsh -File ./install/install-proofloop.ps1 `
-	-TargetProjectPath <path-to-target-project> `
-	-AgentInstallRoot <custom-agent-home> `
-	-SkillInstallRoot <custom-skill-home>
-```
+- target project `.agents/contracts/`:
+	- includes `dispatch-packets.md`
+	- includes `executor-dispatch-packets.md`
+- target project `.agents/skills/`
 
 What the installer does with config:
 
@@ -64,8 +56,8 @@ If the user already works with an AI coding agent, use the prompt in [install/ag
 The expected agent behavior is:
 
 - run the installer script first
-- verify both user-home and project-home install targets
-- verify the Brain dispatch packet contract under `$HOME/.opencode/agents/contracts/dispatch-packets.md`
+- verify both project-level and project-home install targets
+- verify the Brain dispatch packet contract under `<target-project>/.agents/contracts/dispatch-packets.md`
 - verify the default reality verifier is installed; use the CodeGraph-backed variant only when the project explicitly selects it
 - point out any remaining placeholders in `openspec/config.yaml`
 - report conflicts instead of silently guessing

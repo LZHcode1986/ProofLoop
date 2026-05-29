@@ -9,6 +9,7 @@ permission:
     "PRD.md": allow
     "CLARIFY.md": allow
     "tech-spec.md": allow
+    “tech-spec/**”: allow
     "AGENTS.md": allow
     "openspec/config.yaml": allow
     "openspec/QUALITY-GATE.md": allow

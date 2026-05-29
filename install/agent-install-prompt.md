@@ -8,8 +8,6 @@ Install ProofLoop into this project by using the local ProofLoop installer first
 Inputs:
 - Target project root: <target-project-path>
 - ProofLoop repository root: <proofloop-repo-path>
-- Agent install root: <optional, defaults to $HOME/.opencode>
-- Skill install root: <optional, defaults to $HOME/.agents>
 - Contract source directory: `.agents/contracts/` in the ProofLoop repo
 
 Requirements:
@@ -27,17 +25,17 @@ Steps:
    - openspec/QUALITY-GATE.md
    - openspec/config.yaml.example
    - openspec/schemas/spec-driven/schema.yaml
-4. Verify that these user-home paths now exist:
-   - $HOME/.opencode/agents/brain.md
-   - $HOME/.opencode/agents/propose.md
-   - $HOME/.opencode/agents/executor.md
-   - $HOME/.opencode/agents/spec-verifier.md
-   - $HOME/.opencode/agents/reality-verifier.md
-   - $HOME/.opencode/agents/contracts/dispatch-packets.md
-   - $HOME/.opencode/agents/contracts/executor-dispatch-packets.md
-   - Optional when selected: $HOME/.opencode/agents/reality-verifier-codegraph.md
-   - $HOME/.agents/skills/openspec-propose/SKILL.md
-   - $HOME/.agents/skills/workflow-intake/SKILL.md
+4. Verify that these project-level paths now exist:
+   - <target-project>/.opencode/agents/brain.md
+   - <target-project>/.opencode/agents/propose.md
+   - <target-project>/.opencode/agents/executor.md
+   - <target-project>/.opencode/agents/spec-verifier.md
+   - <target-project>/.opencode/agents/reality-verifier.md
+   - Optional when selected: <target-project>/.opencode/agents/reality-verifier-codegraph.md
+   - <target-project>/.agents/contracts/dispatch-packets.md
+   - <target-project>/.agents/contracts/executor-dispatch-packets.md
+   - <target-project>/.agents/skills/openspec-propose/SKILL.md
+   - <target-project>/.agents/skills/workflow-intake/SKILL.md
 5. Check that `openspec/config.yaml` uses `schema: spec-driven`.
 6. If `openspec/config.yaml` was created from the example, list the placeholders the user still needs to fill, especially `Project: <project name>`.
 7. Summarize what was installed, what was backed up, and any follow-up steps.

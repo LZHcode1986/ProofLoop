@@ -3,10 +3,6 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TargetProjectPath,
 
-    [string]$AgentInstallRoot = (Join-Path $HOME '.opencode'),
-
-    [string]$SkillInstallRoot = (Join-Path $HOME '.agents'),
-
     [switch]$DryRun
 )
 
@@ -20,8 +16,6 @@ if (-not (Test-Path $TargetProjectPath)) {
 }
 
 $targetRoot = (Resolve-Path $TargetProjectPath).Path
-$resolvedAgentRoot = $AgentInstallRoot
-$resolvedSkillRoot = $SkillInstallRoot
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $actions = New-Object System.Collections.Generic.List[string]
 
@@ -209,19 +203,19 @@ foreach ($relativePath in $projectDirectoryAssets) {
     Install-RelativeDirectoryToTarget -RelativePath $relativePath
 }
 
-$agentDestination = Join-Path $resolvedAgentRoot 'agents'
-$skillDestination = Join-Path $resolvedSkillRoot 'skills'
+$agentDestination = Join-Path $targetRoot '.opencode/agents'
+$skillDestination = Join-Path $targetRoot '.agents/skills'
 
 Write-Info "Installing ProofLoop agent definitions into $agentDestination"
-Install-Directory  -SourcePath (Join-Path $repoRoot 'agents')  -DestinationPath $agentDestination  -Label '$HOME/.opencode/agents'
+Install-Directory  -SourcePath (Join-Path $repoRoot 'agents')  -DestinationPath $agentDestination  -Label '.opencode/agents'
 
 $contractsSource = (Join-Path $repoRoot '.agents/contracts')
-$contractsDestination = (Join-Path $resolvedAgentRoot 'agents/contracts')
+$contractsDestination = (Join-Path $targetRoot '.agents/contracts')
 Write-Info "Installing ProofLoop dispatch contracts into $contractsDestination"
-Install-Directory  -SourcePath $contractsSource  -DestinationPath $contractsDestination  -Label '$HOME/.opencode/agents/contracts'
+Install-Directory  -SourcePath $contractsSource  -DestinationPath $contractsDestination  -Label '.agents/contracts'
 
 Write-Info "Installing ProofLoop skills into $skillDestination"
-Install-Directory  -SourcePath (Join-Path $repoRoot '.agents/skills')  -DestinationPath $skillDestination  -Label '$HOME/.agents/skills'
+Install-Directory  -SourcePath (Join-Path $repoRoot '.agents/skills')  -DestinationPath $skillDestination  -Label '.agents/skills'
 
 Set-ProofLoopSchema
 
