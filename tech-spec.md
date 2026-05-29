@@ -1,11 +1,41 @@
 # Tech Spec
 
-This document captures long-term, project-wide technical specifications.
-Brain owns and maintains this file. Downstream agents read it as an authoritative technical reference.
+This document is a fill-in template for long-term, project-wide technical specifications.
+After installing ProofLoop into a project, Brain owns and maintains that project's copy of this file.
+Downstream agents read the filled project copy as an authoritative technical reference.
 
-Fill in the sections below for your project. Leave a section as `<unspecified>` only if the project genuinely has no constraint for it yet.
+Fill in the sections below for your project before using this file as a development authority.
+Leave a section as `<unspecified>` only if the project genuinely has no constraint for it yet.
+Delete example placeholders once real project values exist.
+
+This template is not the authority for ProofLoop's own workflow rules.
+For this repository's workflow, follow `AGENTS.md`, `openspec/`, and the agent contracts.
+
+## When to Split
+
+When `tech-spec.md` exceeds 200 lines, create a `tech-spec/` directory and move domain-specific sections into separate files:
+
+```text
+tech-spec.md              ← navigation, project boundary, shared principles, authority order, decisions log
+tech-spec/architecture.md ← architecture, module boundaries, persistence
+tech-spec/api.md          ← API principles, interfaces, contracts
+tech-spec/state.md        ← state model, canonical objects
+tech-spec/testing.md      ← testing posture, validation commands, test data policy
+```
+
+Keep `tech-spec.md` as the entry point with links to each sub-file. Brain maintains the split structure the same way it maintains the single-file version.
 
 ---
+
+## Project Boundary
+
+<!-- Define what this project is responsible for and what it explicitly does not own. -->
+
+- Project name:
+- Domain:
+- Product boundary:
+- Explicit non-goals:
+- Supported environments:
 
 ## Tech Stack
 
@@ -16,6 +46,7 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 - Framework:
 - Package manager:
 - Key dependencies:
+- External services:
 
 ## Architecture
 
@@ -23,8 +54,11 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 
 - Style: <e.g., monolith, modular monolith, microservices, serverless, CLI, library>
 - Layers:
+- Module boundaries:
 - Entry points:
 - Deployment target:
+- Persistence:
+- Background jobs:
 
 ## Core Roles
 
@@ -39,6 +73,7 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 - States:
 - Transitions:
 - Authority source:
+- Invalid states:
 
 ## Canonical Objects
 
@@ -54,6 +89,7 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 - Versioning:
 - Error handling:
 - Authentication:
+- Backward compatibility:
 
 ## Testing Posture
 
@@ -61,7 +97,9 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 
 - Strategy: <e.g., TDD-first, contract tests, integration tests, E2E>
 - Required test types:
+- Required validation commands:
 - Coverage expectations:
+- Test data policy:
 
 ## Shared Principles
 
@@ -83,12 +121,17 @@ Fill in the sections below for your project. Leave a section as `<unspecified>` 
 
 ## Authority Order
 
-<!-- Define which document has the highest priority when conflicts arise. -->
+<!--
+Define which document has the highest priority when conflicts arise in the installed project.
+Adjust this order to match the target repository.
+Do not let this section override ProofLoop/OpenSpec workflow rules unless the project deliberately owns those rules here.
+-->
 
-1. `tech-spec.md` — long-term technical constraints
-2. `PRD.md` — product intent and stage plan
-3. `openspec/config.yaml` — workflow configuration
-4. `AGENTS.md` — repo-wide operating rules
+1. `openspec/` — change workflow, schema, proposal/design/spec/tasks format, apply, and archive rules
+2. `AGENTS.md` — repository-wide operating rules not encoded by OpenSpec
+3. `tech-spec.md` — long-term technical constraints, architecture, state model, canonical objects, and testing posture
+4. `PRD.md` — product intent, stage plan, and acceptance criteria for the active product scope
+5. `CLARIFY.md` — resolved clarifications and decision history, when present
 
 ## Decisions Log
 
