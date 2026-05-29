@@ -53,21 +53,21 @@ If a section looks like a process or governance rule, it belongs in `AGENTS.md`,
 - Key dependencies:
 - External services:
 
-## Core Roles
+## Runtime Actors / System Participants
 
-<!-- List the system participants, actors, or user roles. -->
+<!-- List the system's runtime actors, services, or automated participants. Not product roles or user personas. -->
 
-- <role>: <brief description>
+- <actor>: <brief description>
 
 ## Stable Working Names
 
-<!-- List capability names, module names, or labels that must not drift without an authority update. -->
+<!-- List technical names that must not drift without an authority update: modules, capabilities, states, artifacts. Do not record process roles or project slogans here. -->
 
 - <name>: <what it refers to>
 
-## Decisions Log
+## Technical Decisions Log
 
-<!-- Record durable technical decisions made during exploration or planning. Brain appends entries here, never rewrites. -->
+<!-- Record durable technical decisions made during exploration or planning. Brain appends entries here, never rewrites. Do not log product decisions or process decisions here; those belong in PRD.md or AGENTS.md. -->
 
 <!-- Format:
 ### YYYY-MM-DD — <decision title>
