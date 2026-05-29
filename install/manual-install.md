@@ -22,7 +22,7 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
    - `openspec/config.yaml.example`
    - `openspec/schemas/README.md`
    - `openspec/schemas/spec-driven/`
-2. Copy `agents/` into `<target-project>/.opencode/agents/`.
+2. Copy `.opencode/agents/` into `<target-project>/.opencode/agents/`.
 3. Copy `.agents/contracts/` into `<target-project>/.agents/contracts/`.
 5. If the target project has no `openspec/config.yaml`, copy `openspec/config.yaml.example` to `openspec/config.yaml`.
 6. If `openspec/config.yaml` already exists, update its `schema:` field to `spec-driven`.

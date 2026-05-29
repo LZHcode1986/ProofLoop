@@ -207,7 +207,7 @@ $agentDestination = Join-Path $targetRoot '.opencode/agents'
 $skillDestination = Join-Path $targetRoot '.agents/skills'
 
 Write-Info "Installing ProofLoop agent definitions into $agentDestination"
-Install-Directory  -SourcePath (Join-Path $repoRoot 'agents')  -DestinationPath $agentDestination  -Label '.opencode/agents'
+Install-Directory  -SourcePath (Join-Path $repoRoot '.opencode/agents')  -DestinationPath $agentDestination  -Label '.opencode/agents'
 
 $contractsSource = (Join-Path $repoRoot '.agents/contracts')
 $contractsDestination = (Join-Path $targetRoot '.agents/contracts')
