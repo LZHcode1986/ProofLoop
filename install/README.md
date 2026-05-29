@@ -32,6 +32,7 @@ ProofLoop is installed into the target project by default:
 - target project:
 	- `AGENTS.md`
 	- `tech-spec.md`
+	- `tech-spec/` (architecture.md, api.md, state.md, testing.md)
 	- `openspec/QUALITY-GATE.md`
 	- `openspec/config.yaml.example`
 	- `openspec/schemas/README.md`

@@ -28,7 +28,8 @@ $projectFileAssets = @(
 )
 
 $projectDirectoryAssets = @(
-    'openspec/schemas/spec-driven'
+    'openspec/schemas/spec-driven',
+    'tech-spec'
 )
 
 function Write-Info {

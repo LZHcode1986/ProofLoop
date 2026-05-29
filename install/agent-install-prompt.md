@@ -23,6 +23,10 @@ Steps:
 3. Verify that these paths now exist in the target project:
    - AGENTS.md
    - tech-spec.md
+   - tech-spec/architecture.md
+   - tech-spec/api.md
+   - tech-spec/state.md
+   - tech-spec/testing.md
    - openspec/QUALITY-GATE.md
    - openspec/config.yaml.example
    - openspec/schemas/spec-driven/schema.yaml

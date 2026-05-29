@@ -1,29 +1,24 @@
 # Tech Spec
 
 This document is a fill-in template for long-term, project-wide technical specifications.
-After installing ProofLoop into a project, Brain owns and maintains that project's copy of this file.
+After installing ProofLoop into a project, Brain owns and maintains that project's copy of this file and the `tech-spec/` directory.
 Downstream agents read the filled project copy as an authoritative technical reference.
 
-Fill in the sections below for your project before using this file as a development authority.
+Fill in this file and the sub-files below for your project before using them as a development authority.
 Leave a section as `<unspecified>` only if the project genuinely has no constraint for it yet.
 Delete example placeholders once real project values exist.
 
 This template is not the authority for ProofLoop's own workflow rules.
 For this repository's workflow, follow `AGENTS.md`, `openspec/`, and the agent contracts.
 
-## When to Split
+---
 
-When `tech-spec.md` exceeds 200 lines, create a `tech-spec/` directory and move domain-specific sections into separate files:
+## Index
 
-```text
-tech-spec.md              ← navigation, project boundary, shared principles, authority order, decisions log
-tech-spec/architecture.md ← architecture, module boundaries, persistence
-tech-spec/api.md          ← API principles, interfaces, contracts
-tech-spec/state.md        ← state model, canonical objects
-tech-spec/testing.md      ← testing posture, validation commands, test data policy
-```
-
-Keep `tech-spec.md` as the entry point with links to each sub-file. Brain maintains the split structure the same way it maintains the single-file version.
+- [Architecture](tech-spec/architecture.md) — layering, module boundaries, persistence, background jobs
+- [API](tech-spec/api.md) — API principles, interfaces, contracts
+- [State](tech-spec/state.md) — state model, canonical objects
+- [Testing](tech-spec/testing.md) — testing posture, validation commands, test data policy
 
 ---
 
@@ -48,70 +43,17 @@ Keep `tech-spec.md` as the entry point with links to each sub-file. Brain mainta
 - Key dependencies:
 - External services:
 
-## Architecture
-
-<!-- Describe the system's layering, module boundaries, and deployment shape. -->
-
-- Style: <e.g., monolith, modular monolith, microservices, serverless, CLI, library>
-- Layers:
-- Module boundaries:
-- Entry points:
-- Deployment target:
-- Persistence:
-- Background jobs:
-
 ## Core Roles
 
 <!-- List the system participants, actors, or user roles. -->
 
 - <role>: <brief description>
 
-## State Model
-
-<!-- Define the authoritative state machine or lifecycle model. List state names that must not drift. -->
-
-- States:
-- Transitions:
-- Authority source:
-- Invalid states:
-
-## Canonical Objects
-
-<!-- List the authoritative data structures or domain objects. -->
-
-- <object name>: <brief description, key fields>
-
-## API Principles
-
-<!-- Define the contract principles for APIs, interfaces, or public surfaces. -->
-
-- Style: <e.g., REST, GraphQL, RPC, CLI flags, library API>
-- Versioning:
-- Error handling:
-- Authentication:
-- Backward compatibility:
-
-## Testing Posture
-
-<!-- Define the testing strategy and what is expected for each change type. -->
-
-- Strategy: <e.g., TDD-first, contract tests, integration tests, E2E>
-- Required test types:
-- Required validation commands:
-- Coverage expectations:
-- Test data policy:
-
 ## Shared Principles
 
 <!-- List technical principles that all slices and stages must follow. -->
 
 - <principle>: <brief description>
-
-## Runtime Artifacts
-
-<!-- Define the trace, audit, snapshot, or delivery artifacts that prove execution. -->
-
-- <artifact>: <what it proves, where it lives>
 
 ## Stable Working Names
 

@@ -19,6 +19,10 @@ pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-pr
 1. Copy these files into the target project:
    - `AGENTS.md`
    - `tech-spec.md`
+   - `tech-spec/architecture.md`
+   - `tech-spec/api.md`
+   - `tech-spec/state.md`
+   - `tech-spec/testing.md`
    - `openspec/QUALITY-GATE.md`
    - `openspec/config.yaml.example`
    - `openspec/schemas/README.md`
@@ -44,6 +48,7 @@ After installation, confirm:
 - `openspec/schemas/spec-driven/schema.yaml` exists
 - `openspec/QUALITY-GATE.md` exists
 - `tech-spec.md` exists
+- `tech-spec/` directory with architecture.md, api.md, state.md, testing.md exists
 - required agent files exist under `<target-project>/.opencode/agents/`
   - `brain.md`
   - `propose.md`
