@@ -21,6 +21,7 @@ $actions = New-Object System.Collections.Generic.List[string]
 
 $projectFileAssets = @(
     'AGENTS.md',
+    'tech-spec.md',
     'openspec/QUALITY-GATE.md',
     'openspec/config.yaml.example',
     'openspec/schemas/README.md'

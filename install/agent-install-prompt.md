@@ -22,6 +22,7 @@ Steps:
    pwsh -File "<proofloop-repo-path>/install/install-proofloop.ps1" -TargetProjectPath "<target-project-path>"
 3. Verify that these paths now exist in the target project:
    - AGENTS.md
+   - tech-spec.md
    - openspec/QUALITY-GATE.md
    - openspec/config.yaml.example
    - openspec/schemas/spec-driven/schema.yaml
