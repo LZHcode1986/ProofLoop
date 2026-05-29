@@ -1,7 +1,6 @@
 ---
 description: OpenSpec Spec Verifier - Document readiness auditor.
 mode: subagent
-model: 
 hidden: true
 permission:
   edit: deny

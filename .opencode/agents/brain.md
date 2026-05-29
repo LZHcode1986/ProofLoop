@@ -1,7 +1,6 @@
 ---
 description: ProofLoop L0 governance agent for intake, PRD ownership, and handoff to planning or execution subagents.
 mode: primary
-model: 
 color: "#7aa2f7"
 permission:
   edit:
@@ -9,7 +8,7 @@ permission:
     "PRD.md": allow
     "CLARIFY.md": allow
     "tech-spec.md": allow
-    “tech-spec/**”: allow
+    "tech-spec/**": allow
     "AGENTS.md": allow
     "openspec/config.yaml": allow
     "openspec/QUALITY-GATE.md": allow

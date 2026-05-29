@@ -1,7 +1,6 @@
 ---
 description: Single-task OpenSpec implementation worker.
 mode: subagent
-model: 
 hidden: true
 permission:
   edit: allow

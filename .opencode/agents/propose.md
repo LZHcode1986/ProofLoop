@@ -1,7 +1,6 @@
 ---
 description: Brain-dispatched OpenSpec planning subagent that turns a stable PRD or planning brief into formal change artifacts.
 mode: subagent
-model: 
 color: "#efcde3"
 permission:
   edit:

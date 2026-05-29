@@ -1,7 +1,6 @@
 ---
 description: Gitignore Writer Agent. Checks for untracked files that should not be versioned and updates .gitignore accordingly.
 mode: subagent
-model: 
 hidden: true
 temperature: 0.0
 permission:

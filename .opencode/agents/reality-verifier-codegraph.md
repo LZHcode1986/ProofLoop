@@ -1,7 +1,6 @@
 ---
 description: OpenSpec Reality Verifier - CodeGraph-backed code-reality readiness auditor.
 mode: subagent
-model: 
 hidden: true
 permission:
   edit: deny

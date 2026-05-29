@@ -1,7 +1,6 @@
 ---
 description: Git boundary closure and evidence receipt subagent.
 mode: subagent
-model: 
 hidden: true
 temperature: 0.0
 permission:

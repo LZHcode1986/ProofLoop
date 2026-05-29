@@ -1,7 +1,6 @@
 ---
 description: OpenSpec Code Verifier - slice-level implementation quality gate.
 mode: subagent
-model: 
 hidden: true
 permission:
   edit:

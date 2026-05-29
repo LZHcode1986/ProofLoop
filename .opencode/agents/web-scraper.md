@@ -1,7 +1,6 @@
 ---
 description: Brain-dispatched external research agent for docs, standards, repositories, and feasibility checks.
 mode: subagent
-model: 
 hidden: true
 permission:
   edit: deny
