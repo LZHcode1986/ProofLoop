@@ -1,18 +1,10 @@
-# ProofLoop Repository Rules
+# ProofLoop Repository Operating Rules
 
 ## Rule Priority
 
 - For change workflow, spec structure, proposal/design/tasks format, archive rules, and implementation process, follow `openspec/` as the single source of truth.
 - Use this file for repo-specific operating rules that OpenSpec itself does not encode.
 - When this file conflicts with any older archived methodology document, this file wins.
-
-## Repo Role
-
-- This repo is the coordination hub for the ProofLoop workflow built on OpenSpec.
-- Live workflow assets live under `openspec/` at the repository root.
-- `.agents/skills/` contains reusable skill source files.
-- Fixed Brain subagent packet formats live in `.agents/contracts/dispatch-packets.md`.
-- Fixed Executor subagent packet formats live in `.agents/contracts/executor-dispatch-packets.md`.
 
 ## Source Of Truth
 
@@ -32,102 +24,50 @@ When documents conflict, follow this priority:
 4. `PRD.md` — product intent, stage plan, and acceptance criteria for the active product scope
 5. `CLARIFY.md` — resolved clarifications and decision history, when present
 
-## Project Boundary
-
-- Project name:
-- Domain:
-- Product boundary:
-- Explicit non-goals:
-- Supported environments:
-
-## Shared Principles
-
-<!-- List technical principles that all slices and stages must follow. -->
-
-- <principle>: <brief description>
-
 ## Workflow Rule Ownership
 
-- Brain owns PRD intake, acceptance criteria, stage planning, and archive transition decisions. 
-- Propose owns one-stage OpenSpec decomposition into proposal, design, specs, and tasks. 
-- Executor owns apply orchestration, Worker dispatch, run ledger, git boundary dispatch, verifier dispatch, and rescue flow. 
-- Worker owns one implementation task only. 
-- Committer owns git boundary closure, mechanical scope checks, and boundary receipts. 
-- Reality Verifier owns code-reality readiness after Propose creates formal artifacts. 
-- Code Verifier owns slice-level semantic verification after boundary receipts exist. 
-- Implementation Reviewer owns stage-level integrated review and Brain-authorized archive execution. 
-- Executor dispatch packet shapes for Worker, Code Verifier, and Committer are owned by `.agents/contracts/executor-dispatch-packets.md`.
+- **Brain (L0)**: Owns user intent, PRD intake, acceptance criteria, stage planning, Proof Posture classification, and archive transition decisions.
+- **Propose (L1)**: Owns one-stage OpenSpec decomposition into proposal, design, specs, and tasks. Adjusts verifier intensity based on Proof Posture.
+- **Executor (L1)**: Owns apply orchestration, Worker dispatch, run ledger, Git Boundary Mode selection, Evidence Packet assembly, and rescue flow.
+- **Worker (L2)**: Owns one implementation task only. Produces local structured evidence.
+- **Committer (L2)**: Owns git boundary closure (commits, diff-snapshots, or no-ops).
+- **Reality Verifier (L2)**: Owns code-reality readiness checks. Focuses on contradictions; unverified assumptions do not block P0/P1 by default.
+- **Code Verifier (L2)**: Owns slice-level semantic verification based strictly on the `Executor Evidence Packet`.
+- **Implementation Reviewer (L2)**: Owns stage-level integrated review and archive execution.
 
-## Environment Notes
+## Proof Posture Classifier
 
-- OS:
-- Shell:
-- Command style: prefer PowerShell-native commands and `;` for sequencing
+Brain classifies each stage into one of three Proof Postures before planning:
+- **P0 Fast Proof** (Low Risk): Docs, tooling, setup tasks, or single-file bugfixes with no security, privacy, payment, or storage/migration impact. Dispatches do not run independent L2 verifiers by default.
+- **P1 Stage Proof** (Default / Normal Risk): Ordinary features, multi-file changes affecting a single user loop, or multi-slice changes with clear boundaries. L2 verifier warnings/risks do not block handoff.
+- **P2 Audit Proof** (High Risk): Changes involving authentication, authorization, security controls, privacy, payment, database migrations, cross-repo sync, concurrency consistency, or audit-level requirements. Enforces hard verifier gates (any warning blocks).
 
-## Design Philosophy
+## Failure Attribution & Rescue Rules
 
-- Manage complexity before optimizing for local convenience.
-- Prefer stage and module boundaries that hide internal sequencing from callers.
-- Do not introduce shallow wrapper stages that move work without creating a clearer module boundary.
-- If the boundary matters and two partitions are plausible, compare both before choosing.
-- Do not optimize only for the current prompt when the boundary would increase future change amplification.
+Executor categorizes Code Verifier failures and routes rescue actions:
+- `IMPLEMENTATION DEFECT` => Dispatch Worker Fix in `repair` mode (max 2 attempts per slice gate, then diagnose).
+- `EVIDENCE DEFECT` => Dispatch `@worker` in Evidence Backfill mode (max 1 attempt) to reconstruct missing evidence without modifying product code. Do not rerun code implementation.
+- `PROTOCOL DEFECT` => Executor or dispatcher must fix the dispatch packet or agent contract. Stop execution. Do not edit product code.
+- `PLANNING DEFECT` => Stop execution and return to Propose or Brain. Planning owner repairs planning artifacts.
 
-## Stage Planning Summary
+## Git Boundary Mode Rules
 
-- Brain owns PRD decomposition into stages.
-- Stages must represent one independently valuable capability or one coherent module boundary.
-- If a boundary is unclear, Brain should compare plausible partitions before choosing one.
+Executor chooses Boundary Mode based on risk:
+- `per-task`: Commit after each task. Used in P2, security/migration tasks, or tasks with overlapping file scopes.
+- `slice`: Commit at the end of the slice gate. Intermediate tasks record `diff-snapshot` receipts (changed files and scope check without commit). Used in P1.
+- `final`: Commit at the end of the change. Intermediate tasks record `diff-snapshots`. Used in P0.
+- `no-op`: No commit needed. Used for read-only or docs tasks.
 
-## Task Decomposition Summary
-
-- Propose receives exactly one Brain-selected stage.
-- Propose turns that stage into OpenSpec artifacts and verifier-gated `tasks.md`.
-
-## Verification Boundaries
-
-- `spec-verifier` checks stage planning artifacts for readiness and acceptance coverage.
-- `reality-verifier` checks planning artifacts against current repository reality before execution.
-- `code-verifier` checks slice-level implementation gates.
-- `implementation-reviewer` checks stage-level integrated outcomes.
-- `committer` only closes git boundaries.
-
-### Subagent Reliability
+## Subagent Reliability
 
 - Reuse the existing `task_id` for any continuation of the same Change, Stage, Slice, or task. Do not start a fresh session to recover context.
 - Start a new session only when the scope is new, the previous session is complete and no longer needed, or the reused session returns an unrecoverable error.
-- Every subagent dispatch must include an expected timeout. Default to 120 seconds when no better estimate exists.
+- Every subagent dispatch must include an expected timeout. Default to 120 seconds.
 - On timeout, retry once with the same `task_id` and instruct the subagent to continue from the last completed checkpoint.
-- If the same-session retry also stalls, start one fresh session with a narrower packet that excludes the suspected stall trigger.
-- If the fresh session fails, stop. Executor reports `Execution blocked` to Brain; Brain reports `Blocked` to the user with the reason and retry history.
 
-## Git Worktree Policy
+## Rules Lazy Loading
 
-- Current MVP policy is manual selection, not automatic management.
-- Brain or the human operator selects the active worktree for a change or stage.
-- Executor runs inside the selected worktree.
-- Worker, verifiers, and committer stay inside that worktree.
-- Automatic worktree creation, cleanup, or rebase belongs to a future `manager` role and is out of scope for the current MVP.
-
-## Think Before Coding
-
-- State assumptions explicitly when they matter.
-- If a boundary is unclear, stop and name the ambiguity instead of guessing.
-- If two different decompositions are plausible, compare them briefly before choosing.
-
-## Simplicity First
-
-- Minimum code that solves the problem. Nothing speculative.
-- No abstractions for single-use code unless they create a clearly deeper module.
-- No flexibility or configurability that was not requested.
-
-## Surgical Changes
-
-- Touch only what the current request requires.
-- Do not clean up unrelated code just because you noticed it.
-- Match the existing style unless the current task is explicitly about changing the standard.
-
-## Goal-Driven Execution
-
-- Define success criteria before implementation.
-- Break work into verifiable stage and task boundaries.
-- Prefer strong acceptance criteria over vague completion language.
+To optimize agent context window efficiency, detailed guidelines and specific role contracts are lazy-loaded on demand using `opencode.json` instructions:
+- **Quality Gates & Checklists**: Read `openspec/QUALITY-GATE.md` and files in `openspec/gates/` only during proposal verification, task validation, or implementation check.
+- **Contract & Handoff Packets**: Read `.agents/contracts/` schemas when dispatching or validating messages between agents.
+- **Role Specifications**: Refer to `.opencode/agents/` for agent definitions and boundaries.

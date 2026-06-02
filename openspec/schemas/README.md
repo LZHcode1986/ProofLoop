@@ -9,7 +9,14 @@ If you want to install the whole ProofLoop workflow, including agents, skills, a
 ```text
 openspec/schemas/
 ├── README.md
-└── spec-driven/
+├── proofloop-spec-driven/     <-- Default active schema
+│   ├── schema.yaml
+│   └── templates/
+│       ├── proposal.md
+│       ├── design.md
+│       ├── spec.md
+│       └── tasks.md
+└── spec-driven/               <-- Legacy alias schema (optional)
     ├── schema.yaml
     └── templates/
         ├── proposal.md
@@ -27,9 +34,9 @@ This follows the normal OpenSpec schema layout:
 
 ## How to use this schema in another project
 
-1. Copy `openspec/schemas/spec-driven/` into the target project's `openspec/schemas/spec-driven/`.
+1. Copy `openspec/schemas/proofloop-spec-driven/` into the target project's `openspec/schemas/proofloop-spec-driven/`.
 2. Copy `openspec/config.yaml.example` into the target project as `openspec/config.yaml`.
-3. Keep `schema: spec-driven` unless you intentionally rename the schema package.
+3. Keep `schema: proofloop-spec-driven` (or legacy alias `spec-driven`) unless you intentionally rename the schema package.
 4. Replace the project placeholders in `openspec/config.yaml`, especially `Project: <project name>`.
 5. Fill in the remaining `context`, `rules`, and optional `traceability` sections for your own project.
 6. Copy `openspec/QUALITY-GATE.md` as well if you want the same ProofLoop gate discipline.
@@ -45,7 +52,7 @@ Domain: <business domain or product area>
 Product boundary: <product boundary; define what the system does and does not do>
 ```
 
-Keep the reusable schema package name `spec-driven` unless you are intentionally forking the schema itself.
+Keep the reusable schema package name `proofloop-spec-driven` unless you are intentionally forking the schema itself.
 
 ## If you rename the schema
 
@@ -59,4 +66,5 @@ Do not rename only one of them, or OpenSpec users will see a confusing mismatch 
 
 ## What this repository ships
 
-- `spec-driven`: the reusable ProofLoop schema with proposal, design, specs, tasks, and apply-stage instructions.
+- `proofloop-spec-driven`: the default active ProofLoop schema with proposal, design, specs, tasks, and apply-stage instructions.
+- `spec-driven`: the legacy alias schema maintained for compatibility.

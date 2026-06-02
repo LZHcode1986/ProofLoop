@@ -107,3 +107,13 @@ After all tests pass, look for [refactor candidates](refactoring.md):
 [ ] Code is minimal for this test
 [ ] No speculative features added
 ```
+
+## OpenCode Worker Non-interactive Mode
+
+When this skill is loaded by a `@worker` subagent:
+- Do not ask the user questions.
+- Treat the Task Packet, Slice Contract, and Acceptance Criteria as the approved testing scope.
+- If the public interface, behavior, or verification target is missing or ambiguous, return:
+  `Implementation blocked: untestable task packet`.
+- Do not invent extra product scope to make TDD possible.
+- Produce RED/GREEN/REFACTOR evidence in the required structured fields of the Worker response packet.

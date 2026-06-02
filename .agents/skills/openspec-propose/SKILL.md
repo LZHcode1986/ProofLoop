@@ -124,8 +124,11 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - `tasks.md` must follow the OpenSpec x spec-kit blended structure and the current tasks template
       - Each task must preserve the `1.1 / 1.2` style and support `[P]` and `[Slice-X]` tags
       - If the current change is `interactive`, the first item in `Blocking` in `tasks.md` must be `Proof Task`
-      - Every task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, `Skill Reason`, and `Boundary Receipt Required` for implementation tasks
-      - Any task that changes code must use `Execution Type: test-first-code` and `Required Skills: test-driven-development`
+      - If using `Slice Contract` under `proofloop-spec-driven` schema:
+        - Setup, Blocking, and Reconciliation tasks only require `Allowed File Scope` and `Verification` command.
+        - Implementation tasks under a Slice inherit metadata from the `Slice Contract` using `Uses Slice Contract: yes` and `Overrides: none` (or specify explicit overrides). They do not need to repeat redundant metadata (like Execution Type, Required Skills, etc.).
+        - If not using Slice Contract (legacy spec-driven), every implementation task must include task-level metadata: `Execution Type`, `Required Skills`, `Required Review Skills`, `Skill Reason`, and `Boundary Receipt Required`.
+      - Any task that changes code (or its corresponding Slice Contract) must specify test-first-code requirements (using `Execution Type: test-first-code` and `Required Skills: test-driven-development`).
       - Non-code tasks must not load TDD by default
       - Immediately after `specs/*` + `tasks.md`, run **Tasks Readiness Check** using `openspec/QUALITY-GATE.md` before declaring the change ready
 
@@ -140,30 +143,36 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - If any item is missing: update proposal.md, then re-check
         - DO NOT proceed to design.md until proofability is explicit
       - **Tasks Readiness Check** (BLOCKS declaring planning readiness back to Brain)
-        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`
-        - ALWAYS spawn an independent `spec-verifier` sub-agent to execute this check
-        - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review
-        - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`
-        - The check scope is artifact completeness, consistency, omissions, and acceptance coverage. It does not decide implementation readiness.
-      - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, if any implementation task lacks `Allowed File Scope` or `Boundary Receipt Required`, or if any verifier task lacks `Boundary Evidence Required` or gate standards do not match the slice acceptance criteria they are supposed to verify
-        - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself
-        - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion
-        - The document-readiness result summary in the conversation MUST use this format:
-          - first line: `DOC READINESS PASS` or `DOC READINESS FAIL`
-          - then `findings`, ordered by severity
-          - if result is `DOC READINESS PASS`, still include `residual risks`
-        - Summarize the `spec-verifier` result in the conversation
-        - **Handling FAIL results (Integrated Optimization)**:
-          1. Parse the "Logical Gap / Conflict" and "Actionable Missing Piece" from the findings.
-          2. DO NOT just patch the single reported artifact. Trace the requirement logic from `proposal.md` -> `design.md` -> `specs/*` -> `tasks.md`.
-          3. Perform a **Batch Repair**: Update ALL affected artifacts in a single coherent step before re-running the verifier.
-          4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `DOC READINESS FAIL` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
-        - Only after the `spec-verifier` returns `DOC READINESS PASS` may the main agent mark `Tasks Readiness Check` complete
-        - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path
-        - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status
-        - AFTER `spec-verifier`, ALWAYS run the configured independent reality readiness verifier on the same change before reporting readiness back to Brain
-        - Use `reality-verifier` by default. Use an optional variant only when the target project explicitly configures one.
-        - DO NOT report apply-ready or implementation-ready status from propose; only report that the artifacts are ready for Brain review once both independent checks finish
+        - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`.
+        - Based on the **Proof Posture** assigned to this stage:
+          - **P0 Fast Proof**:
+            - Do not spawn independent `spec-verifier` or `reality-verifier` sub-agents by default.
+            - Rely on self-check, checking `openspec/QUALITY-GATE.md`, and running `openspec validate --strict`.
+            - The main agent self-approves the checklist and the change readiness.
+          - **P1 Stage Proof** (Default) & **P2 Audit Proof**:
+            - ALWAYS spawn an independent `spec-verifier` sub-agent to execute this check.
+            - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review.
+            - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
+            - The check scope is artifact completeness, consistency, omissions, and acceptance coverage. It does not decide implementation readiness.
+            - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, if any implementation task lacks `Allowed File Scope` or `Boundary Receipt Required`, or if any verifier task lacks `Boundary Evidence Required` (or `Evidence Packet Required` for new templates) or gate standards do not match the slice acceptance criteria they are supposed to verify.
+            - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself.
+            - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion.
+            - The document-readiness result summary in the conversation MUST use this format:
+              - first line: `DOC READINESS: BLOCKED | READY_WITH_WARNINGS | READY`
+              - then `BLOCKERS`, `WARNINGS`, and `NOTES`
+              - then `Acceptance Coverage`
+            - Summarize the `spec-verifier` result in the conversation.
+            - **Handling BLOCKED results (Integrated Optimization)**:
+              1. Parse the "BLOCKERS" from the findings.
+              2. DO NOT just patch the single reported artifact. Trace the requirement logic from `proposal.md` -> `design.md` -> `specs/*` -> `tasks.md`.
+              3. Perform a **Batch Repair**: Update ALL affected artifacts in a single coherent step before re-running the verifier.
+              4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `DOC READINESS: BLOCKED` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
+            - Only after the `spec-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS` may the main agent mark `Tasks Readiness Check` complete. Warning status does not block execution unless Brain explicitly escalates it.
+            - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path.
+            - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status.
+            - AFTER `spec-verifier`, ALWAYS run the configured independent reality readiness verifier on the same change before reporting readiness back to Brain.
+            - Use `reality-verifier` by default. Use an optional variant only when the target project explicitly configures one.
+        - DO NOT report apply-ready or implementation-ready status from propose; only report that the artifacts are ready for Brain review once the required checks (self-check for P0, independent checks for P1/P2) finish.
 
       Task decomposition requirements:
       - Write `Setup` tasks first for context preparation and basic scaffolding
@@ -190,8 +199,8 @@ If the request explicitly says `according to <file-path-list>, start task decomp
       - **Required Review Skills Standards**:
         - Verifier gate tasks: `code-review-and-quality`
         - Add `security-and-hardening` only when user input, auth, permissions, storage, upload, external integration, or network boundary is in scope
-      - Every implementation task must explicitly include `Allowed File Scope` and `Boundary Receipt Required`
-      - Every `verifier` task must explicitly include `Covered Tasks`, `Inspection Scope`, `Inspection Content`, `Out of Scope`, `Boundary Evidence Required`, and `PASS/FAIL Gate`
+      - Every implementation task must either inherit metadata via Slice Contract or explicitly include `Allowed File Scope` and `Boundary Receipt Required`
+      - Every `verifier` task must explicitly include `Covered Tasks`, `Inspection Scope`, and `PASS/FAIL Gate` (as well as `Evidence Packet Required` for proofloop-spec-driven templates).
       - Every verifier `PASS/FAIL Gate` must align with the current slice acceptance criteria and must not expand into unrelated stage-level review
       - Implementation task verification commands and verifier gate standards must be consistent; do not add extra gates to compensate for unclear task decomposition
       - **Branch Logic**: If a task or slice contains conditional branches (e.g., "if test fails, stop and log"), these MUST be explicitly documented in the tasks.
@@ -247,11 +256,11 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
-- Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `DOC READINESS PASS`
-- Do not replace independent spec-verifier review with self-review, even temporarily
-- Do not declare the change ready, apply-ready, or fully gated if `spec-verifier` or the configured reality readiness verifier has not run
-- If spec-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
-- If reality readiness verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- For P1/P2: Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS`
+- For P1/P2: Do not replace independent spec-verifier review with self-review, even temporarily
+- Do not declare the change ready, apply-ready, or fully gated if the required verifiers (spec-verifier and reality readiness verifier for P1/P2; self-check for P0) have not run
+- For P1/P2: If spec-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- For P1/P2: If reality readiness verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum

@@ -51,27 +51,41 @@ The caller should provide:
 
 - Prefer CodeGraph structural inspection for code-reality checks.
 - If current stage-related code, config, or test paths have `git diff`, run `codegraph sync` before structural inspection.
-- If CodeGraph is not initialized, unavailable, stale after sync, or visibly inconsistent with repository files, return `REALITY READINESS FAIL` with a blocker finding.
+- If CodeGraph is not initialized, unavailable, stale after sync, or visibly inconsistent with repository files, return `REALITY READINESS: BLOCKED` with a blocker finding.
 - Use normal file reads only to supplement CodeGraph for commands, runbooks, docs, or non-code configuration that CodeGraph does not cover.
 - Review referenced non-project validation documents only to check whether their claimed runtime behavior matches current code reality.
 - Do not rewrite the planning artifacts.
 - Do not implement fixes.
 - Do not judge whether the product idea is good; judge whether the documented assumptions match reality.
+- **Blocking Rules**:
+  - `BLOCKED` only if there is a direct contradiction that breaks the minimum closed loop or impacts security/data/migration, or an unverified critical assumption in a P2 (Audit) task, or if CodeGraph inspection itself fails.
+  - `READY_WITH_RISKS` if assumptions are unverified but do not prevent starting the minimum closed loop (e.g. minor assumptions that can be verified by Worker during implementation).
+  - `READY` if all critical anchors are confirmed.
 
 ## REQUIRED Output Format
 
 You MUST output your readiness result using EXACTLY the following format:
 
-[REALITY READINESS PASS or REALITY READINESS FAIL]
+REALITY READINESS: BLOCKED | READY_WITH_RISKS | READY
+
+### Inspection Capability
+- CodeGraph available: yes/no
+- Repository grep/read available: yes/no
+- Commands run: [list of commands]
 
 ### Assumption Status
 - [assumption]: confirmed | contradicted | unverified
-  - Evidence: [code anchor, test anchor, command, or validation-doc anchor]
+  - Risk Level: critical | normal | low
+  - Evidence/Notes: [code anchor, test anchor, command, or why unverified]
+  - Mitigated by Task: yes/no
 
-### Findings (Only if REALITY READINESS FAIL)
-1. **Deficient Artifact(s)**: [List the specific files, e.g., proposal.md, tasks.md]
-2. **Reality Mismatch**: [Clearly state the mismatch between the documented claim and repository reality]
-3. **Actionable Missing Piece**: [What EXACTLY the planning author needs to change or verify]
+### Critical Contradictions (Only if REALITY READINESS: BLOCKED)
+1. **Deficient Artifact(s)**: [List files]
+2. **Reality Mismatch**: [Mismatch between documented claim and reality]
+3. **Execution Impact**: [Why this prevents safe execution]
+4. **Actionable Fix**: [What must be changed]
 
-### Residual Risks (Only if REALITY READINESS PASS)
-- [List any minor risks that do not block execution]
+### Unverified Assumptions & Risks
+1. **Assumption**: [Describe]
+2. **Risk Level**: [critical | normal | low]
+3. **Mitigation/Note**: [What Worker must verify or what risk we accept]

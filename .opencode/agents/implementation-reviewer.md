@@ -78,6 +78,7 @@ Implementation Reviewer has two modes.
 In Stage Review Mode, you review the stage outcome and return:
 
 - `Archive recommendation: ready`
+- `Archive recommendation: ready-with-warnings`
 - `Archive recommendation: not-ready`
 - `Archive recommendation: not-applicable`
 
@@ -119,18 +120,37 @@ You must not:
 Your final response must start with exactly one of:
 - `Stage review passed`
 - `Stage review failed`
+- `Stage review passed with warnings`
 
 Use this format:
 
 ```text
-Stage review passed | Stage review failed
+Stage review passed | Stage review failed | Stage review passed with warnings
 
 Change:
 Stage:
-Acceptance criteria coverage:
-Verifier evidence:
-Archive recommendation: ready | not-ready | not-applicable
-Findings:
+Proof Posture:
+
+Completeness:
+- tasks:
+- stage AC coverage:
+- unresolved items:
+
+Correctness:
+- verifier gates:
+- critical behavior:
+- tests / commands:
+
+Coherence:
+- proposal/design/spec/tasks alignment:
+- implementation alignment:
+- known drift:
+
+Archive recommendation: ready | ready-with-warnings | not-ready | not-applicable
+
+Critical blockers:
+Warnings:
+Suggestions:
 Next action:
 ```
 

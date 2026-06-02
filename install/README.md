@@ -29,6 +29,37 @@ pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
 
 ProofLoop is installed into the target project by default:
 
+# Install ProofLoop
+
+ProofLoop now supports two practical installation paths for an existing project:
+
+1. One-command install with PowerShell.
+2. AI-assisted install with a ready-made prompt.
+
+The PowerShell installer uses `pwsh`, so it can run on Windows and on other platforms that have PowerShell 7 installed.
+
+## One-command install
+
+From the ProofLoop repository checkout, run:
+
+```powershell
+pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-project>
+```
+
+After the repository is published on GitHub, users can also run the bootstrap installer directly from GitHub:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
+	$bootstrap = Join-Path $env:TEMP 'proofloop-bootstrap.ps1'
+	Invoke-WebRequest 'https://raw.githubusercontent.com/LZHcode1986/ProofLoop/main/install/bootstrap-proofloop.ps1' -OutFile $bootstrap
+	& $bootstrap -RepositoryZipUrl 'https://github.com/LZHcode1986/ProofLoop/archive/refs/heads/main.zip' -TargetProjectPath '<path-to-target-project>'
+}"
+```
+
+## Install destinations
+
+ProofLoop is installed into the target project by default:
+
 - target project:
 	- `AGENTS.md`
 	- `tech-spec.md`
@@ -36,7 +67,7 @@ ProofLoop is installed into the target project by default:
 	- `openspec/QUALITY-GATE.md`
 	- `openspec/config.yaml.example`
 	- `openspec/schemas/README.md`
-	- `openspec/schemas/spec-driven/`
+	- `openspec/schemas/proofloop-spec-driven/`
 - target project `.opencode/agents/`:
 	- includes default `reality-verifier.md`
 	- includes optional `reality-verifier-codegraph.md`
@@ -48,7 +79,7 @@ ProofLoop is installed into the target project by default:
 What the installer does with config:
 
 - if `openspec/config.yaml` does not exist, it creates it from `config.yaml.example`
-- if `openspec/config.yaml` already exists, it keeps the file and updates `schema:` to `spec-driven`
+- if `openspec/config.yaml` already exists, it keeps the file and updates `schema:` to `proofloop-spec-driven`
 - before overwriting installer-managed files, it writes `.spec-driven.bak-<timestamp>` backups
 
 ## AI-assisted install

@@ -215,52 +215,27 @@ When writing MODIFIED requirements in `openspec/changes/<change>/specs/<capabili
 3. If you need to change a requirement header text, use `## RENAMED Requirements` to rename it first, then `## MODIFIED Requirements` with the new name. Never rename a header inside a MODIFIED block.
 4. If a base spec does not exist at `openspec/specs/<capability>/spec.md`, use only `## ADDED Requirements`. MODIFIED and RENAMED operations require an existing base spec.
 
-## L2 Plan Review Contract
+## L2 Plan Review Contract & Proof Posture Intensity
 
-When dispatching `@spec-verifier`, pass these fields verbatim from the caller:
+The planning handoff depends on the Proof Posture assigned to this stage:
 
-```text
-Acceptance Criteria Source:
-Acceptance Criteria:
- - <immutable acceptance criterion>
-```
+- **P0 Fast Proof**:
+  - Do not dispatch independent `@spec-verifier` or `@reality-verifier` subagents by default.
+  - Rely on self-check, checking `openspec/QUALITY-GATE.md`, and running `openspec validate --strict`.
+  - Dispatch verifiers only if `openspec validate` fails, tasks are unverifiable, or Brain explicitly flags high risk.
 
-You may add mapping notes that explain where the criteria are covered, but you must not edit the criteria themselves.
+- **P1 Stage Proof** (Default):
+  - Always dispatch both `@spec-verifier` and `@reality-verifier` subagents.
+  - Parse verifier outputs:
+    - `@spec-verifier` returns `DOC READINESS: BLOCKED | READY_WITH_WARNINGS | READY`.
+    - `@reality-verifier` returns `REALITY READINESS: BLOCKED | READY_WITH_RISKS | READY`.
+  - Block handoff ONLY if any verifier returns `BLOCKED`. `READY_WITH_WARNINGS` and `READY_WITH_RISKS` do not block handoff; record them as residual risks for the execution stage.
 
-After `@spec-verifier` returns, do not claim implementation readiness.
+- **P2 Audit Proof**:
+  - Always dispatch both `@spec-verifier` and `@reality-verifier` subagents.
+  - Enforce hard gates: any status other than `READY` (i.e. `BLOCKED`, `READY_WITH_WARNINGS`, `READY_WITH_RISKS`) blocks handoff until resolved.
 
-Then dispatch the configured reality readiness verifier. Use `@reality-verifier` by default. 
-
-When dispatching the reality readiness verifier, pass these fields verbatim from the caller:
-
-```text
-Acceptance Criteria Source:
-Acceptance Criteria:
- - <immutable acceptance criterion>
-```
-
-Also provide:
-
-```text
-Change:
-Stage:
-Change Path:
-Review Scope:
-- proposal.md
-- design.md
-- tasks.md
-- related code, tests, and referenced runbooks
-Expected Result:
-- REALITY READINESS PASS
-- REALITY READINESS FAIL
-```
-
-The planning handoff is complete only when:
-- `openspec validate --strict` has run
-- `@spec-verifier` has produced document-readiness output
-- the configured reality readiness verifier has produced reality-readiness output
-
-Return control to Brain for the final go / no-go decision before any execution dispatch.
+When dispatching verifiers, pass the immutable Acceptance Criteria Source, Acceptance Criteria, Change Path, and Gate/Review Scope.
 
 ## Output Contract
 
@@ -277,12 +252,25 @@ Proposal ready | Clarification required | Stage repartition required | Planning 
 
 Change:
 Stage:
-Artifacts:
-Readiness Results:
-Acceptance Criteria Status:
-Technical exploration:
-Blocking issue:
-Recommended default:
+Proof Posture:
+OpenSpec status:
+OpenSpec validation:
+Artifact readiness:
+- proposal:
+- specs:
+- design:
+- tasks:
+
+Readiness findings:
+- BLOCKER:
+- WARNING:
+- NOTE:
+
+Reality findings:
+- CONTRADICTION:
+- UNVERIFIED:
+- CONFIRMED:
+
 Next action:
 ```
 

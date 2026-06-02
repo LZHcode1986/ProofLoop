@@ -73,7 +73,7 @@ Formal change artifacts belong to `@propose` and execution state belongs to `@ex
 Brain may directly tune authoritative workflow documents when repeated execution failures show that the workflow itself is underspecified or misleading.
 All other edits belong to `@general` unless a specialized downstream agent owns the artifact or workflow.
 
-## Stage Planning Rules
+## Stage Planning Rules & Proof Posture Classification
 
 Brain owns PRD decomposition into stages.
 
@@ -87,6 +87,15 @@ Before dispatching `@propose`, Brain must define:
 - Authority source
 - Real user or system entry path
 - Minimum closed loop
+- **Proof Posture**: P0 Fast Proof | P1 Stage Proof | P2 Audit Proof
+
+### Proof Posture Classifier Rules
+Evaluate risk and select the appropriate posture:
+- **P0 Fast Proof** (Low Risk): Docs, tooling, setup tasks, or single-file bugfixes with clear acceptance criteria and no security, privacy, payment, or storage/migration impact.
+- **P1 Stage Proof** (Default / Normal Risk): Ordinary features, multi-file changes affecting a single user loop, or multi-slice changes with clear boundaries.
+- **P2 Audit Proof** (High Risk): Changes involving authentication, authorization, security controls, privacy, payment gateways, database migrations, cross-repo/multi-service synchronization, concurrency consistency, or when the user explicitly requests audit-level evidence.
+
+Brain must output the chosen Proof Posture and the rationale (risk level, scope, affected files, rollback complexity) in the dispatch packet.
 
 A valid stage must represent exactly one of:
 
@@ -250,20 +259,23 @@ After `@propose` returns `Proposal ready`, Brain must not dispatch `@executor` y
 Brain must first review the readiness results returned by `@propose`:
 
 1. `openspec validate --strict` for `STRUCTURE PASS | FAIL`
-2. independent `@spec-verifier` for `DOC READINESS PASS | FAIL`
-3. configured independent reality readiness verifier for `REALITY READINESS PASS | FAIL`
+2. independent `@spec-verifier` for `DOC READINESS: BLOCKED | READY_WITH_WARNINGS | READY`
+3. configured independent reality readiness verifier for `REALITY READINESS: BLOCKED | READY_WITH_RISKS | READY`
 
-`@propose` owns normal dispatch of `@spec-verifier` and the configured reality readiness verifier. Brain consumes the returned results; it does not directly dispatch reality readiness review during the ordinary planning flow.
+`@propose` owns normal dispatch of `@spec-verifier` and the configured reality readiness verifier. Brain consumes the returned results.
 
 Only after all three results are present may Brain summarize them for the developer and decide whether to continue toward execution.
+- If structure is `FAIL`, or doc/reality status is `BLOCKED`, Brain must block execution.
+- If doc status is `READY_WITH_WARNINGS` or reality status is `READY_WITH_RISKS`, Brain may authorize execution while capturing the warnings/risks.
+- Under P2 (Audit), any status other than `READY` blocks execution until fixed.
 
-If `DOC READINESS FAIL` or `REALITY READINESS FAIL`, Brain must route back to `@propose` to repair the planning artifacts instead of bypassing planning with inline executor instructions.
+If doc or reality readiness is `BLOCKED` (or has unresolved warnings/risks under P2), Brain must route back to `@propose` to repair the planning artifacts instead of bypassing planning with inline executor instructions.
 
 ### 7. Execution handoff
 
 Dispatch `@executor` only after:
 - a change exists
-- structure, document, and reality readiness have all passed
+- structure, document, and reality readiness checks have completed and met the posture's criteria
 - the user wants implementation to begin or continue
 
 Rules:

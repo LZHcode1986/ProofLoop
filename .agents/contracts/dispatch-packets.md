@@ -63,6 +63,7 @@ PRD Path:
 Existing Change:
 Stage ID:
 Stage Name:
+Proof Posture: P0 Fast Proof | P1 Stage Proof | P2 Audit Proof
 Stage Objective:
 Stage Boundary:
 Stage Out Of Scope:
@@ -93,6 +94,7 @@ Execution Goal:
 Worktree Path:
 Stage ID:
 Stage Name:
+Proof Posture: P0 Fast Proof | P1 Stage Proof | P2 Audit Proof
 Acceptance Criteria Source:
 Acceptance Criteria:
  - <immutable acceptance criterion>
@@ -116,6 +118,7 @@ Brain Dispatch: Stage Review
 
 Change:
 Stage:
+Proof Posture: P0 Fast Proof | P1 Stage Proof | P2 Audit Proof
 Acceptance Criteria Source:
 Acceptance Criteria:
  - <immutable acceptance criterion>
@@ -125,4 +128,5 @@ Relevant Verifier Results:
 Expected Result:
 - Stage review passed
 - Stage review failed
+- Stage review passed with warnings
 ```

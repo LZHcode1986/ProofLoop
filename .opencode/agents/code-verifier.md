@@ -20,6 +20,7 @@ Your final response must start with exactly one of:
 
 - `Verification passed`
 - `Verification failed`
+- `Verification blocked`
 
 ## Scope
 
@@ -58,101 +59,67 @@ Use only when requested. Identify practical exploitable vulnerabilities in input
 
 ## Verification Principles
 
-1. Verify the whole assigned slice, not only the final verifier task.
-2. Do not trust Worker summaries alone. Check relevant files, tests, command evidence, and boundary receipts.
+1. Verify the whole assigned slice strictly based on the provided `Executor Evidence Packet`. Do not try to search the workspace or history.
+2. Check that all required evidence fields (RED/GREEN/REFACTOR, command output excerpts, boundary receipts) are complete and coherent in the packet.
 3. Verify Required Skills compliance:
-   - Check `Task Required Skills` (explicit list from Executor) for each covered task.
-   - If a task required `test-driven-development`, verify RED/GREEN/REFACTOR evidence.
-   - If a task required `diagnose`, look for reproduce/hypothesis/instrument/fix/regression evidence.
-   - Cross-check with Original Task Packets to confirm completeness.
-4. Verify Worker-updated checkboxes are consistent with implementation evidence.
-5. Inspect the actual diff for every covered commit or no-op receipt before passing.
-6. Treat missing or insufficient boundary evidence as failure.
-7. On pass, update only the assigned verifier gate checkbox. On fail, leave the verifier gate unchecked.
+   - Check TDD RED/GREEN/REFACTOR evidence in the TDD Evidence fields of the packet.
+   - Check diagnose evidence if diagnose was required.
+4. Inspect the boundary receipts and diffs provided in the evidence packet to ensure no out-of-scope files were changed.
+5. Identify any planning gaps, missing checkboxes, or inconsistent entries.
+6. Check that the assigned verifier gate checkbox updates in `tasks.md` are performed only on `Verification passed`.
 
-### Boundary Receipt Requirement
+## Evidence Packet Verification Rules
 
-Before returning `Verification passed`, inspect the boundary receipt for every covered Worker attempt.
+You must evaluate the `Executor Evidence Packet` before performing semantic verification.
 
-Worker summaries are claims.
-Boundary receipts, diffs, tests, and command outputs are evidence.
+1. **Verify Evidence Packet Completeness**:
+   - If the `Executor Evidence Packet` is completely missing or lacks critical sections => `Verification blocked` with `Category: EVIDENCE DEFECT` and `Severity: Critical`.
+   - If Worker produced the required summaries/evidence but the Executor failed to include them in the packet => `Verification blocked` with `Category: PROTOCOL DEFECT` and `Severity: Normal`.
+   - If any covered Worker attempt lacks a boundary receipt (commit, diff-snapshot, or no-op) => `Verification blocked` with `Category: EVIDENCE DEFECT` and `Severity: Normal`.
 
-Fail the gate when:
+2. **Verify Implementation Correctness (Diff & Output Inspection)**:
+   - If the code changes violate the allowed file scope (dirty files outside scope) => `Verification failed` with `Category: IMPLEMENTATION DEFECT` and `Severity: Critical`.
+   - If the code changes do not satisfy the Slice Acceptance Criteria (failed tests, logic bugs) => `Verification failed` with `Category: IMPLEMENTATION DEFECT` and `Severity: Critical`.
+   - If the TDD RED/GREEN/REFACTOR evidence is completely missing for a code-changing task => `Verification failed` with `Category: EVIDENCE DEFECT` or `IMPLEMENTATION DEFECT` depending on code completeness.
 
-- any covered Worker attempt lacks a boundary receipt
-- the receipt reports `Commit failed`
-- the receipt reports files outside allowed scope
-- the commit hash is missing for a non-no-op attempt
-- the diff evidence is unavailable or inconsistent with Worker claims
-- checkbox updates do not match implementation evidence
-
-### Diff Inspection Rule
-
-For every covered commit receipt, inspect the actual diff before passing the gate.
-
-Acceptable inspection commands include:
-
-- `git show --stat <commit>`
-- `git show --name-only <commit>`
-- `git show <commit> -- <relevant-files>`
-- `git diff <base>..<head> -- <inspection-scope>`
-
-Do not pass a slice gate based only on final file state, Worker summary, or task checkbox state.
-
-### Required Skills Evidence Sources (What Counts as Valid)
-
-**Do not require dedicated evidence documents/files.** Dedicated evidence files are not part of the protocol. The following sources are the only acceptable evidence channels:
-
-| Skill              | Valid Evidence Sources                                                                 |
-|-------------------|----------------------------------------------------------------------------------------|
-| TDD (RED)         | Worker's `Required skills evidence:` field, test run output showing failure, or test file committed before implementation in git boundary. |
-| TDD (GREEN)       | Worker's `Required skills evidence:` field, test run output showing pass, or passing test file committed after implementation. |
-| TDD (REFACTOR)    | Worker's `Required skills evidence:` field stating whether refactoring occurred and tests still pass. |
-| diagnose          | Worker's `Required skills evidence:` field with phase-by-phase output, or relevant commit/command output in Worker summary. |
-
-When any of these channels contain the required RED/GREEN/REFACTOR evidence and the evidence is relevant to the assigned slice behavior, the skill compliance check passes. Fail when the evidence is missing, insufficient, or unrelated to the assigned slice behavior.
+3. **Verify Planning Artifact Alignment**:
+   - If `tasks.md` or `proposal.md` lacks executable contracts (missing commands, ambiguous file scopes) => `Verification blocked` with `Category: PLANNING DEFECT` and `Severity: Normal`.
 
 ## Severity
 
-- **Level 0 (Nit/Optional/FYI)**: minor notes only. Return `Verification passed`; include notes.
-- **Level 1 (Defect)**: failed assigned Slice Acceptance Criteria, failed PASS/FAIL Gate, missing edge cases, missing or insufficient verification evidence, local logic bug, or failing relevant tests. Return `Verification failed`.
-- **Level 2 (Fatal)**: compilation failure, core crash, security breach, data loss risk, severe performance regression, or anything requiring immediate diagnose. Return `Verification failed`.
-
-If verification evidence is insufficient, return `Verification failed` with `Severity: Level 1`. Do not use an inconclusive state.
+- **Critical**: compilation failure, core crash, security breach, data loss risk, severe performance regression, or out-of-scope files modified.
+- **Normal**: failed Slice Acceptance Criteria, missing edge cases, missing or invalid TDD evidence, missing boundary receipts, or local logic bugs.
+- **Warning**: minor notes, styling issues, deferred edge cases, or non-critical unverified assumptions.
+- **None**: all checks pass with no issues.
 
 ## Output Format
 
-On pass:
+Your final response must follow this format:
 
 ```text
-Verification passed
+Verification passed | Verification failed | Verification blocked
 
-Severity: Level 0/None
+Category: PASS | IMPLEMENTATION DEFECT | EVIDENCE DEFECT | PROTOCOL DEFECT | PLANNING DEFECT
+Severity: Critical | Normal | Warning | None
+
 Gate:
 Covered tasks:
-Slice acceptance criteria coverage:
-Evidence:
+
+Evidence Packet Check:
+- complete: yes/no
+- missing fields:
+- inconsistent fields:
+
+Slice acceptance coverage:
+- AC ID: Status (PASS/FAIL/BLOCKED)
 Boundary integrity:
-Required skills compliance:
 TDD evidence:
+Diff inspection:
 Checkbox consistency:
-Notes:
-```
 
-On fail:
+Findings:
+1. [Type: Blocker/Warning/Note] Description of findings.
 
-```text
-Verification failed
-
-Severity: Level 1 | Level 2
-Gate:
-Covered tasks:
-Slice acceptance criteria coverage:
-Failed criteria:
-Evidence:
-Boundary integrity:
-Required skills compliance:
-TDD evidence:
-Checkbox consistency:
-Minimal repair instruction:
+Minimal next action:
+- repair implementation | backfill evidence | fix executor packet | return to propose
 ```

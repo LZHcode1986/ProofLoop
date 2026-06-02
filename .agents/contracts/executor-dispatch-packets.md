@@ -30,6 +30,8 @@ Use when `@executor` closes a run checkpoint or Worker output boundary through `
 Executor Dispatch: Git Boundary
 
 Boundary Type: run-checkpoint | worker-output
+Boundary Mode: final | slice | per-task | no-op
+Expected Receipt Type: commit | no-op | diff-snapshot
 Change:
 Task ID: <none for run-checkpoint>
 Attempt: initial | repair-1 | repair-2 | diagnose | none
@@ -40,7 +42,7 @@ Allowed File Scope:
 Expected Changed Paths:
 Forbidden Paths:
 Boundary Receipt Required:
-- commit hash or no-op receipt
+- commit hash (or `none` for diff-snapshot/no-op), diff-snapshot receipt, or no-op receipt
 - branch
 - pre-commit HEAD
 - parent hash
@@ -51,9 +53,9 @@ Boundary Receipt Required:
 
 Expected Action:
 - Inspect git status.
-- Stage only changes relevant to this boundary.
-- Commit if relevant changes exist.
-- Return the required first line and commit/no-op/failure receipt.
+- If Expected Receipt Type is commit, stage only changes relevant to this boundary and commit.
+- If Expected Receipt Type is diff-snapshot, do not stage or commit; only inspect status and diff to record a snapshot receipt.
+- Return the required first line and the boundary receipt (commit, diff-snapshot, no-op, or failure).
 ```
 
 ## Shared Worker Packet Components
@@ -147,11 +149,24 @@ Code Verification packets must require:
 - Return exactly:
   - `Verification passed`
   - `Verification failed`
-- If failed, include:
-  - `Severity: Level 1 | Level 2`
+  - `Verification blocked`
+- Category must be one of:
+  - `PASS`
+  - `IMPLEMENTATION DEFECT`
+  - `EVIDENCE DEFECT`
+  - `PROTOCOL DEFECT`
+  - `PLANNING DEFECT`
+- Severity:
+  - `Critical | Normal | Warning`
+- If failed or blocked, include:
   - `Failed criteria`
   - `Evidence`
   - `Minimal repair instruction`
+- Rules:
+  - Missing Evidence Packet => `Verification blocked`, `EVIDENCE DEFECT`
+  - Executor failed to pass Worker evidence that exists => `Verification blocked`, `PROTOCOL DEFECT`
+  - Code does not satisfy slice AC => `Verification failed`, `IMPLEMENTATION DEFECT`
+  - tasks/proposal lacks executable contract => `Verification blocked`, `PLANNING DEFECT`
 
 ## Worker Implementation
 
@@ -245,6 +260,35 @@ Rules:
 - Apply `Shared Worker Rules` plus the `Worker Fix` additions.
 ```
 
+## Worker Evidence Backfill
+
+Use when implementation is already complete but required evidence was missing.
+
+```text
+Executor Dispatch: Worker Evidence Backfill
+
+Change:
+Task ID:
+Task Name:
+Work Request: recreate or backfill the required evidence for this completed task
+
+Required Evidence:
+- RED / GREEN / REFACTOR command outputs, expected/observed results, and excerpts
+
+Context Files:
+
+Allowed File Scope:
+
+Verification Commands:
+
+Rules:
+- Do not edit product code.
+- Do not change completed implementation checkbox state.
+- May rerun verification commands.
+- Return only structured evidence.
+- If evidence cannot be reconstructed, explain why.
+```
+
 ## Code Verification
 
 Use when `@executor` dispatches one explicit slice or reconciliation verifier gate to `@code-verifier`.
@@ -278,3 +322,57 @@ Verification Required:
 Return Contract:
 - Apply `Shared Verification Return Contract`.
 ```
+
+## Executor Evidence Packet
+
+Use when `@executor` dispatches `@code-verifier`. This packet contains all structural evidence collected from Worker executions, git boundaries, and verification commands.
+
+```text
+Executor Evidence Packet
+
+Change:
+Stage:
+Slice / Gate:
+Proof Posture:
+
+Covered Tasks:
+- Task ID:
+  Task Text:
+  Execution Type:
+  Required Skills:
+  Worker Status:
+  Worker Summary Excerpt:
+  Checkbox Updated:
+  Updated Checkbox Line:
+
+TDD Evidence:
+- Task ID:
+  RED Command:
+  RED Expected:
+  RED Observed:
+  RED Output Excerpt:
+  GREEN Command:
+  GREEN Observed:
+  GREEN Output Excerpt:
+  REFACTOR Changed:
+  REFACTOR Evidence:
+
+Verification Commands:
+- Command:
+  Result:
+  Output Excerpt:
+
+Boundary Evidence:
+- Boundary Mode:
+  Receipt Type:
+  Commit Hash:
+  Files Changed:
+  Scope Check:
+  Diff Evidence:
+
+Acceptance Evidence:
+- Stage AC ID:
+  Slice AC ID:
+  Evidence:
+```
+

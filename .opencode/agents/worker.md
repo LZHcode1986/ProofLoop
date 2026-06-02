@@ -24,6 +24,7 @@ Your final response must start with exactly one of:
 - `Implementation finished`
 - `Implementation blocked`
 - `Implementation failed`
+- `Evidence backfilled`
 
 ## Task Reception
 
@@ -95,17 +96,26 @@ If the dispatch is `Executor Dispatch: Worker Fix`, use `Fix Mode` and `Verifier
 
 For both modes, keep the original task constraints active. Do not reset scope, ignore acceptance criteria, change allowed file scope, or add unrelated cleanup.
 
+## Evidence Backfill Mode
+
+If the dispatch is `Executor Dispatch: Worker Evidence Backfill`:
+- Do not edit product code.
+- Do not change any checkboxes in `tasks.md`.
+- May rerun verification commands to capture required evidence.
+- Produce only structured evidence in the required format.
+- If evidence cannot be reconstructed, explain why in `Blocker or failure reason`.
+
 ## Completion Checklist
 
-Before returning `Implementation finished`, ensure:
+Before returning `Implementation finished` or `Evidence backfilled`, ensure:
 
 - required skills were loaded and followed, with concrete evidence for each required skill phase
-- if `test-driven-development` was required, RED/GREEN/REFACTOR evidence is present
+- if `test-driven-development` was required, RED/GREEN/REFACTOR evidence is present in the structured fields
 - required local checks passed
 - each assigned task acceptance criterion has concrete evidence
-- only allowed files were changed
-- the assigned implementation checkbox in `tasks.md` was changed from unchecked to checked
-- the updated checkbox line was re-read from disk after editing and exactly matches the assigned task
+- only allowed files were changed (no files changed if in Backfill mode)
+- the assigned implementation checkbox in `tasks.md` was changed from unchecked to checked (no checkbox changes if in Backfill mode)
+- if checkbox was changed, the updated checkbox line was re-read from disk after editing and exactly matches the assigned task
 - no other implementation task checkbox or verifier gate checkbox was changed
 - no commits or subagents were used
 
@@ -114,18 +124,35 @@ If you cannot locate the assigned implementation checkbox, cannot edit it, or ca
 ## Final Response Format
 
 ```text
-Implementation finished | Implementation blocked | Implementation failed
+Implementation finished | Implementation blocked | Implementation failed | Evidence backfilled
 
 Task:
-Skills used:
-Required skills evidence:
-TDD evidence:
+Execution Type:
+Required Skills:
+TDD Contract:
+- source:
+- applicable: yes/no
+
+TDD Evidence:
+- RED:
+  - command:
+  - expected failure:
+  - observed result:
+  - excerpt:
+- GREEN:
+  - command:
+  - observed result:
+  - excerpt:
+- REFACTOR:
+  - changed: yes/no
+  - action:
+  - post-refactor command:
+  - excerpt:
+
 Files changed:
 Checkbox updated:
-- Updated line:
-- Verification:
-Checks run:
 Acceptance evidence:
+Verification commands:
 Noticed but not changed:
 Blocker or failure reason:
 ```

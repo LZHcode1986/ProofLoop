@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TargetProjectPath,
 
+    [switch]$UseLegacySpecDrivenName,
+
     [switch]$DryRun
 )
 
@@ -24,11 +26,16 @@ $projectFileAssets = @(
     'tech-spec.md',
     'openspec/QUALITY-GATE.md',
     'openspec/config.yaml.example',
-    'openspec/schemas/README.md'
+    'openspec/schemas/README.md',
+    'openspec/gates/propose-readiness.md',
+    'openspec/gates/reality-readiness.md',
+    'openspec/gates/implementation-done.md',
+    'openspec/gates/archive-readiness.md'
 )
 
 $projectDirectoryAssets = @(
     'openspec/schemas/spec-driven',
+    'openspec/schemas/proofloop-spec-driven',
     'tech-spec'
 )
 
@@ -147,6 +154,7 @@ function Install-RelativeDirectoryToTarget {
 }
 
 function Set-ProofLoopSchema {
+    $schema_name = if ($UseLegacySpecDrivenName) { 'spec-driven' } else { 'proofloop-spec-driven' }
     $configPath = Join-Path $targetRoot 'openspec/config.yaml'
     $examplePath = Join-Path $targetRoot 'openspec/config.yaml.example'
 
@@ -158,10 +166,15 @@ function Set-ProofLoopSchema {
         }
 
         if ($DryRun) {
-            Write-Info 'Would create openspec/config.yaml from config.yaml.example'
+            Write-Info "Would create openspec/config.yaml from config.yaml.example"
         }
         else {
-            Copy-Item -Path $examplePath -Destination $configPath -Force
+            $config_content = Get-Content -Path $examplePath -Raw
+            if (-not $UseLegacySpecDrivenName) {
+                # Ensure the default is proofloop-spec-driven
+                $config_content = $config_content -replace '(?m)^\s*schema\s*:\s*spec-driven\s*$', 'schema: proofloop-spec-driven'
+            }
+            Set-Content -Path $configPath -Value $config_content
         }
 
         $actions.Add('config: created openspec/config.yaml from example') | Out-Null
@@ -169,30 +182,30 @@ function Set-ProofLoopSchema {
     }
 
     $raw = Get-Content -Path $configPath -Raw
-    if ($raw -match '(?m)^\s*schema\s*:\s*spec-driven\s*$') {
-        Write-Info 'openspec/config.yaml already points to schema: spec-driven'
-        $actions.Add('config: schema already spec-driven') | Out-Null
+    if ($raw -match "(?m)^\s*schema\s*:\s*$schema_name\s*$") {
+        Write-Info "openspec/config.yaml already points to schema: $schema_name"
+        $actions.Add("config: schema already $schema_name") | Out-Null
         return
     }
 
     $updated = $raw
     if ($raw -match '(?m)^\s*schema\s*:') {
-        $updated = [regex]::Replace($raw, '(?m)^\s*schema\s*:.*$', 'schema: spec-driven', 1)
+        $updated = [regex]::Replace($raw, '(?m)^\s*schema\s*:.*$', "schema: $schema_name", 1)
     }
     else {
-        $updated = "schema: spec-driven`r`n`r`n$raw"
+        $updated = "schema: $schema_name`r`n`r`n$raw"
     }
 
     Backup-ExistingPath -Path $configPath
 
     if ($DryRun) {
-        Write-Info 'Would update openspec/config.yaml to use schema: spec-driven'
+        Write-Info "Would update openspec/config.yaml to use schema: $schema_name"
     }
     else {
         Set-Content -Path $configPath -Value $updated
     }
 
-    $actions.Add('config: updated schema to spec-driven') | Out-Null
+    $actions.Add("config: updated schema to $schema_name") | Out-Null
 }
 
 Write-Info "Installing ProofLoop project assets into $targetRoot"
@@ -231,4 +244,3 @@ Write-Host 'Next steps:'
 Write-Host ' - Fill any remaining placeholders in openspec/config.yaml if it was created from the example.'
 Write-Host ' - Replace `Project: <project name>` in openspec/config.yaml with your actual project name.'
 Write-Host ' - Run your normal OpenSpec validation command inside the target project.'
-

@@ -188,8 +188,8 @@ To install the whole ProofLoop workflow, not just the reusable schema, see [inst
 
 ## Schema layout
 
-The live reusable schema is stored in [openspec/schemas/spec-driven](openspec/schemas/spec-driven).
-ProofLoop keeps the schema identity as `spec-driven` for compatibility with OpenSpec's default SDD workflow.
+The live reusable schema is stored in [openspec/schemas/proofloop-spec-driven](openspec/schemas/proofloop-spec-driven).
+New projects default to using `proofloop-spec-driven` as the active schema, while the older `spec-driven` remains supported as a legacy alias.
 
 This repository now follows the normal OpenSpec schema layout:
 

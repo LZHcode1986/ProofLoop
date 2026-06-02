@@ -58,13 +58,13 @@ Implement tasks from an OpenSpec change.
    - Every task that changes code must be marked `Execution Type: test-first-code` and must include `Required Skills: test-driven-development`.
    - Non-code tasks such as setup, docs-sync, proof, verifier-gate, and reconciliation do not load TDD unless they explicitly change code.
    - If the change is classified as `interactive`, you MUST complete the `Blocking` section's first `Proof Task` before any later slice work begins.
-   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `code-verifier` sub-agent at those boundaries and wait for `Verification passed` or `Verification failed`.
-   - Treat `tasks.md` as scope and progress tracking; it does not override the required
-     implementation order from the apply instruction.
+   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `code-verifier` sub-agent at those boundaries and wait for verification results (`passed`, `failed`, or `blocked`).
+   - Treat `tasks.md` as scope and progress tracking; it does not override the required implementation order from the apply instruction.
    - Worker owns implementation task checkboxes after local completion evidence.
    - Code Verifier does not update normal implementation task checkboxes; it updates only its assigned verifier gate checkbox on `Verification passed`.
-   - After every Worker result that changes files, dispatch `@committer` to close the Worker-output git boundary before any next Worker or Code Verifier dispatch.
-   - Do not dispatch `@code-verifier` until every covered Worker attempt has a boundary receipt or explicit no-op receipt.
+   - Based on Boundary Mode (final | slice | per-task | no-op), either commit after each task, record a `diff-snapshot` receipt (tracking changed files without commit), or record a `no-op` receipt.
+   - Do not dispatch `@code-verifier` until every covered Worker attempt has a recorded boundary receipt (commit, diff-snapshot, or no-op).
+   - Compile the `Executor Evidence Packet` with all gathered Worker summaries, TDD evidence, verification commands, and boundary receipts. Code Verifier must rely strictly on this packet.
 
 5. **Read context files**
 
@@ -91,11 +91,16 @@ For each pending task:
    - Wait for `@worker` to report `Implementation finished`, `Implementation blocked`, or `Implementation failed`.
    - Worker updates only its assigned implementation task checkbox after local completion evidence.
    - Ordinary Worker tasks become `passed-for-now`; they are not final slice trust.
-   - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, invoke independent `@code-verifier` for the whole covered slice.
-   - Code Verifier dispatch must include only the assigned slice/gate contract from `tasks.md` plus covered Worker evidence.
-   - Code Verifier dispatch must also include boundary receipts for every covered Worker attempt, changed files in slice, diff evidence requirements, and the relevant verification command outputs.
+   - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, compile the `Executor Evidence Packet` and invoke independent `@code-verifier` for the whole covered slice.
+   - Code Verifier dispatch must include only the assigned slice/gate contract from `tasks.md` and the compiled `Executor Evidence Packet`.
    - Do not dispatch full Stage Acceptance Criteria to `@code-verifier`; stage-level composition belongs to `@implementation-reviewer`.
-   - Wait for `@code-verifier` to return `Verification passed` or `Verification failed`.
+   - Wait for `@code-verifier` to return `Verification passed`, `Verification failed`, or `Verification blocked` along with Category and Severity.
+   - **Handle Verifier Result by Category**:
+     - `IMPLEMENTATION DEFECT`: Dispatch Worker Fix in `repair` mode (max 2 attempts per slice gate, then diagnose).
+     - `EVIDENCE DEFECT`: Dispatch `@worker` with `Executor Dispatch: Worker Evidence Backfill` (max 1 attempt) to reconstruct missing evidence without modifying product code.
+     - `PROTOCOL DEFECT`: Block execution and report protocol error.
+     - `PLANNING DEFECT`: Block execution and return to Propose/Brain.
+     - `PASS`: Mark slice gate complete.
    - **Task Completion & Checkbox**: Normal implementation checkboxes are Worker-owned. Code Verifier owns only its assigned verifier gate checkbox and updates it on `Verification passed`. Failed slice verifier gates remain unchecked until PASS.
    - Continue to next task.
 

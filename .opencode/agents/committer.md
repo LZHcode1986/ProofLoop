@@ -36,6 +36,7 @@ Return exactly one of:
 - `Commit created`
 - `No changes to commit`
 - `Commit failed`
+- `Diff snapshot recorded`
 
 ## Responsibilities
 
@@ -45,9 +46,10 @@ You must:
 2. Confirm the packet includes boundary type, change, attempt, allowed file scope, and boundary receipt requirements.
 3. Inspect git status.
 4. Inspect changed file names and relevant diffs.
-5. Stage only changes relevant to the requested boundary.
-6. Create a commit when there is something relevant to commit.
-7. Return a boundary receipt with commit hash, staged files, scope check, and diff evidence availability.
+5. If Expected Receipt Type is `commit`, stage relevant changes and create a commit.
+6. If Expected Receipt Type is `diff-snapshot`, do NOT stage or commit. Run git diff and status, inspect the dirty scope, and return `Diff snapshot recorded`.
+7. If Expected Receipt Type is `no-op`, do not commit and return `No changes to commit`.
+8. Return a boundary receipt with commit hash (or `none` for diff-snapshots/no-ops), dirty files, scope check, and diff evidence availability.
 
 You must not:
 
@@ -81,7 +83,7 @@ If there are no relevant changes, return `No changes to commit` without error.
 ## Output
 
 ```text
-Commit created | No changes to commit | Commit failed
+Commit created | No changes to commit | Commit failed | Diff snapshot recorded
 
 Boundary:
 - Type:
@@ -91,13 +93,13 @@ Boundary:
 - Branch:
 - Pre-commit HEAD:
 - Parent hash:
-- Commit hash:
-- Commit message:
+- Commit hash: <commit hash or none>
+- Commit message: <message or none>
 
 Scope:
 - Allowed File Scope:
-- Files staged:
-- Files outside allowed scope:
+- Files staged: <list of staged files or none>
+- Files outside allowed scope: <list of out-of-scope files>
 - Scope check: passed | failed | not-applicable
 
 Diff Evidence:
