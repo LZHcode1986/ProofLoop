@@ -1,62 +1,51 @@
 name: proofloop-spec-driven
-version: 1
-description: ProofLoop governance schema built on OpenSpec spec-driven artifacts with proof posture, verifier gates, and evidence contracts.
+version: 3
+description: ProofLoop OpenSpec workflow schema focused on Brain Dispatch Contract preservation, mechanical execution, slice verification, git boundary closure, and archive readiness.
 
 artifacts:
   - id: proposal
     generates: proposal.md
-    description: Proposal document explaining why this change is needed
+    description: Proposal document explaining why this OpenSpec change is needed.
     template: proposal.md
     instruction: >
-      Generate a proposal document that explains why this change is needed.
-
-      The proposal must focus on the change intent, business value, immutable acceptance criteria, residual risks, minimum closed-loop reality snapshot, and critical runtime assumptions.
-
-      Do not write implementation or technical design details in the proposal.
+      Generate a proposal that preserves the Brain Dispatch Contract, user goal,
+      scope, out-of-scope boundaries, acceptance criteria, minimum closed loop,
+      risks, and code reality anchors.
+      Do not rewrite or weaken Brain acceptance criteria.
     requires: []
+
   - id: design
     generates: design.md
-    description: Technical design document explaining how to implement the change
+    description: Technical design document explaining implementation decisions that affect decomposition.
     template: design.md
     instruction: >
-      Generate a design document that explains how to implement this change.
-
-      Focus only on the technical design decisions that directly affect task decomposition, boundaries, module structure, and interfaces.
-
-      Do not include low-level code snippets or redundant explanations that do not guide task-level execution.
+      Generate a design that only contains technical decisions needed for task
+      decomposition, boundaries, module structure, interfaces, state, persistence,
+      verification, and git boundary strategy.
     requires:
       - proposal
+
   - id: specs
     generates: specs/**/*.md
-    description: Capability specification files that define what the system should do
+    description: Capability specification files.
     template: spec.md
     instruction: >
-      Generate specification files that define what the system should do.
-
-      Define behavior contracts and user-visible scenarios only. Do not specify internal code structures or private helper details.
+      Generate behavior contracts and scenarios only.
     requires:
       - proposal
       - design
+
   - id: tasks
     generates: tasks.md
-    description: Executable task list using Slice Contracts
+    description: Executable task list using Slice Contracts.
     template: tasks.md
     instruction: >
-      Generate a task list that breaks implementation work into verifiable steps.
-
-      Define tasks using a Stage Acceptance Coverage Map (referencing Stage AC IDs only) and Slice Contracts.
-      
-      For each implementation slice, define a Slice Contract containing:
-      - Slice Goal & Slice Acceptance Criteria
-      - Default Allowed File Scope
-      - TDD Contract (required | not-applicable) & TDD Test Files
-      - RED Command & GREEN Command & Additional Verification Commands
-      - Boundary Mode (final | slice | per-task)
-      - Verifier Gate reference
-
-      Individual tasks within a slice must refer to the Slice Contract and declare only overrides (e.g. Overrides: Allowed File Scope) if they differ.
-
-      Include an explicit verifier gate task at the end of each slice.
+      Generate tasks that allow Executor and Worker to proceed mechanically.
+      Every implementation slice must have a Code Verifier gate.
+      Default git boundary:
+      - task output produces task-diff-snapshot receipt
+      - slice verifier PASS produces slice-output commit
+      - archive output is committed separately
     requires:
       - specs
       - design
@@ -66,7 +55,17 @@ apply:
     - tasks
   tracks: tasks.md
   instruction: |
-    Implement the change tasks under the direction of the Executor.
-    The Executor coordinates dispatches based on the Proof Posture (P0, P1, P2) and Boundary Mode.
-    Follow TDD rules for code-changing tasks. Worker writes RED/GREEN/REFACTOR evidence into response packets rather than creating local physical files.
-    The Code Verifier gate checks the assembled Evidence Packet before passing.
+    Executor handles OpenSpec change execution.
+    Direct Tasks are not handled by this schema.
+
+    Executor must:
+    - follow tasks.md and Slice Contracts
+    - dispatch Worker for tasks
+    - collect Completion Receipts
+    - dispatch Committer for task-diff-snapshot receipts after Worker tasks
+    - assemble Evidence Packets
+    - dispatch Code Verifier for every slice
+    - dispatch Committer for slice-output commit after slice verifier PASS
+    - stop and return blockers to Brain when contracts are insufficient
+
+    High-risk requirements are handled through Required Review Skills, not a separate P2 flow.

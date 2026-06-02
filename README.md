@@ -1,271 +1,264 @@
 # ProofLoop
 
-A proof-first multi-agent AI development workflow built on a customized OpenSpec.
+ProofLoop is a proof-first OpenCode + OpenSpec workflow that keeps user intent under Brain control while making downstream planning, execution, verification, git boundary closure, and archive mechanical.
 
-ProofLoop prevents AI agents from producing valid-looking proposals, tasks, implementations, and archives that do not actually close the product loop.
-
-It keeps OpenSpec as the artifact and schema substrate, then adds an explicit agent hierarchy, explicit verifier roles, and explicit workflow governance so AI cannot claim completion before it proves completion.
-
-> Make AI prove completion before it claims completion.
+> Brain owns intent.  
+> Subagents execute mechanically.  
+> Completion must be provable against Brain's acceptance criteria.  
+> Git commits happen at verified boundaries, not after every small task.  
+> OpenSpec canonical skills remain untouched; ProofLoop adds an overlay through agents and contracts.
 
 ## Why this exists
 
-Stock OpenSpec is strong at change artifacts, but a harder delivery environment usually needs more than:
+AI agents often fail not because they cannot write code, but because they drift from the user's intent:
 
-- proposal generation
-- tasks checkboxes
-- local tests
-- archive sync
+- tasks are dispatched without verifiable acceptance criteria
+- downstream agents reinterpret goals
+- planning artifacts look complete but do not preserve intent
+- code is correct but blocked by document-format gates
+- evidence is missing or not returned in a usable receipt
+- archive happens before stage-level acceptance is proven
 
-The common failure mode is not missing documents. It is a false closed loop:
+ProofLoop prevents this by requiring every Brain-dispatched task to carry a verifiable contract and every subagent result to return structured completion evidence.
 
-- the paperwork looks complete
-- the tasks look done
-- the implementation drift is hidden in slices
-- the main workflow guidance is underspecified, so subagents keep guessing
-
-ProofLoop adds a Brain-governed execution layer to stop that drift.
-
-## Install
-
-Choose the fastest path for an existing project:
-
-1. One-command local install with PowerShell:
-
-```powershell
-pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-project>
-```
-
-2. One-command GitHub bootstrap after the repo is published:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
-	$bootstrap = Join-Path $env:TEMP 'proofloop-bootstrap.ps1'
-	Invoke-WebRequest 'https://raw.githubusercontent.com/LZHcode1986/ProofLoop/main/install/bootstrap-proofloop.ps1' -OutFile $bootstrap
-	& $bootstrap -RepositoryZipUrl 'https://github.com/LZHcode1986/ProofLoop/archive/refs/heads/main.zip' -TargetProjectPath '<path-to-target-project>'
-}"
-```
-
-3. AI-assisted install with the ready-made prompt in [install/agent-install-prompt.md](install/agent-install-prompt.md).
-4. Manual fallback in [install/manual-install.md](install/manual-install.md).
-
-The installer uses three destinations by default:
-
-- project files such as `AGENTS.md` and `openspec/**` go into the target project
-- agent definitions go into `$HOME/.opencode/agents`
-- skills go into `$HOME/.agents/skills`
-
-If your local runtime uses different user directories, the installer supports path overrides.
-
-See [install/README.md](install/README.md) for the full install entry.
-
-## Quick start
-
-1. Keep this ProofLoop repository available locally.
-2. Run the installer or paste the AI install prompt in the target project.
-3. Fill any remaining placeholders in `openspec/config.yaml` if the installer created it from the example.
-4. Run your normal OpenSpec validation command inside the target project.
-
-## PRD to stage flow
-
-Brain does not send the whole PRD to Propose in one pass.
-
-The intended flow is:
-
-1. `workflow-intake` turns the raw request into `PRD.md`.
-2. Brain partitions the PRD into stages.
-3. Each stage represents one independently valuable function or one coherent module boundary.
-4. Brain dispatches exactly one stage to Propose.
-5. Propose either decomposes that stage into OpenSpec artifacts and `tasks.md`, or returns `Stage repartition required`.
-
-This protects task decomposition from drifting across unrelated modules and keeps later verification aligned with the stage acceptance criteria.
-
-## Workflow
+## Updated workflow
 
 ```mermaid
 flowchart TD
-		U[User] --> B[Brain\nL0 governance]
-		B --> I[workflow-intake\nPRD and acceptance criteria]
-		B --> P[Propose\nL1 planner]
-		B --> X[Executor\nL1 stage executor]
-		B --> W[Web Scraper\nL1 external research]
-		B --> R[Implementation Reviewer\nL1 stage review]
+    U[User] --> B[Brain\nintent, routing, acceptance]
 
-		P --> SV[Spec Verifier\nL2 plan review]
-		P --> RV[Reality Verifier\nL2 reality readiness]
-		X --> WK[Worker\nL2 implementation]
-		X --> CV[Code Verifier\nL2 slice review]
-		X --> CM[Committer\nGit boundary]
+    B --> D{Needs OpenSpec change?}
 
-		W --> B
-		SV --> P
-		RV --> P
-		WK --> X
-		CV --> X
-		CM --> X
-		X --> R
-		R --> B
+    D -- No --> G[general\nDirect Task executor]
+    G --> GR[Completion Receipt]
+    GR --> BS[Brain self-check\nAC + evidence + scope]
+    BS --> U
+
+    D -- Yes --> P[Propose\nmap Brain Dispatch Contract to OpenSpec artifacts]
+    P --> PCV[Planning Contract Verifier\nintent preservation + mechanical executability]
+    PCV --> X[Executor\nOpenSpec apply orchestrator]
+
+    X --> W[Worker\ntask execution]
+    W --> TDS[Committer\ntask-diff-snapshot receipt]
+    TDS --> SG{Slice complete?}
+    SG -- More tasks --> W
+    SG -- Slice ready --> CV[Code Verifier\nslice-level verification]
+
+    CV -- failed / blocked --> X
+    CV -- passed --> SC[Committer\nslice-output commit]
+    SC --> NS{More slices?}
+    NS -- Yes --> W
+    NS -- No --> IR[Implementation Reviewer\nstage acceptance + archive readiness]
+
+    IR --> BA[Brain archive authorization]
+    BA --> AE[Implementation Reviewer\narchive execution]
+    AE --> AO{Archive changed files?}
+    AO -- Yes --> AC[Committer\narchive-output commit]
+    AO -- No --> DONE[Done]
+    AC --> DONE
+
+    CG[(CodeGraph Tool Protocol)]
+    B -. code reality lookup .-> CG
+    G -. code reality lookup .-> CG
+    P -. code anchors .-> CG
+    PCV -. anchor check .-> CG
+    W -. scoped lookup .-> CG
+    CV -. impact check .-> CG
 ```
 
-## Agent hierarchy
+## Core routing
 
-### L0
+Brain asks one question:
 
-- Brain
-	- Owns `PRD.md`, `CLARIFY.md`, `tech-spec.md`, and authoritative workflow guidance such as `AGENTS.md`, config, schemas, and gate documents.
-	- Owns the top-level acceptance criteria.
-	- Dispatches L1 agents.
+```text
+Does this task need an OpenSpec change?
+```
 
-### L1
+### Direct Task
 
-- Propose
-	- Converts one Brain-selected stage from a stable PRD into `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
-	- Passes Brain-owned acceptance criteria to `spec-verifier` and the configured reality readiness verifier without changing them.
+```text
+Brain -> general -> Completion Receipt -> Brain self-check
+```
 
-- Executor
-	- Runs apply-stage orchestration.
-	- Uses the prepared slice/gate standards from `tasks.md` for slice verification.
+Use Direct Task for:
 
-- Web Scraper
-	- Gathers external facts, technical standards, upstream examples, and feasibility evidence for Brain or Propose.
-	- Works best when Brain sends a narrow research packet instead of a vague "go search the web" request.
-	- Does not hot-inject knowledge into Worker.
+- small edits
+- documentation updates
+- configuration updates
+- low-risk bugfixes
+- restoring existing expected behavior
+- tasks that do not change requirements, specs, architecture, or user-visible contracts
 
-- Implementation Reviewer
-	- Performs stage-level acceptance and archive-readiness review.
-	- Does not replace slice-level or artifact-level verification.
+Bugfixes do not need a separate `bug-fixer` agent. Brain dispatches `general` with `Required Skills: diagnose`.
 
-### L2
+Direct Task default git behavior:
 
-- Spec Verifier
-	- Reviews planning artifacts for readiness and acceptance coverage.
+```text
+No automatic commit.
+Brain may dispatch Committer for direct-task-output if commit is requested.
+```
 
-- Reality Verifier
-	- Reviews planning artifacts against current repository reality before execution.
-	- The default verifier uses repository files and commands; projects with CodeGraph can opt into the CodeGraph-backed variant.
+### OpenSpec Change
 
-- Worker
-	- Implements exactly one task packet.
+```text
+Brain -> Propose
+      -> Planning Contract Verifier
+      -> Executor
+      -> Worker
+      -> Committer task-diff-snapshot
+      -> Code Verifier per slice
+      -> Committer slice-output
+      -> Implementation Reviewer
+      -> Archive
+```
 
-- Code Verifier
-	- Reviews one implementation slice.
+Use OpenSpec Change for:
 
-- Committer
-	- Closes git boundaries and returns receipts for worker-output and archive-output boundaries.
+- new features
+- user-visible behavior changes
+- requirement/spec changes
+- multi-slice implementation
+- architecture/interface/state/data semantic changes
+- formal changes that must be archived
 
-## Acceptance criteria contract
+## No P0 / P1 / P2 workflow levels
 
-Acceptance criteria start at Brain and remain immutable downstream.
+High-risk work is not a separate flow.
 
-1. Brain defines and owns the acceptance criteria in the PRD and dispatch packets.
-2. Propose maps them to artifacts, slices, task packets, and verifier gates without rewriting or weakening them.
-3. Spec Verifier validates planning artifacts against the caller-supplied criteria.
-4. Reality Verifier checks whether critical runtime assumptions and the minimum closed loop match current repository reality.
-5. Code Verifier validates only the assigned slice/gate criteria derived from the stage contract.
-6. Executor consumes the prepared task and gate standards; it does not redefine acceptance scope during execution.
-7. Implementation Reviewer performs stage-level judgment using the original criteria plus the accumulated verifier evidence.
+Use:
 
-## Config example
+```text
+Risk Profile
+Required Review Skills
+Stricter Acceptance Criteria
+Stronger Evidence Requirements
+```
 
-[openspec/config.yaml.example](openspec/config.yaml.example) is a reference template for new projects, not a Brain-maintained runtime file.
+Examples:
 
-In a new project, the config should at minimum define:
+```text
+Risk Profile:
+- security-sensitive
 
-- `schema`
-- `context`
-- `rules`
+Required Review Skills:
+- code-review-and-quality
+- security-and-hardening
+```
 
-For this workflow, it is also useful to keep:
+## OpenSpec canonical skills are preserved
 
-- authority order
-- canonical objects
-- state model
-- testing posture
-- optional `traceability` links to stable authority sources
+ProofLoop does not rewrite:
 
-To install the schema cleanly in another project, see [openspec/schemas/README.md](openspec/schemas/README.md).
-To install the whole ProofLoop workflow, not just the reusable schema, see [install/README.md](install/README.md).
+```text
+.agents/skills/openspec-propose/SKILL.md
+.agents/skills/openspec-apply-change/SKILL.md
+.agents/skills/openspec-archive-change/SKILL.md
+```
 
-## Schema layout
+ProofLoop usage constraints live in:
 
-The live reusable schema is stored in [openspec/schemas/proofloop-spec-driven](openspec/schemas/proofloop-spec-driven).
-New projects default to using `proofloop-spec-driven` as the active schema, while the older `spec-driven` remains supported as a legacy alias.
+```text
+.agents/contracts/proofloop-skill-usage.md
+.opencode/agents/*.md
+openspec/QUALITY-GATE.md
+```
 
-This repository now follows the normal OpenSpec schema layout:
+## TDD skill is preserved
 
-- one schema per folder under `openspec/schemas/`
-- one `schema.yaml` at the schema root
-- one `templates/` folder for the artifact templates
+ProofLoop does not rewrite:
 
-The important invariant is simple: folder name, `schema.yaml` `name:`, and `openspec/config.yaml` `schema:` should match.
+```text
+.agents/skills/test-driven-development/SKILL.md
+```
 
-## Relationship to OpenSpec and opencode
+Worker non-interactive behavior is defined in:
 
-- OpenSpec provides the artifact, schema, status, apply, and archive automation substrate.
-- opencode provides the runtime model for primary agent, subagent, task dispatch, permissions, and tool execution.
-- ProofLoop is the governance layer that binds them into a stricter closed loop.
-- OpenSpec remains the source of truth for change artifacts, schemas, config, and archive flow.
-- This repository still keeps OpenSpec-compatible installed skill names such as `openspec-propose` and `openspec-apply-change`.
-- Archive is a two-phase transition: Implementation Reviewer recommends archive, Brain authorizes it, Implementation Reviewer executes `openspec-archive-change`, and Committer closes the archive git boundary.
+```text
+.opencode/agents/worker.md
+.agents/contracts/proofloop-skill-usage.md
+```
 
-## What Brain can update
+## Planning Contract Verifier
 
-If execution exposes a workflow defect rather than a product defect, Brain is allowed to tune the authoritative workflow documents instead of forcing more retries.
+`spec-verifier` is replaced by `planning-contract-verifier`.
 
-Typical write-back targets:
+It no longer asks:
 
-- `PRD.md`
-- `CLARIFY.md`
-- `tech-spec.md`
-- `AGENTS.md`
-- `openspec/config.yaml`
-- `openspec/QUALITY-GATE.md`
-- `openspec/schemas/**`
-- gate documents such as `QUALITY-GATE.md`
+```text
+Are the documents complete?
+```
 
-## Git worktree flow
+It asks:
 
-The current MVP uses git worktree as an execution-isolation policy, not as a fully automated manager feature.
+```text
+Do these artifacts faithfully and mechanically carry Brain's dispatch contract?
+```
 
-1. Brain or the human operator chooses the active change and, when needed, a dedicated worktree for that change.
-2. Propose works from the planning home and writes formal change artifacts under `openspec/changes/<change-id>/`.
-3. Executor runs inside the selected worktree and assumes that worktree is already active.
-4. Worker implements one task at a time in that worktree.
-5. Committer closes a git boundary and returns a receipt after each completed Worker attempt.
-6. Code Verifier validates slice gates in the same worktree.
-7. Implementation Reviewer performs stage-level review before archive or next-stage promotion.
-8. Archive output, if any, returns to Committer for boundary closure instead of being committed directly by Implementation Reviewer.
+## CodeGraph
 
-Current non-goals:
+CodeGraph is the standard code-reality lookup tool, not an agent.
 
-- no automatic worktree creation
-- no automatic worktree cleanup
-- no automatic rebase across multiple worktrees
-- no parallel worktree manager yet
+It replaces the default Reality Verifier / Reality Investigation Agent role.
 
-Those belong to a future `manager` role if the workflow grows beyond the current MVP.
+Agents use CodeGraph according to:
+
+```text
+.agents/contracts/codegraph-tool-protocol.md
+```
+
+## Committer
+
+Committer is the Git Boundary Closure Agent.
+
+Default behavior:
+
+```text
+Every task gets a receipt.
+Not every task gets a commit.
+Every verified slice gets a commit.
+Archive output gets a separate commit.
+```
+
+Supported boundaries:
+
+```text
+run-preflight
+direct-task-output
+task-diff-snapshot
+slice-output
+stage-output
+archive-output
+```
 
 ## Repository map
 
-- `.agents/`
-	- `contracts/` — fixed Brain-to-subagent and Executor-to-subagent packet formats.
-	- `skills/` — OpenSpec canonical skills plus Brain-layer orchestration skills.
-- `agents/`
-	- Agent definitions for Brain, Propose, Executor, Worker, verifiers, and git boundary roles.
-- `openspec/`
-	- OpenSpec-compatible schema, schema install guidance, config example, gate documents, and formal change artifacts.
-- `install/`
-	- One-command installer, AI install prompt, and manual fallback instructions.
+```text
+AGENTS.md
+  global rules only; all agents see this.
+
+.opencode/agents/
+  role-specific agent definitions.
+
+.agents/contracts/
+  dispatch packet contracts, CodeGraph protocol, and ProofLoop skill usage overlay.
+
+.agents/skills/
+  canonical and shared skills. Do not rewrite canonical skill behavior unless explicitly approved.
+
+openspec/
+  schema, templates, quality gates, and formal changes.
+
+install/
+  installer and installation guidance.
+```
 
 ## Start here
 
-1. Read [install/README.md](install/README.md) if you want to install ProofLoop into another project quickly.
-2. Read `.agents/skills/README.md` to understand canonical OpenSpec skills versus orchestration-layer skills.
-3. Read [agents/brain.md](agents/brain.md) for the top-level routing and governance contract.
-4. Read [agents/propose.md](agents/propose.md) and [agents/executor.md](agents/executor.md) for the L1 planning and execution contracts.
-5. Read [openspec/QUALITY-GATE.md](openspec/QUALITY-GATE.md) for the current gate model.
-6. Read [openspec/schemas/README.md](openspec/schemas/README.md) if you want to install the reusable schema in another OpenSpec project.
-
-## License
-
-[MIT](LICENSE)
+1. Read `AGENTS.md`.
+2. Read `.opencode/agents/brain.md`.
+3. Read `.agents/contracts/dispatch-packets.md`.
+4. Read `.agents/contracts/executor-dispatch-packets.md`.
+5. Read `.agents/contracts/proofloop-skill-usage.md`.
+6. Read `.agents/contracts/codegraph-tool-protocol.md`.
+7. Read `openspec/QUALITY-GATE.md`.
+8. Read `.opencode/agents/committer.md`.

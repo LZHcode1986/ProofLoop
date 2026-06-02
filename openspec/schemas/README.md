@@ -1,70 +1,36 @@
-# ProofLoop Schemas
+# OpenSpec Schemas
 
-This directory contains reusable OpenSpec schema packages shipped by ProofLoop.
-
-If you want to install the whole ProofLoop workflow, including agents, skills, and gate documents, use [install/README.md](../../install/README.md) instead of copying only this schema directory.
-
-## Current layout
+The active ProofLoop schema is:
 
 ```text
-openspec/schemas/
-├── README.md
-├── proofloop-spec-driven/     <-- Default active schema
-│   ├── schema.yaml
-│   └── templates/
-│       ├── proposal.md
-│       ├── design.md
-│       ├── spec.md
-│       └── tasks.md
-└── spec-driven/               <-- Legacy alias schema (optional)
-    ├── schema.yaml
-    └── templates/
-        ├── proposal.md
-        ├── design.md
-        ├── spec.md
-        └── tasks.md
+openspec/schemas/proofloop-spec-driven
 ```
 
-This follows the normal OpenSpec schema layout:
+New projects should use:
 
-- one schema per folder under `openspec/schemas/<schema-name>/`
-- one `schema.yaml` file at the schema root
-- one `templates/` folder for artifact templates
-- the schema name in `openspec/config.yaml` must match both the folder name and the `name:` field in `schema.yaml`
-
-## How to use this schema in another project
-
-1. Copy `openspec/schemas/proofloop-spec-driven/` into the target project's `openspec/schemas/proofloop-spec-driven/`.
-2. Copy `openspec/config.yaml.example` into the target project as `openspec/config.yaml`.
-3. Keep `schema: proofloop-spec-driven` (or legacy alias `spec-driven`) unless you intentionally rename the schema package.
-4. Replace the project placeholders in `openspec/config.yaml`, especially `Project: <project name>`.
-5. Fill in the remaining `context`, `rules`, and optional `traceability` sections for your own project.
-6. Copy `openspec/QUALITY-GATE.md` as well if you want the same ProofLoop gate discipline.
-7. Run your normal OpenSpec validation command after installation.
-
-## Project placeholders
-
-The example config is intentionally generic. At minimum, users should replace lines like these with project-specific values:
-
-```text
-Project: <project name>
-Domain: <business domain or product area>
-Product boundary: <product boundary; define what the system does and does not do>
+```yaml
+schema: proofloop-spec-driven
 ```
 
-Keep the reusable schema package name `proofloop-spec-driven` unless you are intentionally forking the schema itself.
+## v3.3 schema direction
 
-## If you rename the schema
+The schema supports:
 
-Rename these three places together:
+- Brain Dispatch Contract preservation
+- Slice Contracts
+- per-slice Code Verifier gates
+- CodeGraph anchors
+- Required Review Skills
+- task-diff-snapshot receipts
+- slice-output commits
+- archive-output commits
 
-- the folder name under `openspec/schemas/`
-- the `name:` field in `schema.yaml`
-- the `schema:` field in `openspec/config.yaml`
+It does not use:
 
-Do not rename only one of them, or OpenSpec users will see a confusing mismatch between the installed folder and the configured schema.
+- P0/P1/P2 workflow levels
+- default Reality Verifier
+- document-completeness gates as implementation blockers
 
-## What this repository ships
+## Skill boundary
 
-- `proofloop-spec-driven`: the default active ProofLoop schema with proposal, design, specs, tasks, and apply-stage instructions.
-- `spec-driven`: the legacy alias schema maintained for compatibility.
+Schema instructions may add ProofLoop-specific artifact requirements, but should not rewrite OpenSpec canonical skill files.

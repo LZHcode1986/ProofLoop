@@ -1,19 +1,49 @@
-# Design Summary
+# Design
 
-<!-- Focus on decisions that directly impact task decomposition and module boundaries. -->
+## Design Boundary
 
 ## Goals and Non-goals
-**Goals:**
-<!-- Primary goals -->
 
-**Non-goals:**
-<!-- Out of scope for this design -->
+### Goals
 
-## Authority Boundary & Interface Contracts
-<!-- Define module boundaries, public interfaces, and class/function signatures. -->
+- 
 
-## Persistence & State Impact
-<!-- Specify storage schema changes or state transitions if they affect implementation sequencing. -->
+### Non-goals
 
-## Key Architecture Decisions
-<!-- Critical decisions that determine how tasks are partitioned or ordered. -->
+- 
+
+## Interfaces / Contracts
+
+## State / Persistence Impact
+
+## Module Boundaries
+
+## Key Decisions
+
+| Decision | Rationale | Alternatives |
+| --- | --- | --- |
+|  |  |  |
+
+## Verification Strategy
+
+## Git Boundary Strategy
+
+Default:
+
+```text
+task -> task-diff-snapshot receipt
+slice verifier pass -> slice-output commit
+archive output -> archive-output commit
+```
+
+If audit behavior is required, describe why and which boundary is stricter.
+
+## CodeGraph Anchors
+
+| Anchor | Type | Used By |
+| --- | --- | --- |
+|  |  |  |
+
+## Risks and Mitigations
+
+- 

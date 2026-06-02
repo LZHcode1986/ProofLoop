@@ -1,70 +1,59 @@
-# Agent Install Prompt
+# AI-assisted ProofLoop Install Prompt
 
-Use this prompt inside the target project while the ProofLoop repository is also available locally.
+Install ProofLoop v3.3 into this project.
 
-```text
-Install ProofLoop into this project by using the local ProofLoop installer first.
+Do not overwrite OpenSpec canonical skills or shared TDD skill.
 
-Inputs:
-- Target project root: <target-project-path>
-- ProofLoop repository root: <proofloop-repo-path>
-- Contract source directory: `.agents/contracts/` in the ProofLoop repo
-
-Requirements:
-1. Prefer the installer script over manual copy.
-2. Use PowerShell.
-3. Do not rename canonical `openspec-*` skills.
-4. If existing files conflict with ProofLoop assets, report the conflict clearly.
-
-Steps:
-1. Confirm both paths exist.
-2. Run:
-   pwsh -File "<proofloop-repo-path>/install/install-proofloop.ps1" -TargetProjectPath "<target-project-path>"
-3. Verify that these paths now exist in the target project:
-# Agent Install Prompt
-
-Use this prompt inside the target project while the ProofLoop repository is also available locally.
+Do not overwrite:
 
 ```text
-Install ProofLoop into this project by using the local ProofLoop installer first.
-
-Inputs:
-- Target project root: <target-project-path>
-- ProofLoop repository root: <proofloop-repo-path>
-- Contract source directory: `.agents/contracts/` in the ProofLoop repo
-
-Requirements:
-1. Prefer the installer script over manual copy.
-2. Use PowerShell.
-3. Do not rename canonical `openspec-*` skills.
-4. If existing files conflict with ProofLoop assets, report the conflict clearly.
-
-Steps:
-1. Confirm both paths exist.
-2. Run:
-   pwsh -File "<proofloop-repo-path>/install/install-proofloop.ps1" -TargetProjectPath "<target-project-path>"
-3. Verify that these paths now exist in the target project:
-   - AGENTS.md
-   - tech-spec.md
-   - tech-spec/architecture.md
-   - tech-spec/api.md
-   - tech-spec/state.md
-   - tech-spec/testing.md
-   - openspec/QUALITY-GATE.md
-   - openspec/config.yaml.example
-   - openspec/schemas/proofloop-spec-driven/schema.yaml
-4. Verify that these project-level paths now exist:
-   - <target-project>/.opencode/agents/brain.md
-   - <target-project>/.opencode/agents/propose.md
-   - <target-project>/.opencode/agents/executor.md
-   - <target-project>/.opencode/agents/spec-verifier.md
-   - <target-project>/.opencode/agents/reality-verifier.md
-   - Optional when selected: <target-project>/.opencode/agents/reality-verifier-codegraph.md
-   - <target-project>/.agents/contracts/dispatch-packets.md
-   - <target-project>/.agents/contracts/executor-dispatch-packets.md
-   - <target-project>/.agents/skills/openspec-propose/SKILL.md
-   - <target-project>/.agents/skills/workflow-intake/SKILL.md
-5. Check that `openspec/config.yaml` uses `schema: proofloop-spec-driven` (or legacy `spec-driven`).
-6. If `openspec/config.yaml` was created from the example, list the placeholders the user still needs to fill, especially `Project: <project name>`.
-7. Summarize what was installed, what was backed up, and any follow-up steps.
+.agents/skills/openspec-propose/SKILL.md
+.agents/skills/openspec-apply-change/SKILL.md
+.agents/skills/openspec-archive-change/SKILL.md
+.agents/skills/test-driven-development/SKILL.md
 ```
+
+Install the ProofLoop overlay:
+
+```text
+AGENTS.md
+README.md
+.opencode/agents/**
+.agents/contracts/**
+openspec/QUALITY-GATE.md
+openspec/schemas/proofloop-spec-driven/**
+install/**
+```
+
+Use the following active workflow:
+
+```text
+Direct Task:
+  Brain -> general -> Completion Receipt -> Brain self-check
+
+OpenSpec Change:
+  Brain -> Propose
+        -> Planning Contract Verifier
+        -> Executor
+        -> Worker
+        -> Committer task-diff-snapshot
+        -> Code Verifier per slice
+        -> Committer slice-output
+        -> Implementation Reviewer
+        -> Brain archive authorization
+        -> Implementation Reviewer archive execution
+        -> Committer archive-output if needed
+```
+
+Important rules:
+
+- Do not use P0/P1/P2 workflow routing.
+- Do not install Reality Verifier as default active flow.
+- Use CodeGraph Tool Protocol for code reality.
+- Use planning-contract-verifier instead of active spec-verifier.
+- Keep spec-verifier only as deprecated compatibility alias if necessary.
+- Direct Task goes to general.
+- bugfix uses general with diagnose.
+- Executor dispatch contracts live in `.agents/contracts/executor-dispatch-packets.md`.
+- AGENTS.md must stay short and global.
+- README.md must include the updated flowchart.

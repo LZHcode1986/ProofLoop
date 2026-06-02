@@ -1,100 +1,75 @@
-# Install ProofLoop
+# ProofLoop Install
 
-ProofLoop now supports two practical installation paths for an existing project:
+This installer copies ProofLoop workflow assets into a target project.
 
-1. One-command install with PowerShell.
-2. AI-assisted install with a ready-made prompt.
+## Important
 
-The PowerShell installer uses `pwsh`, so it can run on Windows and on other platforms that have PowerShell 7 installed.
+Do not overwrite OpenSpec canonical skills or shared TDD skill unless explicitly requested.
 
-## One-command install
+Do not overwrite:
 
-From the ProofLoop repository checkout, run:
-
-```powershell
-pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-project>
+```text
+.agents/skills/openspec-propose/SKILL.md
+.agents/skills/openspec-apply-change/SKILL.md
+.agents/skills/openspec-archive-change/SKILL.md
+.agents/skills/test-driven-development/SKILL.md
 ```
 
-After the repository is published on GitHub, users can also run the bootstrap installer directly from GitHub:
+Install ProofLoop overlay instead:
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
-	$bootstrap = Join-Path $env:TEMP 'proofloop-bootstrap.ps1'
-	Invoke-WebRequest 'https://raw.githubusercontent.com/LZHcode1986/ProofLoop/main/install/bootstrap-proofloop.ps1' -OutFile $bootstrap
-	& $bootstrap -RepositoryZipUrl 'https://github.com/LZHcode1986/ProofLoop/archive/refs/heads/main.zip' -TargetProjectPath '<path-to-target-project>'
-}"
+```text
+.opencode/agents/*.md
+.agents/contracts/*.md
+openspec/QUALITY-GATE.md
+openspec/schemas/proofloop-spec-driven/**
 ```
 
-## Install destinations
+## v3.3 installed workflow
 
-ProofLoop is installed into the target project by default:
+```text
+Direct Task:
+  Brain -> general -> Completion Receipt -> Brain self-check
 
-# Install ProofLoop
-
-ProofLoop now supports two practical installation paths for an existing project:
-
-1. One-command install with PowerShell.
-2. AI-assisted install with a ready-made prompt.
-
-The PowerShell installer uses `pwsh`, so it can run on Windows and on other platforms that have PowerShell 7 installed.
-
-## One-command install
-
-From the ProofLoop repository checkout, run:
-
-```powershell
-pwsh -File ./install/install-proofloop.ps1 -TargetProjectPath <path-to-target-project>
+OpenSpec Change:
+  Brain -> Propose
+        -> Planning Contract Verifier
+        -> Executor
+        -> Worker
+        -> Committer task-diff-snapshot
+        -> Code Verifier per slice
+        -> Committer slice-output
+        -> Implementation Reviewer
+        -> Archive
 ```
 
-After the repository is published on GitHub, users can also run the bootstrap installer directly from GitHub:
+## Installed active agents
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -Command "& {
-	$bootstrap = Join-Path $env:TEMP 'proofloop-bootstrap.ps1'
-	Invoke-WebRequest 'https://raw.githubusercontent.com/LZHcode1986/ProofLoop/main/install/bootstrap-proofloop.ps1' -OutFile $bootstrap
-	& $bootstrap -RepositoryZipUrl 'https://github.com/LZHcode1986/ProofLoop/archive/refs/heads/main.zip' -TargetProjectPath '<path-to-target-project>'
-}"
+```text
+brain
+propose
+executor
+worker
+code-verifier
+planning-contract-verifier
+implementation-reviewer
+committer
+web-scraper
 ```
 
-## Install destinations
+Do not install as active default:
 
-ProofLoop is installed into the target project by default:
+```text
+reality-verifier
+reality-verifier-codegraph
+```
 
-- target project:
-	- `AGENTS.md`
-	- `tech-spec.md`
-	- `tech-spec/` (architecture.md, api.md, state.md, testing.md)
-	- `openspec/QUALITY-GATE.md`
-	- `openspec/config.yaml.example`
-	- `openspec/schemas/README.md`
-	- `openspec/schemas/proofloop-spec-driven/`
-- target project `.opencode/agents/`:
-	- includes default `reality-verifier.md`
-	- includes optional `reality-verifier-codegraph.md`
-- target project `.agents/contracts/`:
-	- includes `dispatch-packets.md`
-	- includes `executor-dispatch-packets.md`
-- target project `.agents/skills/`
+`spec-verifier` may be installed only as a deprecated compatibility alias.
 
-What the installer does with config:
+## Installed contracts
 
-- if `openspec/config.yaml` does not exist, it creates it from `config.yaml.example`
-- if `openspec/config.yaml` already exists, it keeps the file and updates `schema:` to `proofloop-spec-driven`
-- before overwriting installer-managed files, it writes `.spec-driven.bak-<timestamp>` backups
-
-## AI-assisted install
-
-If the user already works with an AI coding agent, use the prompt in [install/agent-install-prompt.md](agent-install-prompt.md).
-
-The expected agent behavior is:
-
-- run the installer script first
-- verify both project-level and project-home install targets
-- verify the Brain dispatch packet contract under `<target-project>/.agents/contracts/dispatch-packets.md`
-- verify the default reality verifier is installed; use the CodeGraph-backed variant only when the project explicitly selects it
-- point out any remaining placeholders in `openspec/config.yaml`
-- report conflicts instead of silently guessing
-
-## Manual fallback
-
-If a user cannot run the script, use [install/manual-install.md](manual-install.md).
+```text
+.agents/contracts/dispatch-packets.md
+.agents/contracts/executor-dispatch-packets.md
+.agents/contracts/codegraph-tool-protocol.md
+.agents/contracts/proofloop-skill-usage.md
+```
