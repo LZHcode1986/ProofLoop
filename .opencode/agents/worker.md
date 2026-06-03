@@ -45,6 +45,7 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 - Load only explicitly required skills.
 - Use CodeGraph only inside assigned scope.
 - Run required verification.
+- Update task checkbox in `tasks.md` after local completion evidence.
 - Return Completion Receipt with Contract Echo and Skill Evidence.
 - Leave git boundary closure to Committer.
 
@@ -60,6 +61,16 @@ Worker returns Completion Receipt to Executor.
 - CodeGraph impact exceeds allowed scope
 - behavior change requires OpenSpec artifact change
 - security/data/migration risk appears outside contract
+
+## Checkbox update
+
+After local verification passes and before returning Completion Receipt:
+
+1. Open `tasks.md` and locate the assigned task checkbox.
+2. Change `[ ]` to `[x]`.
+3. Record the file path, line number, and confirmation in the Completion Receipt.
+
+If checkbox update fails (e.g., task not found, format mismatch), report in Completion Receipt and continue returning.
 
 ## Completion Receipt
 
@@ -98,6 +109,11 @@ Files changed:
 Commands run:
 Verification result:
 Acceptance evidence:
+
+Task Checkbox:
+- file:
+- line:
+- checked: yes/no
 
 CodeGraph Evidence:
 - status checked:

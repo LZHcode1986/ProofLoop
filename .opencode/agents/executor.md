@@ -66,17 +66,25 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
 4. Run `run-preflight` through Committer.
 5. Dispatch Worker for tasks.
-6. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
-7. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
-8. Dispatch Code Verifier at every slice gate with assigned slice evidence.
-9. Collect Code Verifier result and append to Evidence Ledger.
-10. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
-11. After all slices complete, dispatch Implementation Reviewer for stage review.
-12. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
-13. Stop and return to Brain on blockers.
+6. Verify Worker receipt includes `Task Checkbox: checked: yes`. If not, report PROTOCOL DEFECT.
+7. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
+8. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
+9. Dispatch Code Verifier at every slice gate with assigned slice evidence.
+10. Verify Code Verifier output includes `Task Checkbox: checked: yes` for verifier gate. If not, report PROTOCOL DEFECT.
+11. Collect Code Verifier result and append to Evidence Ledger.
+12. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
+13. After all slices complete, dispatch Implementation Reviewer for stage review.
+14. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
+15. Stop and return to Brain on blockers.
 
 Executor owns execution evidence updates in Evidence Ledger.
 Executor appends Worker receipts, boundary receipts, command evidence, CodeGraph evidence, skill evidence, and verifier results.
+
+## Guardrails
+
+- Verify `Task Checkbox: checked: yes` in every Worker receipt before proceeding to boundary receipt.
+- Verify `Task Checkbox: checked: yes` in Code Verifier output before proceeding to slice-output commit.
+- If checkbox is not checked, report PROTOCOL DEFECT and stop the affected flow.
 
 ## Do not
 

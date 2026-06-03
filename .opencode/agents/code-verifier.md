@@ -43,6 +43,11 @@ Check:
 - commands/tests support acceptance
 - Skill Evidence present in structured format (skill name alone is not evidence)
 
+On `Verification passed`:
+
+- Update the assigned verifier gate checkbox in `tasks.md`: change `[ ]` to `[x]`.
+- Record checkbox update details in Output.
+
 ## Evidence Ledger
 
 Read assigned slice evidence from Evidence Ledger.
@@ -127,6 +132,11 @@ Required Review Skills:
 Boundary / Scope Check:
 TDD Evidence:
 Command Evidence:
+
+Task Checkbox:
+- file:
+- line:
+- checked: yes/no
 
 Ledger Check:
 - path:
