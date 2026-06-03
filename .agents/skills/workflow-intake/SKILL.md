@@ -55,9 +55,11 @@ Do not ask for information that is already present or can be inferred with low r
 
 ### 2. Maintain a decision ledger
 
-Keep an internal ledger with these buckets:
+Keep a decision ledger with these buckets:
 - `Confirmed`: explicitly stated in context
 - `Inferred`: strongly implied and low-risk to assume
+- `Decided During Intake`: resolved in the clarification loop
+- `Deferred to grill-me-prd`: open but not blocking a responsible PRD
 - `Open`: truly unresolved and consequential
 
 Only ask about an `Open` item when the answer would materially affect:
@@ -118,8 +120,11 @@ If the user's description is thin, ask them to elaborate on:
 - a rough idea of the solution
 - what success looks like
 
-Record rough solution ideas as `Inferred` in the decision ledger.
-They are exploration anchors, not binding design decisions.
+Record rough solution ideas in the decision ledger:
+- `Confirmed`: when explicitly stated by the user as a proposed idea
+- `Inferred`: when implied from context
+
+In both cases, mark them as exploration anchors, not binding design decisions.
 
 ### Step 2: Read nearby context
 
@@ -134,6 +139,8 @@ Inspect the most relevant repository and document context needed to understand:
 Sort what you know into:
 - `Confirmed`
 - `Inferred`
+- `Decided During Intake`
+- `Deferred to grill-me-prd`
 - `Open`
 
 ### Step 4: Consequential Clarification Loop
@@ -202,6 +209,12 @@ Use this structure:
 ## Legal / Privacy / Security
 ## Success Metrics
 ## Decision Ledger
+
+### Confirmed
+### Inferred
+### Decided During Intake
+### Deferred to grill-me-prd
+
 ## Open Questions
 ## Recommended Next Step
 ```
@@ -222,8 +235,10 @@ When you finish intake, provide:
 - PRD readiness status
 - the main `Confirmed` decisions
 - the main `Inferred` assumptions
+- the main `Decided During Intake` items
 - the acceptance criteria that should remain immutable downstream
 - the proposed stage plan
+- `Deferred to grill-me-prd` items, if any
 - remaining `Open` questions, if any
 - the recommended next step
 
