@@ -1,6 +1,6 @@
 # Propose Readiness Gate
 
-This gate is audited by `@spec-verifier` to ensure planning artifacts (`proposal.md`, `design.md`, `specs/`, `tasks.md`) are complete and safe for execution.
+This gate is audited by `@planning-contract-verifier` to ensure planning artifacts (`proposal.md`, `design.md`, `specs/`, `tasks.md`) are complete and safe for execution.
 
 ## BLOCKER
 These issues prevent safe task dispatch and will block the execution.

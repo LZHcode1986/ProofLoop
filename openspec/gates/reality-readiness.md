@@ -1,6 +1,6 @@
 # Reality Readiness Gate
 
-This gate is audited by `@reality-verifier` to verify that documented planning assumptions align with current repository reality.
+This gate is verified using CodeGraph Tool Protocol to verify that documented planning assumptions align with current repository reality.
 
 ## BLOCKER
 Direct mismatches that prevent starting the implementation.

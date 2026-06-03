@@ -90,8 +90,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
    - `design.md` drafted
    - `specs/*` drafted
    - `tasks.md` drafted
-   - spec-verifier tasks readiness check started
-   - reality readiness verifier check started
+    - planning-contract-verifier tasks readiness check started
    - readiness checks complete
 
    **IMPORTANT**: gate checks are in-process blockers, not end-of-flow clean-up work. Do not postpone them until after all artifacts are written.
@@ -146,32 +145,31 @@ If the request explicitly says `according to <file-path-list>, start task decomp
         - AFTER writing specs/* and tasks.md, read `openspec/QUALITY-GATE.md`.
         - Based on the **Proof Posture** assigned to this stage:
           - **P0 Fast Proof**:
-            - Do not spawn independent `spec-verifier` or `reality-verifier` sub-agents by default.
+            - Do not spawn independent `planning-contract-verifier` sub-agent by default.
             - Rely on self-check, checking `openspec/QUALITY-GATE.md`, and running `openspec validate --strict`.
             - The main agent self-approves the checklist and the change readiness.
           - **P1 Stage Proof** (Default) & **P2 Audit Proof**:
-            - ALWAYS spawn an independent `spec-verifier` sub-agent to execute this check.
-            - Give the `spec-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review.
-            - The `spec-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
+            - ALWAYS spawn an independent `planning-contract-verifier` sub-agent to execute this check.
+            - Give the `planning-contract-verifier` only the change path, artifact paths, `openspec/QUALITY-GATE.md`, and the exact gate to review.
+            - The `planning-contract-verifier` checks the whole change artifact set: `proposal.md`, `design.md`, `specs/*`, and `tasks.md`.
             - The check scope is artifact completeness, consistency, omissions, and acceptance coverage. It does not decide implementation readiness.
             - The check must fail if `tasks.md` lacks a Stage Acceptance Coverage Map, if any Stage Acceptance Criterion is uncovered, if any implementation task lacks `Allowed File Scope` or `Boundary Receipt Required`, or if any verifier task lacks `Boundary Evidence Required` (or `Evidence Packet Required` for new templates) or gate standards do not match the slice acceptance criteria they are supposed to verify.
-            - The `spec-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself.
-            - The `spec-verifier` must review independently rather than inheriting the main agent's conclusion.
+            - The `planning-contract-verifier` must report deficient artifacts and findings; it must not decide whether to create another change or rewrite the scope itself.
+            - The `planning-contract-verifier` must review independently rather than inheriting the main agent's conclusion.
             - The document-readiness result summary in the conversation MUST use this format:
               - first line: `DOC READINESS: BLOCKED | READY_WITH_WARNINGS | READY`
               - then `BLOCKERS`, `WARNINGS`, and `NOTES`
               - then `Acceptance Coverage`
-            - Summarize the `spec-verifier` result in the conversation.
+            - Summarize the `planning-contract-verifier` result in the conversation.
             - **Handling BLOCKED results (Integrated Optimization)**:
               1. Parse the "BLOCKERS" from the findings.
               2. DO NOT just patch the single reported artifact. Trace the requirement logic from `proposal.md` -> `design.md` -> `specs/*` -> `tasks.md`.
               3. Perform a **Batch Repair**: Update ALL affected artifacts in a single coherent step before re-running the verifier.
-              4. **CIRCUIT BREAKER**: If the `spec-verifier` returns `DOC READINESS: BLOCKED` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
-            - Only after the `spec-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS` may the main agent mark `Tasks Readiness Check` complete. Warning status does not block execution unless Brain explicitly escalates it.
+              4. **CIRCUIT BREAKER**: If the `planning-contract-verifier` returns `DOC READINESS: BLOCKED` for the 3rd consecutive time on the same change, STOP. Present the findings to the user and ask for guidance.
+            - Only after the `planning-contract-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS` may the main agent mark `Tasks Readiness Check` complete. Warning status does not block execution unless Brain explicitly escalates it.
             - The main agent MUST NOT self-approve, self-check, or use a degraded self-check path.
             - If subagent tooling is unavailable, blocked by policy, or not yet authorized by the user, STOP and ask the user to enable or authorize subagent verification; do not continue to ready/apply-ready status.
-            - AFTER `spec-verifier`, ALWAYS run the configured independent reality readiness verifier on the same change before reporting readiness back to Brain.
-            - Use `reality-verifier` by default. Use an optional variant only when the target project explicitly configures one.
+            - AFTER `planning-contract-verifier`, use CodeGraph Tool Protocol for code reality verification before reporting readiness back to Brain.
         - DO NOT report apply-ready or implementation-ready status from propose; only report that the artifacts are ready for Brain review once the required checks (self-check for P0, independent checks for P1/P2) finish.
 
       Task decomposition requirements:
@@ -225,7 +223,7 @@ If the request explicitly says `according to <file-path-list>, start task decomp
 After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Change name and location
 - List of artifacts created with brief descriptions
-- State the `spec-verifier` and configured reality readiness verifier results separately
+- State the `planning-contract-verifier` result and CodeGraph reality verification results separately
 - What's ready: "All artifacts created. Ready for Brain review."
 - Prompt: "Brain should review structure, document readiness, and reality readiness before execution."
 
@@ -256,11 +254,11 @@ After completing all artifacts and finishing Tasks Readiness Check, summarize:
 - Do not skip decomposition when the user explicitly anchors the change to one or more files
 - Do not skip `proofability check` after `proposal.md`
 - Do not defer `tasks readiness check` until after you have already declared the change ready
-- For P1/P2: Do not self-mark `Tasks Readiness Check` as passed before an independent `spec-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS`
-- For P1/P2: Do not replace independent spec-verifier review with self-review, even temporarily
-- Do not declare the change ready, apply-ready, or fully gated if the required verifiers (spec-verifier and reality readiness verifier for P1/P2; self-check for P0) have not run
-- For P1/P2: If spec-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
-- For P1/P2: If reality readiness verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- For P1/P2: Do not self-mark `Tasks Readiness Check` as passed before an independent `planning-contract-verifier` returns `DOC READINESS: READY` or `DOC READINESS: READY_WITH_WARNINGS`
+- For P1/P2: Do not replace independent planning-contract-verifier review with self-review, even temporarily
+- Do not declare the change ready, apply-ready, or fully gated if the required verifiers (planning-contract-verifier for P1/P2; self-check for P0) have not run
+- For P1/P2: If planning-contract-verifier execution is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
+- For P1/P2: If CodeGraph reality verification is blocked by tool availability, policy, or missing user authorization, stop and request what is needed instead of downgrading the gate
 - Do not treat the listed source files as optional reference material
 - Do not declare the change ready if `openspec/QUALITY-GATE.md` has unresolved readiness failures
 - If context is critically unclear, ask the user - but prefer making reasonable decisions to keep momentum

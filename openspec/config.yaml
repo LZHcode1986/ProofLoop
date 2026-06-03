@@ -27,7 +27,7 @@ context: |
   State model: proposal -> specs -> design -> tasks -> apply -> archive.
   Runtime artifacts: Executor Evidence Packets, boundary receipts.
   Canonical objects: change, spec, design, task, evidence.
-  Stable working names: spec-verifier, reality-verifier, code-verifier.
+  Stable working names: planning-contract-verifier, code-verifier.
   API principles: Structured L2 communication and task status outputs.
   Testing posture: Verification commands and reality contradiction scans.
   Documentation language: Chinese/English.
