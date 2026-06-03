@@ -101,13 +101,25 @@ Follow the repository's root `AGENTS.md` as the operational source for stage qua
 
 ### Step 1: Parse the request
 
-Identify:
+Extract from the user's description:
+
 - the core problem
-- the target user or operator
+- who is affected (target user or operator)
+- current pain points
 - the desired outcome
+- any rough solution ideas the user mentions
 - the acceptance criteria that would prove the outcome is complete
 - the likely stage boundaries that could deliver the outcome in independent increments
 - any obvious constraints, non-goals, or deadlines
+
+If the user's description is thin, ask them to elaborate on:
+- the problem and who it affects
+- current pain points
+- a rough idea of the solution
+- what success looks like
+
+Record rough solution ideas as `Inferred` in the decision ledger.
+They are exploration anchors, not binding design decisions.
 
 ### Step 2: Read nearby context
 
@@ -124,14 +136,50 @@ Sort what you know into:
 - `Inferred`
 - `Open`
 
-### Step 4: Ask the best next question only if needed
+### Step 4: Consequential Clarification Loop
 
-Ask only the highest-leverage unresolved question.
-If the remaining uncertainty is minor or low-risk, proceed with clearly labeled assumptions.
+Ask at most **3 questions** by default.
+
+Each iteration:
+
+1. Select the single most consequential `Open` item from the ledger.
+2. If no `Open` item would materially affect scope, UX, architecture, security, or success criteria — skip to Step 5.
+3. Ask the question using this format:
+
+```
+### Clarification Needed
+
+**Question**
+[one precise question]
+
+**Why it matters**
+[one to two sentences on what this affects]
+
+**Recommended default**
+[a concrete recommendation]
+```
+
+4. Record the question and answer in the decision ledger.
+5. Repeat until 3 questions are asked or no consequential `Open` items remain.
+
+After the loop:
+
+- Move resolved items to `Confirmed`.
+- Items that are `Open` but do not block a responsible PRD are marked **Deferred to grill-me-prd**.
+- Proceed to Step 5 with clearly labeled assumptions for any remaining gaps.
+
+Do not exceed 3 questions unless the user explicitly asks for deeper discovery.
+The goal is to produce a grillable PRD, not a complete product specification.
 
 ### Step 5: Draft or refresh `PRD.md`
 
-Write a PRD that captures the stable product definition.
+Create or update `PRD.md` at the repository root.
+
+When updating an existing `PRD.md`:
+- preserve existing `Confirmed` decisions and acceptance criteria
+- do not silently delete sections that still apply
+- merge new findings into existing sections
+- mark newly added content with the source (e.g., from clarification loop, from codebase exploration)
 
 Use this structure:
 
@@ -150,7 +198,10 @@ Use this structure:
 ## Authority Sources
 ## Functional Requirements
 ## Risks and Edge Cases
+## Rollout / Migration
+## Legal / Privacy / Security
 ## Success Metrics
+## Decision Ledger
 ## Open Questions
 ## Recommended Next Step
 ```
