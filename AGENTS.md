@@ -48,17 +48,23 @@ Direct Task does not automatically commit.
 ## OpenSpec Change
 
 ```text
-Brain -> Propose
+Brain -> Evidence Ledger Seed
+      -> Propose
       -> Planning Contract Verifier
       -> Executor
-      -> Worker
-      -> Committer task-diff-snapshot
-      -> Code Verifier per slice
-      -> Committer slice-output
       -> Implementation Reviewer
       -> Brain archive authorization
       -> Implementation Reviewer archive execution
       -> Committer archive-output if needed
+```
+
+Executor-owned internals:
+
+```text
+- Worker
+- Committer task-diff-snapshot
+- Code Verifier per slice
+- Committer slice-output
 ```
 
 ## Required dispatch contract
@@ -86,6 +92,12 @@ CodeGraph Use
 CodeGraph Anchors
 Stop Conditions
 Escalation Target
+```
+
+For openspec-change:
+
+```text
+Evidence Ledger Seed
 ```
 
 If a task cannot be made verifiable, Brain must clarify or narrow before dispatch.
