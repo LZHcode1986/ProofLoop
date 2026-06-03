@@ -56,14 +56,18 @@ Brain -> general -> Completion Receipt -> Brain self-check
 OpenSpec Change:
 
 ```text
-Brain -> Propose
+Brain -> Evidence Ledger Seed
+      -> Propose
       -> Planning Contract Verifier
       -> Executor
-      -> Code Verifier per slice
-      -> Committer slice-output
       -> Implementation Reviewer
-      -> Archive
+      -> Brain archive authorization
+      -> Implementation Reviewer archive execution
+      -> Committer archive-output if needed
 ```
+
+Worker / task-diff-snapshot / Code Verifier / slice-output are Executor-owned apply-stage internals.
+Brain does not directly orchestrate Worker or Code Verifier.
 
 ## Dispatch rule
 

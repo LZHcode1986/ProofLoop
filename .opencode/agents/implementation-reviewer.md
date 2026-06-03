@@ -77,6 +77,13 @@ Git Boundary:
 - slice commits:
 - archive boundary needed:
 
+Evidence Ledger:
+- path:
+- Brain Dispatch Snapshot checked:
+- slice verifier results checked:
+- stage review section updated:
+- archive section updated:
+
 Archive recommendation:
 - ready
 - ready-with-warnings

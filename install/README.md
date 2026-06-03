@@ -8,19 +8,22 @@ This installer copies ProofLoop workflow assets into a target project.
 |---|---|---|
 | `-TargetProjectPath` | (required) | Path to the target project |
 | `-EnableCodeGraph` | off | Show CodeGraph initialization guidance after install |
-| `-InstallGeneralAgent` | off | Install optional `general.md` agent (not installed by default) |
 | `-InstallDeprecatedAliases` | off | Install deprecated `spec-verifier.md` compatibility alias |
-| `-OverwriteCanonicalSkills` | off | Overwrite canonical skills (default: skip with warning) |
+| `-InstallCanonicalSkills` | off | Install missing canonical skills (default: skip all) |
+| `-OverwriteCanonicalSkills` | off | Overwrite existing canonical skills (default: skip) |
 | `-Force` | off | Skip version detection confirmation and dirty worktree check |
 
 ## Usage
 
 ```powershell
-# Default install (core agents + contracts + schema, skip existing skills)
+# Default install (core agents + contracts + schema, skip all canonical skills)
 .\install\install-proofloop.ps1 -TargetProjectPath "C:\path\to\project"
 
-# Install with general agent and force past dirty worktree
-.\install\install-proofloop.ps1 -TargetProjectPath "C:\path\to\project" -InstallGeneralAgent -Force
+# Install missing canonical skills without overwriting existing ones
+.\install\install-proofloop.ps1 -TargetProjectPath "C:\path\to\project" -InstallCanonicalSkills
+
+# Force past dirty worktree
+.\install\install-proofloop.ps1 -TargetProjectPath "C:\path\to\project" -Force
 
 # Full install including deprecated aliases and skill overwrite
 .\install\install-proofloop.ps1 -TargetProjectPath "C:\path\to\project" -InstallDeprecatedAliases -OverwriteCanonicalSkills
@@ -60,12 +63,14 @@ openspec/schemas/proofloop-spec-driven/**
 ## Default NOT installed
 
 ```text
-.opencode/agents/general.md              (use -InstallGeneralAgent)
+.agents/skills/**                        (use -InstallCanonicalSkills for missing, -OverwriteCanonicalSkills to overwrite)
+.opencode/agents/general.md              (ProofLoop does not ship a general agent)
 .opencode/agents/reality-verifier.md     (deprecated)
 .opencode/agents/reality-verifier-codegraph.md (deprecated)
 .opencode/agents/spec-verifier.md        (use -InstallDeprecatedAliases)
-.agents/skills/**                        (use -OverwriteCanonicalSkills)
 ```
+
+ProofLoop does not ship a general agent. Direct Task uses the host runtime's general agent constrained by Brain Dispatch Contract and Completion Receipt format.
 
 ## Installed workflow
 

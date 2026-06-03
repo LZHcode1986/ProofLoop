@@ -65,6 +65,7 @@ artifacts:
 apply:
   requires:
     - tasks
+    - evidence-ledger
   tracks: tasks.md
   instruction: |
     Executor handles OpenSpec change execution.

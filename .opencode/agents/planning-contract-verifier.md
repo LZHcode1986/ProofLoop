@@ -59,6 +59,10 @@ Block unresolved internal conflicts.
 - Required code anchors cannot be resolved and are necessary for execution.
 - No slice-level verifier gate exists for an implementation slice.
 - Git boundary plan would commit unverified implementation output by default.
+- A binding contract item is declared in Brain Dispatch Contract, proposal, design, specs, tasks, or Slice Contract but is not mapped to executable acceptance, Verification Method, Expected Evidence, approved deferral, or explicitly marked non-binding.
+- Planning artifacts contain an unresolved internal conflict that would force Executor, Worker, Code Verifier, or Implementation Reviewer to guess.
+- Evidence Ledger Brain Dispatch Snapshot is missing or inconsistent with Brain Dispatch Contract.
+- Evidence Ledger AC Mapping Summary is missing required Brain acceptance criteria.
 
 ## Do not block on
 

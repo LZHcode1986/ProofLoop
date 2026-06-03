@@ -7,7 +7,10 @@ context:
 rules:
   - Every Brain-dispatched task must have verifiable acceptance criteria.
   - Direct Task uses Brain -> general -> Completion Receipt -> Brain self-check.
-  - OpenSpec Change uses Propose -> Planning Contract Verifier -> Executor -> Code Verifier per slice -> Implementation Reviewer -> Archive.
+  - OpenSpec Change uses Evidence Ledger Seed -> Propose -> Planning Contract Verifier -> Executor -> Implementation Reviewer -> Brain archive authorization.
+  - Evidence Ledger is the delivery evidence spine for OpenSpec Change. It does not introduce new requirements.
+  - Executor maintains execution evidence in the Evidence Ledger.
+  - Code Verifier must not pass solely because tests are green. It checks declared contract, expected evidence, skill evidence, and boundary receipts.
   - OpenSpec canonical skills remain untouched; ProofLoop applies an overlay through agents and contracts.
   - CodeGraph is a tool protocol, not a default agent.
   - Committer records task-diff-snapshot after tasks and commits slice-output only after verifier PASS.

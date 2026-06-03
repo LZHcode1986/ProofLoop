@@ -68,17 +68,36 @@ Implementation finished | Implementation blocked | Implementation failed | Evide
 
 Task:
 Slice:
+
+Contract Echo:
+- accepted:
+- satisfied:
+- not satisfied:
+- conflicted:
+
 Skills used:
+
+Skill Evidence:
+- required skills:
+- evidence:
+- deviation / not applicable reason:
+
 Acceptance Criteria Coverage:
+- AC:
+- status:
+- evidence:
+
 TDD Evidence:
 - RED:
 - GREEN:
 - REFACTOR:
+- deviation / not applicable reason:
 
 What changed:
 Files changed:
 Commands run:
 Verification result:
+Acceptance evidence:
 
 CodeGraph Evidence:
 - status checked:
@@ -90,6 +109,10 @@ CodeGraph Evidence:
 Git Boundary:
 - commit created: no
 - expected next boundary: task-diff-snapshot
+
+Ledger Update:
+- assigned section:
+- receipt ready for executor append: yes/no
 
 Stop conditions encountered:
 Upgrade required:

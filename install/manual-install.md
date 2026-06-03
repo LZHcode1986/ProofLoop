@@ -39,9 +39,10 @@ openspec/config.yaml.example
 ## Optional agents
 
 ```text
-.opencode/agents/general.md              # -InstallGeneralAgent
 .opencode/agents/spec-verifier.md        # -InstallDeprecatedAliases (deprecated)
 ```
+
+ProofLoop does not ship a general agent. Direct Task uses the host runtime's general agent constrained by Brain Dispatch Contract and Completion Receipt format.
 
 Do not install as active default:
 

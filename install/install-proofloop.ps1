@@ -4,9 +4,9 @@ param(
 
   [switch]$EnableCodeGraph,
 
-  [switch]$InstallGeneralAgent,
-
   [switch]$InstallDeprecatedAliases,
+
+  [switch]$InstallCanonicalSkills,
 
   [switch]$OverwriteCanonicalSkills,
 
@@ -223,28 +223,26 @@ try {
   Write-Host "Installing schema..." -ForegroundColor Cyan
   Copy-SchemaDir -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
 
-  # --- Optional: General Agent ---
-  if ($InstallGeneralAgent) {
-    Write-Host "Installing optional general agent..." -ForegroundColor Cyan
-    Copy-Safe -RelativePath ".opencode/agents/general.md" -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
-  }
-
-  # --- Optional: Deprecated Aliases ---
+# --- Optional: Deprecated Aliases ---
   if ($InstallDeprecatedAliases) {
     Write-Host "Installing deprecated compatibility aliases..." -ForegroundColor Cyan
     Copy-Safe -RelativePath ".opencode/agents/spec-verifier.md" -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
   }
 
-  # --- Canonical Skills (with skip/overwrite) ---
-  Write-Host "Checking canonical skills..." -ForegroundColor Cyan
-  foreach ($skill in $CanonicalSkills) {
-    $dst = Join-Path $TargetProjectPath $skill
-    if ((Test-Path $dst) -and (-not $OverwriteCanonicalSkills)) {
-      Write-Warning "Skipped canonical skill update: $skill"
-    } else {
-      Copy-Safe -RelativePath $skill -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
-    }
+# --- Canonical Skills (skip by default) ---
+Write-Host "Checking canonical skills..." -ForegroundColor Cyan
+foreach ($skill in $CanonicalSkills) {
+  $dst = Join-Path $TargetProjectPath $skill
+  if ($OverwriteCanonicalSkills) {
+    Copy-Safe -RelativePath $skill -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
+  } elseif ((-not (Test-Path $dst)) -and $InstallCanonicalSkills) {
+    Copy-Safe -RelativePath $skill -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
+  } elseif (Test-Path $dst) {
+    Write-Warning "Skipped existing canonical skill: $skill"
+  } else {
+    Write-Warning "Skipped canonical skill (use -InstallCanonicalSkills to install missing, -OverwriteCanonicalSkills to overwrite): $skill"
   }
+}
 
   # --- Self-Verification ---
   Write-Host ""
@@ -277,7 +275,6 @@ try {
   Write-Host "Core agents: $($DefaultAgents.Count)"
   Write-Host "Contracts: $($Contracts.Count)"
   Write-Host "Schema: $SchemaDir"
-  if ($InstallGeneralAgent) { Write-Host "Optional: general.md installed" }
   if ($InstallDeprecatedAliases) { Write-Host "Optional: spec-verifier.md installed" }
   if ($EnableCodeGraph) {
     Write-Host ""

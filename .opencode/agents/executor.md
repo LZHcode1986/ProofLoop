@@ -63,16 +63,17 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 
 1. Read OpenSpec apply instructions.
 2. Read tasks and Slice Contracts.
-3. Run `run-preflight` through Committer.
-4. Dispatch Worker for tasks.
-5. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
-6. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
-7. Dispatch Code Verifier at every slice gate with assigned slice evidence.
-8. Collect Code Verifier result and append to Evidence Ledger.
-9. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
-10. After all slices complete, dispatch Implementation Reviewer for stage review.
-11. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
-12. Stop and return to Brain on blockers.
+3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
+4. Run `run-preflight` through Committer.
+5. Dispatch Worker for tasks.
+6. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
+7. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
+8. Dispatch Code Verifier at every slice gate with assigned slice evidence.
+9. Collect Code Verifier result and append to Evidence Ledger.
+10. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
+11. After all slices complete, dispatch Implementation Reviewer for stage review.
+12. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
+13. Stop and return to Brain on blockers.
 
 Executor owns execution evidence updates in Evidence Ledger.
 Executor appends Worker receipts, boundary receipts, command evidence, CodeGraph evidence, skill evidence, and verifier results.

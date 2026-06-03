@@ -99,14 +99,43 @@ Severity:
 Slice:
 Covered Tasks:
 
+Contract Echo Check:
+- received:
+- evidence present:
+- evidence missing:
+- conflicted:
+
 AC Coverage:
 Evidence Packet Check:
+
+Evidence Sufficiency:
+- declared Verification Method executed:
+- Expected Evidence present:
+- command evidence sufficient:
+- missing evidence:
+- evidence weakness:
+
+Skill Evidence Check:
+- Required Skills:
+- Required Review Skills:
+- evidence present:
+- missing:
+
 Task Snapshot Receipt Check:
 CodeGraph Impact Check:
 Required Review Skills:
 Boundary / Scope Check:
 TDD Evidence:
 Command Evidence:
+
+Ledger Check:
+- path:
+- assigned slice section:
+- read successfully:
+- unrelated sections ignored: yes/no
+
+Ledger Update:
+- verifier result ready for executor append: yes/no
 
 Findings:
 - BLOCKER:

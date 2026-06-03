@@ -105,7 +105,18 @@ Worker Completion Receipt:
 - files changed:
 - commands run:
 - verification result:
-- skill evidence:
+
+Contract Echo:
+- accepted:
+- satisfied:
+- not satisfied:
+- conflicted:
+
+Skill Evidence:
+- required skills:
+- evidence:
+- deviation / not applicable reason:
+
 - acceptance evidence:
 - CodeGraph evidence:
 - residual risk:
@@ -126,6 +137,18 @@ Code Verifier Result:
 
 Category:
 - PASS | IMPLEMENTATION DEFECT | EVIDENCE DEFECT | CONTRACT DEFECT | PROTOCOL DEFECT
+
+Contract Echo Check:
+- received:
+- evidence present:
+- evidence missing:
+- conflicted:
+
+Skill Evidence Check:
+- Required Skills:
+- Required Review Skills:
+- evidence present:
+- missing:
 
 AC Coverage:
 Evidence Sufficiency:
