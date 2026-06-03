@@ -65,12 +65,17 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 2. Read tasks and Slice Contracts.
 3. Run `run-preflight` through Committer.
 4. Dispatch Worker for tasks.
-5. After each Worker task, dispatch Committer for `task-diff-snapshot`.
-6. Collect Worker Completion Receipts and task snapshot receipts.
-7. Assemble Evidence Packet.
-8. Dispatch Code Verifier at every slice gate.
-9. After Code Verifier passes, dispatch Committer for `slice-output` commit.
-10. Stop and return to Brain on blockers.
+5. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
+6. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
+7. Dispatch Code Verifier at every slice gate with assigned slice evidence.
+8. Collect Code Verifier result and append to Evidence Ledger.
+9. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
+10. After all slices complete, dispatch Implementation Reviewer for stage review.
+11. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
+12. Stop and return to Brain on blockers.
+
+Executor owns execution evidence updates in Evidence Ledger.
+Executor appends Worker receipts, boundary receipts, command evidence, CodeGraph evidence, skill evidence, and verifier results.
 
 ## Do not
 

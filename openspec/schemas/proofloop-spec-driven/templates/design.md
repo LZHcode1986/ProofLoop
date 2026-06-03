@@ -47,3 +47,9 @@ If audit behavior is required, describe why and which boundary is stricter.
 ## Risks and Mitigations
 
 - 
+
+## Binding Decisions
+
+| Decision | Execution Impact | Verification / Evidence Expectation | Non-binding Context |
+| --- | --- | --- | --- |
+|  |  |  | yes/no |

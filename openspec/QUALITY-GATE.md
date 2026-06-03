@@ -35,14 +35,63 @@ Checks:
 
 Used by Executor and Code Verifier.
 
+A gate checks declared contract against available evidence.
+Tests passing alone is not sufficient for PASS.
+Gate must not invent requirements outside declared contract.
+Evidence Ledger is a transport and index, not a source of new requirements.
+
 Checks:
 
 - Worker Completion Receipts cover assigned criteria.
 - Task diff snapshot receipts exist for covered tasks.
 - Evidence Packet includes command output, scope, diff, and CodeGraph evidence where applicable.
-- Required skills evidence is present.
+- Required skills evidence is present (skill name alone is not evidence).
 - Required Review Skills were applied.
 - Evidence defects are separated from implementation defects.
+
+### R4. Evidence Sufficiency Rule
+
+Code Verifier PASS only when all 7 conditions are satisfied:
+
+1. Declared slice acceptance is covered.
+2. Required Verification Method was executed.
+3. Expected Evidence is present.
+4. Required Skill Evidence is present (structured format, not just skill name).
+5. Boundary receipts are present where required.
+6. No unresolved contract conflict remains.
+7. Scope and CodeGraph rules are satisfied.
+
+### R5. Gate Classification Rule
+
+```text
+IMPLEMENTATION DEFECT:
+- implementation contradicts declared contract.
+
+EVIDENCE DEFECT:
+- implementation may be correct, but required evidence is missing or too weak.
+
+CONTRACT DEFECT:
+- upstream contract is ambiguous, inconsistent, omitted, or unmapped.
+
+PROTOCOL DEFECT:
+- agent skipped required receipt, ledger update, skill evidence, or boundary protocol.
+```
+
+### R6. No Invention Rule
+
+Verifier only checks:
+
+- Brain Dispatch Contract
+- Slice Contract
+- tasks
+- declared Verification Method
+- declared Expected Evidence
+- Required Skills / Required Review Skills
+- Evidence Ledger entries
+- boundary receipts
+- CodeGraph evidence where applicable
+
+Verifier must not introduce project-specific requirements not declared upstream.
 
 ## 4. Git Boundary Gate
 

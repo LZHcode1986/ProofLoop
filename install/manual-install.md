@@ -4,7 +4,7 @@ Copy files into the target project preserving paths.
 
 ## Do not overwrite canonical skills
 
-Do not overwrite these files during v3.3 migration unless explicitly approved:
+Do not overwrite these files unless explicitly approved:
 
 ```text
 .agents/skills/openspec-propose/SKILL.md
@@ -36,10 +36,11 @@ openspec/config.yaml.example
 .opencode/agents/web-scraper.md
 ```
 
-Optional compatibility alias:
+## Optional agents
 
 ```text
-.opencode/agents/spec-verifier.md
+.opencode/agents/general.md              # -InstallGeneralAgent
+.opencode/agents/spec-verifier.md        # -InstallDeprecatedAliases (deprecated)
 ```
 
 Do not install as active default:
@@ -68,4 +69,29 @@ Set:
 
 ```yaml
 schema: proofloop-spec-driven
+```
+
+## Rollback behavior
+
+The PowerShell installer (`install-proofloop.ps1`) automatically rolls back on failure:
+
+- Files that existed before installation are restored from backup.
+- Files that were newly created during installation are deleted.
+- Empty directories created by the installer are cleaned up.
+
+If you install manually and need to roll back, delete the files listed in the "Required" sections above that did not exist before installation.
+
+## Direct Task without physical ledger
+
+When using Direct Task without `Evidence Ledger: required: yes`, the Completion Receipt should include:
+
+```text
+AC coverage:
+Files changed:
+Commands run:
+Verification result:
+Acceptance evidence:
+Stop conditions:
+Upgrade required:
+Residual risk:
 ```

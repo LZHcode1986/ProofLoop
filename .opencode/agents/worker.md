@@ -45,8 +45,12 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 - Load only explicitly required skills.
 - Use CodeGraph only inside assigned scope.
 - Run required verification.
-- Return Completion Receipt.
+- Return Completion Receipt with Contract Echo and Skill Evidence.
 - Leave git boundary closure to Committer.
+
+Worker does not read full Evidence Ledger by default.
+Worker receives assigned task contract only.
+Worker returns Completion Receipt to Executor.
 
 ## Stop and return blocked when
 

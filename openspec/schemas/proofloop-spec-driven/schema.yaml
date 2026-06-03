@@ -50,6 +50,18 @@ artifacts:
       - specs
       - design
 
+  - id: evidence-ledger
+    generates: proofloop/evidence-ledger.md
+    description: ProofLoop evidence ledger initialized from Brain Dispatch Contract.
+    template: evidence-ledger.md
+    instruction: >
+      Generate an evidence ledger seeded from the Brain Dispatch Contract.
+      The ledger records contract snapshots, planning results, execution receipts,
+      slice verification results, stage review, and archive result.
+      It must not introduce new requirements.
+    requires:
+      - proposal
+
 apply:
   requires:
     - tasks

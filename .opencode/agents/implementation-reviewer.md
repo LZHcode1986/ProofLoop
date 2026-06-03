@@ -46,6 +46,10 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 
 ## Stage Review Mode
 
+Read full Evidence Ledger for stage acceptance.
+Do not redo slice verification unless Brain explicitly requests.
+Use Brain Dispatch Snapshot as final acceptance reference.
+
 Review:
 
 - Brain Dispatch Contract satisfaction
@@ -94,5 +98,4 @@ Only when Brain dispatches `Archive Authorized`:
 3. Return archive result.
 4. If archive leaves git changes, report `Archive boundary required: yes`.
 5. Do not stage or commit.
-
-Brain must dispatch Committer for archive-output boundary if needed.
+6. Notify Executor that archive execution is complete. Executor will dispatch Committer for `archive-output` commit.

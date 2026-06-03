@@ -45,6 +45,11 @@ CodeGraph Anchors:
 Stop Conditions:
 Checkbox Owner:
 
+Evidence Ledger:
+- path:
+- assigned section:
+- update mode: return receipt to Executor
+
 Rules:
 - Work only on this task.
 - Do not broaden scope.
@@ -112,6 +117,17 @@ Files Changed In Slice:
 Required Review Skills:
 Executor Evidence Packet:
 
+Evidence Ledger:
+- path:
+- assigned slice section:
+- assignment mechanism: Executor 在 dispatch packet 中显式指定 slice ID 和对应的账本章节
+
+Assigned Slice:
+- slice ID:
+- covered Task IDs:
+- slice contract ref:
+- worker completion receipt refs:
+
 Return Contract:
 - Slice verification passed
 - Slice verification failed
@@ -133,6 +149,11 @@ Boundary Evidence:
 CodeGraph Evidence:
 Acceptance Evidence:
 Residual Risks:
+
+Evidence Ledger Path:
+Contract Echo:
+Skill Evidence:
+Ledger Update Summary:
 ```
 
 ## Git Boundary
@@ -220,3 +241,11 @@ Blocker:
 - Reason:
 - Required Brain action:
 ```
+
+## Contract Echo trimming
+
+Each subagent uses a trimmed Contract Echo in its receipt:
+
+- **Worker**: `accepted` | `satisfied` | `not satisfied` | `conflicted`
+- **Code Verifier**: `received` | `evidence present` | `evidence missing` | `conflicted`
+- **Committer**: no Echo required (returns Boundary Receipt only)

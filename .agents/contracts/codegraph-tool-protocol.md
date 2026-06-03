@@ -123,3 +123,10 @@ CodeGraph Evidence:
   - file:
   - reason:
 ```
+
+## Evidence Ledger recording
+
+When CodeGraph is used in OpenSpec Change execution:
+
+- CodeGraph Evidence must be appended to the Evidence Ledger in the relevant slice evidence section.
+- Stale results or fallback direct reads must be recorded in the relevant slice evidence section with the reason.

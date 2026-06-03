@@ -96,3 +96,36 @@ When `general` handles a Direct Task bugfix:
 - Run regression or verification.
 - Return Completion Receipt.
 - If the fix requires requirement/spec/user contract changes, return `Upgrade required: yes`.
+
+## Skill Evidence Rule (R3)
+
+A required skill name alone is not evidence. The agent output must include structured evidence produced by that skill.
+
+Minimum evidence format per skill:
+
+```text
+diagnose:
+- symptom reproduced or characterized:
+- suspected area:
+- root cause:
+- minimal fix:
+- regression check:
+
+test-driven-development:
+- RED:
+- GREEN:
+- REFACTOR:
+- deviation / not applicable reason:
+
+code-review-and-quality:
+- contract alignment:
+- implementation risks:
+- evidence gaps:
+- residual risk:
+
+security-and-hardening / data-migration-safety / concurrency-correctness / performance-regression:
+- reviewed scope:
+- findings:
+- evidence:
+- residual risk:
+```

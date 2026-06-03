@@ -62,14 +62,15 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 1. Create/update exactly one change.
 2. Preserve Brain intent and acceptance criteria.
 3. Generate proposal, design, specs, and tasks.
-4. Use CodeGraph according to `.agents/contracts/codegraph-tool-protocol.md` when code anchors are needed.
-5. Generate Slice Contracts.
-6. Ensure every implementation slice has a Code Verifier gate.
-7. Ensure git boundary plan is explicit:
+4. Materialize Evidence Ledger from Brain Evidence Ledger Seed into `proofloop/evidence-ledger.md`. Write Brain Dispatch Snapshot and planning artifact refs. Do not leave binding constraints only in prose.
+5. Use CodeGraph according to `.agents/contracts/codegraph-tool-protocol.md` when code anchors are needed.
+6. Generate Slice Contracts.
+7. Ensure every implementation slice has a Code Verifier gate.
+8. Ensure git boundary plan is explicit:
    - task -> task-diff-snapshot
    - slice PASS -> slice-output commit
    - archive -> archive-output commit
-8. Dispatch `planning-contract-verifier`.
+9. Dispatch `planning-contract-verifier`.
 
 ## Do not
 
@@ -103,6 +104,12 @@ Artifact readiness:
 - design:
 - specs:
 - tasks:
+- evidence-ledger:
+
+Evidence Ledger:
+- path:
+- Brain Dispatch Snapshot written: yes/no
+- AC Mapping Summary written: yes/no
 
 Git Boundary Plan:
 - task receipt: task-diff-snapshot

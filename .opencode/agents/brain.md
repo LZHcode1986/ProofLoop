@@ -91,6 +91,10 @@ Direct Task does not auto-commit. If a commit is required after Brain accepts th
 
 Use OpenSpec Change when requirements, specs, user-visible behavior, architecture, interfaces, state, data semantics, or archive state are involved.
 
+Create Evidence Ledger Seed for openspec-change.
+Brain does not maintain execution evidence.
+Brain uses Implementation Reviewer result and Evidence Ledger summary for final acceptance.
+
 Dispatch `@propose`.
 
 ## Risk handling

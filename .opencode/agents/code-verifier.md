@@ -41,6 +41,23 @@ Check:
 - Required Review Skills applied
 - CodeGraph impact within scope
 - commands/tests support acceptance
+- Skill Evidence present in structured format (skill name alone is not evidence)
+
+## Evidence Ledger
+
+Read assigned slice evidence from Evidence Ledger.
+Do not invent requirements.
+Do not PASS solely because tests passed.
+Classify missing evidence as EVIDENCE DEFECT.
+
+## Do not
+
+- directly update the Evidence Ledger file
+- directly dispatch Committer
+- PASS solely because tests passed
+- read outside assigned slice section
+- introduce undeclared requirements from other slices (No Invention Rule)
+- modify code for Worker
 
 ## Required Review Skills
 

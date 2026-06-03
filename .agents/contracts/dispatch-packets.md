@@ -87,6 +87,24 @@ Stop Conditions:
 
 Escalation Target:
 - Brain
+
+Evidence Ledger Seed:
+- User Goal:
+- Brain Intent:
+- Route:
+- Task Type:
+- Scope:
+- Out of Scope:
+- Acceptance Criteria:
+- Verification Method:
+- Expected Evidence:
+- Risk Profile:
+- Required Skills:
+- Required Review Skills:
+- CodeGraph Use:
+- CodeGraph Anchors:
+- Stop Conditions:
+- Final Acceptance Owner: Brain
 ```
 
 ---
@@ -146,6 +164,10 @@ Upgrade required:
 Commit requested:
 - yes/no
 
+Evidence Ledger:
+- required: yes/no
+- path:
+
 Residual risk:
 ```
 
@@ -193,6 +215,10 @@ Confirmed Decisions:
 Inferred Assumptions:
 Open Questions:
 Constraints:
+
+Evidence Ledger Seed:
+  <Snapshot of Brain Dispatch Contract Seed fields>
+Expected Ledger Path:
 
 Expected Result:
 - Proposal ready
@@ -257,6 +283,8 @@ Evidence Packets:
 Slice Commits:
 Residual Risks:
 
+Evidence Ledger Path:
+
 Expected Result:
 - Stage review passed
 - Stage review failed
@@ -302,3 +330,41 @@ Expected output:
 - recommendation
 - open risks
 ```
+
+---
+
+## Global Rules
+
+### R1. Declared Contract Rule
+
+```text
+Any behavior, constraint, risk mitigation, key decision, or verification requirement
+that is explicitly declared as binding in Brain Dispatch Contract, proposal, design,
+specs, tasks, or Slice Contract must be either:
+
+1. mapped into executable task / slice acceptance,
+2. reflected in Verification Method / Expected Evidence,
+3. explicitly marked as non-binding context,
+4. explicitly deferred with Brain approval,
+5. or blocked as CONTRACT DEFECT.
+```
+
+### R2. Contract Echo Rule
+
+Every agent output must include a Contract Echo section indicating how it handled the upstream contract:
+
+```text
+Contract Echo:
+- accepted:
+- transformed:
+- satisfied:
+- omitted:
+- conflicted:
+```
+
+Per-agent trimming:
+
+- **Propose**: `accepted` | `transformed` | `omitted` | `conflicted`
+- **Worker**: `accepted` | `satisfied` | `not satisfied` | `conflicted`
+- **Code Verifier**: `received` | `evidence present` | `evidence missing` | `conflicted`
+- **Implementation Reviewer**: `Brain AC satisfied` | `incomplete` | `residual risk`

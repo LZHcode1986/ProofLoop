@@ -103,3 +103,11 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Git boundary plan is explicit.
 - [ ] Task output uses task-diff-snapshot.
 - [ ] Slice output is committed only after verifier PASS.
+
+## Evidence Ledger Section
+
+Expected Evidence must be concrete enough for ledger recording.
+
+| Slice | Evidence Section | Task Receipt Section |
+| --- | --- | --- |
+| Slice 1 | 4. Execution Evidence > Slice 1 | Task 1.1 |

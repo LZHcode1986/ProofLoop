@@ -43,6 +43,10 @@ Check:
 5. CodeGraph Anchor Resolution
 6. Git Boundary Plan
 
+Read Evidence Ledger Brain Dispatch Snapshot.
+Verify artifacts map declared contract to executable acceptance, verification method, expected evidence, or approved deferral.
+Block unresolved internal conflicts.
+
 ## Block only when
 
 - Brain AC is missing from artifact mapping.

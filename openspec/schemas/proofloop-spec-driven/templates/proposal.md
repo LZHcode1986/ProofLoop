@@ -47,3 +47,8 @@
 ## Non-goals
 
 - 
+
+## Evidence Ledger
+
+- initialized from Brain Dispatch Contract: yes/no
+- path:
