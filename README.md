@@ -21,7 +21,9 @@ AI agents often fail not because they cannot write code, but because they drift 
 
 ProofLoop prevents this by requiring every Brain-dispatched task to carry a verifiable contract and every subagent result to return structured completion evidence.
 
-## Updated workflow
+## Workflow
+
+Evidence Ledger is the delivery evidence spine for OpenSpec Change. Brain seeds it, Propose materializes it, Executor maintains it, Code Verifier reads it, and Implementation Reviewer uses it for stage acceptance.
 
 ```mermaid
 flowchart TD
@@ -34,22 +36,31 @@ flowchart TD
     GR --> BS[Brain self-check\nAC + evidence + scope]
     BS --> U
 
-    D -- Yes --> P[Propose\nmap Brain Dispatch Contract to OpenSpec artifacts]
+    D -- Yes --> BLS[Brain\nEvidence Ledger Seed]
+    BLS --> P[Propose\nmap Brain Dispatch Contract to OpenSpec artifacts]
+
+    EL[(Evidence Ledger\nproofloop/evidence-ledger.md)]
+    P -->|materialize| EL
+
     P --> PCV[Planning Contract Verifier\nintent preservation + mechanical executability]
+    PCV -->|check against| EL
     PCV --> X[Executor\nOpenSpec apply orchestrator]
 
+    X -->|read/write| EL
     X --> W[Worker\ntask execution]
     W --> TDS[Committer\ntask-diff-snapshot receipt]
     TDS --> SG{Slice complete?}
     SG -- More tasks --> W
     SG -- Slice ready --> CV[Code Verifier\nslice-level verification]
 
+    CV -->|read assigned slice| EL
     CV -- failed / blocked --> X
     CV -- passed --> SC[Committer\nslice-output commit]
     SC --> NS{More slices?}
     NS -- Yes --> W
     NS -- No --> IR[Implementation Reviewer\nstage acceptance + archive readiness]
 
+    IR -->|read full ledger| EL
     IR --> BA[Brain archive authorization]
     BA --> AE[Implementation Reviewer\narchive execution]
     AE --> AO{Archive changed files?}
@@ -101,15 +112,18 @@ Brain may dispatch Committer for direct-task-output if commit is requested.
 ### OpenSpec Change
 
 ```text
-Brain -> Propose
-      -> Planning Contract Verifier
-      -> Executor
-      -> Worker
-      -> Committer task-diff-snapshot
-      -> Code Verifier per slice
-      -> Committer slice-output
-      -> Implementation Reviewer
-      -> Archive
+Brain creates Evidence Ledger Seed.
+Propose materializes proofloop/evidence-ledger.md.
+Planning Contract Verifier checks contract fidelity.
+Executor maintains execution evidence in the ledger.
+Worker returns structured Completion Receipt.
+Committer records task-diff-snapshot.
+Code Verifier checks assigned slice evidence.
+Committer commits slice-output after verifier PASS.
+Implementation Reviewer performs stage acceptance from full ledger.
+Brain authorizes archive.
+Implementation Reviewer executes archive.
+Committer commits archive-output if needed.
 ```
 
 Use OpenSpec Change for:
