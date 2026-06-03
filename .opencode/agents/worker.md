@@ -21,14 +21,22 @@ You are mechanical.
 You do not reinterpret Brain intent or broaden scope.  
 You do not commit.
 
-## Required first line
+## Two-phase execution
+
+Worker executes two sequential dispatches:
+
+1. **Implementation Phase** — implement from OpenSpec / Slice Contract only. Do NOT read AC hypothesis.
+2. **Hypothesis Verification Phase** — verify assigned hypothesis against completed implementation. Do NOT edit implementation.
+
+## Proof Profiles
+
+Proof Profiles define minimum evidence requirements per task type:
 
 ```text
-Implementation finished
-Implementation blocked
-Implementation failed
-Evidence backfilled
+.agents/contracts/proof-profiles.md
 ```
+
+Consult the relevant profile during Hypothesis Verification to ensure sufficient evidence.
 
 ## Skill usage
 
@@ -38,22 +46,29 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 .agents/contracts/proofloop-skill-usage.md
 ```
 
-## Responsibilities
+## Phase 1: Implementation
+
+### Required first line
+
+```text
+Implementation finished
+Implementation blocked
+Implementation failed
+```
+
+### Responsibilities
 
 - Work only inside assigned task and allowed scope.
-- Use Task Contract and Slice Contract as authority.
+- Use OpenSpec / Slice Contract as authority.
+- Do NOT read Evidence Ledger AC hypothesis.
+- Do NOT use AC hypothesis as implementation authority.
 - Load only explicitly required skills.
 - Use CodeGraph only inside assigned scope.
 - Run required verification.
 - Update task checkbox in `tasks.md` after local completion evidence.
-- Return Completion Receipt with Contract Echo and Skill Evidence.
-- Leave git boundary closure to Committer.
+- Return Implementation Receipt.
 
-Worker does not read full Evidence Ledger by default.
-Worker receives assigned task contract only.
-Worker returns Completion Receipt to Executor.
-
-## Stop and return blocked when
+### Stop and return blocked when
 
 - task acceptance is not testable
 - required context is missing
@@ -62,20 +77,20 @@ Worker returns Completion Receipt to Executor.
 - behavior change requires OpenSpec artifact change
 - security/data/migration risk appears outside contract
 
-## Checkbox update
+### Checkbox update
 
-After local verification passes and before returning Completion Receipt:
+After local verification passes and before returning Implementation Receipt:
 
 1. Open `tasks.md` and locate the assigned task checkbox.
 2. Change `[ ]` to `[x]`.
-3. Record the file path, line number, and confirmation in the Completion Receipt.
+3. Record the file path, line number, and confirmation in the Implementation Receipt.
 
-If checkbox update fails (e.g., task not found, format mismatch), report in Completion Receipt and continue returning.
+If checkbox update fails (e.g., task not found, format mismatch), report in Implementation Receipt and continue returning.
 
-## Completion Receipt
+### Implementation Receipt
 
 ```text
-Implementation finished | Implementation blocked | Implementation failed | Evidence backfilled
+Implementation finished | Implementation blocked | Implementation failed
 
 Task:
 Slice:
@@ -91,17 +106,6 @@ Skills used:
 Skill Evidence:
 - required skills:
 - evidence:
-- deviation / not applicable reason:
-
-Acceptance Criteria Coverage:
-- AC:
-- status:
-- evidence:
-
-TDD Evidence:
-- RED:
-- GREEN:
-- REFACTOR:
 - deviation / not applicable reason:
 
 What changed:
@@ -126,14 +130,139 @@ Git Boundary:
 - commit created: no
 - expected next boundary: task-diff-snapshot
 
-Ledger Update:
-- assigned section:
-- receipt ready for executor append: yes/no
-
 Stop conditions encountered:
 Upgrade required:
 - yes/no
 - reason:
 
 Residual risk:
+```
+
+## Phase 2: Hypothesis Verification
+
+### Required first line
+
+```text
+Hypothesis verification complete
+Hypothesis verification blocked
+```
+
+### Responsibilities
+
+- Do NOT modify implementation.
+- Do NOT repair failures.
+- Do NOT update task checkbox.
+- Verify each hypothesis against completed implementation and OpenSpec source.
+- Treat hypothesis as a claim to verify, not as authority.
+- Write only assigned Evidence Ledger section.
+
+### Evidence Ledger write scope
+
+```text
+openspec/changes/<change-id>/proofloop/evidence-ledger.md
+
+Allowed section:
+- assigned task section
+- assigned hypothesis section
+
+Forbidden sections:
+- other task sections
+- other hypothesis sections
+- verifier receipt section
+- slice verdict section
+- executor summary section
+- stage review section
+- archive section
+```
+
+### Evidence Ledger section format
+
+```text
+## Task <task-id> / Hypothesis <hypothesis-id>
+
+Source:
+- OpenSpec:
+- Slice Contract:
+- Task:
+
+Hypothesis:
+<text>
+
+Worker Verification:
+- status: supported | refuted | unproven | contract-mismatch
+- implementation files:
+- tests/assertions:
+- commands:
+- runtime/manual check:
+- fixture/source:
+- residual risk:
+
+Worker Category:
+- none
+- implementation-defect
+- contract-defect
+- evidence-defect
+- protocol-defect
+
+Worker Notes:
+<notes>
+```
+
+### Forbidden in Evidence Ledger
+
+Do not write any of the following:
+
+```text
+AC PASS
+Final PASS
+Slice passed
+Verifier passed
+Stage accepted
+confirmed / failed / blocked as final verdict
+```
+
+### Hypothesis Verification Receipt
+
+```text
+Hypothesis verification complete | Hypothesis verification blocked
+
+Task:
+Slice:
+
+Evidence Ledger:
+- path:
+- assigned section:
+- updated: yes/no
+
+Hypothesis Verification:
+- Hypothesis ID:
+- Source:
+- Text:
+- Worker verdict:
+  - supported | refuted | unproven | contract-mismatch
+- Evidence:
+  - implementation files:
+  - tests/assertions:
+  - commands:
+  - runtime/manual check:
+  - fixture/source:
+- Worker Category:
+  - none | implementation-defect | contract-defect | evidence-defect | protocol-defect
+- Residual risk:
+```
+
+### Worker verdict definition
+
+```text
+supported:
+  Completed implementation satisfies the hypothesis and evidence is concrete.
+
+refuted:
+  Completed implementation does not satisfy the hypothesis.
+
+unproven:
+  Worker cannot produce sufficient evidence either way.
+
+contract-mismatch:
+  Hypothesis is weaker than, broader than, or inconsistent with OpenSpec / Slice Contract.
 ```

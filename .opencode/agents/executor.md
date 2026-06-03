@@ -5,7 +5,6 @@ color: "#ae89bc"
 permission:
   edit:
     "*": deny
-    "openspec/changes/*/proofloop/**": allow
   bash:
     "*": deny
     "openspec list*": allow
@@ -67,37 +66,65 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 2. Read tasks and Slice Contracts.
 3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
 4. Run `run-preflight` through Committer.
-5. Dispatch Worker for tasks.
+5. Dispatch **Worker Implementation** for tasks.
 6. Verify Worker receipt includes `Task Checkbox: checked: yes`. If not, report PROTOCOL DEFECT.
-7. After each Worker task, dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
-8. Append execution evidence (Worker receipt + boundary receipt) to Evidence Ledger.
-9. Dispatch Code Verifier at every slice gate with assigned slice evidence.
-10. Verify Code Verifier output includes `Task Checkbox: checked: yes` for verifier gate. If not, report PROTOCOL DEFECT.
-11. Collect Code Verifier result and append to Evidence Ledger.
-12. After Code Verifier passes, dispatch Committer for `slice-output` commit. Append slice commit info to Ledger.
+7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path.
+8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
+9. Dispatch **Code Verifier Blind Refutation** at every slice gate. Do NOT provide Worker evidence.
+10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts and Evidence Ledger.
+11. Collect Code Verifier Receipt with Final Slice Verdict.
+12. Route based on Code Verifier verdict (see Routing Rules).
 13. After all slices complete, dispatch Implementation Reviewer for stage review.
-14. After IR completes archive, dispatch Committer for `archive-output` commit. Append archive commit info to Ledger.
+14. After IR completes archive, dispatch Committer for `archive-output` commit.
 15. Stop and return to Brain on blockers.
 
-Executor owns execution evidence updates in Evidence Ledger.
-Executor appends Worker receipts, boundary receipts, command evidence, CodeGraph evidence, skill evidence, and verifier results.
+## Ownership
+
+Executor is the execution orchestrator, not an evidence author, not a semantic reviewer.
+
+- Executor does NOT write Evidence Ledger.
+- Executor does NOT edit implementation files.
+- Executor does NOT edit OpenSpec artifacts.
+- Executor does NOT write verifier results.
+- Executor does NOT write slice verdicts.
+- Executor does NOT substitute Code Verifier pass/fail/blocked judgment.
+
+## Routing Rules
+
+```text
+Code Verifier PASS:
+  dispatch Committer for slice-output
+
+Code Verifier FAIL / IMPLEMENTATION DEFECT:
+  dispatch Worker Fix for affected task IDs
+
+Code Verifier BLOCKED / EVIDENCE DEFECT:
+  dispatch Worker Evidence Backfill for affected task IDs
+
+Code Verifier BLOCKED / CONTRACT DEFECT:
+  return to Brain or Propose
+
+Code Verifier PROTOCOL DEFECT:
+  stop affected flow and report protocol defect
+```
 
 ## Guardrails
 
-- Verify `Task Checkbox: checked: yes` in every Worker receipt before proceeding to boundary receipt.
-- Verify `Task Checkbox: checked: yes` in Code Verifier output before proceeding to slice-output commit.
+- Verify `Task Checkbox: checked: yes` in every Worker Implementation receipt before proceeding.
 - If checkbox is not checked, report PROTOCOL DEFECT and stop the affected flow.
 
 ## Do not
 
 - implement code
 - edit files
+- edit Evidence Ledger
 - redefine Brain acceptance criteria
 - modify OpenSpec artifacts
 - ask the user
 - broaden scope
 - treat document debt as implementation failure
 - commit implementation output before slice verification passes
+- substitute Code Verifier judgment
 
 ## Git Boundary Policy
 
@@ -117,20 +144,47 @@ Every implementation slice must be verified.
 
 Do not dispatch Code Verifier after every ordinary task unless tasks explicitly require it.
 
-## Completion
+## Execution Summary
 
 ```text
 Execution complete | Execution blocked | Verification failed
 
 Change:
 Stage:
-Brain Dispatch Contract:
-Slice results:
-Completion Receipts:
+
+Worker Implementation Receipts:
+- task:
+- receipt ref:
+
+Worker Hypothesis Verification Receipts:
+- task:
+- hypothesis:
+- ledger section:
+- receipt ref:
+
 Task Snapshot Receipts:
+- task:
+- receipt ref:
+
+Code Verifier Receipts:
+- slice:
+- blind refutation receipt:
+- evidence review receipt:
+- final slice verdict:
+
+Slice Routing:
+- slice:
+- verdict:
+- next action:
+
 Slice Commits:
-Evidence Packets:
-Commands executed:
+- slice:
+- commit hash:
+
+Evidence Ledger:
+- path:
+- worker sections updated:
+- executor edited ledger: no
+
 Residual risks:
-Archive readiness notes:
 ```

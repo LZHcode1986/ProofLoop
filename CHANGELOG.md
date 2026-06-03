@@ -10,6 +10,16 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 - P0/P1/P2 路由级别不再使用，改为 `direct-task` / `openspec-change` 路由
 - 废弃别名仅通过 `-InstallDeprecatedAliases` 安装
 
+### 2026-06-04
+
+- **refactor**: v1 执行流程确定性整改 — Worker/Code Verifier 拆为两阶段，Executor 不再写 Evidence Ledger
+  - Worker: Implementation Phase（不读 hypothesis）+ Hypothesis Verification Phase（只写 assigned ledger section）
+  - Code Verifier: Blind Slice Refutation（不读 Worker evidence）+ Evidence Review and Task Attribution
+  - Executor: 删除 Evidence Ledger 编辑权限，增加 dispatch Worker Hypothesis Verification / Code Verifier Blind Refutation / Evidence Review
+  - Implementation Reviewer: Stage Review 输入增加 Executor Summary、Code Verifier Receipts
+- **feat**: 新增 `.agents/contracts/proof-profiles.md` — 5 个 verifier 反证模板（api-shape、route-default、ui-cardinality、empty-state、integration-path）
+- **chore**: `.gitignore` 添加 `docs/`
+
 ### 2026-06-03
 
 - **fix**: 清理 `openspec-propose/SKILL.md`、`config.yaml`、`propose-readiness.md`、`reality-readiness.md` 中残留的 `spec-verifier` / `reality-verifier` 引用

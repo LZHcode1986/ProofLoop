@@ -46,28 +46,53 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 
 ## Stage Review Mode
 
-Read full Evidence Ledger for stage acceptance.
-Do not redo slice verification unless Brain explicitly requests.
-Use Brain Dispatch Snapshot as final acceptance reference.
+Read the following inputs for stage acceptance:
+
+- **Evidence Ledger**: worker hypothesis verification sections only. This is worker proof record, NOT final verdict.
+- **Executor Summary**: execution routing and receipt index.
+- **Code Verifier Receipts**: blind refutation, evidence review, slice verdict, task attribution.
+- **Committer Receipts**: task-diff-snapshot, slice-output commits, archive-output commit.
+- **Slice commits**: actual committed changes.
+- **Brain Dispatch Contract**: final acceptance reference.
+
+Do NOT:
+
+- treat Worker `supported` as final PASS.
+- treat Evidence Ledger worker sections as final verdict.
+- read Evidence Ledger alone as sufficient for stage acceptance.
+- redo slice verification unless Brain explicitly requests.
 
 Review:
 
 - Brain Dispatch Contract satisfaction
-- all slice-level verification results
+- all slice-level verification results (from Code Verifier Receipts)
 - slice-output commits
 - composed stage behavior
 - residual risks
 - archive readiness
 
-Output:
+### Stage Review Output
 
 ```text
 Stage review passed | Stage review failed | Stage review passed with warnings
 
 Change:
 Stage:
+
 Brain Dispatch Contract:
 - AC coverage:
+
+Inputs checked:
+- Evidence Ledger worker sections:
+- Executor Summary:
+- Code Verifier Receipts:
+- Committer Receipts:
+- Slice commits:
+
+Slice Verdicts:
+- slice:
+- verdict:
+- verifier receipt:
 
 Completeness:
 Correctness:
@@ -76,6 +101,12 @@ Git Boundary:
 - task snapshot receipts:
 - slice commits:
 - archive boundary needed:
+
+Evidence Quality:
+- worker proof sufficient:
+- verifier refutation checked:
+- evidence defects:
+- contract defects:
 
 Evidence Ledger:
 - path:

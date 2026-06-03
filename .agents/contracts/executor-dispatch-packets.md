@@ -35,7 +35,6 @@ Change:
 Task ID:
 Task Name:
 Task Text:
-Task Acceptance Criteria:
 Allowed File Scope:
 Forbidden File Scope:
 Required Skills:
@@ -45,17 +44,45 @@ CodeGraph Anchors:
 Stop Conditions:
 Checkbox Owner:
 
-Evidence Ledger:
-- path:
-- assigned section:
-- update mode: return receipt to Executor
-
 Rules:
+- Use OpenSpec / Slice Contract as authority.
+- Do not read Evidence Ledger AC hypothesis.
+- Do not use AC hypothesis as implementation authority.
 - Work only on this task.
 - Do not broaden scope.
 - Do not commit.
 - Do not invoke subagents.
-- Return Completion Receipt.
+- Update assigned task checkbox after local verification.
+- Return Implementation Receipt.
+```
+
+## Worker Hypothesis Verification
+
+```text
+Executor Dispatch: Worker Hypothesis Verification
+
+Completed Implementation Receipt:
+OpenSpec source refs:
+Slice Contract:
+Assigned AC Hypotheses:
+- id:
+- source:
+- text:
+- expected evidence:
+
+Evidence Ledger:
+- path:
+- assigned section:
+- update mode: worker writes assigned section only
+
+Rules:
+- Do not edit implementation.
+- Do not repair failures.
+- Do not update task checkbox.
+- Verify each hypothesis against completed implementation and OpenSpec source.
+- Treat hypothesis as a claim to verify, not as authority.
+- Write only assigned Evidence Ledger section.
+- Return Hypothesis Verification Receipt.
 ```
 
 ## Worker Fix
@@ -100,60 +127,55 @@ Rules:
 - Return only structured evidence.
 ```
 
-## Code Verification
+## Code Verification - Blind Refutation
 
 ```text
-Executor Dispatch: Code Verification
+Executor Dispatch: Code Verification - Blind Refutation
 
 Brain Dispatch Contract:
 Slice Contract:
 Change:
 Slice / Gate:
 Covered Tasks:
-PASS/FAIL Gate:
-Worker Completion Receipts:
-Task Diff Snapshot Receipts:
 Files Changed In Slice:
 Required Review Skills:
-Executor Evidence Packet:
+Allowed File Scope:
+Forbidden File Scope:
 
-Evidence Ledger:
-- path:
-- assigned slice section:
-- assignment mechanism: Executor 在 dispatch packet 中显式指定 slice ID 和对应的账本章节
-
-Assigned Slice:
-- slice ID:
-- covered Task IDs:
-- slice contract ref:
-- worker completion receipt refs:
-
-Return Contract:
-- Slice verification passed
-- Slice verification failed
-- Slice verification blocked
+Rules:
+- Do not inspect Worker evidence.
+- Do not inspect Evidence Ledger worker sections.
+- Do not inspect Worker Completion Receipts.
+- Do not inspect Worker Hypothesis Verification Receipts.
+- Use OpenSpec / Slice Contract as authority.
+- Try to construct a real counterexample for the slice.
+- Prefer runtime/API/UI paths over structural inspection.
+- Do not PASS solely because tests pass.
+- Return Blind Slice Refutation Receipt.
 ```
 
-## Executor Evidence Packet
+## Code Verification - Evidence Review
 
 ```text
-Executor Evidence Packet
+Executor Dispatch: Code Verification - Evidence Review
 
-Brain Dispatch Contract:
-Slice Contract:
-Covered Tasks:
-Worker Completion Receipts:
+Blind Slice Refutation Receipt:
+Worker Implementation Receipts:
+Worker Hypothesis Verification Receipts:
 Task Diff Snapshot Receipts:
-Verification Commands:
-Boundary Evidence:
-CodeGraph Evidence:
-Acceptance Evidence:
-Residual Risks:
+Evidence Ledger assigned slice sections:
+Files Changed In Slice:
+Required Review Skills:
 
-Evidence Ledger Path:
-Contract Echo:
-Skill Evidence:
-Ledger Update Summary:
+Rules:
+- If blind refutation is refuted, slice fails.
+- If blind refutation is not-refuted, inspect Worker evidence.
+- If evidence is sufficient, slice passes.
+- If evidence is insufficient, slice is blocked.
+- If blind refutation is inconclusive, slice is blocked.
+- If slice fails or blocks, perform task-level attribution.
+- Final Slice Verdict goes in Code Verifier Receipt, not in Evidence Ledger.
+- Return Code Verifier Receipt with Final Slice Verdict.
 ```
 
 ## Git Boundary
