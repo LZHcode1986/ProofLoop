@@ -3,7 +3,9 @@ description: Brain-dispatched OpenSpec apply-stage orchestrator.
 mode: subagent
 color: "#ae89bc"
 permission:
-  edit: deny
+  edit:
+    "*": deny
+    "openspec/changes/*/proofloop/**": allow
   bash:
     "*": deny
     "openspec list*": allow
