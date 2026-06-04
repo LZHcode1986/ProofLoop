@@ -34,11 +34,10 @@ context: |
   Authority order: openspec/ > AGENTS.md > tech-spec.md > PRD.md > CLARIFY.md.
 
 rules:
-  classification:
+  proposal:
     - Every change MUST be classified as exactly one explicit change type before proposal work starts.
     - Define a default change type for non-UI or non-interaction work, and define a stricter change type for work where implemented behavior and actually usable behavior can diverge.
     - Document the exact boundaries that trigger the stricter change type, such as user interaction surfaces, operator workflows, or externally visible runtime behaviors.
-  proposal:
     - Always state the active stage, minimum closed loop, scope, non-goals, dependencies, risks, acceptance criteria, and verification method.
     - Default to the smallest proofable closed loop instead of the largest roadmap promise.
     - If a requested capability depends on an unfinished earlier artifact or stage boundary, either include the dependency slice explicitly or mark the change as blocked.
@@ -61,8 +60,6 @@ rules:
     - For interaction-heavy changes, require both a baseline proof before implementation and a full acceptance proof in reconciliation.
     - 'If any slice verifier task in `tasks.md` requires physical evidence files in `output/changes/`, `tasks readiness check` MUST verify that at least one implementation task covered by or prior to that verifier declares `output/changes/<change>/` in its `Allowed File Scope` and its task description mandates producing that artifact. If no producing task is found, readiness is FAIL.'
     - 'If any Reconciliation task in `tasks.md` requires physical evidence files in `output/changes/`, that Reconciliation task itself MUST declare `output/changes/<change>/` in its `Allowed File Scope` and its task description must mandate producing that artifact. If it requires files without declaring scope, readiness is FAIL.'
-  
-  implementation:
     - Define a zero-regressions rule: implementation is not complete until the repo-level gate passes with exit code 0.
     - When frontend files are touched, require a production build check before reporting completion.
     - When backend or pipeline behavior changes, require targeted automated tests that prove the active slice.

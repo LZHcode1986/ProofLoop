@@ -12,6 +12,15 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
 ### 2026-06-04
 
+- **fix**: v1 Propose/Planning 阶段综合整改 — schema/template/config overlay 层修复，确保 invalid planning artifacts 在进入 executor 前被挡住
+  - `openspec/config.yaml`: 迁移 `classification` / `implementation` unknown artifact rules 到 `proposal` / `tasks`
+  - `schema.yaml`: specs instruction 强制 `specs/<capability>/spec.md`，evidence-ledger instruction 改 Worker-owned 模型
+  - `templates/proposal.md`: 新增 `## What Changes`（含 In Scope / Out of Scope）
+  - `templates/tasks.md`: 新增 `### 2. Blocking`，Reconciliation 加 `bash scripts/local-check.sh`，任务重编号
+  - `templates/evidence-ledger.md`: Ledger Owners 改 Worker-owned，移除 Verifier/Reviewer/Archive 结论区，新增 Worker Hypothesis Verification Sections
+  - `templates/spec.md`: 补充 delta section 规则说明和 MODIFIED Requirements 示例
+  - `planning-contract-verifier.md`: 新增 CLI validate gate、schema/template contract checks、Evidence Ledger 模板禁止项检查（Slice Verification / Code Verifier Result / Stage Review Result / Archive Result / 旧 owner model）、validate 失败不可降级
+  - `propose.md`: 新增 Skill Immutability Rule、Overlay gates（6 项硬检查）、Fail-closed rules 扩展 Evidence Ledger 模板冲突条件
 - **refactor**: v1 执行流程确定性整改 — Worker/Code Verifier 拆为两阶段，Executor 不再写 Evidence Ledger
   - Worker: Implementation Phase（不读 hypothesis）+ Hypothesis Verification Phase（只写 assigned ledger section）
   - Code Verifier: Blind Slice Refutation（不读 Worker evidence）+ Evidence Review and Task Attribution

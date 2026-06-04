@@ -6,6 +6,8 @@ permission:
   edit: deny
   bash:
     "*": deny
+    "openspec validate*": allow
+    "openspec instructions*": allow
     "rg *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
@@ -36,19 +38,79 @@ PLANNING CONTRACT: READY
 
 Check:
 
-1. Intent Preservation
-2. Acceptance Mapping
-3. Mechanical Executability
-4. Stop Conditions
-5. CodeGraph Anchor Resolution
-6. Git Boundary Plan
+1. OpenSpec CLI Validation (hard gate)
+2. Schema/Template CLI Contract
+3. Intent Preservation
+4. Acceptance Mapping
+5. Mechanical Executability
+6. Stop Conditions
+7. CodeGraph Anchor Resolution
+8. Git Boundary Plan
+9. Evidence Ledger Execution Model Compatibility
 
 Read Evidence Ledger Brain Dispatch Snapshot.
 Verify artifacts map declared contract to executable acceptance, verification method, expected evidence, or approved deferral.
 Block unresolved internal conflicts.
 
+## Hard gates (BLOCKED cannot downgrade to READY_WITH_WARNINGS)
+
+### 1. OpenSpec CLI Validation
+
+Run or read the result of:
+
+```bash
+openspec validate <change> --strict
+```
+
+If validate fails:
+- verdict MUST be `PLANNING CONTRACT: BLOCKED`
+- do NOT continue to other checks
+- report failure summary
+
+### 2. Schema/Template CLI Contract
+
+Check:
+
+- specs path shape: every spec must be at `specs/<capability>/spec.md`, not flat `specs/<capability>.md`
+- proposal must contain `## What Changes` section
+- tasks section order must be: Setup -> Blocking -> Slice 1..N -> Reconciliation
+- interactive change: first Blocking task MUST be Proof Task
+- Reconciliation must contain final repo gate: `bash scripts/local-check.sh`
+- frontend files touched: Reconciliation must include `cd frontend && npm run build`
+- backend/pipeline changed: Reconciliation must include targeted `uv run pytest ...`
+
+If any contract check fails:
+- verdict MUST be `PLANNING CONTRACT: BLOCKED`
+
+### 3. Evidence Ledger Execution Model
+
+Check Evidence Ledger follows Worker-owned model:
+
+- Ledger Owners must show: planning seed: Propose, worker proof sections: Worker
+- Verifier receipts, executor summaries, stage reviews, archive results must be outside ledger
+
+Check Evidence Ledger template does NOT contain any of:
+
+- `execution: Executor`
+- `slice verification: Code Verifier`
+- `stage review: Implementation Reviewer`
+- `archive execution: Implementation Reviewer`
+- `Slice Verification` (as section or verdict)
+- `Code Verifier Result`
+- `Stage Review Result`
+- `Archive Result`
+- `Slice Commit` (as final verdict record)
+- `AC PASS` / `Final PASS` / `Slice passed` / `Verifier passed` / `Stage accepted` as final verdict
+
+If ledger model is outdated or template contains any forbidden item:
+- verdict MUST be `PLANNING CONTRACT: BLOCKED`
+
 ## Block only when
 
+- OpenSpec validate --strict fails.
+- Schema/template CLI contract check fails.
+- Evidence Ledger execution model is incompatible.
+- Evidence Ledger template contains forbidden items (Slice Verification, Code Verifier Result, Stage Review Result, Archive Result, old owner model).
 - Brain AC is missing from artifact mapping.
 - A slice lacks verifiable acceptance criteria.
 - A task cannot be mechanically executed.
@@ -77,6 +139,18 @@ Block unresolved internal conflicts.
 ```text
 PLANNING CONTRACT: BLOCKED | READY_WITH_WARNINGS | READY
 
+OpenSpec CLI:
+- status:
+- validate --strict: passed | failed
+- instructions warnings:
+
+Artifact Contract:
+- proposal:
+- design:
+- specs:
+- tasks:
+- evidence-ledger:
+
 Intent Preservation:
 - status:
 - notes:
@@ -104,6 +178,19 @@ CodeGraph Anchor Check:
 - anchors resolved:
 - unresolved anchors:
 - fallback direct reads:
+
+Tasks Readiness:
+- section order:
+- blocking proof:
+- slice gates:
+- final repo gate:
+
+Execution Model Compatibility:
+- worker-owned ledger:
+- verifier receipt outside ledger:
+- executor summary outside ledger:
+- no CV result in ledger:
+- no forbidden verdict sections in ledger:
 
 Findings:
 - BLOCKER:

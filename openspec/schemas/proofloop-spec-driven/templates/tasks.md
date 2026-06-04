@@ -41,7 +41,18 @@ Do not create implementation commits before slice verification passes unless Bra
   - **Expected Evidence:** <evidence>
   - **Boundary Receipt:** task-diff-snapshot
 
-### 2. Slice 1: <slice-name>
+### 2. Blocking
+
+- [ ] 2.1 <blocking/proof task or explicitly documented none>
+  - **Execution Type:** proof
+  - **Allowed File Scope:** <paths>
+  - **Verification Method:** <command>
+  - **Expected Evidence:** baseline proof before implementation
+  - **Boundary Receipt:** task-diff-snapshot
+
+<!-- For interactive changes, the first Blocking task MUST be Proof Task. -->
+
+### 3. Slice 1: <slice-name>
 
 #### Slice Contract
 
@@ -64,29 +75,35 @@ Do not create implementation commits before slice verification passes unless Bra
   - 
 - **Task Boundary Receipt:** task-diff-snapshot
 - **Slice Commit Boundary:** slice-output after verifier PASS
-- **Verifier Gate:** 2.V
+- **Verifier Gate:** 3.V
 
 #### Tasks
 
-- [ ] 2.1 [Slice-1] <task>
+- [ ] 3.1 [Slice-1] <task>
   - **Uses Slice Contract:** yes
   - **Overrides:** none
   - **Boundary Receipt:** task-diff-snapshot
 
-- [ ] 2.V [Slice-1] Code Verifier gate
-  - **Covered Tasks:** 2.1
+- [ ] 3.V [Slice-1] Code Verifier gate
+  - **Covered Tasks:** 3.1
   - **Evidence Packet Required:** yes
   - **Inspection Scope:** Slice 1 artifacts + changed files + task snapshot receipts + tests + commands + CodeGraph evidence
   - **PASS/FAIL Gate:** all Slice 1 ACs pass; no scope violation; required review skills applied
   - **On PASS:** Committer creates slice-output commit
 
-### 3. Reconciliation
+### 4. Reconciliation
 
-- [ ] 3.1 <task>
-  - **Allowed File Scope:** <paths>
-  - **Verification Method:** <command/inspection>
-  - **Expected Evidence:** <evidence>
+- [ ] 4.1 Final repo gate
+  - **Allowed File Scope:** <paths required for evidence only, if any>
+  - **Verification Method:** `bash scripts/local-check.sh`
+  - **Expected Evidence:** command exits 0; output summary captured
   - **Boundary Receipt:** task-diff-snapshot | stage-output if not part of a slice
+
+<!-- Additional Reconciliation rules:
+  - Frontend files touched: Reconciliation must include `cd frontend && npm run build`.
+  - Backend or pipeline behavior changed: Reconciliation must include targeted `uv run pytest ...`.
+  - Interactive change: Reconciliation must include full acceptance proof after all slices complete.
+-->
 
 ## Readiness Checklist
 
@@ -103,6 +120,8 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Git boundary plan is explicit.
 - [ ] Task output uses task-diff-snapshot.
 - [ ] Slice output is committed only after verifier PASS.
+- [ ] Blocking section exists (Proof Task for interactive changes).
+- [ ] Reconciliation includes `bash scripts/local-check.sh`.
 
 ## Evidence Ledger Section
 
@@ -110,4 +129,4 @@ Expected Evidence must be concrete enough for ledger recording.
 
 | Slice | Evidence Section | Task Receipt Section |
 | --- | --- | --- |
-| Slice 1 | 4. Execution Evidence > Slice 1 | Task 1.1 |
+| Slice 1 | 4. Execution Evidence > Slice 1 | Task 3.1 |

@@ -30,6 +30,10 @@ artifacts:
     description: Capability specification files.
     template: spec.md
     instruction: >
+      Generate capability specs only at specs/<capability>/spec.md.
+      Do not generate flat specs/<capability>.md files.
+      Each spec.md must contain OpenSpec delta sections (ADDED/MODIFIED Requirements)
+      parsable by the OpenSpec CLI for delta resolution.
       Generate behavior contracts and scenarios only.
     requires:
       - proposal
@@ -56,8 +60,12 @@ artifacts:
     template: evidence-ledger.md
     instruction: >
       Generate an evidence ledger seeded from the Brain Dispatch Contract.
-      The ledger records contract snapshots, planning results, execution receipts,
-      slice verification results, stage review, and archive result.
+      The ledger records: Brain Dispatch Snapshot, Planning Artifacts,
+      Planning Contract Result, and Worker Hypothesis Verification Sections.
+      Worker writes only assigned task/hypothesis sections.
+      Verifier receipts, executor summaries, stage reviews, and archive results
+      live outside the ledger in their respective receipts.
+      The ledger must not contain final verdicts (PASS/FAIL/blocked/confirmed).
       It must not introduce new requirements.
     requires:
       - proposal

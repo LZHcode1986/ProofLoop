@@ -57,6 +57,36 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 .agents/contracts/proofloop-skill-usage.md
 ```
 
+## Skill Immutability Rule
+
+```text
+ProofLoop does not directly modify canonical skills.
+Skill only provides OpenSpec base capability.
+ProofLoop-specific constraints must be in overlay layer:
+- agent instruction (this file)
+- schema
+- template
+- planning-contract-verifier
+- dispatch contract
+
+If canonical skill behavior conflicts with ProofLoop constraints,
+Propose Agent and Planning Contract Verifier must fail-closed.
+Do NOT resolve by modifying the skill itself.
+```
+
+## Overlay gates
+
+After skill output, before reporting readiness, verify:
+
+1. `openspec validate <change> --strict` passes.
+2. Every spec path is `specs/<capability>/spec.md`.
+3. proposal contains `## What Changes`.
+4. tasks contains `Setup -> Blocking -> Slice N -> Reconciliation`.
+5. Reconciliation contains `bash scripts/local-check.sh`.
+6. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
+
+If any gate fails: output `Planning blocked`.
+
 ## Responsibilities
 
 1. Create/update exactly one change.
@@ -94,10 +124,25 @@ Brain Dispatch Contract:
 - AC mapping summary:
 
 OpenSpec status:
+- artifacts complete:
+- applyRequires done:
+
 OpenSpec validation:
+- command: openspec validate <change> --strict
+- exit code:
+- result: passed | failed
+- failure summary:
+
+Tasks Readiness Check:
+- result:
+- blockers:
 
 Planning Contract Result:
 - PLANNING CONTRACT: BLOCKED | READY_WITH_WARNINGS | READY
+
+CodeGraph Protocol Check:
+- result:
+- stale/fallback:
 
 Artifact readiness:
 - proposal:
@@ -126,4 +171,26 @@ Findings:
 - NOTE:
 
 Next action:
+```
+
+## Fail-closed rules
+
+```text
+openspec validate --strict failed:
+  => Final output MUST be "Planning blocked"
+  => proposal MUST NOT be reported as ready
+  => tasks readiness MUST NOT be considered passed
+  => execution/apply MUST NOT start
+
+openspec status 5/5 artifacts complete:
+  => artifact completeness only
+  => does NOT equal Proposal ready
+
+Evidence Ledger template conflict:
+  => old owner model (execution: Executor, slice verification: Code Verifier, etc.)
+  => contains forbidden sections (Slice Verification, Code Verifier Result, Stage Review Result, Archive Result)
+  => Final output MUST be "Planning blocked"
+
+Any gate failure:
+  => Final output MUST be "Planning blocked"
 ```

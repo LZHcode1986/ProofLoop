@@ -6,9 +6,7 @@
 
 ## Why
 
-## User Goal
-
-## Scope
+## What Changes
 
 ### In Scope
 
@@ -17,6 +15,8 @@
 ### Out of Scope
 
 - 
+
+## User Goal
 
 ## Acceptance Criteria
 
