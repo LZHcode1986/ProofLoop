@@ -94,6 +94,8 @@ Executor Dispatch: Worker Fix
 
 Brain Dispatch Contract:
 Slice Contract:
+OpenSpec Artifacts:
+OpenSpec source refs:
 Failed Slice / Gate:
 Covered Tasks:
 Fix Mode: repair | diagnose
@@ -105,8 +107,10 @@ Verification Method:
 Stop Conditions:
 
 Rules:
+- Use OpenSpec / Slice Contract as authority.
+- Treat Verifier Failure as a defect report, not as implementation authority.
 - Fix only the listed defect.
-- Preserve original contract.
+- Preserve original OpenSpec contract.
 - Do not broaden scope.
 ```
 
@@ -118,15 +122,27 @@ Executor Dispatch: Worker Evidence Backfill
 Change:
 Task ID:
 Task Name:
+OpenSpec source refs:
+Slice Contract:
+Hypothesis ID:
 Required Evidence:
 Verification Commands:
 Allowed File Scope:
 
+Evidence Ledger:
+- path:
+- assigned section:
+- update mode: worker writes assigned section only
+
 Rules:
-- Do not edit product code.
-- Do not change task checkbox state.
+- Do not edit implementation.
+- Do not repair failures.
+- Do not update task checkbox.
 - May rerun verification commands.
-- Return only structured evidence.
+- May inspect completed implementation.
+- Write only assigned Evidence Ledger section.
+- Backfill only evidence for assigned task / hypothesis.
+- Return Evidence Backfill Receipt.
 ```
 
 ## Code Verification - Blind Refutation
@@ -167,7 +183,7 @@ Blind Slice Refutation Receipt:
 Worker Implementation Receipts:
 Worker Hypothesis Verification Receipts:
 Task Diff Snapshot Receipts:
-Evidence Ledger assigned slice sections:
+Evidence Ledger worker task/hypothesis sections for covered tasks:
 Files Changed In Slice:
 Required Review Skills:
 

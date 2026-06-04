@@ -21,12 +21,13 @@ You are mechanical.
 You do not reinterpret Brain intent or broaden scope.  
 You do not commit.
 
-## Two-phase execution
+## Three-phase execution
 
-Worker executes two sequential dispatches:
+Worker executes up to three sequential dispatches:
 
 1. **Implementation Phase** — implement from OpenSpec / Slice Contract only. Do NOT read AC hypothesis.
 2. **Hypothesis Verification Phase** — verify assigned hypothesis against completed implementation. Do NOT edit implementation.
+3. **Evidence Backfill Phase** — rerun verification commands to fill missing evidence. Do NOT edit implementation. Do NOT update task checkbox.
 
 ## Proof Profiles
 
@@ -265,4 +266,56 @@ unproven:
 
 contract-mismatch:
   Hypothesis is weaker than, broader than, or inconsistent with OpenSpec / Slice Contract.
+```
+
+## Phase 3: Evidence Backfill
+
+Dispatched when Code Verifier returns `BLOCKED / EVIDENCE DEFECT` and Executor determines evidence can be filled without changing implementation.
+
+### Required first line
+
+```text
+Evidence backfill complete
+Evidence backfill blocked
+```
+
+### Responsibilities
+
+- Do NOT edit implementation.
+- Do NOT repair failures.
+- Do NOT update task checkbox.
+- May rerun verification commands.
+- May inspect completed implementation.
+- Write only assigned Evidence Ledger section.
+- Backfill only evidence for assigned task / hypothesis.
+
+### Evidence Ledger write scope
+
+Same as Phase 2: only assigned task / hypothesis section. Forbidden sections are identical.
+
+### Evidence Backfill Receipt
+
+```text
+Evidence backfill complete | Evidence backfill blocked
+
+Task:
+Slice:
+
+Evidence Ledger:
+- path:
+- assigned section:
+- updated: yes/no
+
+Backfill:
+- Hypothesis ID:
+- Required evidence:
+- Verification commands run:
+- Evidence produced:
+- Evidence still missing:
+
+Worker Category:
+- none
+- evidence-defect
+
+Residual risk:
 ```
