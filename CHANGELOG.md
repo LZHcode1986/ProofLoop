@@ -19,6 +19,11 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - Implementation Reviewer: Stage Review 输入增加 Executor Summary、Code Verifier Receipts
 - **feat**: 新增 `.agents/contracts/proof-profiles.md` — 5 个 verifier 反证模板（api-shape、route-default、ui-cardinality、empty-state、integration-path）
 - **chore**: `.gitignore` 添加 `docs/`
+- **fix**: dispatch packet 确定性整改 — 补齐 OpenSpec Artifacts 传递、删除 Implementation Reviewer 残留 Ledger 写入字段、删除 Committer ledger 写入例外口子
+  - Worker Implementation / Blind Refutation packet 新增 `OpenSpec Artifacts` + `OpenSpec source refs` 显式字段
+  - Implementation Reviewer Stage Review Output 删除 `stage review section updated` / `archive section updated`，改为 `worker hypothesis sections checked` + `ledger edited by implementation-reviewer: no`
+  - Committer 删除 "unless explicitly dispatched to append boundary receipt" 例外，改为 `Committer never writes Evidence Ledger`
+  - Brain Stage Review packet 同步新模型：`Evidence Ledger Path` / `Worker Hypothesis Verification Sections` / `Code Verifier Receipts` / `Committer Receipts`
 
 ### 2026-06-03
 

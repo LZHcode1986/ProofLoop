@@ -110,10 +110,12 @@ Evidence Quality:
 
 Evidence Ledger:
 - path:
-- Brain Dispatch Snapshot checked:
-- slice verifier results checked:
-- stage review section updated:
-- archive section updated:
+- worker hypothesis sections checked:
+- ledger edited by implementation-reviewer: no
+
+Stage Review Record:
+- recorded in Implementation Reviewer output: yes
+- recorded in Evidence Ledger: no
 
 Archive recommendation:
 - ready

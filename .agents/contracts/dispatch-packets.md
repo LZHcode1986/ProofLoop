@@ -275,15 +275,15 @@ Brain Dispatch Contract:
 Change:
 Stage:
 Relevant PRD Decisions:
-Relevant Artifacts:
-Relevant Verifier Results:
-Executor Summary:
-Completion Receipts:
-Evidence Packets:
-Slice Commits:
-Residual Risks:
+Relevant OpenSpec Artifacts:
 
 Evidence Ledger Path:
+Worker Hypothesis Verification Sections:
+Executor Summary:
+Code Verifier Receipts:
+Committer Receipts:
+Slice Commits:
+Residual Risks:
 
 Expected Result:
 - Stage review passed

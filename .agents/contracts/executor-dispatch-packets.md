@@ -35,6 +35,8 @@ Change:
 Task ID:
 Task Name:
 Task Text:
+OpenSpec Artifacts:
+OpenSpec source refs:
 Allowed File Scope:
 Forbidden File Scope:
 Required Skills:
@@ -137,6 +139,8 @@ Slice Contract:
 Change:
 Slice / Gate:
 Covered Tasks:
+OpenSpec Artifacts:
+OpenSpec source refs:
 Files Changed In Slice:
 Required Review Skills:
 Allowed File Scope:
