@@ -3,7 +3,8 @@ description: Slice-level implementation verifier.
 mode: subagent
 hidden: true
 permission:
-  edit: deny
+  edit:
+    "**/tasks.md": allow
   bash: allow
   task:
     "*": deny
