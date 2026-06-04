@@ -171,6 +171,7 @@ Rules:
 - Try to construct a real counterexample for the slice.
 - Prefer runtime/API/UI paths over structural inspection.
 - Do not PASS solely because tests pass.
+- Every Slice AC must have a refutation attempt; if any AC is unchallenged, verdict is inconclusive.
 - Return Blind Slice Refutation Receipt.
 ```
 
@@ -195,6 +196,7 @@ Rules:
 - If blind refutation is inconclusive, slice is blocked.
 - If slice fails or blocks, perform task-level attribution.
 - Final Slice Verdict goes in Code Verifier Receipt, not in Evidence Ledger.
+- Worker evidence is a claim to challenge, not a fact to trust.
 - Return Code Verifier Receipt with Final Slice Verdict.
 ```
 

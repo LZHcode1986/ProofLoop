@@ -33,6 +33,9 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - Implementation Reviewer Stage Review Output 删除 `stage review section updated` / `archive section updated`，改为 `worker hypothesis sections checked` + `ledger edited by implementation-reviewer: no`
   - Committer 删除 "unless explicitly dispatched to append boundary receipt" 例外，改为 `Committer never writes Evidence Ledger`
   - Brain Stage Review packet 同步新模型：`Evidence Ledger Path` / `Worker Hypothesis Verification Sections` / `Code Verifier Receipts` / `Committer Receipts`
+- **fix**: Code Verifier dispatch packet 行为约束补强 — Blind Refutation per-AC 反例约束、Evidence Review evidence 认识论声明
+  - Blind Refutation Rules: 每条 Slice AC 必须尝试反例，否则 verdict 为 inconclusive
+  - Evidence Review Rules: Worker evidence is a claim to challenge, not a fact to trust
 - **fix**: Worker Evidence Backfill 纳入 Worker 三阶段协议、Worker Fix 补齐 OpenSpec refs、Evidence Review 口径收窄
   - Worker 新增 Phase 3: Evidence Backfill — 不编辑实现、不修失败、只补证据写 assigned Ledger section
   - Worker Evidence Backfill packet 新增 `OpenSpec source refs` / `Slice Contract` / `Hypothesis ID` / `Evidence Ledger` 字段
