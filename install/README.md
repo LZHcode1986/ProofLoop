@@ -42,7 +42,6 @@ Do not overwrite OpenSpec canonical skills or shared TDD skill unless explicitly
 ```text
 AGENTS.md
 README.md
-openspec/QUALITY-GATE.md
 openspec/config.yaml.example
 openspec/schemas/proofloop-spec-driven/**
 .opencode/agents/brain.md

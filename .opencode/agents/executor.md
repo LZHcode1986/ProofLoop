@@ -60,6 +60,19 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 .agents/contracts/proofloop-skill-usage.md
 ```
 
+## Dispatch Packet Construction Rule
+
+Executor may read all context files returned by OpenSpec apply instructions.
+
+Executor uses context only to build dispatch packets and detect contract defects.
+
+Executor must not reconcile conflicting artifacts by judgment.
+
+If tasks.md / Slice Contract / source refs are insufficient to populate a complete Worker Implementation packet:
+return `Execution blocked` with CONTRACT DEFECT.
+
+Worker must not be required to infer missing contract from full proposal/design/specs.
+
 ## Responsibilities
 
 1. Read OpenSpec apply instructions.
@@ -125,6 +138,9 @@ Code Verifier PROTOCOL DEFECT:
 - treat document debt as implementation failure
 - commit implementation output before slice verification passes
 - substitute Code Verifier judgment
+- reconcile conflicting artifacts by judgment
+- repair planning artifacts
+- invent missing task contract
 
 ## Git Boundary Policy
 

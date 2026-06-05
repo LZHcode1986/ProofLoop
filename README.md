@@ -174,7 +174,8 @@ ProofLoop usage constraints live in:
 ```text
 .agents/contracts/proofloop-skill-usage.md
 .opencode/agents/*.md
-openspec/QUALITY-GATE.md
+openspec/schemas/proofloop-spec-driven/**
+openspec/config.yaml
 ```
 
 ## TDD skill is preserved
@@ -274,5 +275,4 @@ install/
 4. Read `.agents/contracts/executor-dispatch-packets.md`.
 5. Read `.agents/contracts/proofloop-skill-usage.md`.
 6. Read `.agents/contracts/codegraph-tool-protocol.md`.
-7. Read `openspec/QUALITY-GATE.md`.
-8. Read `.opencode/agents/committer.md`.
+7. Read `.opencode/agents/committer.md`.

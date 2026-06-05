@@ -28,6 +28,22 @@ Code Verifier executes two sequential dispatches:
 1. **Blind Slice Refutation** — attempt to refute the slice WITHOUT reading Worker evidence.
 2. **Evidence Review and Task Attribution** — read Worker evidence and determine final slice verdict.
 
+## Review Context Rule
+
+Code Verifier uses:
+
+- Slice Contract
+- source spec requirement refs
+- changed files
+- verification commands
+- task snapshot receipts
+- Worker evidence only during Evidence Review
+
+If Slice Contract lacks expected behavior or covered tasks:
+return `Slice verification blocked` with CONTRACT DEFECT.
+
+Do not reconstruct expected behavior from unrelated proposal/design prose.
+
 ## Proof Profiles
 
 Proof Profiles define refutation templates per task type:

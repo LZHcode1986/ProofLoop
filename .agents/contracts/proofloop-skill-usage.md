@@ -4,6 +4,31 @@ This document defines how ProofLoop agents use canonical and shared skills.
 
 It does not replace or modify the skill files themselves.
 
+## Canonical Skill Substrate Rule
+
+Canonical OpenSpec skills are substrate only.
+
+The following skills MUST remain official or near-official:
+
+```text
+.agents/skills/openspec-propose/SKILL.md
+.agents/skills/openspec-apply-change/SKILL.md
+.agents/skills/openspec-archive-change/SKILL.md
+```
+
+They do not own ProofLoop-specific governance rules.
+
+ProofLoop authority lives in:
+
+```text
+.opencode/agents/*.md
+.agents/contracts/*.md
+openspec/schemas/proofloop-spec-driven/**
+openspec/config.yaml
+```
+
+Future rule changes MUST only modify the ProofLoop layer, NOT the canonical skills.
+
 ## Do not overwrite canonical skills
 
 ProofLoop flow changes must not directly rewrite:
@@ -21,8 +46,8 @@ ProofLoop constraints belong in:
 ```text
 .opencode/agents/*.md
 .agents/contracts/*.md
-openspec/QUALITY-GATE.md
 openspec/schemas/proofloop-spec-driven/**
+openspec/config.yaml
 ```
 
 ## Do not overwrite shared TDD skill

@@ -82,7 +82,6 @@ $Contracts = @(
 $RootFiles = @(
   "AGENTS.md",
   "README.md",
-  "openspec/QUALITY-GATE.md",
   "openspec/config.yaml.example"
 )
 
@@ -250,7 +249,6 @@ foreach ($skill in $CanonicalSkills) {
 
   $requiredFiles = @(
     "AGENTS.md",
-    "openspec/QUALITY-GATE.md",
     ".opencode/agents/brain.md",
     ".opencode/agents/executor.md",
     ".agents/contracts/dispatch-packets.md",

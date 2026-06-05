@@ -57,22 +57,18 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 .agents/contracts/proofloop-skill-usage.md
 ```
 
-## Skill Immutability Rule
+## Artifact Role Rules
 
 ```text
-ProofLoop does not directly modify canonical skills.
-Skill only provides OpenSpec base capability.
-ProofLoop-specific constraints must be in overlay layer:
-- agent instruction (this file)
-- schema
-- template
-- planning-contract-verifier
-- dispatch contract
-
-If canonical skill behavior conflicts with ProofLoop constraints,
-Propose Agent and Planning Contract Verifier must fail-closed.
-Do NOT resolve by modifying the skill itself.
+proposal = intent snapshot
+specs = behavior contract source of truth
+design = technical rationale
+tasks = executable projection
+evidence-ledger = proof record
 ```
+
+Downstream artifacts may restate upstream content only as projections with source references.
+If a downstream artifact introduces new binding behavior, Planning Contract is BLOCKED.
 
 ## Overlay gates
 
@@ -102,6 +98,14 @@ If any gate fails: output `Planning blocked`.
    - archive -> archive-output commit
 9. Dispatch `planning-contract-verifier`.
 
+## Ready判定
+
+Proposal ready only when:
+
+- `openspec validate <change> --strict` passes.
+- `planning-contract-verifier` returns READY or acceptable READY_WITH_WARNINGS.
+- No BLOCKED projection defect exists.
+
 ## Do not
 
 - rewrite Brain acceptance criteria
@@ -112,6 +116,8 @@ If any gate fails: output `Planning blocked`.
 - implement code
 - execute apply or archive
 - ask the user directly
+- redefine behavior contracts in downstream artifacts
+- introduce new binding behavior not present in specs
 
 ## Output
 

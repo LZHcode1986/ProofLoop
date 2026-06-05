@@ -20,7 +20,6 @@ AGENTS.md
 README.md
 .opencode/agents/**
 .agents/contracts/**
-openspec/QUALITY-GATE.md
 openspec/schemas/proofloop-spec-driven/**
 install/**
 ```

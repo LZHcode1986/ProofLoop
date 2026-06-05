@@ -2,6 +2,8 @@
 
 ## Design Boundary
 
+<!-- Design is technical rationale for implementing specs. It does not redefine behavior contracts. -->
+
 ## Goals and Non-goals
 
 ### Goals
@@ -50,6 +52,12 @@ If audit behavior is required, describe why and which boundary is stricter.
 
 ## Binding Decisions
 
-| Decision | Execution Impact | Verification / Evidence Expectation | Non-binding Context |
-| --- | --- | --- | --- |
-|  |  |  | yes/no |
+| Decision | Type | Source Spec Requirement | Projects To Tasks | Projects To Specs | Rationale |
+| --- | --- | --- | --- | --- | --- |
+|  | behavior-binding / implementation-only | REQ-... | yes/no | yes/no |  |
+
+<!-- 
+  Rules:
+  - behavior-binding: affects observable behavior or external contract. Must already be represented in specs. Must project to tasks.
+  - implementation-only: affects implementation plan. May project to tasks. Does not need to appear in specs.
+-->

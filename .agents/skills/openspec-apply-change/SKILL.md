@@ -20,9 +20,9 @@ Implement tasks from an OpenSpec change.
    If a name is provided, use it. Otherwise:
    - Infer from conversation context if the user mentioned a change
    - Auto-select if only one active change exists
-   - If ambiguous, run `openspec list --json` to get available changes. In apply-stage executor orchestration, stop and report a blocker with the candidate changes; do not use `question`. `question` is reserved for the propose primary agent.
+   - If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select
 
-   Always announce: "Using change: <name>" and how to override (e.g., `/opsx:apply <other>`).
+   Always announce: "Using change: <name>" and how to override (e.g., `/opsx-apply <other>`).
 
 2. **Check status to understand the schema**
    ```bash
@@ -39,7 +39,7 @@ Implement tasks from an OpenSpec change.
    ```
 
    This returns:
-   - Context file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
+   - `contextFiles`: artifact ID -> array of concrete file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
    - Progress (total, complete, remaining)
    - Task list with status
    - Dynamic instruction based on current state
@@ -49,31 +49,14 @@ Implement tasks from an OpenSpec change.
    - If `state: "all_done"`: congratulate, suggest archive
    - Otherwise: proceed to implementation
 
-4. **Honor apply workflow requirements**
+4. **Read context files**
 
-   Read the dynamic `instruction` returned by `openspec instructions apply`.
-
-   - You MUST follow the task-level implementation workflow declared in `tasks.md`.
-   - Do not load `test-driven-development` globally for all apply work.
-   - Every task that changes code must be marked `Execution Type: test-first-code` and must include `Required Skills: test-driven-development`.
-   - Non-code tasks such as setup, docs-sync, proof, verifier-gate, and reconciliation do not load TDD unless they explicitly change code.
-   - If the change is classified as `interactive`, you MUST complete the `Blocking` section's first `Proof Task` before any later slice work begins.
-   - If `tasks.md` defines explicit `Slice 1..N` verifier gates, you MUST invoke the independent `code-verifier` sub-agent at those boundaries and wait for verification results (`passed`, `failed`, or `blocked`).
-   - Treat `tasks.md` as scope and progress tracking; it does not override the required implementation order from the apply instruction.
-   - Worker owns implementation task checkboxes after local completion evidence.
-   - Code Verifier does not update normal implementation task checkboxes; it updates only its assigned verifier gate checkbox on `Verification passed`.
-   - Based on Boundary Mode (final | slice | per-task | no-op), either commit after each task, record a `diff-snapshot` receipt (tracking changed files without commit), or record a `no-op` receipt.
-   - Do not dispatch `@code-verifier` until every covered Worker attempt has a recorded boundary receipt (commit, diff-snapshot, or no-op).
-   - Compile the `Executor Evidence Packet` with all gathered Worker summaries, TDD evidence, verification commands, and boundary receipts. Code Verifier must rely strictly on this packet.
-
-5. **Read context files**
-
-   Read the files listed in `contextFiles` from the apply instructions output.
+   Read every file path listed under `contextFiles` from the apply instructions output.
    The files depend on the schema being used:
    - **spec-driven**: proposal, specs, design, tasks
    - Other schemas: follow the contextFiles from CLI output
 
-6. **Show current progress**
+5. **Show current progress**
 
    Display:
    - Schema being used
@@ -81,46 +64,22 @@ Implement tasks from an OpenSpec change.
    - Remaining tasks overview
    - Dynamic instruction from CLI
 
-7. **Implement tasks (loop until done or blocked)**
+6. **Implement tasks (loop until done or blocked)**
 
-For each pending task:
+   For each pending task:
    - Show which task is being worked on
-   - Follow the task-level workflow before or during implementation. If `Required Skills` includes `test-driven-development`, delegate RED -> GREEN -> REFACTOR explicitly.
-   - If the change is `interactive`, enforce `Proof Task -> remaining Blocking -> Slice work -> Reconciliation`  
-   - **Dispatch `@worker`**: Delegate implementation or proof work using a full Task Packet built from `tasks.md` and the loaded context files. **Do NOT write code or edit files yourself.**
-   - Wait for `@worker` to report `Implementation finished`, `Implementation blocked`, or `Implementation failed`.
-   - Worker updates only its assigned implementation task checkbox after local completion evidence.
-   - Ordinary Worker tasks become `passed-for-now`; they are not final slice trust.
-   - **Dispatch `@code-verifier` only at explicit verifier gates**: If the current pending item is a slice verifier gate, verifier task, or reconciliation verifier gate, compile the `Executor Evidence Packet` and invoke independent `@code-verifier` for the whole covered slice.
-   - Code Verifier dispatch must include only the assigned slice/gate contract from `tasks.md` and the compiled `Executor Evidence Packet`.
-   - Do not dispatch full Stage Acceptance Criteria to `@code-verifier`; stage-level composition belongs to `@implementation-reviewer`.
-   - Wait for `@code-verifier` to return `Verification passed`, `Verification failed`, or `Verification blocked` along with Category and Severity.
-   - **Handle Verifier Result by Category**:
-     - `IMPLEMENTATION DEFECT`: Dispatch Worker Fix in `repair` mode (max 2 attempts per slice gate, then diagnose).
-     - `EVIDENCE DEFECT`: Dispatch `@worker` with `Executor Dispatch: Worker Evidence Backfill` (max 1 attempt) to reconstruct missing evidence without modifying product code.
-     - `PROTOCOL DEFECT`: Block execution and report protocol error.
-     - `PLANNING DEFECT`: Block execution and return to Propose/Brain.
-     - `PASS`: Mark slice gate complete.
-   - **Task Completion & Checkbox**: Normal implementation checkboxes are Worker-owned. Code Verifier owns only its assigned verifier gate checkbox and updates it on `Verification passed`. Failed slice verifier gates remain unchecked until PASS.
-   - Continue to next task.
+   - Make the code changes required
+   - Keep changes minimal and focused
+   - Mark task complete in the tasks file: `- [ ]` → `- [x]`
+   - Continue to next task
 
    **Pause if:**
-   - Task is unclear → stop and report a blocker with the exact missing decision/input
-   - Worker/Verifier reveals a design issue → suggest updating artifacts
-   - The current slice is missing a necessary prerequisite task or artifact → stop the slice, report the missing prerequisite and impacted task, and suggest the minimal artifact/task update
-   - Fatal error or upstream blocker encountered → report and wait for guidance
+   - Task is unclear → ask for clarification
+   - Implementation reveals a design issue → suggest updating artifacts
+   - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
-8. **Run implementation done check**
-
-   After all implementation tasks are done:
-   - Read `openspec/QUALITY-GATE.md`
-   - Run the mechanical `Implementation Done Check`
-   - Confirm task ownership, recorded verification commands, required slice verifier `PASS` results, boundary receipts for every covered Worker attempt, interactive proof evidence when applicable, and the stage-review package
-   - Do not suggest archive until boundary evidence is complete and stage review can be prepared
-   - Report failures before suggesting archive
-
-9. **On completion or pause, show status**
+7. **On completion or pause, show status**
 
    Display:
    - Tasks completed this session
@@ -135,11 +94,11 @@ For each pending task:
 
 Working on task 3/7: <task description>
 [...implementation happening...]
-✓ Worker self-check complete
+✓ Task complete
 
 Working on task 4/7: <task description>
 [...implementation happening...]
-✓ Slice verifier gate passed
+✓ Task complete
 ```
 
 **Output On Completion**
@@ -156,7 +115,7 @@ Working on task 4/7: <task description>
 - [x] Task 2
 ...
 
-All tasks complete and `Implementation Done Check` passed. Ready to archive this change.
+All tasks complete! Ready to archive this change.
 ```
 
 **Output On Pause (Issue Encountered)**
@@ -181,17 +140,12 @@ What would you like to do?
 
 **Guardrails**
 - Keep going through tasks until done or blocked
-- Always honor the dynamic apply instruction before dispatching tasks
 - Always read context files before starting (from the apply instructions output)
-- **NEVER implement tasks yourself**. Always use `@worker` for implementation.
-- If a task changes code, it must be `test-first-code` and include `test-driven-development`; explicitly instruct `@worker` to follow `RED -> GREEN -> REFACTOR`. Do not let `@worker` skip this.
-- If the change is `interactive`, do not skip dispatching the first `Proof Task`; this proof is Worker self-checked and is not a Code Verifier gate.
-- If `tasks.md` defines verifier gates, do not replace them with self-review; ALWAYS use the independent `@code-verifier` sub-agent.
-- **Enforce Worker Scope**: Always instruct `@worker` to keep code changes minimal and strictly scoped to each task.
-- **Enforce Checkbox Rules**: Worker owns normal implementation task checkboxes after local completion evidence. Code Verifier does not update normal implementation checkboxes; it owns only assigned verifier gate checkboxes.
-- If task is ambiguous, pause and report a blocker before dispatching
-- Do not suggest archive before `Implementation Done Check` is complete
-- Pause on fatal errors, upstream blockers, or unclear requirements - don't guess
+- If task is ambiguous, pause and ask before implementing
+- If implementation reveals issues, pause and suggest artifact updates
+- Keep code changes minimal and scoped to each task
+- Update task checkbox immediately after completing each task
+- Pause on errors, blockers, or unclear requirements - don't guess
 - Use contextFiles from CLI output, don't assume specific file names
 
 **Fluid Workflow Integration**

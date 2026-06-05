@@ -56,10 +56,16 @@ Do not create implementation commits before slice verification passes unless Bra
 
 #### Slice Contract
 
+- **Source Spec Requirements:**
+  - REQ-...
+- **Binding Behavior Summary:**
+  - 
 - **Slice Goal:** 
 - **Acceptance Criteria:**
   - AC-S1-1:
 - **Default Allowed File Scope:**
+  - 
+- **Forbidden File Scope:**
   - 
 - **Verification Method:**
   - 

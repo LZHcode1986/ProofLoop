@@ -35,39 +35,26 @@ context: |
 
 rules:
   proposal:
-    - Every change MUST be classified as exactly one explicit change type before proposal work starts.
-    - Define a default change type for non-UI or non-interaction work, and define a stricter change type for work where implemented behavior and actually usable behavior can diverge.
-    - Document the exact boundaries that trigger the stricter change type, such as user interaction surfaces, operator workflows, or externally visible runtime behaviors.
-    - Always state the active stage, minimum closed loop, scope, non-goals, dependencies, risks, acceptance criteria, and verification method.
-    - Default to the smallest proofable closed loop instead of the largest roadmap promise.
-    - If a requested capability depends on an unfinished earlier artifact or stage boundary, either include the dependency slice explicitly or mark the change as blocked.
-    - Proposal completion SHOULD be followed by an explicit proofability or readiness check before design work starts.
+    - Proposal is an intent snapshot. It must preserve Brain intent, scope, non-goals, acceptance criteria, risk posture, and minimum closed loop.
+    - Proposal must not define implementation details as authoritative behavior contracts.
+
   specs:
-    - Reuse authoritative terms, state names, object names, and boundary labels exactly where they already exist.
-    - Do not introduce new stable terminology or lifecycle states without updating the relevant authority source.
-    - Any spec that affects traceable or auditable outputs SHOULD define how traceability is preserved end to end.
+    - Specs are the behavior contract source of truth.
+    - Binding behavior that affects observable runtime behavior, API contracts, event delivery, persistence, failure semantics, or user-visible outcomes MUST appear in specs.
+    - Specs must not contain internal implementation plans unless they are externally observable requirements.
+
   design:
-    - Include input and output handoff, persistence or artifact implications, traceability impact, and how the design preserves stage or module boundaries.
-    - Avoid introducing architecture depth, service splits, or infrastructure scope that the active stage does not require.
-    - If the change affects runtime interaction boundaries, define user action boundaries, proof method, and false-positive boundaries explicitly.
+    - Design is technical rationale for implementing specs.
+    - Each binding decision must state whether it is behavior-binding or implementation-only.
+    - Behavior-binding decisions must reference source spec requirements.
+    - Implementation-only decisions may project to tasks but must not redefine behavior contracts.
+
   tasks:
-    - Break work into small, verifiable steps around the minimum closed loop for the active stage.
-    - Prefer TDD-oriented ordering when implementation is involved.
-    - Include exact verification commands or artifact checks for each slice.
-    - tasks.md SHOULD include an explicit verifier checkpoint for every implementation slice, with clear inspection scope and a PASS/FAIL gate.
-    - Use a canonical section order such as Setup -> Blocking -> Slice 1..N -> Reconciliation.
-    - Task planning SHOULD be followed by an explicit tasks readiness check before apply starts.
-    - For interaction-heavy changes, require both a baseline proof before implementation and a full acceptance proof in reconciliation.
-    - 'If any slice verifier task in `tasks.md` requires physical evidence files in `output/changes/`, `tasks readiness check` MUST verify that at least one implementation task covered by or prior to that verifier declares `output/changes/<change>/` in its `Allowed File Scope` and its task description mandates producing that artifact. If no producing task is found, readiness is FAIL.'
-    - 'If any Reconciliation task in `tasks.md` requires physical evidence files in `output/changes/`, that Reconciliation task itself MUST declare `output/changes/<change>/` in its `Allowed File Scope` and its task description must mandate producing that artifact. If it requires files without declaring scope, readiness is FAIL.'
-    - Define a zero-regressions rule: implementation is not complete until the repo-level gate passes with exit code 0.
-    - When frontend files are touched, require a production build check before reporting completion.
-    - When backend or pipeline behavior changes, require targeted automated tests that prove the active slice.
-    - Implementation changes SHOULD reference the current authority sources and active stage plan before task execution begins.
-    - Implementation SHOULD not start before the tasks readiness check passes.
-    - For stricter interaction-boundary changes, define a two-phase proof model: baseline proof before implementation and full acceptance proof after all slices complete.
-    - Apply SHOULD end with an explicit implementation-done check rather than discovering proof gaps during archive or release work.
-    - Require test-driven development before any code is written or modified unless the project documents an approved exception.
+    - Tasks are executable projections of specs and design.
+    - Each implementation slice must reference source spec requirements.
+    - Each Slice Contract must be self-contained enough for Executor to build Worker Dispatch Packet.
+    - Tasks must not introduce behavior not present in specs.
+    - Tasks must include verification method, expected evidence, allowed scope, stop conditions, and verifier gate for each implementation slice.
 
 traceability:
   proofloop-rectification:

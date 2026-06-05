@@ -18,7 +18,6 @@ Do not overwrite these files unless explicitly approved:
 ```text
 AGENTS.md
 README.md
-openspec/QUALITY-GATE.md
 openspec/config.yaml.example
 ```
 

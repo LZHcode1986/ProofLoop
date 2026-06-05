@@ -2,6 +2,25 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.4
+
+### 2026-06-05
+
+- **refactor**: 官方 Skill 基底 + ProofLoop Overlay 权威化减法式整改
+  - `openspec-propose/SKILL.md`: 回归官方基底，移除 ProofLoop-specific 规则（source decomposition, proofability check, Proof Posture, QUALITY-GATE, batch repair, Stage Acceptance Coverage Map, task metadata standards 等）
+  - `openspec-apply-change/SKILL.md`: 回归官方基底，移除 Worker/Code Verifier/Committer orchestration, task-diff-snapshot, slice-output, Hypothesis Verification, Evidence Backfill, Implementation Done Check 等
+  - `proofloop-skill-usage.md`: 新增 Canonical Skill Substrate Rule 硬规则，明确 canonical skills 不可修改，ProofLoop 权威在 agents/contracts/schema/config
+  - `propose.md`: 新增 Artifact Role Rules（proposal=intent snapshot, specs=behavior contract source of truth, design=technical rationale, tasks=executable projection, evidence-ledger=proof record）和 Ready 判定规则
+  - `planning-contract-verifier.md`: 从重型文档审查器减重为 Projection Consistency Checker + Mechanical Dispatch Readiness Checker，移除专项技术检查
+  - `executor.md`: 新增 Dispatch Packet Construction Rule，明确不能靠判断调和 artifact 冲突，构造不出完整 dispatch packet 时 blocked
+  - `worker.md`: 新增 No Guessing Rule，遇到合同缺失或冲突时 blocked 不猜
+  - `code-verifier.md`: 新增 Review Context Rule
+  - `config.yaml`: rules 改为通用 source/projection 规则
+- **chore**: 移除 `openspec/QUALITY-GATE.md` 及所有引用，QUALITY-GATE 定位为非权威可选清单，已从所有文件中清理
+- **fix**: schema/templates 强化 source/projection 关系
+  - `templates/design.md`: Binding Decisions 表增加 Type (behavior-binding/implementation-only), Source Spec Requirement, Projects To Tasks/Specs
+  - `templates/tasks.md`: Slice Contract 增加 Source Spec Requirements 和 Binding Behavior Summary 必填项，增加 Forbidden File Scope
+
 ## v3.3
 
 ### Breaking Changes

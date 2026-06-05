@@ -11,7 +11,6 @@ permission:
     "tech-spec/**": allow
     "AGENTS.md": allow
     "openspec/config.yaml": allow
-    "openspec/QUALITY-GATE.md": allow
     "openspec/schemas/**": allow
     ".agents/contracts/**": allow
   question: allow

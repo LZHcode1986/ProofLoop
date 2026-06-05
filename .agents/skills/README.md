@@ -11,8 +11,8 @@ ProofLoop workflow constraints belong in:
 ```text
 .opencode/agents/*.md
 .agents/contracts/*.md
-openspec/QUALITY-GATE.md
 openspec/schemas/proofloop-spec-driven/**
+openspec/config.yaml
 ```
 
 ## OpenSpec canonical skills
