@@ -20,8 +20,11 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 - **fix**: schema/templates 强化 source/projection 关系
   - `templates/design.md`: Binding Decisions 表增加 Type (behavior-binding/implementation-only), Source Spec Requirement, Projects To Tasks/Specs
   - `templates/tasks.md`: Slice Contract 增加 Source Spec Requirements 和 Binding Behavior Summary 必填项，增加 Forbidden File Scope
+- **fix**: 补强 Worker No Guessing Rule 和 Code Verifier Review Context Rule 交叉引用
+  - `worker.md`: `Stop and return blocked when` 新增两条，直接引用 No Guessing Rule（dispatch packet 冲突 → CONTRACT DEFECT；TDD 任务缺 verification target → untestable task packet）
+  - `code-verifier.md`: Phase 1 / Phase 2 Responsibilities 各新增两条，直接引用 Review Context Rule（Slice Contract 不足 → CONTRACT DEFECT；不得从 proposal/design prose 重建 expected behavior）
 
-## v3.3
+## v1.0.3
 
 ### Breaking Changes
 
@@ -75,27 +78,3 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 - **fix**: installer skills default、Worker/CV/IR output templates、PCV blockers、schema apply.requires、flow drift
 - **feat**: Evidence Ledger v1 rectification - contract echo、skill evidence、gate classification、agent boundaries、installer rollback
 - **chore**: 完成 v3.3 rectification - 移除废弃 agents、新增 planning-contract-verifier 和 codegraph-tool-protocol
-
-### 升级指南
-
-从 v3.2 升级到 v3.3 需要更新以下文件：
-
-```text
-AGENTS.md
-README.md
-.opencode/agents/**
-.agents/contracts/**
-openspec/config.yaml
-openspec/gates/**
-openspec/schemas/proofloop-spec-driven/**
-install/**
-```
-
-不需要更新的文件（OpenSpec canonical skills）：
-
-```text
-.agents/skills/openspec-propose/SKILL.md
-.agents/skills/openspec-apply-change/SKILL.md
-.agents/skills/openspec-archive-change/SKILL.md
-.agents/skills/test-driven-development/SKILL.md
-```
