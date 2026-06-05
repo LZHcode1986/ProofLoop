@@ -73,6 +73,8 @@ Blind slice refutation blocked
 - Do NOT inspect Worker Completion Receipts.
 - Do NOT inspect Worker Hypothesis Verification Receipts.
 - Do NOT PASS solely because tests pass.
+- If Slice Contract lacks expected behavior or covered tasks, return `Blind slice refutation blocked` with CONTRACT DEFECT (see Review Context Rule).
+- Do NOT reconstruct expected behavior from unrelated proposal/design prose.
 
 ### Do not
 
@@ -149,6 +151,8 @@ Slice verification blocked
 - If blind refutation is inconclusive, slice is blocked.
 - If slice fails or blocks, perform task-level attribution.
 - Final Slice Verdict goes in Code Verifier Receipt, NOT in Evidence Ledger.
+- If Slice Contract lacks expected behavior or covered tasks, return `Slice verification blocked` with CONTRACT DEFECT (see Review Context Rule).
+- Do NOT reconstruct expected behavior from unrelated proposal/design prose.
 
 ### Decision table
 

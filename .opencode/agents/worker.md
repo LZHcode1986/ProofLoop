@@ -97,6 +97,8 @@ Implementation failed
 - CodeGraph impact exceeds allowed scope
 - behavior change requires OpenSpec artifact change
 - security/data/migration risk appears outside contract
+- dispatch packet, task, Slice Contract, and source refs are ambiguous or conflicting → `Implementation blocked` with CONTRACT DEFECT (see No Guessing Rule)
+- Required Skills includes test-driven-development and public interface, behavior, or verification target is missing → `Implementation blocked: untestable task packet` (see No Guessing Rule)
 
 ### Checkbox update
 
