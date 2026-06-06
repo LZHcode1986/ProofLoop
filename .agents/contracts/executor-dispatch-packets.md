@@ -188,7 +188,7 @@ Task Diff Snapshot Receipts:
 Evidence Ledger worker task/hypothesis sections for covered tasks:
 Files Changed In Slice:
 Required Review Skills:
-Checkbox Owner:
+Checkbox Owner: Code Verifier
 
 Rules:
 - If blind refutation is refuted, slice fails.
@@ -199,6 +199,7 @@ Rules:
 - If slice fails or blocks, perform task-level attribution.
 - Final Slice Verdict goes in Code Verifier Receipt, not in Evidence Ledger.
 - Worker evidence is a claim to challenge, not a fact to trust.
+- After Final Slice Verdict = pass, open tasks.md and mark the verifier gate checkbox [x].
 - Return Code Verifier Receipt with Final Slice Verdict.
 ```
 

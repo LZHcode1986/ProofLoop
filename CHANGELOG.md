@@ -2,6 +2,13 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.5
+
+### 2026-06-07
+
+- **fix**: Evidence Review dispatch packet checkbox 驱动修复 — 模板默认值 + Rules 内联指令
+  - `executor-dispatch-packets.md`: Evidence Review 包 `Checkbox Owner:` 填默认值 `Code Verifier`，Rules 新增内联指令（Final Slice Verdict = pass 后勾选 verifier gate checkbox）
+
 ## v1.0.4
 
 ### 2026-06-06
