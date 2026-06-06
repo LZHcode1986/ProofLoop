@@ -161,6 +161,7 @@ Files Changed In Slice:
 Required Review Skills:
 Allowed File Scope:
 Forbidden File Scope:
+Checkbox Owner:
 
 Rules:
 - Do not inspect Worker evidence.
@@ -187,6 +188,7 @@ Task Diff Snapshot Receipts:
 Evidence Ledger worker task/hypothesis sections for covered tasks:
 Files Changed In Slice:
 Required Review Skills:
+Checkbox Owner:
 
 Rules:
 - If blind refutation is refuted, slice fails.

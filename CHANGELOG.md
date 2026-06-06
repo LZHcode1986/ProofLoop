@@ -4,6 +4,13 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
 ## v1.0.4
 
+### 2026-06-06
+
+- **fix**: Code Verifier 勾选流程补全 — 与 Worker 勾选流程对称
+  - `code-verifier.md`: 新增 Checkbox update 段（PASS 勾选 verifier gate checkbox、fail/blocked 不勾选、失败报 PROTOCOL DEFECT），Receipt 新增 `Verifier Gate Checkbox` 字段
+  - `executor-dispatch-packets.md`: Blind Refutation / Evidence Review 两个 dispatch packet 新增 `Checkbox Owner` 字段
+  - `executor.md`: Responsibilities 统一 checkbox 校验表述，Guardrails 替换为通用 `Task Checkbox Receipt Check`（Worker 勾 task、Verifier 勾 gate、缺失即 PROTOCOL DEFECT）
+
 ### 2026-06-05
 
 - **refactor**: 官方 Skill 基底 + ProofLoop Overlay 权威化减法式整改

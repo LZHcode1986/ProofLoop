@@ -80,12 +80,12 @@ Worker must not be required to infer missing contract from full proposal/design/
 3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
 4. Run `run-preflight` through Committer.
 5. Dispatch **Worker Implementation** for tasks.
-6. Verify Worker receipt includes `Task Checkbox: checked: yes`. If not, report PROTOCOL DEFECT.
+6. Verify Worker Implementation receipt includes checkbox confirmation (see Task Checkbox Receipt Check).
 7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path.
 8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
 9. Dispatch **Code Verifier Blind Refutation** at every slice gate. Do NOT provide Worker evidence.
 10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts and Evidence Ledger.
-11. Collect Code Verifier Receipt with Final Slice Verdict.
+11. Collect Code Verifier Receipt with Final Slice Verdict and verify checkbox confirmation when PASS (see Task Checkbox Receipt Check).
 12. Route based on Code Verifier verdict (see Routing Rules).
 13. After all slices complete, dispatch Implementation Reviewer for stage review.
 14. After IR completes archive, dispatch Committer for `archive-output` commit.
@@ -121,10 +121,14 @@ Code Verifier PROTOCOL DEFECT:
   stop affected flow and report protocol defect
 ```
 
-## Guardrails
+## Task Checkbox Receipt Check
 
-- Verify `Task Checkbox: checked: yes` in every Worker Implementation receipt before proceeding.
-- If checkbox is not checked, report PROTOCOL DEFECT and stop the affected flow.
+For any agent that owns a `tasks.md` checkbox:
+
+- Worker successful completion requires `Task Checkbox: checked: yes`.
+- Code Verifier PASS requires `Verifier Gate Checkbox: checked: yes`.
+- Code Verifier fail/blocked requires verifier gate checkbox unchecked.
+- Missing required checkbox confirmation is PROTOCOL DEFECT and stops the affected flow.
 
 ## Do not
 

@@ -230,6 +230,20 @@ Verifier only checks:
 
 Verifier must not introduce project-specific requirements not declared upstream.
 
+### Checkbox update
+
+After Final Slice Verdict = pass and Category = PASS:
+
+1. Open `tasks.md` and locate the assigned Code Verifier gate checkbox.
+2. Change `[ ]` to `[x]`.
+3. Record the file path, line number, and confirmation in the Code Verifier Receipt.
+
+If Final Slice Verdict = fail or blocked:
+- Do not update the verifier gate checkbox.
+
+If checkbox update fails after PASS:
+- return `Slice verification blocked` with PROTOCOL DEFECT.
+
 ### Code Verifier Receipt
 
 ```text
@@ -296,6 +310,11 @@ Findings:
 - BLOCKER:
 - WARNING:
 - NOTE:
+
+Verifier Gate Checkbox:
+- file:
+- line:
+- checked: yes/no
 
 Final Slice Verdict:
 - pass | fail | blocked
