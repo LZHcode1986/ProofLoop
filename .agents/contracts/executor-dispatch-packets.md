@@ -214,8 +214,6 @@ Boundary Type:
 - run-preflight
 - task-diff-snapshot
 - slice-output
-- stage-output
-- archive-output
 
 Boundary Policy:
 - normal | audit

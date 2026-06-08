@@ -136,6 +136,6 @@ Only when Brain dispatches `Archive Authorized`:
 1. Load `openspec-archive-change`.
 2. Run official OpenSpec archive flow.
 3. Return archive result.
-4. If archive leaves git changes, report `Archive boundary required: yes`.
-5. Do not stage or commit.
-6. Notify Executor that archive execution is complete. Executor will dispatch Committer for `archive-output` commit.
+4. Do not stage or commit.
+5. Return archive result to Brain.
+6. If archive leaves git changes, report `Archive boundary required: yes`. Brain dispatches Committer for `archive-output` if needed.

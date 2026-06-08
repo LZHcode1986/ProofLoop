@@ -12,6 +12,11 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `brain.md`: `OpenSpec Change` 段增加 continuation 优先说明
   - `dispatch-packets.md`: `General` 段增加 fallback 限定（必须确认无 continuation 且无 specialist owner）
   - `dispatch-packets.md`: `Brain Dispatch Contract` 模板新增可选 `Continuation:` 字段（previous task_id / previous owner / continuation reason）
+- **fix**: Executor 职责边界修正 — stage review / archive-output 派发回归 Brain
+  - `executor.md`: 删除职责 13（派发 Implementation Reviewer stage review）和 14（派发 archive-output commit），改为所有 slice 完成后 return Execution Summary 给 Brain
+  - `executor.md`: Git Boundary Policy 移除 `archive -> archive-output commit`
+  - `implementation-reviewer.md`: Archive Execution Mode 通知目标从 Executor 改为 Brain
+  - `executor-dispatch-packets.md`: Executor Git Boundary 类型列表移除 `stage-output` / `archive-output`
 
 ## v1.0.5
 

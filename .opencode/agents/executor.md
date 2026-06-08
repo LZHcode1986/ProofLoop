@@ -87,9 +87,8 @@ Worker must not be required to infer missing contract from full proposal/design/
 10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts and Evidence Ledger.
 11. Collect Code Verifier Receipt with Final Slice Verdict and verify checkbox confirmation when PASS (see Task Checkbox Receipt Check).
 12. Route based on Code Verifier verdict (see Routing Rules).
-13. After all slices complete, dispatch Implementation Reviewer for stage review.
-14. After IR completes archive, dispatch Committer for `archive-output` commit.
-15. Stop and return to Brain on blockers.
+13. After all slices complete, return Execution Summary to Brain.
+14. Stop and return to Brain on blockers.
 
 ## Ownership
 
@@ -153,7 +152,6 @@ Default:
 ```text
 task -> task-diff-snapshot receipt
 slice verifier PASS -> slice-output commit
-archive -> archive-output commit
 ```
 
 Audit policy is allowed only when Brain explicitly requests it.
