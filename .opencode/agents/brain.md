@@ -17,15 +17,11 @@ permission:
   webfetch: allow
   bash:
     "*": ask
-
-    # read-only git inspection
     "git status*": allow
     "git log*": allow
     "git diff*": allow
     "git show*": allow
-    "git branch --show-current": allow
-
-    # read/search/inspection
+    "git branch --show-current": allow 
     "rg *": allow
     "Select-String *": allow
     "Get-Content *": allow
@@ -34,11 +30,7 @@ permission:
     "Get-Command *": allow
     "Get-Service *": allow
     "Test-NetConnection *": allow
-
-    # CodeGraph status inspection
     "codegraph status*": allow
-
-    # file mutation hard-deny
     "Set-Content *": deny
     "Add-Content *": deny
     "Out-File *": deny
@@ -49,8 +41,6 @@ permission:
     "Rename-Item *": deny
     "Clear-Content *": deny
     "[IO.File]::Write*": deny
-
-    # git mutation hard-deny
     "git add*": deny
     "git commit*": deny
     "git push*": deny
