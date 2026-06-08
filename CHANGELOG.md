@@ -17,6 +17,9 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `executor.md`: Git Boundary Policy 移除 `archive -> archive-output commit`
   - `implementation-reviewer.md`: Archive Execution Mode 通知目标从 Executor 改为 Brain
   - `executor-dispatch-packets.md`: Executor Git Boundary 类型列表移除 `stage-output` / `archive-output`
+- **fix**: Brain bash 权限收紧 — 从 `bash: allow` 改为 deny-by-default + 语义约束
+  - `brain.md`: bash 权限从 `allow` 改为分层配置（只读 git/search/inspection allow，file/git mutation hard-deny，其余 ask）
+  - `brain.md`: 新增 `Bash restriction` 段，约束 bash 只能用于 routing / inspection / governance checks
 
 ## v1.0.5
 

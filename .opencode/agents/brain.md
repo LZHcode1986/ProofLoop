@@ -15,7 +15,55 @@ permission:
     ".agents/contracts/**": allow
   question: allow
   webfetch: allow
-  bash: allow
+  bash:
+    "*": ask
+
+    # read-only git inspection
+    "git status*": allow
+    "git log*": allow
+    "git diff*": allow
+    "git show*": allow
+    "git branch --show-current": allow
+
+    # read/search/inspection
+    "rg *": allow
+    "Select-String *": allow
+    "Get-Content *": allow
+    "Get-ChildItem *": allow
+    "Test-Path *": allow
+    "Get-Command *": allow
+    "Get-Service *": allow
+    "Test-NetConnection *": allow
+
+    # CodeGraph status inspection
+    "codegraph status*": allow
+
+    # file mutation hard-deny
+    "Set-Content *": deny
+    "Add-Content *": deny
+    "Out-File *": deny
+    "New-Item *": deny
+    "Remove-Item *": deny
+    "Move-Item *": deny
+    "Copy-Item *": deny
+    "Rename-Item *": deny
+    "Clear-Content *": deny
+    "[IO.File]::Write*": deny
+
+    # git mutation hard-deny
+    "git add*": deny
+    "git commit*": deny
+    "git push*": deny
+    "git reset*": deny
+    "git clean*": deny
+    "git checkout*": deny
+    "git restore*": deny
+    "git switch*": deny
+    "git merge*": deny
+    "git rebase*": deny
+    "git cherry-pick*": deny
+    "git revert*": deny
+    "git stash*": deny
   skill:
     "*": ask
     "workflow-intake": allow
@@ -195,3 +243,14 @@ Brain owns archive authorization.
 Brain must not run `openspec archive` directly.  
 Implementation Reviewer runs archive only after Brain authorizes.  
 Committer commits archive output if needed.
+
+## Bash restriction
+
+Brain may use bash only for routing, inspection, and governance checks.
+
+Brain must not use bash to modify files, change git state, start/stop services, run implementation verification, build artifacts, or produce execution evidence.
+
+If modification, verification, build, test, commit, or evidence generation is needed, Brain dispatches a bounded task to the appropriate specialist subagent.
+
+Commands denied by YAML are always prohibited.
+Commands not explicitly denied require approval and must still satisfy this rule.
