@@ -238,7 +238,9 @@ Committer commits archive output if needed.
 
 Brain may use bash only for routing, inspection, and governance checks.
 
-Brain must not use bash to modify files, change git state, start/stop services, run implementation verification, build artifacts, or produce execution evidence.
+Brain must not use bash to modify files, change git state, run implementation verification, build artifacts, or produce execution evidence.
+
+Environment or service commands that are not explicitly allowed or denied require approval and must be used only for routing or inspection, not for implementation.
 
 If modification, verification, build, test, commit, or evidence generation is needed, Brain dispatches a bounded task to the appropriate specialist subagent.
 
