@@ -68,6 +68,49 @@ Brain -> Evidence Ledger Seed
 Worker / task-diff-snapshot / Code Verifier / slice-output are Executor-owned apply-stage internals.
 Brain does not directly orchestrate Worker or Code Verifier.
 
+## Continuation-first routing
+
+Before routing by task type, Brain MUST check whether the request continues, repairs, retries, or responds to a previous subagent task.
+
+If a previous specialist subagent returned a valid `task_id`, Brain MUST dispatch the follow-up to that same `task_id`.
+
+Do not create a new subagent task when a valid continuation `task_id` exists.
+
+Do not route continuation or repair work to `general` when a previous specialist `task_id` exists.
+
+Examples:
+
+- planning artifact repair -> previous propose task_id
+- planning-contract-verifier BLOCKED repair -> previous propose task_id
+- execution repair / retry / backfill -> previous executor task_id
+- stage review or archive continuation -> previous implementation-reviewer task_id
+- commit boundary follow-up -> previous committer task_id
+- web evidence follow-up -> previous web-scraper task_id
+
+## Specialist-owner routing
+
+If no continuation `task_id` applies, Brain routes by specialist ownership before considering `general`.
+
+Route to `propose` when the task concerns OpenSpec planning artifacts or planning readiness:
+- proposal.md
+- design.md
+- specs/**
+- tasks.md
+- proofloop/evidence-ledger.md
+- planning-contract-verifier feedback
+- source/projection consistency
+- dispatch readiness defects
+
+Route to `executor` when the task concerns applying or continuing an implementation-ready OpenSpec change.
+
+Route to `implementation-reviewer` when the task concerns stage review, archive readiness, or archive execution.
+
+Route to `committer` when the task concerns a git boundary commit after an accepted receipt.
+
+Route to `web-scraper` when the task requires external web evidence collection.
+
+Only route to `general` when no continuation task_id applies and no specialist owner matches.
+
 ## Dispatch rule
 
 Never dispatch a task without a verifiable Brain Dispatch Contract.
@@ -76,9 +119,20 @@ If acceptance criteria are not verifiable, clarify or narrow before dispatching.
 
 ## Direct Task
 
-Use Direct Task for small edits, docs/config/script changes, and low-risk bugfixes.
+Use Direct Task only when:
 
-For bugfixes:
+1. no continuation `task_id` applies, and
+2. no specialist subagent owns the task.
+
+`general` is the fallback agent.
+
+Do not route to `general` merely because the task looks like a small docs/config/script edit.
+
+If the task edits or repairs active OpenSpec planning artifacts, route to `propose`.
+
+If the task continues an OpenSpec apply-stage flow, route to `executor`.
+
+For bugfixes outside any specialist-owned flow:
 
 ```text
 Task Type: bugfix
@@ -94,11 +148,13 @@ Direct Task does not auto-commit. If a commit is required after Brain accepts th
 
 Use OpenSpec Change when requirements, specs, user-visible behavior, architecture, interfaces, state, data semantics, or archive state are involved.
 
+If this is a new OpenSpec Change, dispatch `@propose`.
+
+If this is a continuation of an existing propose task (e.g. planning-contract-verifier BLOCKED repair), dispatch the previous propose `task_id`.
+
 Create Evidence Ledger Seed for openspec-change.
 Brain does not maintain execution evidence.
 Brain uses Implementation Reviewer result and Evidence Ledger summary for final acceptance.
-
-Dispatch `@propose`.
 
 ## Risk handling
 

@@ -85,6 +85,11 @@ Stop Conditions:
 - CodeGraph impact exceeds allowed scope
 - required OpenSpec spec change discovered during direct task
 
+Continuation:
+- previous task_id:
+- previous owner: propose | executor | implementation-reviewer | committer | web-scraper | general
+- continuation reason: repair | retry | follow-up | blocked-resolution | evidence-backfill | archive-continuation | commit-follow-up
+
 Escalation Target:
 - Brain
 
@@ -111,7 +116,12 @@ Evidence Ledger Seed:
 
 ## General
 
-Use when Brain delegates a Direct Task to `general`.
+Use only when Brain has confirmed:
+
+1. no continuation `task_id` applies, and
+2. no specialist subagent owns the task.
+
+`general` is a fallback agent, not the default agent for small docs/config/script edits.
 
 ```text
 Brain Dispatch: General

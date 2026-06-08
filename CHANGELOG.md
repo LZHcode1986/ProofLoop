@@ -2,6 +2,17 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.6
+
+### 2026-06-08
+
+- **refactor**: Brain 路由整改 — task_id continuation-first + specialist-owner first + general fallback
+  - `brain.md`: 新增 `Continuation-first routing`（有可继续的 `task_id` 必须继续派回原子代理）和 `Specialist-owner routing`（无 continuation 时按 propose/executor/implementation-reviewer/committer/web-scraper 专项 owner 路由）两个路由段
+  - `brain.md`: `Direct Task` 从 "small edits/docs/config/script 默认代理" 改为兜底语义，只在无 continuation 且无 specialist owner 时才派 `general`
+  - `brain.md`: `OpenSpec Change` 段增加 continuation 优先说明
+  - `dispatch-packets.md`: `General` 段增加 fallback 限定（必须确认无 continuation 且无 specialist owner）
+  - `dispatch-packets.md`: `Brain Dispatch Contract` 模板新增可选 `Continuation:` 字段（previous task_id / previous owner / continuation reason）
+
 ## v1.0.5
 
 ### 2026-06-07
