@@ -2,6 +2,15 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.7
+
+### 2026-06-10
+
+- **fix**: Propose readiness 自证闭环整改 — 禁止 self-certify，强制 post-edit verifier 校验
+  - `propose.md`: `Ready判定` 重写为 `Readiness Decision`，强制要求 `planning-contract-verifier` 结果必须产生于最新 artifact 编辑之后，修复后必须重新 dispatch verifer
+  - `propose.md`: Responsibilities 第 9 条改为 "after artifact generation and after every Propose artifact repair"
+  - `propose.md`: 新增 Spec delta rule — 区分 ADDED / MODIFIED Requirements，分类不清时 blocked
+
 ## v1.0.6
 
 ### 2026-06-08

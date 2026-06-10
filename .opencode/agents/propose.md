@@ -56,6 +56,17 @@ Do not rewrite the skill. Follow ProofLoop overlay rules in:
 ```text
 .agents/contracts/proofloop-skill-usage.md
 ```
+## Spec delta rule
+
+Before writing `specs/<capability>/spec.md`, inspect existing base specs under `openspec/specs/**`.
+
+Use `## ADDED Requirements` only when the requirement does not already exist in base specs.
+
+Use `## MODIFIED Requirements` only when changing an existing base requirement. The requirement title must match the existing base requirement.
+
+If Propose cannot determine whether the requirement is new or existing, it MAY use `openspec-explore` for read-only investigation.
+
+If classification is still unclear, return `Planning blocked` with a delta classification blocker.
 
 ## Artifact Role Rules
 
@@ -96,15 +107,22 @@ If any gate fails: output `Planning blocked`.
    - task -> task-diff-snapshot
    - slice PASS -> slice-output commit
    - archive -> archive-output commit
-9. Dispatch `planning-contract-verifier`.
+9. Dispatch `planning-contract-verifier` after artifact generation and after every Propose artifact repair.
 
-## Ready判定
+## Readiness Decision
 
-Proposal ready only when:
+`Proposal ready` may be reported only when:
 
-- `openspec validate <change> --strict` passes.
-- `planning-contract-verifier` returns READY or acceptable READY_WITH_WARNINGS.
-- No BLOCKED projection defect exists.
+- `openspec validate <change> --strict` passes after the latest Propose artifact edit.
+- The latest `planning-contract-verifier` result was produced after the latest Propose artifact edit.
+- The latest `planning-contract-verifier` result is `READY` or acceptable `READY_WITH_WARNINGS`.
+- No `BLOCKED` projection defect exists.
+
+If Propose edits any planning artifact after a verifier result, that verifier result is stale.
+
+If Propose repairs a `PLANNING CONTRACT: BLOCKED` finding, Propose MUST re-dispatch `planning-contract-verifier` before reporting readiness.
+
+Propose MUST NOT report `Proposal ready`, `ready for Executor dispatch`, or equivalent readiness from self-check alone.
 
 ## Do not
 
