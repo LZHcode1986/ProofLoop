@@ -85,6 +85,10 @@ $RootFiles = @(
   "openspec/config.yaml.example"
 )
 
+$Scripts = @(
+  "scripts/local-check.sh"
+)
+
 $SchemaDir = "openspec/schemas/proofloop-spec-driven"
 
 $CanonicalSkills = @(
@@ -203,6 +207,12 @@ try {
 
   # Root files
   foreach ($f in $RootFiles) {
+    Copy-Safe -RelativePath $f -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
+  }
+
+  # Scripts
+  Write-Host "Installing scripts..." -ForegroundColor Cyan
+  foreach ($f in $Scripts) {
     Copy-Safe -RelativePath $f -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
   }
 

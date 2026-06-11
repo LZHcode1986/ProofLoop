@@ -159,6 +159,18 @@ Check Evidence Ledger template does NOT contain any of:
 If ledger model is outdated or template contains any forbidden item:
 - verdict MUST be `PLANNING CONTRACT: BLOCKED`
 
+### 7. Spec Naming Compliance
+
+Check every spec directory in the change delta:
+
+- name matches `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/`
+- no stage-N- prefix
+- no fix-/remediation-/visible- prefix
+- no leading digit
+- no version suffix (-bN, -vN)
+
+If any spec name fails: verdict MUST be `PLANNING CONTRACT: BLOCKED`
+
 ## Block only when
 
 - OpenSpec validate --strict fails.
@@ -179,7 +191,7 @@ If ledger model is outdated or template contains any forbidden item:
 
 - minor formatting issues
 - non-critical missing prose
-- naming preferences
+- minor naming preferences (e.g., singular vs plural, abbreviation choices)
 - optional extra tests
 - low-risk assumptions that can be verified during execution
 - async/SSE/function-signature technical details (these belong in specs if externally observable)

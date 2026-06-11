@@ -81,6 +81,9 @@ After skill output, before reporting readiness, verify:
 4. tasks contains `Setup -> Blocking -> Slice N -> Reconciliation`.
 5. Reconciliation contains `bash scripts/local-check.sh`.
 6. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
+7. Every spec dir name matches kebab-case: `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/`.
+   - Exclude: leading number, trailing -bN/-vN, fix-/remediation-/visible- prefix, stage-N- prefix.
+   - If any spec name fails: output `Planning blocked`.
 
 If any gate fails: output `Planning blocked`.
 

@@ -42,6 +42,10 @@ rules:
     - Specs are the behavior contract source of truth.
     - Binding behavior that affects observable runtime behavior, API contracts, event delivery, persistence, failure semantics, or user-visible outcomes MUST appear in specs.
     - Specs must not contain internal implementation plans unless they are externally observable requirements.
+    - Spec directory name must match kebab-case: start with lowercase letter, contain only lowercase letters, digits, and hyphens.
+    - Forbidden: leading digit, version suffix (-bN/-vN), fix-/remediation-/visible- prefix.
+    - Forbidden: stage-N- prefix — stage markers belong in change names, not spec names.
+    - Before creating a new spec, check if base specs already contain a spec for the same capability. If so, use `## ADDED Requirements / ## MODIFIED Requirements` to extend rather than creating a duplicate.
 
   design:
     - Design is technical rationale for implementing specs.

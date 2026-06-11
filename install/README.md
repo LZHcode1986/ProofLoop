@@ -44,6 +44,7 @@ AGENTS.md
 README.md
 openspec/config.yaml.example
 openspec/schemas/proofloop-spec-driven/**
+scripts/local-check.sh
 .opencode/agents/brain.md
 .opencode/agents/propose.md
 .opencode/agents/executor.md

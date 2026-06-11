@@ -2,6 +2,18 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.9
+
+### 2026-06-11
+
+- **feat**: Spec 命名整改 — 4 层防御新增/升级 spec 命名校验，阻止增量违规
+  - `openspec/config.yaml`: `specs:` 规则新增 kebab-case 命名规范（禁止数字前缀、版本后缀、fix-/remediation-/visible- 前缀、stage-N- 前缀）
+  - `propose.md`: Overlay gates 新增 gate #7 — spec 目录名 kebab-case 校验
+  - `planning-contract-verifier.md`: `naming preferences` 免封改为 `minor naming preferences`，新增 Hard gate #7 Spec Naming Compliance
+  - `scripts/local-check.sh`: 新增第 5 步 spec 命名检查脚本
+  - `install/install-proofloop.ps1`: 新增 `$Scripts` 数组，安装 `scripts/local-check.sh`
+  - `install/README.md`: Default installed files 添加 `scripts/local-check.sh`
+
 ## v1.0.8
 
 ### 2026-06-11
