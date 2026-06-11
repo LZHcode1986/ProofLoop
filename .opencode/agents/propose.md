@@ -8,17 +8,7 @@ permission:
     "openspec/changes/**": allow
   question: deny
   webfetch: allow
-  bash:
-    "*": deny
-    "openspec new change*": allow
-    "openspec list*": allow
-    "openspec status*": allow
-    "openspec instructions*": allow
-    "openspec validate*": allow
-    "rg *": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
+  bash: allow
   skill:
     "*": ask
     "openspec-explore": allow

@@ -2,6 +2,15 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.8
+
+### 2026-06-11
+
+- **chore**: 删除 `openspec/schemas/spec-driven/` — 已被 `proofloop-spec-driven` 替代，清理废弃 schema 目录
+  - 删除 `schema.yaml`、`templates/design.md`、`templates/proposal.md`、`templates/spec.md`、`templates/tasks.md`
+- **fix**: Propose bash 权限放开 — 从 deny-by-default + 白名单改为 `bash: allow`
+  - `propose.md`: 移除 bash 分层配置（`"*": deny` + 具体命令 allow），简化为 `bash: allow`
+
 ## v1.0.7
 
 ### 2026-06-10
