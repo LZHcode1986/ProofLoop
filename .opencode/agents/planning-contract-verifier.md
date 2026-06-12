@@ -128,6 +128,9 @@ Required fields:
 - required review skills
 - stop conditions
 - checkbox owner / task id
+- dependencies
+- parallel opportunities
+- `[P]` markers for safe parallel candidates
 
 Block when:
 
@@ -135,6 +138,11 @@ Block when:
 - Worker would need to guess public interface, behavior, or verification target.
 - TDD task lacks behavior under test.
 - Verifier gate lacks covered tasks or PASS/FAIL criteria.
+- dependencies are missing or contradictory.
+- parallel opportunities are missing from tasks.md.
+- a `[P]` task depends on another same-time parallel candidate.
+- a `[P]` task has overlapping Allowed File Scope with another same-slice `[P]` task.
+- a verifier gate does not cover all implementation tasks in the slice.
 
 ### 6. Evidence Ledger Model Check
 
@@ -186,6 +194,8 @@ If any spec name fails: verdict MUST be `PLANNING CONTRACT: BLOCKED`
 - Tasks introduce new binding behavior not in specs.
 - Tasks weaken specs requirements.
 - Slice Contract cannot generate Worker Dispatch Packet.
+- Dependencies or parallel opportunities are missing from tasks.md.
+- A `[P]` parallel candidate task has overlapping Allowed File Scope with another same-slice `[P]` task, or depends on another parallel task scheduled at the same time.
 
 ## Do not block on
 

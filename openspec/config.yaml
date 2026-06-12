@@ -59,10 +59,5 @@ rules:
     - Each Slice Contract must be self-contained enough for Executor to build Worker Dispatch Packet.
     - Tasks must not introduce behavior not present in specs.
     - Tasks must include verification method, expected evidence, allowed scope, stop conditions, and verifier gate for each implementation slice.
-
-traceability:
-  proofloop-rectification:
-    artifact: rectification-plan
-    description: ProofLoop OpenCode & OpenSpec Rectification Plan
-    reference: file:///D:/software-dev/ProofLoop/ProofLoop_Rectification_Plan.md
-    enabled: true
+    - Tasks must include dependencies and parallel opportunities.
+    - `[P]` marks a parallel candidate, not mandatory parallel execution.

@@ -410,11 +410,25 @@ Forbidden Actions:
 - Do not ask the user or request permission approval.
 - Do not read denied secret files such as `.env` or `.env.*`.
 - Do not wait for service startup, credentials, or interactive setup.
+- Do not use Write/Edit, shell redirection, heredoc, or generated files to create temporary verifier scripts.
+- Do not create temp `.py`, `.js`, `.sh`, notebook, fixture, or scratch files for verification.
+- Do not create new tests, new fixtures, or new verification artifacts during Blind Refutation.
+- Do not import project modules from ad-hoc inline probes.
+- Do not run ad-hoc probes that trigger service startup, migrations, credential reads, network login, or interactive setup.
 
 Runtime Policy:
 - Non-interactive only.
 - Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
 - If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
+- Ad-hoc probe rule:
+  - For small verifier-owned probes, use one-shot inline commands only, for example: `uv run python -c "..."`.
+  - Inline probes must use Python stdlib only, such as `json`, `math`, `os`, `glob`, `pathlib`, `re`, and `difflib`.
+  - Inline probes must be read-only and must not import project modules.
+  - Inline probes must not write files, mutate the worktree, start services, or require credentials.
+- Project behavior verification rule:
+  - For behavior verification, prefer the Verification Method declared in the Slice Contract or tasks.md.
+  - Existing project tests, CLI commands, HTTP/API checks, or UI checks may be used when they are already declared or safely available.
+  - If real behavior verification requires a new script, new fixture, project import side effects, missing runtime config, service startup, credentials, or interactive setup, return `Blind slice refutation blocked` with `runtime-config-blocker`, `runtime-dependency-blocker`, or `protocol-defect` as appropriate.
 
 Expected Result:
 - Blind slice refutation complete | Blind slice refutation blocked
@@ -503,6 +517,8 @@ Forbidden Actions:
 - Do not ask the user or request permission approval.
 - Do not read denied secret files such as `.env` or `.env.*`.
 - Do not wait for service startup, credentials, or interactive setup.
+- Do not create temporary verifier scripts, fixtures, or scratch files.
+- Do not use Write/Edit, shell redirection, heredoc, or generated files during Evidence Review.
 
 Runtime Policy:
 - Non-interactive only.

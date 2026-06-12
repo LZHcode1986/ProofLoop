@@ -46,6 +46,9 @@ artifacts:
     instruction: >
       Generate tasks that allow Executor and Worker to proceed mechanically.
       Every implementation slice must have a Code Verifier gate.
+      Tasks must include dependencies and parallel opportunities.
+      Use `[P]` to mark parallel candidate tasks when safe.
+      `[P]` means parallel candidate, not mandatory parallel execution.
       Default git boundary:
       - task output produces task-diff-snapshot receipt
       - slice verifier PASS produces slice-output commit

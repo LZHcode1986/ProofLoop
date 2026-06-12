@@ -2,6 +2,20 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.13
+
+### 2026-06-13
+
+- **fix**: 恢复轻量并行任务语义、删除本地可追溯性路径、收紧 Code Verifier 验证脚本边界
+  - `openspec/schemas/proofloop-spec-driven/templates/tasks.md`: 在 Task Order 前恢复 `## Dependencies` 和 `## Parallel Opportunities` 章节，添加带有 `[P]` 并行标记的 Slice 任务示例，在 Readiness Checklist 增加并行配置自检。
+  - `openspec/schemas/proofloop-spec-driven/schema.yaml`: 在 `artifacts.tasks.instruction` 任务生成指令中，添加对 dependencies, parallel opportunities 和 `[P]` 标记的规范要求。
+  - `openspec/config.yaml`: 在 `rules.tasks` 规则中，补充对任务依赖与并行机制的规范；删除硬编码本地绝对路径的 `traceability` 块，确保环境可移植性并防止敏感信息泄露。
+  - `.opencode/agents/propose.md`: 在 `Overlay gates` 流程中新增针对并行章节 `## Dependencies`、`## Parallel Opportunities` 以及 `[P]` 并行标记的自检门槛。
+  - `.opencode/agents/planning-contract-verifier.md`: 升级 `Mechanical Dispatch Readiness Check` 与 `Block only when` 校验规则，增加对依赖和并行配置合法性及 Allowed File Scope 的阻断卡点。
+  - `.opencode/agents/executor.md`: 引入 `Parallel Rules` 并行调度安全判断规范，规定在无依赖、Allowed File Scope 无交集等场景下方能并发调度，否则降级为串行派发。
+  - `.opencode/agents/code-verifier.md`: 收紧 `Code Verifier Runtime Policy`，禁止使用 Write/Edit 写入临时校验脚本（`.py`, `.js`, `.sh` 等）或 scratch 文件，明确 ad-hoc inline 只读标准库指令以及既有测试命令的边界，无法满足时直接返回 `blocked`。
+  - `.agents/contracts/executor-dispatch-packets.md`: 在 `Code Verification - Blind Refutation` 和 `Evidence Review` 包的 `Forbidden Actions` 中加入绝对禁止临时校验脚本、Fixture、Scratch 文件写入以及写工具使用的条件，并在 Blind Refutation `Runtime Policy` 中为 ad-hoc 探测和 project behavior verification 分别设立具体的限制规则。
+
 ## v1.0.12
 
 ### 2026-06-12

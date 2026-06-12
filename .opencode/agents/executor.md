@@ -91,6 +91,27 @@ Each Worker dispatch must include:
 
 Executor must not send a generic task request to Worker.
 
+## Parallel Rules
+
+`[P]` means parallel candidate, not mandatory parallel execution. Default to serial execution.
+
+Only dispatch Worker tasks in parallel when all are true:
+
+1. No dependency relationship.
+2. `Allowed File Scope` has no overlap.
+3. They do not modify the same `tasks.md` checkbox or verifier gate.
+4. They do not touch shared config, public types, migrations, lock files, generated files, or entry points at the same time.
+5. Each Worker receives an exclusive file scope.
+6. After parallel Workers finish, Executor collects each Worker receipt and closes each `task-diff-snapshot` boundary before entering the shared Code Verifier gate.
+
+If safety cannot be proven, execute serially.
+
+### Parallel dispatch constraints
+
+- Executor only uses parallel candidates explicitly marked by Propose in tasks.md.
+- Executor may downgrade `[P]` to serial execution when safety is unclear.
+- Executor must not upgrade unmarked tasks to parallel execution by inference.
+
 ## Responsibilities
 
 1. Read OpenSpec apply instructions.

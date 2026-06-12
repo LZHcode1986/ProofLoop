@@ -42,6 +42,9 @@ Code Verifier must strictly adhere to the non-interactive runtime and fail-fast 
 - Code Verifier must not ask the user or request permission approval.
 - Code Verifier must not read denied secret files such as `.env` or `.env.*`.
 - If required runtime config or dependency is unavailable during Blind Refutation or Evidence Review, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
+- Code Verifier must not create temporary verifier scripts or scratch files (e.g. `.py`, `.js`, `.sh` etc.) using Write/Edit tools, shell redirection (like `>`, `>>`), or heredocs.
+- For verifier-owned ad-hoc probes, use read-only inline commands only (e.g., `uv run python -c "..."`). Ad-hoc inline probes must use Python stdlib only and must not import project modules.
+- For project behavior checks, use the declared Verification Method or existing project commands. If verification requires creating new scripts, new fixtures, service startup, credentials, or interactive setup, return blocked instead of writing files.
 
 ## Phase Receipts
 

@@ -31,6 +31,14 @@ After archive execution:
 
 Do not create implementation commits before slice verification passes unless Brain explicitly requests audit boundary behavior.
 
+## Dependencies
+
+<!-- List dependencies between tasks or slices. -->
+
+## Parallel Opportunities
+
+<!-- List tasks or task groups that can be done in parallel. `[P]` means parallel candidate, not mandatory parallel execution. -->
+
 ## Task Order
 
 ### 1. Setup
@@ -90,8 +98,13 @@ Do not create implementation commits before slice verification passes unless Bra
   - **Overrides:** none
   - **Boundary Receipt:** task-diff-snapshot
 
+- [ ] 3.2 [P] [Slice-1] <parallel-candidate-task>
+  - **Uses Slice Contract:** yes
+  - **Overrides:** none
+  - **Boundary Receipt:** task-diff-snapshot
+
 - [ ] 3.V [Slice-1] Code Verifier gate
-  - **Covered Tasks:** 3.1
+  - **Covered Tasks:** 3.1, 3.2
   - **Evidence Packet Required:** yes
   - **Inspection Scope:** Slice 1 artifacts + changed files + task snapshot receipts + tests + commands + CodeGraph evidence
   - **PASS/FAIL Gate:** all Slice 1 ACs pass; no scope violation; required review skills applied
@@ -113,6 +126,8 @@ Do not create implementation commits before slice verification passes unless Bra
 
 ## Readiness Checklist
 
+- [ ] Dependencies are explicit.
+- [ ] Parallel opportunities are marked where safe.
 - [ ] Brain ACs mapped.
 - [ ] Every slice has verifiable ACs.
 - [ ] Every slice has a Code Verifier gate.
