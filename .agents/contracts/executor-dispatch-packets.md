@@ -379,6 +379,9 @@ Use the receipt format specified by the active phase.
 ```text
 Executor Dispatch: Code Verification - Blind Refutation
 
+Phase:
+- blind-refutation
+
 Brain Dispatch Contract:
 Slice Contract:
 Change:
@@ -392,23 +395,66 @@ Allowed File Scope:
 Forbidden File Scope:
 Checkbox Owner:
 
-Rules:
-- Do not inspect Worker evidence.
-- Do not inspect Evidence Ledger worker sections.
-- Do not inspect Worker Completion Receipts.
-- Do not inspect Worker Hypothesis Verification Receipts.
+Allowed Actions:
 - Use OpenSpec / Slice Contract as authority.
 - Try to construct a real counterexample for the slice.
 - Prefer runtime/API/UI paths over structural inspection.
-- Do not PASS solely because tests pass.
 - Every Slice AC must have a refutation attempt; if any AC is unchallenged, verdict is inconclusive.
 - Return Blind Slice Refutation Receipt.
+
+Forbidden Actions:
+- Do not inspect Worker evidence (Worker Completion Receipts, Hypothesis Verification Receipts, Evidence Ledger worker sections) before blind refutation is complete.
+- Do not modify implementation or write Evidence Ledger.
+- Do not dispatch Committer.
+- Do not PASS solely because tests pass.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for service startup, credentials, or interactive setup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
+
+Expected Result:
+- Blind slice refutation complete | Blind slice refutation blocked
+
+Receipt Format:
+[First Line: Blind slice refutation complete]
+
+Slice:
+Covered Tasks:
+
+OpenSpec Expected Behavior:
+
+Counterexamples Attempted:
+- case:
+- path/input:
+- expected:
+- actual:
+- result:
+  - refuted | not-refuted | inconclusive
+
+Blind Refutation Result:
+- refuted | not-refuted | inconclusive
+
+Preliminary Category:
+- none
+- implementation-defect
+- contract-defect
+- evidence-defect
+- protocol-defect
+
+Notes:
 ```
 
 ## Code Verification - Evidence Review
 
 ```text
 Executor Dispatch: Code Verification - Evidence Review
+
+Phase:
+- evidence-review
 
 Blind Slice Refutation Receipt:
 Worker Implementation Receipts:
@@ -442,23 +488,145 @@ Files Changed In Slice:
 Required Review Skills:
 Checkbox Owner: Code Verifier
 
-Rules:
-- Evidence Review inputs are inline payloads, not file path references.
-- Executor must paste the relevant receipt and ledger contents into this dispatch.
-- File paths may be included only as source labels, never as substitutes for content.
-- Code Verifier must not independently scan the filesystem for receipts or ledger sections.
-- If required inline evidence is missing, Code Verifier returns "Slice verification blocked" with PROTOCOL DEFECT.
-- Executor must not create synthetic, placeholder, or redundant receipt files to satisfy this packet.
-- If blind refutation is refuted, slice fails.
-- If blind refutation is not-refuted, inspect Worker evidence.
-- If evidence is sufficient, slice passes.
-- If evidence is insufficient, slice is blocked.
-- If blind refutation is inconclusive, slice is blocked.
-- If slice fails or blocks, perform task-level attribution.
-- Final Slice Verdict goes in Code Verifier Receipt, not in Evidence Ledger.
-- Worker evidence is a claim to challenge, not a fact to trust.
-- After Final Slice Verdict = pass, open tasks.md and mark the verifier gate checkbox [x].
+Allowed Actions:
+- Read and verify Worker evidence (receipts, ledger sections, diff snapshots) only from the inline content provided in this dispatch packet.
+- Evaluate blind refutation result against Worker evidence.
+- Attribute task-level defects if verification fails or blocks.
+- After Final Slice Verdict = pass, update the verifier gate checkbox [x] in tasks.md.
 - Return Code Verifier Receipt with Final Slice Verdict.
+
+Forbidden Actions:
+- Do not independently scan the filesystem for receipts, ledger sections, or snapshot files.
+- Do not modify implementation or write Evidence Ledger.
+- Do not dispatch Committer.
+- Do not introduce project-specific requirements not declared upstream.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for service startup, credentials, or interactive setup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- If required inline review payload is missing from the dispatch, return blocked immediately with `protocol-defect` (do not classify missing inline payload as `evidence-defect`).
+- If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
+
+Decision Rules:
+- Blind refutation = refuted:
+    Final Slice Verdict = fail
+    Category = IMPLEMENTATION DEFECT or CONTRACT DEFECT
+    Task attribution required = yes
+- Blind refutation = not-refuted AND Worker evidence sufficient AND no worker contract-mismatch AND no unresolved evidence defect:
+    Final Slice Verdict = pass
+    Category = PASS
+- Blind refutation = not-refuted AND Worker evidence insufficient:
+    Final Slice Verdict = blocked
+    Category = EVIDENCE DEFECT
+    Task attribution required = yes
+- Blind refutation = inconclusive:
+    Final Slice Verdict = blocked
+    Category = EVIDENCE DEFECT or PROTOCOL DEFECT
+    Task attribution required = yes
+- Worker contract-mismatch found:
+    Final Slice Verdict = blocked
+    Category = CONTRACT DEFECT
+    Task attribution required = yes
+
+Evidence Sufficiency Rules:
+PASS only when all conditions are satisfied:
+1. Declared slice acceptance is covered.
+2. Required Verification Method was executed.
+3. Expected Evidence is present.
+4. Required Skill Evidence is present (structured format, not just skill name).
+5. Boundary receipts are present as inline content in this dispatch where required.
+6. No unresolved contract conflict remains.
+7. Scope and CodeGraph rules are satisfied.
+
+Gate Classification Rules:
+- IMPLEMENTATION DEFECT: implementation contradicts declared contract.
+- EVIDENCE DEFECT: implementation may be correct, but required evidence is missing or too weak.
+- CONTRACT DEFECT: upstream contract is ambiguous, inconsistent, omitted, or unmapped.
+- PROTOCOL DEFECT: agent skipped required receipt, ledger update, skill evidence, or boundary protocol.
+
+Missing Evidence Review Payload Classification:
+- If Worker produced evidence but Executor failed to inline it, classify as: PROTOCOL DEFECT
+- If Worker did not produce required evidence, classify as: EVIDENCE DEFECT
+- If Code Verifier cannot tell whether evidence exists because inline dispatch payload is missing, classify as: PROTOCOL DEFECT
+
+Expected Result:
+- Slice verification passed | Slice verification failed | Slice verification blocked
+
+Receipt Format:
+[First Line: Slice verification passed | Slice verification failed | Slice verification blocked]
+
+Category:
+- PASS
+- IMPLEMENTATION DEFECT
+- EVIDENCE DEFECT
+- CONTRACT DEFECT
+- PROTOCOL DEFECT
+
+Severity:
+
+Slice:
+Covered Tasks:
+
+Blind Refutation:
+- result:
+- counterexamples attempted:
+
+Evidence Review:
+- worker hypotheses checked:
+- supported:
+- refuted:
+- unproven:
+- contract-mismatch:
+- evidence missing:
+- fixture/source issues:
+
+Task Attribution:
+- required: yes/no
+- Task ID:
+- Hypothesis ID:
+- Failure type:
+  - implementation-defect
+  - contract-defect
+  - evidence-defect
+  - protocol-defect
+- Refutation:
+- Minimal next action:
+  - repair implementation
+  - backfill evidence
+  - return to Propose
+  - return to Brain
+
+Contract Echo Check:
+- received:
+- evidence present:
+- evidence missing:
+- conflicted:
+
+Skill Evidence Check:
+- Required Skills:
+- Required Review Skills:
+- evidence present:
+- missing:
+
+Task Snapshot Receipt Check:
+CodeGraph Impact Check:
+Boundary / Scope Check:
+
+Findings:
+- BLOCKER:
+- WARNING:
+- NOTE:
+
+Verifier Gate Checkbox:
+- file:
+- line:
+- checked: yes/no
+
+Final Slice Verdict:
+- pass | fail | blocked
 ```
 
 ## Git Boundary

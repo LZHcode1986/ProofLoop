@@ -59,3 +59,4 @@ Important rules:
 - Worker runtime and fail-fast policies live in `.agents/contracts/worker-runtime-contract.md`.
 - AGENTS.md must stay short and global.
 - README.md must include the updated flowchart.
+- Brain uses workflow-intake and grill-me-prd only as pre-dispatch clarify-or-narrow procedures, not as workflow routes or gates.

@@ -1,8 +1,8 @@
-# Worker Runtime Contract
+# Worker and Code Verifier Runtime Contract
 
-All Worker phase dispatches are non-interactive.
+All Worker and Code Verifier phase dispatches are non-interactive.
 
-Worker must not:
+Worker and Code Verifier must not:
 - ask the user
 - request permission approval
 - invoke subagents
@@ -15,7 +15,7 @@ If required runtime configuration or dependency readiness cannot be established 
 
 ## Blocker Categories
 
-When returning blocked, Worker must attribute one of the following blocker categories:
+When returning blocked, the subagent (Worker or Code Verifier) must attribute one of the following blocker categories:
 
 - `runtime-config-blocker`:
   - Required runtime configuration is unavailable.
@@ -27,19 +27,19 @@ When returning blocked, Worker must attribute one of the following blocker categ
 - `contract-defect`:
   - Upstream contract, Slice Contract, task definition, or Verification Method is ambiguous, contradictory, untestable, or incomplete.
 - `evidence-defect`:
-  - Evidence needed for verification is missing or insufficient (specifically for backfill phase).
+  - Evidence needed for verification is missing or insufficient (specifically for backfill phase on Worker, or evidence review phase on Code Verifier).
 - `protocol-defect`:
   - Subagent routing, receipt alignment, or checkbox updates failed.
 
 ## Blocker Receipt Format
 
-Every Worker blocked receipt must include:
+Every blocked receipt must include:
 
 ```text
 [Phase blocked first line]
 
 Phase:
-- implementation | hypothesis-verification | evidence-backfill | fix
+- implementation | hypothesis-verification | evidence-backfill | fix | blind-refutation | evidence-review
 
 Blocker Type:
 - runtime-config-blocker | runtime-dependency-blocker | contract-defect | evidence-defect | protocol-defect
@@ -56,7 +56,7 @@ Non-secret Sources Inspected:
 Forbidden Sources Not Read:
 - <denied files/folders bypassed>
 
-Worker Actions:
+Subagent Actions:
 - did not read denied secret files
 - did not request permission
 - did not ask user
@@ -84,3 +84,4 @@ Executor must return to Brain when resolution requires:
 - service startup
 - external environment changes
 - contract or verification-method changes
+

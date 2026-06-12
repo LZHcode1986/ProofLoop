@@ -137,9 +137,9 @@ Code Verifier BLOCKED / CONTRACT DEFECT:
 Code Verifier PROTOCOL DEFECT:
   stop affected flow and report protocol defect
 
-Worker Phase Blocked (runtime-config-blocker or runtime-dependency-blocker):
+Worker or Code Verifier Phase Blocked (runtime-config-blocker or runtime-dependency-blocker):
   if resolvable from non-secret context:
-    dispatch Worker Runtime Context Continuation for the active phase
+    repair environment locally or dispatch Worker Runtime Context Continuation (if Worker blocked) or re-dispatch Code Verifier phase (if Code Verifier blocked)
   else:
     return Execution blocked to Brain
 
@@ -150,9 +150,9 @@ Code Verifier BLOCKED / PROTOCOL DEFECT due to missing inline Evidence Review pa
     return Execution blocked to Brain
 ```
 
-## Worker Runtime Blocker Routing
+## Worker and Code Verifier Runtime Blocker Routing
 
-When Worker returns `runtime-config-blocker` or `runtime-dependency-blocker`, Executor decides whether the blocker can be resolved from non-secret project context.
+When Worker or Code Verifier returns `runtime-config-blocker` or `runtime-dependency-blocker`, Executor decides whether the blocker can be resolved from non-secret project context.
 
 Executor may inspect only non-secret sources such as:
 - `.env.example`
@@ -174,11 +174,13 @@ Executor must not inspect:
 - private keys
 - production secrets
 
-If Executor can resolve the blocker from non-secret context, dispatch `Worker Runtime Context Continuation` to the same `@worker` with the same phase and task.
+If Executor can resolve the blocker from non-secret context:
+- For Worker blockers: dispatch `Worker Runtime Context Continuation` to the same `@worker` with the same phase and task.
+- For Code Verifier blockers: resolve local environment/configuration and re-dispatch the active phase (Blind Refutation or Evidence Review) to the same `@code-verifier`.
 
 If resolving the blocker requires denied secret files, credentials, permission approval, user input, service startup, or contract changes, return `Execution blocked` to Brain.
 
-Executor must not retry the same Worker phase repeatedly without new non-secret context.
+Executor must not retry the same Worker or Code Verifier phase repeatedly without new non-secret context.
 
 ## Evidence Review Inline Dispatch Rule
 

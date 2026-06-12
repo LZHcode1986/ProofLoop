@@ -1,6 +1,6 @@
 ---
 name: workflow-intake
-description: Turn an unstructured user request into a PRD draft and decision ledger before formal OpenSpec planning.
+description: Turn an unstructured user request into structured PRD context, decision ledger, and dispatch-ready acceptance criteria before formal OpenSpec planning.
 license: MIT
 compatibility: opencode
 metadata:
@@ -10,7 +10,7 @@ metadata:
 
 # Workflow Intake
 
-Turn raw user intent into a stable PRD draft that a Brain agent can own before handing work to formal OpenSpec planning.
+Turn raw user intent into structured PRD context, decision ledger, and dispatch-ready acceptance criteria that a Brain agent can own before handing work to formal OpenSpec planning.
 
 ## When to use
 
