@@ -49,17 +49,80 @@ CodeGraph Anchors:
 Stop Conditions:
 Checkbox Owner:
 
-Rules:
-- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
+Allowed Actions:
 - Use OpenSpec / Slice Contract as authority.
+- Work only on this task and edit files only inside Allowed File Scope.
+- Run non-interactive verification commands.
+- Update assigned task checkbox in tasks.md only after local verification passes.
+
+Forbidden Actions:
 - Do not read Evidence Ledger AC hypothesis.
 - Do not use AC hypothesis as implementation authority.
-- Work only on this task.
+- Do not perform hypothesis verification or evidence backfill.
+- Do not write Evidence Ledger.
 - Do not broaden scope.
 - Do not commit.
 - Do not invoke subagents.
-- Update assigned task checkbox after local verification.
-- Return Implementation Receipt.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for interactive setup or service startup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- Use `runtime-config-blocker` for missing config or denied secret material.
+- Use `runtime-dependency-blocker` for unavailable runtime dependencies.
+
+Expected Result:
+- Implementation finished | Implementation blocked | Implementation failed
+
+Receipt Format:
+[First Line: Implementation finished | Implementation failed]
+
+Task:
+Slice:
+
+Contract Echo:
+- accepted:
+- satisfied:
+- not satisfied:
+- conflicted:
+
+Skills used:
+
+Skill Evidence:
+- required skills:
+- evidence:
+- deviation / not applicable reason:
+
+What changed:
+Files changed:
+Commands run:
+Verification result:
+Acceptance evidence:
+
+Task Checkbox:
+- file:
+- line:
+- checked: yes/no
+
+CodeGraph Evidence:
+- status checked:
+- stale banner encountered:
+- anchors used:
+- impact notes:
+- fallback direct reads:
+
+Git Boundary:
+- commit created: no
+- expected next boundary: task-diff-snapshot
+
+Stop conditions encountered:
+Upgrade required:
+- yes/no
+- reason:
+
+Residual risk:
 ```
 
 ## Worker Hypothesis Verification
@@ -84,15 +147,57 @@ Evidence Ledger:
 - assigned section:
 - update mode: worker writes assigned section only
 
-Rules:
-- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
-- Do not edit implementation.
-- Do not repair failures.
-- Do not update task checkbox.
-- Verify each hypothesis against completed implementation and OpenSpec source.
-- Treat hypothesis as a claim to verify, not as authority.
-- Write only assigned Evidence Ledger section.
+Allowed Actions:
+- Inspect completed implementation, OpenSpec source refs, and Slice Contract.
+- Verify assigned AC hypotheses against completed implementation.
+- Write only the assigned Evidence Ledger section.
 - Return Hypothesis Verification Receipt.
+
+Forbidden Actions:
+- Do not edit implementation or repair failures.
+- Do not update task checkbox.
+- Do not inspect unrelated Evidence Ledger sections or other Worker receipts.
+- Do not broaden hypothesis or change verification target.
+- Do not invoke subagents or commit.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for service startup or interactive setup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- Use `runtime-config-blocker` for missing config or denied secret material.
+- Use `runtime-dependency-blocker` for unavailable runtime dependencies.
+
+Expected Result:
+- Hypothesis verification complete | Hypothesis verification blocked
+
+Receipt Format:
+[First Line: Hypothesis verification complete]
+
+Task:
+Slice:
+
+Evidence Ledger:
+- path:
+- assigned section:
+- updated: yes/no
+
+Hypothesis Verification:
+- Hypothesis ID:
+- Source:
+- Text:
+- Worker verdict:
+  - supported | refuted | unproven | contract-mismatch
+- Evidence:
+  - implementation files:
+  - tests/assertions:
+  - commands:
+  - runtime/manual check:
+  - fixture/source:
+- Worker Category:
+  - none | implementation-defect | contract-defect | evidence-defect | protocol-defect
+- Residual risk:
 ```
 
 ## Worker Fix
@@ -117,13 +222,33 @@ Required Skills:
 Verification Method:
 Stop Conditions:
 
-Rules:
-- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
-- Use OpenSpec / Slice Contract as authority.
-- Treat Verifier Failure as a defect report, not as implementation authority.
-- Fix only the listed defect.
-- Preserve original OpenSpec contract.
-- Do not broaden scope.
+Allowed Actions:
+- Inspect verifier failure and completed implementation.
+- Edit only files inside Allowed File Scope.
+- Fix only the attributed defect.
+- Run non-interactive verification commands.
+- Return Fix Phase Receipt (reuse Implementation Phase Receipt format).
+
+Forbidden Actions:
+- Do not broaden scope or repair unrelated issues.
+- Do not redefine the OpenSpec contract or change task acceptance criteria.
+- Do not invoke subagents or commit.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for interactive setup or service startup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- Use `runtime-config-blocker` for missing config or denied secret material.
+- Use `runtime-dependency-blocker` for unavailable runtime dependencies.
+
+Expected Result:
+- Worker fix complete | Worker fix blocked | Worker fix failed
+
+Receipt Format:
+Use the Implementation Phase Receipt format with the first line matching:
+`Worker fix complete` | `Worker fix failed`
 ```
 
 ## Worker Evidence Backfill
@@ -149,16 +274,54 @@ Evidence Ledger:
 - assigned section:
 - update mode: worker writes assigned section only
 
-Rules:
-- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
-- Do not edit implementation.
-- Do not repair failures.
-- Do not update task checkbox.
-- Rerun assigned verification commands.
-- Inspect completed implementation.
-- Write only assigned Evidence Ledger section.
-- Backfill only evidence for assigned task / hypothesis.
+Allowed Actions:
+- Inspect completed implementation and assigned OpenSpec source refs.
+- Rerun assigned verification commands to produce required evidence.
+- Write only the assigned Evidence Ledger section.
 - Return Evidence Backfill Receipt.
+
+Forbidden Actions:
+- Do not edit implementation or repair failures.
+- Do not update task checkbox.
+- Do not change verification strategy or invent evidence.
+- Do not inspect unrelated ledger sections.
+- Do not invoke subagents or commit.
+- Do not ask the user or request permission approval.
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not wait for service startup or interactive setup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- Use `runtime-config-blocker` for missing config or denied secret material.
+- Use `runtime-dependency-blocker` for unavailable runtime dependencies.
+
+Expected Result:
+- Evidence backfill complete | Evidence backfill blocked
+
+Receipt Format:
+[First Line: Evidence backfill complete]
+
+Task:
+Slice:
+
+Evidence Ledger:
+- path:
+- assigned section:
+- updated: yes/no
+
+Backfill:
+- Hypothesis ID:
+- Required evidence:
+- Verification commands run:
+- Evidence produced:
+- Evidence still missing:
+
+Worker Category:
+- none
+- evidence-defect
+
+Residual risk:
 ```
 
 ## Worker Runtime Context Continuation
@@ -189,11 +352,26 @@ Runtime Context Addendum:
 - unavailable facts:
 - forbidden sources not read:
 
-Rules:
-- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
-- Continue the same task and same phase.
-- Use the original dispatch packet plus this addendum.
-- If still blocked, return blocked with updated Runtime Dependency Check.
+Allowed Actions:
+- Continue the same task and same phase as specified in original dispatch.
+- Use the original dispatch packet plus the Runtime Context Addendum.
+- Return the receipt format required by the active phase.
+
+Forbidden Actions:
+- Do not read denied secret files such as `.env` or `.env.*`.
+- Do not request permission approval or ask the user.
+- Do not wait for service startup, credentials, login, or interactive setup.
+
+Runtime Policy:
+- Non-interactive only.
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md.
+- If still blocked, return blocked with updated blocker type and receipt.
+
+Expected Result:
+- Result matching active phase outcome (e.g. Implementation finished, Hypothesis verification complete, or Blocked)
+
+Receipt Format:
+Use the receipt format specified by the active phase.
 ```
 
 ## Code Verification - Blind Refutation

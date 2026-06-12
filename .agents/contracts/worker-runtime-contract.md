@@ -36,7 +36,7 @@ When returning blocked, Worker must attribute one of the following blocker categ
 Every Worker blocked receipt must include:
 
 ```text
-Blocked
+[Phase blocked first line]
 
 Phase:
 - implementation | hypothesis-verification | evidence-backfill | fix
