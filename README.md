@@ -137,9 +137,9 @@ Use OpenSpec Change for:
 
 ## Role Responsibilities
 
-- **Brain**: intent, clarification, routing, acceptance, archive authorization; no file edits.
+- **Brain**: governance control plane; intent, clarification, routing, acceptance, archive authorization; no file edits.
 - **general**: general-purpose execution for Brain-bounded tasks, lightweight docs persistence (such as updating `CLARIFY.md`), authorized archive execution; no specialist judgment; no git boundary.
-- **implementation-reviewer**: stage acceptance review, archive readiness recommendation; no archive execution.
+- **implementation-reviewer**: stage acceptance review, archive readiness recommendation, stage-level code-review-and-quality lens; no archive execution.
 - **committer**: git boundary only.
 
 ## No P0 / P1 / P2 workflow levels

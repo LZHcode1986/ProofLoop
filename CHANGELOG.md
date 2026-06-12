@@ -2,6 +2,17 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.13
+
+### 2026-06-12
+
+- **refactor**: ProofLoop 架构优化 — Brain 瘦身为治理控制面 & Implementation Reviewer 引入阶段级质量透镜
+  - `brain.md`: 大幅精简非核心控制面逻辑与流程，重构为极简治理控制面（正文缩减至约 100 行），定义硬性禁令（Hard prohibitions），删除冗余的 Primary decision、Dispatch rule 及重复的 Direct/OpenSpec 叙述。
+  - `implementation-reviewer.md`: 挂载 `code-review-and-quality` 技能，引入为 Stage Review 的跨 slice 阶段级质量审查工具（stage-level quality lens），并明确定义与 Code Verifier 的职责界限（只评不验），在输出模板中加入 Stage Quality Review 结构化技能证据输出区。
+  - `proofloop-skill-usage.md`: 新增 `Implementation Reviewer using code-review-and-quality` 节，约束其技能边界，并规范最小证据 (Minimum evidence) 结构。
+  - `dispatch-packets.md`: 在 `Brain Dispatch: Stage Review` packet 协议中引入 `Required Review Skills: - code-review-and-quality` 字段。
+  - `agent-install-prompt.md` & `README.md`: 同步更新全局角色职责定义，明确 Brain 为治理控制面，Implementation Reviewer 拥有阶段级 code-review-and-quality 质量透镜，禁止任何直接编辑或亲自归档执行行为。
+
 ## v1.0.12
 
 ### 2026-06-12

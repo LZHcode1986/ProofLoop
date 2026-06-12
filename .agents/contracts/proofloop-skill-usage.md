@@ -118,6 +118,29 @@ It does not:
 - commit;
 - write Evidence Ledger.
 
+## Implementation Reviewer using code-review-and-quality
+
+When `@implementation-reviewer` loads `code-review-and-quality`:
+
+- Apply it only as a stage-level quality lens.
+- Review composed stage behavior, slice-output commits, verifier receipts, residual risks, and Brain Dispatch Contract alignment.
+- Do not replace Code Verifier.
+- Do not redo slice verification unless Brain explicitly requests.
+- Do not execute archive.
+- Do not commit.
+- Do not modify implementation files.
+
+Minimum evidence:
+- contract alignment:
+- stage composition risks:
+- correctness risks:
+- architecture / maintainability risks:
+- security / data-safety risks:
+- performance risks:
+- evidence gaps:
+- archive-readiness impact:
+- residual risk:
+
 ## Worker using test-driven-development
 
 When `@worker` loads `test-driven-development`:

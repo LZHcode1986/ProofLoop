@@ -316,6 +316,8 @@ Code Verifier Receipts:
 Committer Receipts:
 Slice Commits:
 Residual Risks:
+Required Review Skills:
+- code-review-and-quality
 
 Expected Result:
 - Stage review passed

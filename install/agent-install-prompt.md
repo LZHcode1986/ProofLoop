@@ -60,9 +60,9 @@ Important rules:
 - AGENTS.md must stay short and global.
 - README.md must include the updated flowchart.
 - Brain uses workflow-intake and grill-me-prd only as pre-dispatch clarify-or-narrow procedures, not as workflow routes or gates.
-- Brain has edit denied; all file modifications are performed through subagents.
+- Brain has edit denied and acts as a pure governance control plane; all file modifications are performed through subagents.
 - Brain routes in this order: continuation, specialist owner, committer boundary, general fallback.
 - general is the general-purpose executor for Brain-bounded tasks after specialist and committer checks.
-- implementation-reviewer performs stage review and archive-readiness review only.
+- implementation-reviewer performs stage review and archive-readiness review only, using code-review-and-quality as a stage-level quality lens (does not replace Code Verifier).
 - Brain-authorized archive execution is dispatched to general.
 - committer owns archive-output git boundary.
