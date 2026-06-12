@@ -106,9 +106,9 @@ When `@worker` loads `test-driven-development`:
 
 - Do not ask the user directly.
 - Treat Brain Dispatch Contract, Task Contract, Slice Contract, and Acceptance Criteria as the approved behavior scope.
-- If the behavior or verification target is not testable, return `Implementation blocked`.
+- If the behavior or verification target is not testable, return `[active phase] blocked` with `contract-defect` or `evidence-defect` as appropriate.
 - Do not invent product behavior to make TDD possible.
-- Return TDD evidence in the Worker Completion Receipt.
+- Return TDD evidence in the receipt format required by the active Worker dispatch packet.
 
 ## general using diagnose
 

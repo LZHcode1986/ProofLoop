@@ -139,7 +139,7 @@ Code Verifier PROTOCOL DEFECT:
 
 Worker or Code Verifier Phase Blocked (runtime-config-blocker or runtime-dependency-blocker):
   if resolvable from non-secret context:
-    repair environment locally or dispatch Worker Runtime Context Continuation (if Worker blocked) or re-dispatch Code Verifier phase (if Code Verifier blocked)
+    resolve from non-secret context only: dispatch Worker Runtime Context Continuation (if Worker blocked) or re-dispatch Code Verifier phase (if Code Verifier blocked)
   else:
     return Execution blocked to Brain
 
