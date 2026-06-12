@@ -29,6 +29,9 @@ Executor-to-subagent packets live here.
 ```text
 Executor Dispatch: Worker Implementation
 
+Phase:
+- implementation
+
 Brain Dispatch Contract:
 Slice Contract:
 Change:
@@ -47,6 +50,7 @@ Stop Conditions:
 Checkbox Owner:
 
 Rules:
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
 - Use OpenSpec / Slice Contract as authority.
 - Do not read Evidence Ledger AC hypothesis.
 - Do not use AC hypothesis as implementation authority.
@@ -63,6 +67,9 @@ Rules:
 ```text
 Executor Dispatch: Worker Hypothesis Verification
 
+Phase:
+- hypothesis-verification
+
 Completed Implementation Receipt:
 OpenSpec source refs:
 Slice Contract:
@@ -78,6 +85,7 @@ Evidence Ledger:
 - update mode: worker writes assigned section only
 
 Rules:
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
 - Do not edit implementation.
 - Do not repair failures.
 - Do not update task checkbox.
@@ -91,6 +99,9 @@ Rules:
 
 ```text
 Executor Dispatch: Worker Fix
+
+Phase:
+- fix
 
 Brain Dispatch Contract:
 Slice Contract:
@@ -107,6 +118,7 @@ Verification Method:
 Stop Conditions:
 
 Rules:
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
 - Use OpenSpec / Slice Contract as authority.
 - Treat Verifier Failure as a defect report, not as implementation authority.
 - Fix only the listed defect.
@@ -118,6 +130,9 @@ Rules:
 
 ```text
 Executor Dispatch: Worker Evidence Backfill
+
+Phase:
+- evidence-backfill
 
 Change:
 Task ID:
@@ -135,14 +150,50 @@ Evidence Ledger:
 - update mode: worker writes assigned section only
 
 Rules:
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
 - Do not edit implementation.
 - Do not repair failures.
 - Do not update task checkbox.
-- May rerun verification commands.
-- May inspect completed implementation.
+- Rerun assigned verification commands.
+- Inspect completed implementation.
 - Write only assigned Evidence Ledger section.
 - Backfill only evidence for assigned task / hypothesis.
 - Return Evidence Backfill Receipt.
+```
+
+## Worker Runtime Context Continuation
+
+```text
+Executor Dispatch: Worker Runtime Context Continuation
+
+Phase:
+- implementation | hypothesis-verification | evidence-backfill | fix
+
+Original Worker Dispatch:
+- phase:
+- task:
+- packet summary:
+
+Previous Worker Receipt:
+- blocker type:
+- blocked operation:
+- runtime facts needed:
+- safe resolution hints:
+
+Runtime Context Addendum:
+- non-secret sources inspected:
+- config names discovered:
+- available fixture path:
+- local service declaration:
+- safe command alternative:
+- unavailable facts:
+- forbidden sources not read:
+
+Rules:
+- Subject to runtime and fail-fast policies in .agents/contracts/worker-runtime-contract.md
+- Continue the same task and same phase.
+- Use the original dispatch packet plus this addendum.
+- If still blocked, return blocked with updated Runtime Dependency Check.
 ```
 
 ## Code Verification - Blind Refutation
@@ -183,14 +234,43 @@ Executor Dispatch: Code Verification - Evidence Review
 
 Blind Slice Refutation Receipt:
 Worker Implementation Receipts:
+- inline content only:
+  - task:
+  - receipt:
+      <paste Worker Implementation Receipt content here>
+
 Worker Hypothesis Verification Receipts:
+- inline content only:
+  - task:
+  - hypothesis:
+  - receipt:
+      <paste Worker Hypothesis Verification Receipt content here>
+
 Task Diff Snapshot Receipts:
+- inline content only:
+  - task:
+  - boundary:
+  - receipt:
+      <paste task-diff-snapshot Boundary Receipt content here>
+
 Evidence Ledger worker task/hypothesis sections for covered tasks:
+- inline content only:
+  - task:
+  - hypothesis:
+  - ledger section:
+      <paste the assigned Evidence Ledger section here>
+
 Files Changed In Slice:
 Required Review Skills:
 Checkbox Owner: Code Verifier
 
 Rules:
+- Evidence Review inputs are inline payloads, not file path references.
+- Executor must paste the relevant receipt and ledger contents into this dispatch.
+- File paths may be included only as source labels, never as substitutes for content.
+- Code Verifier must not independently scan the filesystem for receipts or ledger sections.
+- If required inline evidence is missing, Code Verifier returns "Slice verification blocked" with PROTOCOL DEFECT.
+- Executor must not create synthetic, placeholder, or redundant receipt files to satisfy this packet.
 - If blind refutation is refuted, slice fails.
 - If blind refutation is not-refuted, inspect Worker evidence.
 - If evidence is sufficient, slice passes.

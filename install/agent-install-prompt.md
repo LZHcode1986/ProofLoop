@@ -20,6 +20,8 @@ AGENTS.md
 README.md
 .opencode/agents/**
 .agents/contracts/**
+.agents/skills/workflow-intake/**
+.agents/skills/grill-me-prd/**
 openspec/schemas/proofloop-spec-driven/**
 install/**
 ```
@@ -54,5 +56,6 @@ Important rules:
 - Direct Task goes to general.
 - bugfix uses general with diagnose.
 - Executor dispatch contracts live in `.agents/contracts/executor-dispatch-packets.md`.
+- Worker runtime and fail-fast policies live in `.agents/contracts/worker-runtime-contract.md`.
 - AGENTS.md must stay short and global.
 - README.md must include the updated flowchart.

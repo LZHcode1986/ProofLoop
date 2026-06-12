@@ -122,6 +122,52 @@ When `general` handles a Direct Task bugfix:
 - Return Completion Receipt.
 - If the fix requires requirement/spec/user contract changes, return `Upgrade required: yes`.
 
+## Brain using workflow-intake
+
+When Brain cannot form a verifiable Brain Dispatch Contract from the user's current request because product intent, scope, acceptance criteria, or stage boundaries are still unclear, Brain uses `workflow-intake` as the default clarify-or-narrow procedure.
+
+Use `workflow-intake` when:
+- the user presents an idea, bug, initiative, migration, feature, or behavior change;
+- no stable PRD or stable planning brief exists;
+- requirements are scattered across chat, docs, issues, screenshots, or code;
+- Brain cannot produce verifiable acceptance criteria without product-definition work.
+
+Do not treat `workflow-intake` as a new route.
+It is Brain-owned pre-dispatch clarification.
+
+Minimum evidence:
+- PRD / intake readiness status
+- Confirmed decisions
+- Inferred assumptions
+- Decided During Intake
+- Acceptance Criteria
+- Stage candidates
+- Remaining Open Questions
+- Recommended next step
+
+## Brain using grill-me-prd
+
+When Brain has structured PRD context but consequential unknowns remain, Brain uses `grill-me-prd` to identify the single highest-leverage clarification question.
+
+Structured PRD context may include:
+- PRD.md
+- draft PRD
+- intake decision ledger
+- CLARIFY.md
+- structured planning brief
+- workflow-intake organized conversation context
+
+Use `grill-me-prd` during clarification.
+Do not wait until PRD.md is finalized.
+
+Minimum evidence:
+- Confirmed decisions
+- Inferred decisions
+- Critical gaps
+- Optional gaps
+- recommended default for the next question
+- readiness assessment
+
 ## Skill Evidence Rule (R3)
 
 A required skill name alone is not evidence. The agent output must include structured evidence produced by that skill.

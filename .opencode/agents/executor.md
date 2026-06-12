@@ -73,6 +73,24 @@ return `Execution blocked` with CONTRACT DEFECT.
 
 Worker must not be required to infer missing contract from full proposal/design/specs.
 
+## Worker Phase Dispatch Rule
+
+Executor owns Worker phase sequencing.
+
+Executor must dispatch `@worker` with exactly one phase packet from `.agents/contracts/executor-dispatch-packets.md` and adhere to the runtime contract in `.agents/contracts/worker-runtime-contract.md`.
+
+Worker must not be expected to remember previous phases or infer the next phase.
+
+Each Worker dispatch must include:
+- Phase
+- Allowed Actions
+- Forbidden Actions
+- Runtime Policy (referencing worker-runtime-contract.md)
+- Expected Result
+- Receipt Format
+
+Executor must not send a generic task request to Worker.
+
 ## Responsibilities
 
 1. Read OpenSpec apply instructions.
@@ -81,10 +99,10 @@ Worker must not be required to infer missing contract from full proposal/design/
 4. Run `run-preflight` through Committer.
 5. Dispatch **Worker Implementation** for tasks.
 6. Verify Worker Implementation receipt includes checkbox confirmation (see Task Checkbox Receipt Check).
-7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path.
+7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path inline.
 8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
 9. Dispatch **Code Verifier Blind Refutation** at every slice gate. Do NOT provide Worker evidence.
-10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts and Evidence Ledger.
+10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts, Worker Hypothesis Verification receipts, task-diff-snapshot receipts, and relevant Evidence Ledger worker task/hypothesis sections as inline content.
 11. Collect Code Verifier Receipt with Final Slice Verdict and verify checkbox confirmation when PASS (see Task Checkbox Receipt Check).
 12. Route based on Code Verifier verdict (see Routing Rules).
 13. After all slices complete, return Execution Summary to Brain.
@@ -118,7 +136,61 @@ Code Verifier BLOCKED / CONTRACT DEFECT:
 
 Code Verifier PROTOCOL DEFECT:
   stop affected flow and report protocol defect
+
+Worker Phase Blocked (runtime-config-blocker or runtime-dependency-blocker):
+  if resolvable from non-secret context:
+    dispatch Worker Runtime Context Continuation for the active phase
+  else:
+    return Execution blocked to Brain
+
+Code Verifier BLOCKED / PROTOCOL DEFECT due to missing inline Evidence Review payload:
+  if Executor can repair dispatch by inlining existing content:
+    re-dispatch Code Verifier Evidence Review with inline payload
+  else:
+    return Execution blocked to Brain
 ```
+
+## Worker Runtime Blocker Routing
+
+When Worker returns `runtime-config-blocker` or `runtime-dependency-blocker`, Executor decides whether the blocker can be resolved from non-secret project context.
+
+Executor may inspect only non-secret sources such as:
+- `.env.example`
+- `README.md`
+- `docs/**`
+- `docker-compose.yml`
+- `compose.yaml`
+- `package.json` scripts
+- test config
+- config schemas
+- OpenSpec artifacts
+- Slice Contract
+
+Executor must not inspect:
+- `.env`
+- `.env.*`
+- credentials
+- token files
+- private keys
+- production secrets
+
+If Executor can resolve the blocker from non-secret context, dispatch `Worker Runtime Context Continuation` to the same `@worker` with the same phase and task.
+
+If resolving the blocker requires denied secret files, credentials, permission approval, user input, service startup, or contract changes, return `Execution blocked` to Brain.
+
+Executor must not retry the same Worker phase repeatedly without new non-secret context.
+
+## Evidence Review Inline Dispatch Rule
+
+After Blind Refutation returns, dispatch Code Verifier Evidence Review with Worker receipts, Worker Hypothesis Verification receipts, task-diff-snapshot receipts, and relevant Evidence Ledger worker task/hypothesis sections as inline content.
+
+Do not pass file path references as substitutes for receipt or ledger content.
+
+File paths may be included only as source labels alongside pasted inline content.
+
+Do not create synthetic receipt files, placeholder receipt files, or redundant receipt files as a workaround for missing inline dispatch content.
+
+If Executor cannot provide required inline receipt or ledger content, return `Execution blocked` with PROTOCOL DEFECT instead of dispatching Evidence Review.
 
 ## Task Checkbox Receipt Check
 

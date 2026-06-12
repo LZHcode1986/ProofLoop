@@ -78,7 +78,11 @@ You do not perform implementation work. You dispatch bounded tasks and verify th
 
 ## Primary decision
 
-For every user request, decide:
+For every user request, first decide whether Brain can form a verifiable Brain Dispatch Contract from the current request.
+
+If not, clarify or narrow before routing.
+
+After the request is clear enough to produce verifiable acceptance criteria, decide:
 
 ```text
 Does this task need an OpenSpec change?
@@ -155,6 +159,13 @@ Never dispatch a task without a verifiable Brain Dispatch Contract.
 
 If acceptance criteria are not verifiable, clarify or narrow before dispatching.
 
+For product-definition ambiguity, use `workflow-intake` as the default clarification and narrowing procedure.
+
+For structured PRD-context gaps, use `grill-me-prd` to select the single highest-leverage clarification question.
+
+Do not create a new workflow route for either skill.
+They are Brain-owned clarification procedures before dispatch.
+
 ## Direct Task
 
 Use Direct Task only when:
@@ -186,7 +197,11 @@ Direct Task does not auto-commit. If a commit is required after Brain accepts th
 
 Use OpenSpec Change when requirements, specs, user-visible behavior, architecture, interfaces, state, data semantics, or archive state are involved.
 
-If this is a new OpenSpec Change, dispatch `@propose`.
+If this is a new OpenSpec Change and Brain can form a verifiable Brain Dispatch Contract, dispatch `@propose`.
+
+If Brain cannot yet form the contract, clarify or narrow first.
+Use `workflow-intake` when raw user intent must be converted into structured PRD context.
+Use `grill-me-prd` when structured PRD context exists but consequential unknowns remain.
 
 If this is a continuation of an existing propose task (e.g. planning-contract-verifier BLOCKED repair), dispatch the previous propose `task_id`.
 

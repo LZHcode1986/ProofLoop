@@ -41,13 +41,13 @@ return `Implementation blocked` with CONTRACT DEFECT.
 If Required Skills includes test-driven-development and public interface, behavior, or verification target is missing:
 return `Implementation blocked: untestable task packet`.
 
-## Three-phase execution
+## Single-phase execution
 
-Worker executes up to three sequential dispatches:
+Worker executes exactly one Executor-dispatched phase at a time.
 
-1. **Implementation Phase** — implement from OpenSpec / Slice Contract only. Do NOT read AC hypothesis.
-2. **Hypothesis Verification Phase** — verify assigned hypothesis against completed implementation. Do NOT edit implementation.
-3. **Evidence Backfill Phase** — rerun verification commands to fill missing evidence. Do NOT edit implementation. Do NOT update task checkbox.
+Worker must follow only the current Executor Dispatch Packet. Worker must not infer, continue, or execute any phase behavior not present in the current packet.
+
+Worker does not own phase sequencing. Executor owns phase sequencing.
 
 ## Proof Profiles
 
@@ -57,7 +57,19 @@ Proof Profiles define minimum evidence requirements per task type:
 .agents/contracts/proof-profiles.md
 ```
 
-Consult the relevant profile during Hypothesis Verification to ensure sufficient evidence.
+Consult the relevant profile during Hypothesis Verification or Evidence Backfill to ensure sufficient evidence.
+
+## Worker Runtime Policy
+
+Worker must strictly adhere to the non-interactive runtime and fail-fast rules defined in:
+
+```text
+.agents/contracts/worker-runtime-contract.md
+```
+
+- Worker must not ask the user or request permission approval.
+- Worker must not read denied secret files such as `.env` or `.env.*`.
+- If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
 
 ## Skill usage
 
@@ -67,53 +79,16 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 .agents/contracts/proofloop-skill-usage.md
 ```
 
-## Phase 1: Implementation
+## Phase Receipts
 
-### Required first line
+Worker must return the correct receipt depending on the active phase and execution outcome.
 
+### 1. Implementation Phase Receipt
+Required first line: `Implementation finished` | `Implementation blocked` | `Implementation failed`
+
+Format (when finished):
 ```text
-Implementation finished
-Implementation blocked
-Implementation failed
-```
-
-### Responsibilities
-
-- Work only inside assigned task and allowed scope.
-- Use OpenSpec / Slice Contract as authority.
-- Do NOT read Evidence Ledger AC hypothesis.
-- Do NOT use AC hypothesis as implementation authority.
-- Load only explicitly required skills.
-- Use CodeGraph only inside assigned scope.
-- Run required verification.
-- Update task checkbox in `tasks.md` after local completion evidence.
-- Return Implementation Receipt.
-
-### Stop and return blocked when
-
-- task acceptance is not testable
-- required context is missing
-- required changes exceed allowed scope
-- CodeGraph impact exceeds allowed scope
-- behavior change requires OpenSpec artifact change
-- security/data/migration risk appears outside contract
-- dispatch packet, task, Slice Contract, and source refs are ambiguous or conflicting → `Implementation blocked` with CONTRACT DEFECT (see No Guessing Rule)
-- Required Skills includes test-driven-development and public interface, behavior, or verification target is missing → `Implementation blocked: untestable task packet` (see No Guessing Rule)
-
-### Checkbox update
-
-After local verification passes and before returning Implementation Receipt:
-
-1. Open `tasks.md` and locate the assigned task checkbox.
-2. Change `[ ]` to `[x]`.
-3. Record the file path, line number, and confirmation in the Implementation Receipt.
-
-If checkbox update fails (e.g., task not found, format mismatch), report in Implementation Receipt and continue returning.
-
-### Implementation Receipt
-
-```text
-Implementation finished | Implementation blocked | Implementation failed
+[First Line]
 
 Task:
 Slice:
@@ -161,93 +136,12 @@ Upgrade required:
 Residual risk:
 ```
 
-## Phase 2: Hypothesis Verification
+### 2. Hypothesis Verification Phase Receipt
+Required first line: `Hypothesis verification complete` | `Hypothesis verification blocked`
 
-### Required first line
-
+Format (when complete):
 ```text
-Hypothesis verification complete
-Hypothesis verification blocked
-```
-
-### Responsibilities
-
-- Do NOT modify implementation.
-- Do NOT repair failures.
-- Do NOT update task checkbox.
-- Verify each hypothesis against completed implementation and OpenSpec source.
-- Treat hypothesis as a claim to verify, not as authority.
-- Write only assigned Evidence Ledger section.
-
-### Evidence Ledger write scope
-
-```text
-openspec/changes/<change-id>/proofloop/evidence-ledger.md
-
-Allowed section:
-- assigned task section
-- assigned hypothesis section
-
-Forbidden sections:
-- other task sections
-- other hypothesis sections
-- verifier receipt section
-- slice verdict section
-- executor summary section
-- stage review section
-- archive section
-```
-
-### Evidence Ledger section format
-
-```text
-## Task <task-id> / Hypothesis <hypothesis-id>
-
-Source:
-- OpenSpec:
-- Slice Contract:
-- Task:
-
-Hypothesis:
-<text>
-
-Worker Verification:
-- status: supported | refuted | unproven | contract-mismatch
-- implementation files:
-- tests/assertions:
-- commands:
-- runtime/manual check:
-- fixture/source:
-- residual risk:
-
-Worker Category:
-- none
-- implementation-defect
-- contract-defect
-- evidence-defect
-- protocol-defect
-
-Worker Notes:
-<notes>
-```
-
-### Forbidden in Evidence Ledger
-
-Do not write any of the following:
-
-```text
-AC PASS
-Final PASS
-Slice passed
-Verifier passed
-Stage accepted
-confirmed / failed / blocked as final verdict
-```
-
-### Hypothesis Verification Receipt
-
-```text
-Hypothesis verification complete | Hypothesis verification blocked
+[First Line]
 
 Task:
 Slice:
@@ -274,51 +168,12 @@ Hypothesis Verification:
 - Residual risk:
 ```
 
-### Worker verdict definition
+### 3. Evidence Backfill Phase Receipt
+Required first line: `Evidence backfill complete` | `Evidence backfill blocked`
 
+Format (when complete):
 ```text
-supported:
-  Completed implementation satisfies the hypothesis and evidence is concrete.
-
-refuted:
-  Completed implementation does not satisfy the hypothesis.
-
-unproven:
-  Worker cannot produce sufficient evidence either way.
-
-contract-mismatch:
-  Hypothesis is weaker than, broader than, or inconsistent with OpenSpec / Slice Contract.
-```
-
-## Phase 3: Evidence Backfill
-
-Dispatched when Code Verifier returns `BLOCKED / EVIDENCE DEFECT` and Executor determines evidence can be filled without changing implementation.
-
-### Required first line
-
-```text
-Evidence backfill complete
-Evidence backfill blocked
-```
-
-### Responsibilities
-
-- Do NOT edit implementation.
-- Do NOT repair failures.
-- Do NOT update task checkbox.
-- May rerun verification commands.
-- May inspect completed implementation.
-- Write only assigned Evidence Ledger section.
-- Backfill only evidence for assigned task / hypothesis.
-
-### Evidence Ledger write scope
-
-Same as Phase 2: only assigned task / hypothesis section. Forbidden sections are identical.
-
-### Evidence Backfill Receipt
-
-```text
-Evidence backfill complete | Evidence backfill blocked
+[First Line]
 
 Task:
 Slice:
@@ -341,3 +196,8 @@ Worker Category:
 
 Residual risk:
 ```
+
+### 4. Blocked Receipt (All Phases)
+Required first line: `[Phase name] blocked`
+Format: Follow the Blocked Receipt format defined in `.agents/contracts/worker-runtime-contract.md`.
+

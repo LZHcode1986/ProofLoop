@@ -39,7 +39,7 @@ You are here to:
 4. Partition the PRD into stage candidates before formal planning starts.
 5. Build a decision ledger with `Confirmed`, `Inferred`, and `Open` items.
 6. Ask only the minimum consequential questions needed to draft a responsible PRD.
-7. Produce or refresh a PRD that is ready for a later `grill-me-prd` review.
+7. Produce or refresh structured PRD context that lets Brain form a verifiable Brain Dispatch Contract.
 
 ## Operating principles
 
@@ -59,7 +59,7 @@ Keep a decision ledger with these buckets:
 - `Confirmed`: explicitly stated in context
 - `Inferred`: strongly implied and low-risk to assume
 - `Decided During Intake`: resolved in the clarification loop
-- `Deferred to grill-me-prd`: open but not blocking a responsible PRD
+- `Optional / Non-blocking follow-up`: open but not blocking a responsible PRD
 - `Open`: truly unresolved and consequential
 
 Only ask about an `Open` item when the answer would materially affect:
@@ -140,43 +140,22 @@ Sort what you know into:
 - `Confirmed`
 - `Inferred`
 - `Decided During Intake`
-- `Deferred to grill-me-prd`
+- `Optional / Non-blocking follow-up`
 - `Open`
 
 ### Step 4: Consequential Clarification Loop
 
-Ask at most **3 questions** by default.
+Ask at most one consequential question at a time.
 
-Each iteration:
+After the intake ledger or draft PRD context exists, use `grill-me-prd` to select the single highest-leverage unresolved question when:
+- more than one consequential Open item exists;
+- there is a scope, workflow, architecture, data, security, rollout, or success-metric ambiguity;
+- Brain needs to decide whether the PRD context is ready for dispatch.
 
-1. Select the single most consequential `Open` item from the ledger.
-2. If no `Open` item would materially affect scope, UX, architecture, security, or success criteria — skip to Step 5.
-3. Ask the question using this format:
+Do not ask broad questionnaires.
 
-```
-### Clarification Needed
-
-**Question**
-[one precise question]
-
-**Why it matters**
-[one to two sentences on what this affects]
-
-**Recommended default**
-[a concrete recommendation]
-```
-
-4. Record the question and answer in the decision ledger.
-5. Repeat until 3 questions are asked or no consequential `Open` items remain.
-
-After the loop:
-
-- Move resolved items to `Confirmed`.
-- Items that are `Open` but do not block a responsible PRD are marked **Deferred to grill-me-prd**.
-- Proceed to Step 5 with clearly labeled assumptions for any remaining gaps.
-
-Do not exceed 3 questions unless the user explicitly asks for deeper discovery.
-The goal is to produce a grillable PRD, not a complete product specification.
+Do not defer consequential unknowns to a later PRD review.
+Resolve them now or label the assumption explicitly for Brain acceptance.
 
 ### Step 5: Draft or refresh `PRD.md`
 
@@ -213,7 +192,7 @@ Use this structure:
 ### Confirmed
 ### Inferred
 ### Decided During Intake
-### Deferred to grill-me-prd
+### Optional / Non-blocking follow-up
 
 ## Open Questions
 ## Recommended Next Step
@@ -222,7 +201,7 @@ Use this structure:
 ### Step 6: Report readiness
 
 After drafting the PRD, state whether it is:
-- `Ready for grill-me-prd`
+- `Ready for Brain Dispatch Contract`
 - `Needs one more clarification`
 - `Blocked by critical unknowns`
 
@@ -238,7 +217,7 @@ When you finish intake, provide:
 - the main `Decided During Intake` items
 - the acceptance criteria that should remain immutable downstream
 - the proposed stage plan
-- `Deferred to grill-me-prd` items, if any
+- `Optional / Non-blocking follow-up` items, if any
 - remaining `Open` questions, if any
 - the recommended next step
 

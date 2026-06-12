@@ -55,6 +55,8 @@ Do not install as active default:
 ```text
 .agents/contracts/dispatch-packets.md
 .agents/contracts/executor-dispatch-packets.md
+.agents/contracts/worker-runtime-contract.md
+.agents/contracts/proof-profiles.md
 .agents/contracts/codegraph-tool-protocol.md
 .agents/contracts/proofloop-skill-usage.md
 ```

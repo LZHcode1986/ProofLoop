@@ -56,6 +56,8 @@ scripts/local-check.sh
 .opencode/agents/web-scraper.md
 .agents/contracts/dispatch-packets.md
 .agents/contracts/executor-dispatch-packets.md
+.agents/contracts/worker-runtime-contract.md
+.agents/contracts/proof-profiles.md
 .agents/contracts/codegraph-tool-protocol.md
 .agents/contracts/proofloop-skill-usage.md
 ```

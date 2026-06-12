@@ -3,512 +3,284 @@ name: grill-me-prd
 preamble-tier: 4
 version: 1.0.0
 description: |
-  Review an already-written PRD by extracting what is already decided, identifying only
+  Review structured PRD context by extracting what is already decided, identifying only
   the consequential unknowns, and asking the minimum number of clarifying questions
   needed to de-risk execution.
 ---
 
 \# grill-me-prd
 
+# grill-me-prd
 
+Review structured PRD context by extracting what is already decided, identifying only the consequential unknowns, and asking the minimum number of clarifying questions needed to de-risk execution.
 
-Review an already-written PRD by extracting what is already decided, identifying only the consequential unknowns, and asking the minimum number of clarifying questions needed to de-risk execution.
+## Modes
 
+### Intake clarification mode
 
+Use this mode when Brain has structured PRD context but the PRD is not finalized.
 
-\## When to use
+Structured PRD context may include:
+- intake decision ledger
+- draft PRD
+- CLARIFY.md
+- structured planning brief
+- workflow-intake organized conversation context
 
+The goal is to select the single highest-leverage clarification question before Brain forms a final Dispatch Contract.
 
+### PRD review mode
+
+Use this mode when a stable PRD, spec, RFC, proposal, or planning doc already exists.
+
+The goal is to assess execution readiness and identify remaining critical or optional gaps.
+
+## When to use
 
 Use this skill when:
 
+- Brain has structured PRD context, even if it is not finalized.
+- The goal is to find gaps, contradictions, risky assumptions, or unresolved decisions.
+- Brain needs targeted clarification, not open-ended discovery.
+- The assistant has access to PRD text, draft PRD, intake ledger, CLARIFY.md, linked documents, or surrounding context.
 
-
-\- The user already has a PRD, spec, RFC, planning doc, or proposal.
-
-\- The goal is to find gaps, contradictions, risky assumptions, or unresolved decisions.
-
-\- The user wants targeted clarification, not open-ended discovery.
-
-\- The assistant has access to the PRD text, linked documents, or surrounding context.
-
-
-
-\## When not to use
-
-
+## When not to use
 
 Do not use this skill when:
 
+- There is no structured context at all.
+- The user is in unconstrained brainstorming and workflow-intake has not yet extracted a ledger.
+- The user wants broad ideation rather than execution-oriented clarification.
 
-
-\- The user only has a vague idea and wants to explore from scratch.
-
-\- There is no PRD or structured draft to review.
-
-\- The main task is writing the PRD from zero.
-
-\- The user wants broad brainstorming rather than execution-oriented clarification.
-
-
-
-In those cases, use a general discovery or ideation flow instead.
-
-
-
-\## Core behavior
-
-
+## Core behavior
 
 You are not here to interrogate endlessly.
 
-
-
 You are here to:
 
-
-
-1\. Extract what the PRD already answers.
-
-2\. Infer what is strongly implied.
-
-3\. Identify only the unresolved questions that would materially affect delivery or correctness.
-
-4\. Ask the fewest questions necessary.
-
-5\. Stop as soon as the critical gaps are resolved.
-
-
+1. Extract what the PRD already answers.
+2. Infer what is strongly implied.
+3. Identify only the unresolved questions that would materially affect delivery or correctness.
+4. Ask the fewest questions necessary.
+5. Stop as soon as the critical gaps are resolved.
 
 Your default stance is:
 
+- Prefer reading over asking.
+- Prefer inferring over re-asking.
+- Prefer proposing a recommendation over dumping uncertainty back on the user.
+- Prefer shipping a concise gap analysis over running an unbounded interview.
 
+## Operating principles
 
-\- Prefer reading over asking.
-
-\- Prefer inferring over re-asking.
-
-\- Prefer proposing a recommendation over dumping uncertainty back on the user.
-
-\- Prefer shipping a concise gap analysis over running an unbounded interview.
-
-
-
-\## Operating principles
-
-
-
-\### 1) Treat the PRD as the primary source of truth
-
-
+### 1) Treat the PRD as the primary source of truth
 
 Before asking anything, carefully review the PRD and any available supporting context.
 
-
-
 Extract:
 
-
-
-\- explicit decisions
-
-\- constraints
-
-\- goals
-
-\- non-goals
-
-\- assumptions
-
-\- dependencies
-
-\- rollout details
-
-\- metrics
-
-\- unresolved placeholders
-
-\- contradictions or ambiguities
-
-
+- explicit decisions
+- constraints
+- goals
+- non-goals
+- assumptions
+- dependencies
+- rollout details
+- metrics
+- unresolved placeholders
+- contradictions or ambiguities
 
 Do not ask about anything already stated clearly.
 
-
-
-\### 2) Maintain a resolved-decisions ledger
-
-
+### 2) Maintain a resolved-decisions ledger
 
 Continuously maintain an internal ledger with three buckets:
 
-
-
-\- \*\*Confirmed\*\*: explicitly stated in the PRD or supporting context
-
-\- \*\*Inferred\*\*: not stated verbatim, but strongly implied and low-risk to assume
-
-\- \*\*Open\*\*: genuinely unresolved and consequential
-
-
+- **Confirmed**: explicitly stated in the PRD or supporting context
+- **Inferred**: not stated verbatim, but strongly implied and low-risk to assume
+- **Open**: genuinely unresolved and consequential
 
 Before asking any question, check whether it is already answerable from the ledger.
 
-
-
 Never ask about items already in Confirmed.
-
-
 
 Only ask about an Inferred item if:
 
-\- the inference is risky,
+- the inference is risky,
+- the PRD is contradictory,
+- or the answer would materially change scope, UX, architecture, security, rollout, or measurement.
 
-\- the PRD is contradictory,
-
-\- or the answer would materially change scope, UX, architecture, security, rollout, or measurement.
-
-
-
-\### 3) Only ask consequential questions
-
-
+### 3) Only ask consequential questions
 
 A question is worth asking only if the answer could materially change one or more of:
 
-
-
-\- product scope
-
-\- user experience or workflow
-
-\- API or data model
-
-\- permissions, privacy, or security
-
-\- operational rollout or migration
-
-\- dependencies or ownership
-
-\- success metrics or decision criteria
-
-\- failure handling or fallback behavior
-
-
+- product scope
+- user experience or workflow
+- API or data model
+- permissions, privacy, or security
+- operational rollout or migration
+- dependencies or ownership
+- success metrics or decision criteria
+- failure handling or fallback behavior
 
 Avoid cosmetic, speculative, or low-leverage questions.
 
-
-
-\### 4) Ask one question at a time
-
-
+### 4) Ask one question at a time
 
 Ask at most one question per turn.
 
-
-
 Do not batch questions.
-
-
 
 Do not produce long questionnaires.
 
-
-
-\### 5) Every question must include a recommendation
-
-
+### 5) Every question must include a recommendation
 
 Whenever you ask a question, include:
 
-
-
-\- \*\*Why it matters\*\*
-
-\- \*\*Recommended default\*\*
-
-\- \*\*Severity\*\*: `Critical` or `Optional`
-
-
+- **Why it matters**
+- **Recommended default**
+- **Severity**: `Critical` or `Optional`
 
 This reduces back-and-forth and gives the user a fast path to confirm.
 
-
-
-\### 6) Enforce a question budget
-
-
+### 6) Enforce a question budget
 
 Default maximums:
 
-
-
-\- \*\*Critical questions\*\*: 10
-
-\- \*\*Optional questions\*\*: 5
-
-
+- **Critical questions**: 10
+- **Optional questions**: 5
 
 Do not exceed the budget unless the user explicitly asks for a deeper audit.
 
-
-
 If you hit the budget, stop asking and provide the best gap analysis possible with assumptions clearly labeled.
 
-
-
-\### 7) Stop early
-
-
+### 7) Stop early
 
 Stop asking questions as soon as:
 
-
-
-\- no critical unknowns remain, or
-
-\- remaining unknowns are optional and non-blocking, or
-
-\- the PRD is already sufficiently actionable with clearly labeled assumptions
-
-
+- no critical unknowns remain, or
+- remaining unknowns are optional and non-blocking, or
+- the PRD is already sufficiently actionable with clearly labeled assumptions
 
 Do not continue asking questions just because more questions are possible.
 
-
-
-\### 8) Never ask for information already available
-
-
+### 8) Never ask for information already available
 
 If the answer can be derived from:
 
-
-
-\- the PRD
-
-\- prior messages
-
-\- linked docs
-
-\- code context
-
-\- screenshots
-
-\- tables
-
-\- earlier answers in the same session
-
-
+- the PRD
+- prior messages
+- linked docs
+- code context
+- screenshots
+- tables
+- earlier answers in the same session
 
 then do not ask the user to restate it.
 
-
-
 Instead, state the answer and label it as Confirmed or Inferred.
 
-
-
-\### 9) Surface contradictions explicitly
-
-
+### 9) Surface contradictions explicitly
 
 If the PRD appears inconsistent, do not ask a vague question.
 
-
-
 Instead:
 
+- quote or summarize the conflicting points
+- explain why they conflict
+- ask for a decision only on the exact conflict
 
-
-\- quote or summarize the conflicting points
-
-\- explain why they conflict
-
-\- ask for a decision only on the exact conflict
-
-
-
-\### 10) Prefer execution readiness over completeness theater
-
-
+### 10) Prefer execution readiness over completeness theater
 
 Your job is not to exhaust every conceivable branch.
 
-
-
 Your job is to determine whether the PRD is ready enough to execute responsibly.
 
-
-
-\## Review workflow
-
-
+## Review workflow
 
 Follow this sequence:
 
-
-
-\### Step 1: Parse the PRD
-
-
+### Step 1: Parse the PRD
 
 Read the PRD carefully and identify:
 
+- problem statement
+- target user
+- goals
+- non-goals
+- key flows
+- edge cases
+- success metrics
+- rollout plan
+- dependencies
+- technical implications
+- legal/privacy/security implications
+- unresolved placeholders
 
-
-\- problem statement
-
-\- target user
-
-\- goals
-
-\- non-goals
-
-\- key flows
-
-\- edge cases
-
-\- success metrics
-
-\- rollout plan
-
-\- dependencies
-
-\- technical implications
-
-\- legal/privacy/security implications
-
-\- unresolved placeholders
-
-
-
-\### Step 2: Build the ledger
-
-
+### Step 2: Build the ledger
 
 Create an internal ledger with:
 
+- Confirmed
+- Inferred
+- Open
 
-
-\- Confirmed
-
-\- Inferred
-
-\- Open
-
-
-
-\### Step 3: Assess execution readiness
-
-
+### Step 3: Assess execution readiness
 
 Determine whether the PRD is:
 
+- **Ready**
+- **Mostly ready with minor gaps**
+- **Blocked by critical unknowns**
 
-
-\- \*\*Ready\*\*
-
-\- \*\*Mostly ready with minor gaps\*\*
-
-\- \*\*Blocked by critical unknowns\*\*
-
-
-
-\### Step 4: Ask only the highest-leverage open question
-
-
+### Step 4: Ask only the highest-leverage open question
 
 Select the single most consequential unresolved question.
 
-
-
 For that question, provide:
 
+- `Question`
+- `Why it matters`
+- `Recommended default`
+- `Severity`
 
-
-\- `Question`
-
-\- `Why it matters`
-
-\- `Recommended default`
-
-\- `Severity`
-
-
-
-\### Step 5: Update the ledger after each answer
-
-
+### Step 5: Update the ledger after each answer
 
 When the user responds:
 
+- move the item to Confirmed
+- update related assumptions
+- reassess whether more critical gaps remain
 
-
-\- move the item to Confirmed
-
-\- update related assumptions
-
-\- reassess whether more critical gaps remain
-
-
-
-\### Step 6: Stop and summarize
-
-
+### Step 6: Stop and summarize
 
 When no more critical questions remain, stop and output the final review.
 
-
-
-\## Preferred question format
-
-
+## Preferred question format
 
 Use this exact structure when asking a question:
 
+### Clarification Needed
 
+**Question**  
+[one precise question]
 
-\### Clarification Needed
+**Why it matters**  
+[one to three sentences on what this affects]
 
+**Recommended default**  
+[a concrete recommendation, not a vague possibility list]
 
-
-\*\*Question\*\*  
-
-\[one precise question]
-
-
-
-\*\*Why it matters\*\*  
-
-\[one to three sentences on what this affects]
-
-
-
-\*\*Recommended default\*\*  
-
-\[a concrete recommendation, not a vague possibility list]
-
-
-
-\*\*Severity\*\*  
-
+**Severity**  
 `Critical` or `Optional`
-
-
 
 Keep it tight.
 
+## Final output format
 
-
-\## Final output format
-
-
+In `Intake clarification mode`, if critical gaps remain, ask only the single highest-leverage next question. Do not output a final PRD Gap Review unless the user asks for a review or no critical question remains.
 
 When you stop asking questions, output the review in this structure:
-
-
 
 \# PRD Gap Review
 

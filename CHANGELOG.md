@@ -2,6 +2,33 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.11
+
+### 2026-06-12
+
+- **refactor**: ProofLoop 执行链路整改方案 — 单阶段派发、Fail-Fast 运行时阻塞与内联证据审查
+  - `worker-runtime-contract.md`: (新增) 集中定义非交互运行时约束、运行时 Blocker 类型（`runtime-config-blocker` 和 `runtime-dependency-blocker`）及 Blocked Receipt 格式。
+  - `worker.md`: 移除三阶段流程描述，改造为单阶段机械执行 Worker，引入对 `worker-runtime-contract.md` 的运行时与阻碍政策引用，纠正绝对路径为相对路径。
+  - `executor-dispatch-packets.md`: 在 Worker 阶段的分发 Packet 模板中移除冗余 Runtime 约束，改用 `worker-runtime-contract.md`；新增 `Worker Runtime Context Continuation` 模板；将 Evidence Review 的 Receipts 与 Ledger 部分限制为 `inline content only`。
+  - `executor.md`: 引入 `Worker Phase Dispatch Rule` 及 `Worker Runtime Blocker Routing`（限定 Executor 基于非秘密上下文尝试一次本地补救重派），更新 Routing 规则分支以处理运行时 Block 状态以及缺失 Evidence payload 的情况；强制 Evidence Review 以内联内容传输，不得传路径。
+  - `code-verifier.md`: 引入 `Evidence Review Input Source Rule` 强力禁止扫盘找 receipt，必须只读取 inline 载荷；缺失 inline 载荷视为协议缺陷 `PROTOCOL DEFECT`。
+  - `proof-profiles.md`: 在 `integration-path` 章节加入对不可用运行时依赖应返回 Blocker 的提示说明。
+  - `install/install-proofloop.ps1`: 将新增的 `worker-runtime-contract.md` 和 `proof-profiles.md` 加入安装及自检清单。
+  - `install/agent-install-prompt.md`: 新增针对 `worker-runtime-contract.md` 定位的 AI 部署规则。
+  - `install/README.md`: 在默认安装清单中同步补充这两个核心合约。
+  - `install/manual-install.md`: 在 Required contracts 清单中同步补充。
+
+## v1.0.10
+
+### 2026-06-12
+
+- **refactor**: 优化需求澄清与 PRD 审查工作流 — 将 workflow-intake 与 grill-me-prd 融入 Brain 澄清流程
+  - `brain.md`: Primary decision 调整为前置判断 Dispatch Contract 是否可验证；Dispatch rule 补充在产品定义歧义时调用 `workflow-intake`，结构化上下文有漏洞时调用 `grill-me-prd`；OpenSpec Change 限制只在 Dispatch Contract 可验证时才派发 propose。
+  - `proofloop-skill-usage.md`: 新增 `Brain using workflow-intake` 和 `Brain using grill-me-prd` 段落，规范了这两个技能的前置调用条件与 Minimum evidence 证据格式。
+  - `workflow-intake/SKILL.md`: 将目标变更为“产出用于生成可验证 Dispatch Contract 的结构化 PRD 上下文”，将 ledger 分类中的 `Deferred to grill-me-prd` 替换为 `Optional / Non-blocking follow-up`，在澄清循环中支持遇到多个 open 选项时调用 `grill-me-prd` 找出下一个最高杠杆的问题，并修改就绪状态为 `Ready for Brain Dispatch Contract`。
+  - `grill-me-prd/SKILL.md`: 扩展支持对未完稿的“结构化 PRD 上下文（如账本、草稿等）”的审查，新增 `Intake clarification mode` 与 `PRD review mode` 双模式，并在 intake 模式下仅返回单个最高杠杆的问题以加速澄清循环。
+  - `agent-install-prompt.md`: 在 ProofLoop overlay 安装清单中补全 `workflow-intake` 和 `grill-me-prd` 技能路径。
+
 ## v1.0.9
 
 ### 2026-06-11

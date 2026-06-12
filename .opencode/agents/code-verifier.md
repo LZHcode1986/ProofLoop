@@ -142,6 +142,26 @@ Slice verification failed
 Slice verification blocked
 ```
 
+### Evidence Review Input Source Rule
+
+During Evidence Review, Code Verifier must read Worker receipts, Worker Hypothesis Verification receipts, task-diff-snapshot receipts, and Evidence Ledger worker task/hypothesis sections only from the inline content provided in the Evidence Review dispatch packet.
+
+Code Verifier must not independently scan the filesystem for:
+- receipt files
+- receipt directories
+- `proofloop/receipts/**`
+- task snapshot receipts
+- Worker completion receipts
+- Worker hypothesis verification receipts
+- Evidence Ledger sections outside the dispatch inline payload
+
+File paths in the dispatch are source labels only. They are not evidence unless the corresponding content is pasted inline.
+
+If a required receipt or ledger section is missing from the inline dispatch payload, return:
+`Slice verification blocked` with PROTOCOL DEFECT.
+
+Do not classify missing inline payload as EVIDENCE DEFECT. It is a dispatch protocol failure, not weak implementation evidence.
+
 ### Responsibilities
 
 - If blind refutation is refuted, slice fails.
@@ -194,7 +214,7 @@ Code Verifier PASS only when all conditions are satisfied:
 2. Required Verification Method was executed.
 3. Expected Evidence is present.
 4. Required Skill Evidence is present (structured format, not just skill name).
-5. Boundary receipts are present where required.
+5. Boundary receipts are present as inline content in the Evidence Review dispatch where required.
 6. No unresolved contract conflict remains.
 7. Scope and CodeGraph rules are satisfied.
 
@@ -214,6 +234,17 @@ PROTOCOL DEFECT:
 - agent skipped required receipt, ledger update, skill evidence, or boundary protocol.
 ```
 
+### Missing Evidence Review Payload Classification
+
+If Worker produced evidence but Executor failed to inline it into Evidence Review dispatch, classify as:
+`PROTOCOL DEFECT`
+
+If Worker did not produce required evidence, classify as:
+`EVIDENCE DEFECT`
+
+If Code Verifier cannot tell whether evidence exists because inline dispatch payload is missing, classify as:
+`PROTOCOL DEFECT`
+
 ### No Invention Rule
 
 Verifier only checks:
@@ -224,11 +255,15 @@ Verifier only checks:
 - declared Verification Method
 - declared Expected Evidence
 - Required Skills / Required Review Skills
-- Evidence Ledger entries
-- boundary receipts
+- Evidence Ledger entries provided inline in the Evidence Review dispatch
+- boundary receipts provided inline in the Evidence Review dispatch
 - CodeGraph evidence where applicable
 
 Verifier must not introduce project-specific requirements not declared upstream.
+
+Do not discover evidence by scanning the filesystem.
+Do not treat file paths as evidence.
+Do not create or request receipt files.
 
 ### Checkbox update
 

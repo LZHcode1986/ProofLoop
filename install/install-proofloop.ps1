@@ -75,6 +75,8 @@ $DefaultAgents = @(
 $Contracts = @(
   ".agents/contracts/dispatch-packets.md",
   ".agents/contracts/executor-dispatch-packets.md",
+  ".agents/contracts/worker-runtime-contract.md",
+  ".agents/contracts/proof-profiles.md",
   ".agents/contracts/codegraph-tool-protocol.md",
   ".agents/contracts/proofloop-skill-usage.md"
 )
@@ -262,7 +264,8 @@ foreach ($skill in $CanonicalSkills) {
     ".opencode/agents/brain.md",
     ".opencode/agents/executor.md",
     ".agents/contracts/dispatch-packets.md",
-    ".agents/contracts/executor-dispatch-packets.md"
+    ".agents/contracts/executor-dispatch-packets.md",
+    ".agents/contracts/worker-runtime-contract.md"
   )
 
   $allPresent = $true
