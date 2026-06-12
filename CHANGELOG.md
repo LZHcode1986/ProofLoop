@@ -2,30 +2,18 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
-## v1.0.13
-
-### 2026-06-12
-
-- **refactor**: ProofLoop 架构优化 — Brain 瘦身为治理控制面 & Implementation Reviewer 引入阶段级质量透镜
-  - `brain.md`: 大幅精简非核心控制面逻辑与流程，重构为极简治理控制面（正文缩减至约 100 行），定义硬性禁令（Hard prohibitions），删除冗余的 Primary decision、Dispatch rule 及重复的 Direct/OpenSpec 叙述。
-  - `implementation-reviewer.md`: 挂载 `code-review-and-quality` 技能，引入为 Stage Review 的跨 slice 阶段级质量审查工具（stage-level quality lens），并明确定义与 Code Verifier 的职责界限（只评不验），在输出模板中加入 Stage Quality Review 结构化技能证据输出区。
-  - `proofloop-skill-usage.md`: 新增 `Implementation Reviewer using code-review-and-quality` 节，约束其技能边界，并规范最小证据 (Minimum evidence) 结构。
-  - `dispatch-packets.md`: 在 `Brain Dispatch: Stage Review` packet 协议中引入 `Required Review Skills: - code-review-and-quality` 字段。
-  - `agent-install-prompt.md` & `README.md`: 同步更新全局角色职责定义，明确 Brain 为治理控制面，Implementation Reviewer 拥有阶段级 code-review-and-quality 质量透镜，禁止任何直接编辑或亲自归档执行行为。
-
 ## v1.0.12
 
 ### 2026-06-12
 
-- **refactor**: ProofLoop 执行链路及需求澄清瘦身整改 — grill-me-prd 瘦身、Brain 禁用编辑、General 通用机械执行与 Archive Execution 迁移
-  - `grill-me-prd/SKILL.md`: 瘦身主入口，将核心流程以外的规则及长模板抽离至 references 子目录，控制面保持在百行左右，杜绝执行中写入文件。
+- **refactor**: ProofLoop 架构优化与执行链路整改 — grill-me-prd 瘦身、Brain 瘦身为治理控制面并禁用编辑、General 机械执行、Archive Execution 迁移与 Implementation Reviewer 引入阶段级质量透镜
+  - `grill-me-prd/SKILL.md`: 瘦身主入口，将核心流程以外 of 规则及长模板抽离至 references 子目录，控制面保持在百行左右，杜绝执行中写入文件。
   - `grill-me-prd/references/`: (新增) 新增 `domain-context-checks.md`（术语校准/交叉验证/场景压测/ADR 候选）、`output-formats.md`（提问及各模式输出格式）和 `examples.md`（提问与决策用例）。
-  - `brain.md`: 将 edit 权限收窄为全部禁用 (`edit: "*": deny`)；规定 4 级路由优先级（Continuation -> Specialist -> Committer -> General）；修改归档执行节点为 General，新增澄清持久化 CLARIFY.md 的通用派发规范。
-  - `dispatch-packets.md`: General 不新增专业任务包，仍沿用 `Brain Dispatch: General`，Expected Result 扩充 Task complete / Task blocked / Task failed 完结状态支持。
-  - `implementation-reviewer.md`: 移除 `openspec archive` 命令权限及技能挂载权限，删除归档执行模式相关段落，收缩为只读评审与 readiness 推荐。
-  - `proofloop-skill-usage.md`: 同步技能规则，将 `openspec-archive-change` 授权执行者调整为 General，增加 reviewer 纯读与免归档控制约束。
-  - `agent-install-prompt.md`: 全局流程图中同步修改 archive 执行为 General，重要规则增加 Brain 禁编辑、4级路由原则、General 兜底机械执行等配置提示。
-  - `README.md` & `AGENTS.md`: Mermaid 流程图和文字流中将归档执行节点切换为 General，更新全局角色职责矩阵表格及描述。
+  - `brain.md`: 将 edit 权限收窄为全部禁用 (`edit: "*": deny`)；规定 4 级路由优先级（Continuation -> Specialist -> Committer -> General）；修改归档执行节点为 General，新增澄清持久化 CLARIFY.md 的通用派发规范；大幅精简非核心控制面逻辑与流程，重构为极简治理控制面（正文缩减至约 100 行），定义硬性禁令（Hard prohibitions），删除冗余 of Primary decision、Dispatch rule 及重复 of Direct/OpenSpec 叙述。
+  - `implementation-reviewer.md`: 移除 `openspec archive` 命令权限及技能挂载权限，删除归档执行模式相关段落，收缩为只读评审与 readiness 推荐；挂载 `code-review-and-quality` 技能，引入为 Stage Review 的跨 slice 阶段级质量审查工具（stage-level quality lens），并明确定义与 Code Verifier 的职责界限（只评不验），在输出模板中加入 Stage Quality Review 结构化技能证据输出区。
+  - `proofloop-skill-usage.md`: 同步技能规则，将 `openspec-archive-change` 授权执行者调整为 General，增加 reviewer 纯读与免归档控制约束；新增 `Implementation Reviewer using code-review-and-quality` 节，约束其技能边界，并规范最小证据 (Minimum evidence) 结构。
+  - `dispatch-packets.md`: General 不新增专业任务包，仍沿用 `Brain Dispatch: General`，Expected Result 扩充 Task complete / Task blocked / Task failed 完结状态支持；在 `Brain Dispatch: Stage Review` packet 协议中引入 `Required Review Skills: - code-review-and-quality` 字段。
+  - `agent-install-prompt.md` & `README.md`: 同步更新全局角色职责定义，明确 Brain 为治理控制面，Implementation Reviewer 拥有阶段级 code-review-and-quality 质量透镜，禁止任何直接编辑或亲自归档执行行为；重要规则增加 Brain 禁编辑、4级路由原则、General 兜底机械执行等配置提示。
   - `committer.md`: 可选微调，修改 `archive-output` 触发边界场景下的通用文案。
 
 ## v1.0.11
