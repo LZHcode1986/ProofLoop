@@ -91,14 +91,32 @@ When `@executor` loads `openspec-apply-change`:
 - Dispatch Committer for `slice-output` only after slice verifier PASS.
 - Return contract, evidence, or protocol blockers to Brain.
 
-## Implementation Reviewer using openspec-archive-change
+## General using openspec-archive-change
 
-When `@implementation-reviewer` loads `openspec-archive-change`:
+When `@general` loads `openspec-archive-change`:
 
-- Only do so after Brain authorizes archive.
-- Execute official OpenSpec archive behavior.
+- Only do so after Brain explicitly authorizes archive.
+- Treat the skill as official OpenSpec archive substrate.
+- Do not decide archive readiness.
+- Do not perform stage acceptance review.
 - Do not commit archive output.
-- Return archive result and whether archive-output boundary is needed.
+- Return archive execution result and whether archive-output boundary is needed.
+- If archive output changes files, Brain dispatches `@committer` for `archive-output`.
+
+## Implementation Reviewer stage review only
+
+`@implementation-reviewer` does not load `openspec-archive-change`.
+
+It performs:
+- stage-level acceptance review;
+- archive-readiness recommendation.
+
+It does not:
+- execute archive;
+- run `openspec archive`;
+- modify files;
+- commit;
+- write Evidence Ledger.
 
 ## Worker using test-driven-development
 

@@ -2,6 +2,21 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.12
+
+### 2026-06-12
+
+- **refactor**: ProofLoop 执行链路及需求澄清瘦身整改 — grill-me-prd 瘦身、Brain 禁用编辑、General 通用机械执行与 Archive Execution 迁移
+  - `grill-me-prd/SKILL.md`: 瘦身主入口，将核心流程以外的规则及长模板抽离至 references 子目录，控制面保持在百行左右，杜绝执行中写入文件。
+  - `grill-me-prd/references/`: (新增) 新增 `domain-context-checks.md`（术语校准/交叉验证/场景压测/ADR 候选）、`output-formats.md`（提问及各模式输出格式）和 `examples.md`（提问与决策用例）。
+  - `brain.md`: 将 edit 权限收窄为全部禁用 (`edit: "*": deny`)；规定 4 级路由优先级（Continuation -> Specialist -> Committer -> General）；修改归档执行节点为 General，新增澄清持久化 CLARIFY.md 的通用派发规范。
+  - `dispatch-packets.md`: General 不新增专业任务包，仍沿用 `Brain Dispatch: General`，Expected Result 扩充 Task complete / Task blocked / Task failed 完结状态支持。
+  - `implementation-reviewer.md`: 移除 `openspec archive` 命令权限及技能挂载权限，删除归档执行模式相关段落，收缩为只读评审与 readiness 推荐。
+  - `proofloop-skill-usage.md`: 同步技能规则，将 `openspec-archive-change` 授权执行者调整为 General，增加 reviewer 纯读与免归档控制约束。
+  - `agent-install-prompt.md`: 全局流程图中同步修改 archive 执行为 General，重要规则增加 Brain 禁编辑、4级路由原则、General 兜底机械执行等配置提示。
+  - `README.md` & `AGENTS.md`: Mermaid 流程图和文字流中将归档执行节点切换为 General，更新全局角色职责矩阵表格及描述。
+  - `committer.md`: 可选微调，修改 `archive-output` 触发边界场景下的通用文案。
+
 ## v1.0.11
 
 ### 2026-06-12

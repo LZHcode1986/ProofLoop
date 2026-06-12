@@ -73,7 +73,7 @@ After each Worker task:
 After Code Verifier passes slice:
   slice-output commit.
 
-After archive execution:
+After Brain-authorized archive execution by general:
   archive-output commit if archive changed files.
 ```
 

@@ -62,7 +62,7 @@ flowchart TD
 
     IR -->|read full ledger| EL
     IR --> BA[Brain archive authorization]
-    BA --> AE[Implementation Reviewer\narchive execution]
+    BA --> AE[general\narchive execution]
     AE --> AO{Archive changed files?}
     AO -- Yes --> AC[Committer\narchive-output commit]
     AO -- No --> DONE[Done]
@@ -122,7 +122,7 @@ Code Verifier checks assigned slice evidence.
 Committer commits slice-output after verifier PASS.
 Implementation Reviewer performs stage acceptance from full ledger.
 Brain authorizes archive.
-Implementation Reviewer executes archive.
+General executes archive.
 Committer commits archive-output if needed.
 ```
 
@@ -134,6 +134,13 @@ Use OpenSpec Change for:
 - multi-slice implementation
 - architecture/interface/state/data semantic changes
 - formal changes that must be archived
+
+## Role Responsibilities
+
+- **Brain**: intent, clarification, routing, acceptance, archive authorization; no file edits.
+- **general**: general-purpose execution for Brain-bounded tasks, lightweight docs persistence (such as updating `CLARIFY.md`), authorized archive execution; no specialist judgment; no git boundary.
+- **implementation-reviewer**: stage acceptance review, archive readiness recommendation; no archive execution.
+- **committer**: git boundary only.
 
 ## No P0 / P1 / P2 workflow levels
 

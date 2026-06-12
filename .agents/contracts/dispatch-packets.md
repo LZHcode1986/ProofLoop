@@ -116,12 +116,33 @@ Evidence Ledger Seed:
 
 ## General
 
-Use only when Brain has confirmed:
+Use only after Brain has checked:
 
-1. no continuation `task_id` applies, and
-2. no specialist subagent owns the task.
+1. no continuation `task_id` applies;
+2. no specialist owner applies;
+3. the task is not a git boundary closure owned by `committer`;
+4. Brain can form a bounded Brain Dispatch Contract.
 
-`general` is a fallback agent, not the default agent for small docs/config/script edits.
+`general` is a general-purpose execution agent for Brain-owned direct tasks and bounded mechanical work.
+
+`general` is not the default agent for small tasks.
+Do not route to `general` to avoid a specialist owner.
+
+Brain may dispatch `general` for:
+- direct task edits;
+- lightweight documentation persistence such as updating `CLARIFY.md`;
+- bounded mechanical edits where Brain has specified target, scope, AC, and verification;
+- Brain-authorized OpenSpec archive execution;
+- diagnostic edits outside any specialist-owned flow.
+
+Brain must provide:
+- target files or commands;
+- allowed file scope;
+- forbidden file scope;
+- acceptance criteria;
+- verification method;
+- expected evidence;
+- stop conditions.
 
 ```text
 Brain Dispatch: General
@@ -137,15 +158,16 @@ Diagnostic Protocol:
 - Stop / Upgrade Conditions:
 
 Expected Result:
-- Edit complete
-- Edit blocked
-- Edit failed
+- Task complete
+- Task blocked
+- Task failed
 ```
 
 Expected completion receipt:
 
 ```text
-Edit complete | Edit blocked | Edit failed
+Task complete | Task blocked | Task failed
+(Or: Edit complete | Edit blocked | Edit failed)
 
 Task Type:
 Skills used:

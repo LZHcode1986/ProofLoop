@@ -54,7 +54,7 @@ Brain -> Evidence Ledger Seed
       -> Executor
       -> Implementation Reviewer
       -> Brain archive authorization
-      -> Implementation Reviewer archive execution
+      -> General archive execution
       -> Committer archive-output if needed
 ```
 
@@ -167,7 +167,7 @@ archive output -> archive-output commit
 
 ## Archive rule
 
-Implementation Reviewer performs archive execution only after Brain authorizes archive.
+General performs archive execution only after Brain authorizes archive.
 
 Brain does not run archive directly.  
-Implementation Reviewer does not commit archive output.
+General does not commit archive output.
