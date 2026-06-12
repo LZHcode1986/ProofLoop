@@ -77,6 +77,16 @@ Brain routes in this order:
 
 Do not route to `general` to avoid a specialist owner.
 
+## Continuation-first routing
+
+Before creating a new subagent task, Brain must check whether the request continues an existing task.
+
+If a valid previous `task_id` exists, reuse the same `task_id` and owner for repair, retry, follow-up, blocked-resolution, evidence-backfill, archive-continuation, or commit-follow-up.
+
+Do not route continuation work to `general` just because it is small or mechanical.
+
+Create a new task only when no valid `task_id` exists or Brain explicitly changes ownership.
+
 ## Clarify before dispatch
 
 Never dispatch without a verifiable Brain Dispatch Contract.

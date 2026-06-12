@@ -34,9 +34,6 @@ Brain chooses one route:
 direct-task
 openspec-change
 ```
-
-No active workflow should use `P0 / P1 / P2` as routing levels.
-
 ## Direct Task
 
 ```text

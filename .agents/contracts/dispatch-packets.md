@@ -90,6 +90,9 @@ Continuation:
 - previous owner: propose | executor | implementation-reviewer | committer | web-scraper | general
 - continuation reason: repair | retry | follow-up | blocked-resolution | evidence-backfill | archive-continuation | commit-follow-up
 
+Continuation Rule:
+- If this dispatch continues, repairs, retries, or responds to a previous subagent task, Brain must reuse the previous `task_id` instead of creating a new subagent task.
+
 Escalation Target:
 - Brain
 
@@ -329,7 +332,7 @@ Expected Result:
 
 ## Archive Commit
 
-Use after Implementation Reviewer executes archive and reports archive-output changes.
+Use after General executes Brain-authorized archive and reports archive-output changes.
 
 ```text
 Brain Dispatch: Archive Commit
