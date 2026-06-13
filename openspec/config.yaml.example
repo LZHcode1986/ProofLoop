@@ -1,17 +1,44 @@
 schema: proofloop-spec-driven
 
-context:
-  project: "<project-name>"
-  description: "<project-description>"
+context: |
+  Project: <project-name>
+  Domain: <project-domain>
+  Product boundary: <product-boundary-description>
+  Tech stack: <your-tech-stack>
+  Documentation language: <e.g., Chinese/English>
+  
+  # ProofLoop 默认规范 (通常无需修改)
+  Architecture: Layered rule-based governance over OpenSpec artifacts.
+  Core roles: Brain (L0), Propose (L1), Executor (L1), Worker (L2), Verifiers (L2).
+  State model: proposal -> specs -> design -> tasks -> apply -> archive.
+  Canonical objects: change, spec, design, task, evidence.
+  Authority order: openspec/ > AGENTS.md > tech-spec.md > PRD.md > CLARIFY.md.
 
 rules:
-  - Every Brain-dispatched task must have verifiable acceptance criteria.
-  - Direct Task uses Brain -> general -> Completion Receipt -> Brain self-check.
-  - OpenSpec Change uses Evidence Ledger Seed -> Propose -> Planning Contract Verifier -> Executor -> Implementation Reviewer -> Brain archive authorization.
-  - Evidence Ledger is the delivery evidence spine for OpenSpec Change. It does not introduce new requirements.
-  - Executor maintains execution evidence in the Evidence Ledger.
-  - Code Verifier must not pass solely because tests are green. It checks declared contract, expected evidence, skill evidence, and boundary receipts.
-  - OpenSpec canonical skills remain untouched; ProofLoop applies an overlay through agents and contracts.
-  - CodeGraph is a tool protocol, not a default agent.
-  - Committer records task-diff-snapshot after tasks and commits slice-output only after verifier PASS.
-  - High-risk work uses Required Review Skills, not P2 flow.
+  proposal:
+    - Proposal is an intent snapshot. It must preserve Brain intent, scope, non-goals, acceptance criteria, risk posture, and minimum closed loop.
+    - Proposal must not define implementation details as authoritative behavior contracts.
+
+  specs:
+    - Specs are the behavior contract source of truth.
+    - Binding behavior that affects observable runtime behavior, API contracts, event delivery, persistence, failure semantics, or user-visible outcomes MUST appear in specs.
+    - Specs must not contain internal implementation plans unless they are externally observable requirements.
+    - Spec directory name must match kebab-case: start with lowercase letter, contain only lowercase letters, digits, and hyphens.
+    - Forbidden: leading digit, version suffix (-bN/-vN), fix-/remediation-/visible- prefix.
+    - Forbidden: stage-N- prefix — stage markers belong in change names, not spec names.
+    - Before creating a new spec, check if base specs already contain a spec for the same capability. If so, use `## ADDED Requirements / ## MODIFIED Requirements` to extend rather than creating a duplicate.
+
+  design:
+    - Design is technical rationale for implementing specs.
+    - Each binding decision must state whether it is behavior-binding or implementation-only.
+    - Behavior-binding decisions must reference source spec requirements.
+    - Implementation-only decisions may project to tasks but must not redefine behavior contracts.
+
+  tasks:
+    - Tasks are executable projections of specs and design.
+    - Each implementation slice must reference source spec requirements.
+    - Each Slice Contract must be self-contained enough for Executor to build Worker Dispatch Packet.
+    - Tasks must not introduce behavior not present in specs.
+    - Tasks must include verification method, expected evidence, allowed scope, stop conditions, and verifier gate for each implementation slice.
+    - Tasks must include dependencies and parallel opportunities.
+    - "`[P]` marks a parallel candidate, not mandatory parallel execution."

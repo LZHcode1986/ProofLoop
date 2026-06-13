@@ -106,7 +106,13 @@ $CanonicalSkills = @(
   ".agents/skills/openspec-propose/SKILL.md",
   ".agents/skills/openspec-apply-change/SKILL.md",
   ".agents/skills/openspec-archive-change/SKILL.md",
-  ".agents/skills/test-driven-development/SKILL.md"
+  ".agents/skills/test-driven-development/SKILL.md",
+  ".agents/skills/code-review-and-quality/SKILL.md",
+  ".agents/skills/diagnose/SKILL.md",
+  ".agents/skills/grill-me-prd/SKILL.md",
+  ".agents/skills/openspec-explore/SKILL.md",
+  ".agents/skills/security-and-hardening/SKILL.md",
+  ".agents/skills/workflow-intake/SKILL.md"
 )
 
 # --- Rollback tracking ---

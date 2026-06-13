@@ -2,6 +2,14 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.15
+
+### 2026-06-14
+
+- **fix**: 修复安装脚本缺失 skills 与样例文件不同步问题
+  - `openspec/config.yaml.example`: 同步 `openspec/config.yaml` 中的 `rules` 规范定义；重构 `context` 为支持多行占位符（`<project-name>` 等）的结构，明确 ProofLoop 默认规范不可更改的边界，提供清晰的新项目接入模板。
+  - `install/install-proofloop.ps1`: 修复安装时遗漏技能的问题，将 `code-review-and-quality`、`diagnose`、`grill-me-prd`、`openspec-explore`、`security-and-hardening`、`workflow-intake` 6 个核心 skill 补充至 `$CanonicalSkills` 列表中。
+
 ## v1.0.14
 
 ### 2026-06-13
