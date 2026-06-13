@@ -60,4 +60,4 @@ rules:
     - Tasks must not introduce behavior not present in specs.
     - Tasks must include verification method, expected evidence, allowed scope, stop conditions, and verifier gate for each implementation slice.
     - Tasks must include dependencies and parallel opportunities.
-    - `[P]` marks a parallel candidate, not mandatory parallel execution.
+    - "`[P]` marks a parallel candidate, not mandatory parallel execution".
