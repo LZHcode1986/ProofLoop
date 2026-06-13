@@ -36,19 +36,29 @@ You execute exactly one implementation-ready OpenSpec change.
 
 Direct Tasks belong to Brain -> general.
 
-## Canonical contract source
+## Dispatch Contract Loading
 
-Executor-to-subagent dispatch formats are defined in:
+Do not browse `.agents/contracts/` as an index during runtime.
 
-```text
-.agents/contracts/executor-dispatch-packets.md
-```
+For each dispatch flow, read only the exact contract file set listed below:
 
-Use that file for every dispatch to:
+- Git Boundary:
+  - `.agents/contracts/executor/git-boundary.md`
 
-- Worker
-- Code Verifier
-- Committer
+- Worker Implementation:
+  - `.agents/contracts/executor/worker-implementation.md`
+  - `.agents/contracts/executor/shared-worker-rules.md`
+
+- Worker Fix:
+  - `.agents/contracts/executor/worker-fix.md`
+  - `.agents/contracts/executor/shared-worker-rules.md`
+
+- Code Verification:
+  - `.agents/contracts/executor/code-verification.md`
+  - `.agents/contracts/executor/shared-code-verification-rules.md`
+  - `.agents/contracts/executor/evidence-protocol.md`
+
+Executor must construct the packet before dispatch. The target agent receives the completed packet and should not browse the contract directory.
 
 ## Skill usage
 
@@ -73,21 +83,15 @@ return `Execution blocked` with CONTRACT DEFECT.
 
 Worker must not be required to infer missing contract from full proposal/design/specs.
 
-## Worker Phase Dispatch Rule
+## Worker Task Dispatch Rule
 
-Executor owns Worker phase sequencing.
+Executor owns Worker task sequencing.
 
-Executor must dispatch `@worker` with exactly one phase packet from `.agents/contracts/executor-dispatch-packets.md` and adhere to the runtime contract in `.agents/contracts/worker-runtime-contract.md`.
+Executor must dispatch `@worker` with exactly one task packet built from `.agents/contracts/executor/worker-implementation.md` (for implementation) or `.agents/contracts/executor/worker-fix.md` (for repair/diagnose) and adhere to the rules in `.agents/contracts/executor/shared-worker-rules.md`.
 
-Worker must not be expected to remember previous phases or infer the next phase.
+Worker must not be expected to remember previous tasks or infer the next task.
 
-Each Worker dispatch must include:
-- Phase
-- Allowed Actions
-- Forbidden Actions
-- Runtime Policy (referencing worker-runtime-contract.md)
-- Expected Result
-- Receipt Format
+Each Worker dispatch must include the required fields defined in the respective contract file.
 
 Executor must not send a generic task request to Worker.
 
@@ -118,12 +122,12 @@ If safety cannot be proven, execute serially.
 2. Read tasks and Slice Contracts.
 3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
 4. Run `run-preflight` through Committer.
-5. Dispatch **Worker Implementation** for tasks.
+5. Dispatch **Worker Implementation** for tasks (read `.agents/contracts/executor/worker-implementation.md` and `.agents/contracts/executor/shared-worker-rules.md`).
 6. Verify Worker Implementation receipt includes checkbox confirmation (see Task Checkbox Receipt Check).
 7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path inline.
-8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot`. Collect boundary receipt.
-9. Dispatch **Code Verifier Blind Refutation** at every slice gate. Do NOT provide Worker evidence.
-10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts, Worker Hypothesis Verification receipts, task-diff-snapshot receipts, and relevant Evidence Ledger worker task/hypothesis sections as inline content.
+8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot` (read `.agents/contracts/executor/git-boundary.md`). Collect boundary receipt.
+9. Dispatch **Code Verifier Blind Refutation** at every slice gate. Do NOT provide Worker evidence (read `.agents/contracts/executor/code-verification.md` and `.agents/contracts/executor/shared-code-verification-rules.md`).
+10. After Blind Refutation returns, dispatch **Code Verifier Evidence Review** with Worker receipts, Worker Hypothesis Verification receipts, task-diff-snapshot receipts, and relevant Evidence Ledger worker task/hypothesis sections as inline content (read `.agents/contracts/executor/code-verification.md`, `.agents/contracts/executor/shared-code-verification-rules.md`, and `.agents/contracts/executor/evidence-protocol.md`).
 11. Collect Code Verifier Receipt with Final Slice Verdict and verify checkbox confirmation when PASS (see Task Checkbox Receipt Check).
 12. Route based on Code Verifier verdict (see Routing Rules).
 13. After all slices complete, return Execution Summary to Brain.
@@ -147,7 +151,7 @@ Code Verifier PASS:
   dispatch Committer for slice-output
 
 Code Verifier FAIL / IMPLEMENTATION DEFECT:
-  dispatch Worker Fix for affected task IDs
+  dispatch Worker Fix for affected task IDs (read `.agents/contracts/executor/worker-fix.md` and `.agents/contracts/executor/shared-worker-rules.md`)
 
 Code Verifier BLOCKED / EVIDENCE DEFECT:
   dispatch Worker Evidence Backfill for affected task IDs

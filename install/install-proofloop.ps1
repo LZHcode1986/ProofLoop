@@ -73,9 +73,18 @@ $DefaultAgents = @(
 )
 
 $Contracts = @(
-  ".agents/contracts/dispatch-packets.md",
-  ".agents/contracts/executor-dispatch-packets.md",
-  ".agents/contracts/worker-runtime-contract.md",
+  ".agents/contracts/brain/external-research.md",
+  ".agents/contracts/brain/general-edit.md",
+  ".agents/contracts/brain/propose.md",
+  ".agents/contracts/brain/execute.md",
+  ".agents/contracts/brain/stage-review.md",
+  ".agents/contracts/executor/git-boundary.md",
+  ".agents/contracts/executor/worker-implementation.md",
+  ".agents/contracts/executor/worker-fix.md",
+  ".agents/contracts/executor/code-verification.md",
+  ".agents/contracts/executor/shared-worker-rules.md",
+  ".agents/contracts/executor/shared-code-verification-rules.md",
+  ".agents/contracts/executor/evidence-protocol.md",
   ".agents/contracts/proof-profiles.md",
   ".agents/contracts/codegraph-tool-protocol.md",
   ".agents/contracts/proofloop-skill-usage.md"
@@ -263,9 +272,9 @@ foreach ($skill in $CanonicalSkills) {
     "AGENTS.md",
     ".opencode/agents/brain.md",
     ".opencode/agents/executor.md",
-    ".agents/contracts/dispatch-packets.md",
-    ".agents/contracts/executor-dispatch-packets.md",
-    ".agents/contracts/worker-runtime-contract.md"
+    ".agents/contracts/brain/execute.md",
+    ".agents/contracts/executor/worker-implementation.md",
+    ".agents/contracts/executor/shared-worker-rules.md"
   )
 
   $allPresent = $true

@@ -55,8 +55,8 @@ Important rules:
 - Keep spec-verifier only as deprecated compatibility alias if necessary.
 - Direct Task goes to general.
 - bugfix uses general with diagnose.
-- Executor dispatch contracts live in `.agents/contracts/executor-dispatch-packets.md`.
-- Worker runtime and fail-fast policies live in `.agents/contracts/worker-runtime-contract.md`.
+- Executor dispatch contracts live under `.agents/contracts/executor/`.
+- Worker runtime and fail-fast policies live in `.agents/contracts/executor/shared-worker-rules.md`.
 - AGENTS.md must stay short and global.
 - README.md must include the updated flowchart.
 - Brain uses workflow-intake and grill-me-prd only as pre-dispatch clarify-or-narrow procedures, not as workflow routes or gates.

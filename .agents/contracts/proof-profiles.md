@@ -130,7 +130,7 @@ Verifier refutation:
 
 If the real integration path depends on unavailable runtime config, denied secret files, database readiness, external services, browser services, containers, daemons, credentials, or interactive setup, Worker must return blocked with `runtime-config-blocker` or `runtime-dependency-blocker` as defined in:
 
-.agents/contracts/worker-runtime-contract.md
+.agents/contracts/executor/shared-worker-rules.md
 
 Worker must not wait for the dependency, request permission, ask the user, or silently substitute mocked evidence unless the task or Slice Contract explicitly authorizes that fixture path.
 

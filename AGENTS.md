@@ -3,7 +3,9 @@
 This file is loaded by every agent. Keep it short and global.
 
 Detailed role behavior belongs in `.opencode/agents/*.md`.  
-Packet formats belong in `.agents/contracts/*.md`.  
+Packet formats live under `.agents/contracts/`:
+- Brain dispatch packet formats live under `.agents/contracts/brain/`.
+- Executor subagent packet formats live under `.agents/contracts/executor/`.  
 OpenSpec artifact rules belong in `openspec/**`.  
 Reusable procedures belong in `.agents/skills/**`.
 
@@ -162,9 +164,17 @@ slice verifier PASS -> slice-output commit
 archive output -> archive-output commit
 ```
 
-## Archive rule
-
 General performs archive execution only after Brain authorizes archive.
 
 Brain does not run archive directly.  
 General does not commit archive output.
+
+## Dispatch Contract Loading Rule
+
+Agents must not browse `.agents/contracts/` as a runtime index.
+
+Each dispatch flow must name the exact contract file or file set it may read.
+
+Parent agents are responsible for reading the relevant contract file, constructing the completed packet, and sending that packet to the target agent.
+
+Target agents must validate the packet they receive and must not load unrelated contract files to compensate for missing dispatch context.

@@ -147,9 +147,19 @@ After Brain authorizes archive, dispatch `@general` for archive execution.
 
 If archive output changes files, dispatch `@committer` for `archive-output`.
 
-## Dispatch contracts
+## Dispatch Contract Loading
 
-Use `.agents/contracts/dispatch-packets.md`.
+Do not browse `.agents/contracts/` as an index during runtime.
+
+For each dispatch flow, read only the exact contract file listed below:
+
+- External Research: `.agents/contracts/brain/external-research.md`
+- General Edit: `.agents/contracts/brain/general-edit.md`
+- Propose: `.agents/contracts/brain/propose.md`
+- Execute: `.agents/contracts/brain/execute.md`
+- Stage Review: `.agents/contracts/brain/stage-review.md`
+
+Brain must construct the packet before dispatch. The target agent receives the completed packet and should not browse the contract directory.
 
 Every dispatch must preserve:
 - Brain intent

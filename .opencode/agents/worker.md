@@ -59,17 +59,20 @@ Proof Profiles define minimum evidence requirements per task type:
 
 Consult the relevant profile during Hypothesis Verification or Evidence Backfill to ensure sufficient evidence.
 
-## Worker Runtime Policy
+## Worker Runtime and Contract Policy
 
-Worker must strictly adhere to the non-interactive runtime and fail-fast rules defined in:
+Worker receives a completed Task Packet from Executor.
 
-```text
-.agents/contracts/worker-runtime-contract.md
-```
+Worker must not browse `.agents/contracts/` during task execution.
 
+If the packet is missing required task identity, acceptance criteria, context files or excerpts, allowed file scope, verification commands, required skills, or checkbox ownership rules, return:
+
+Implementation blocked: insufficient task context
+
+Worker must strictly adhere to non-interactive runtime and fail-fast rules:
 - Worker must not ask the user or request permission approval.
 - Worker must not read denied secret files such as `.env` or `.env.*`.
-- If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format defined in the contract.
+- If required runtime config or dependency is unavailable, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format.
 
 ## Skill usage
 
@@ -83,6 +86,6 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 
 Worker must return the correct receipt format required by the current dispatch packet.
 
-If the active phase execution is blocked (e.g., due to runtime config or dependency issues), return the Blocked Receipt format defined in `.agents/contracts/worker-runtime-contract.md` with the first line matching:
+If the active phase execution is blocked (e.g., due to runtime config or dependency issues), return the Blocked Receipt format with the first line matching:
 `[active phase] blocked` (e.g., `Implementation blocked`, `Hypothesis verification blocked`, `Evidence backfill blocked`, or `Worker fix blocked`).
 

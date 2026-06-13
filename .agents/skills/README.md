@@ -45,5 +45,5 @@ Use `.agents/contracts/proofloop-skill-usage.md` and `.opencode/agents/worker.md
 5. `propose` dispatches `planning-contract-verifier`, not active `spec-verifier`.
 6. `reality-verifier` is no longer a default agent; use CodeGraph Tool Protocol.
 7. `executor` loads `openspec-apply-change`.
-8. `executor` dispatches `worker`, `code-verifier`, and `committer` using `.agents/contracts/executor-dispatch-packets.md`.
+8. `executor` dispatches `worker`, `code-verifier`, and `committer` using contracts under `.agents/contracts/executor/`.
 9. `implementation-reviewer` loads `openspec-archive-change` only after Brain authorizes archive.

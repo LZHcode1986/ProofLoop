@@ -2,6 +2,20 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.0.14
+
+### 2026-06-13
+
+- **refactor**: ProofLoop 契约精确化拆分与重构 — 精准分拆集中式契约、强制 Agent 契约单入单出，杜绝运行时目录索引
+  - `.agents/contracts/brain/`: (新增) 新增 `external-research.md` (外部 facts 收集)、`general-edit.md` (非权威文件编辑)、`propose.md` (单阶段 formal planning)、`execute.md` (阶段执行) 以及 `stage-review.md` (阶段与归档就绪评审) 五大专项契约。
+  - `.agents/contracts/executor/`: (新增) 新增 `git-boundary.md` (Committer 边界)、`worker-implementation.md` (实现分派)、`worker-fix.md` (修复/诊断分派)、`code-verification.md` (Blind Refutation 与 Evidence Review 阶段验证) 四大交互契约，以及 `shared-worker-rules.md` (Worker 共享规则)、`shared-code-verification-rules.md` (Verifier 共享规则) 与 `evidence-protocol.md` (证据规范)。
+  - `.opencode/agents/brain.md`: 移除对已废弃 `dispatch-packets.md` 的引用，新增 `Dispatch Contract Loading` 精确文件载入规则，规定各个分派流程必须精准加载对应的 `brain/*.md` 契约，严禁运行时对契约目录进行索引。
+  - `.opencode/agents/executor.md`: 移除对 `executor-dispatch-packets.md` 和 `worker-runtime-contract.md` 的引用，新增 `Dispatch Contract Loading` 章节定义，在各执行子场景（Git Boundary、Worker Implementation、Worker Fix、Code Verification）显式且精准地加载专属的契约文件与共享规则文件。
+  - `.opencode/agents/worker.md` & `.opencode/agents/code-verifier.md` & `.opencode/agents/committer.md`: 移除旧的 `worker-runtime-contract.md` 引用，添加并强化安全校验——各子代理严禁在运行时浏览或遍历 `.agents/contracts/` 目录，必须由父代理组装好包后分发接收，缺字段时直接抛出 failure/blocked 退出。
+  - `AGENTS.md` & `README.md` & `.agents/contracts/proof-profiles.md` & `.agents/contracts/proofloop-skill-usage.md` & `.agents/skills/README.md`: 替换废弃文件的引用路径为最新的子目录及共享规则位置；在 `AGENTS.md` 中增加 `Dispatch Contract Loading Rule` 全局契约单入单出交互硬规则。
+  - `install/install-proofloop.ps1` & `install/README.md` & `install/agent-install-prompt.md` & `install/manual-install.md`: 更新 `$Contracts` 列表与自检的 `$requiredFiles` 列表，升级文档，以适配新的契约文件拆分规范与结构。
+  - 删除废弃的集中式契约文件：`dispatch-packets.md`、`executor-dispatch-packets.md`、`worker-runtime-contract.md`。
+
 ## v1.0.13
 
 ### 2026-06-13

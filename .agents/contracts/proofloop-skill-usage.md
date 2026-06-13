@@ -83,7 +83,7 @@ When `@propose` loads `openspec-propose`:
 When `@executor` loads `openspec-apply-change`:
 
 - Treat the skill as OpenSpec apply substrate.
-- Use `.agents/contracts/executor-dispatch-packets.md` for subagent dispatch.
+- Use `.agents/contracts/executor/` contracts for subagent dispatch.
 - Do not implement code directly.
 - Dispatch Worker for tasks.
 - Dispatch Committer for `task-diff-snapshot` after Worker task completion.

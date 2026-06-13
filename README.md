@@ -278,8 +278,7 @@ install/
 
 1. Read `AGENTS.md`.
 2. Read `.opencode/agents/brain.md`.
-3. Read `.agents/contracts/dispatch-packets.md`.
-4. Read `.agents/contracts/executor-dispatch-packets.md`.
-5. Read `.agents/contracts/proofloop-skill-usage.md`.
-6. Read `.agents/contracts/codegraph-tool-protocol.md`.
-7. Read `.opencode/agents/committer.md`.
+3. Read `.agents/contracts/brain/` and `.agents/contracts/executor/` for packet contracts.
+4. Read `.agents/contracts/proofloop-skill-usage.md`.
+5. Read `.agents/contracts/codegraph-tool-protocol.md`.
+6. Read `.opencode/agents/committer.md`.
