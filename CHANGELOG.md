@@ -2,6 +2,17 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.1
+
+### 2026-06-14
+
+- **refactor**: Simplify Code Verifier flow by removing Evidence Review phase — single verifier gate + recheck continuation after Worker Fix
+  - `.opencode/agents/executor.md`: remove Code Verifier Evidence Review dispatch; replace two-phase (Blind Refutation + Evidence Review) with single Code Verification gate; add Worker Fix → same-gate recheck routing; remove Evidence Review Inline Dispatch Rule section; simplify Execution Summary Code Verifier Receipts.
+  - `.opencode/agents/code-verifier.md`: add Verification Verdict Rule (passed / failed / blocked semantics) and Recheck Continuation Rule; clean Blind Refutation and Evidence Review references.
+  - `.agents/contracts/executor/code-verification.md`: remove Evidence Review semantics; add `Verification Mode: initial | recheck`; add recheck-specific fields; define x.V checkbox ownership; remove Evidence Protocol dependency.
+  - `.agents/contracts/executor/shared-code-verification-rules.md`: remove Default review skills; make review skill usage explicit per dispatch packet; recheck defaults to no skill loading.
+  - `.opencode/agents/implementation-reviewer.md`: `redo Evidence Review` → `redo Code Verification`.
+
 ## v1.0.15
 
 ### 2026-06-14

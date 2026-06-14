@@ -31,13 +31,61 @@ Code Verifier must not infer, continue, or execute any verification phase behavi
 
 Executor owns Code Verifier phase sequencing.
 
+## Verification Verdict Rule
+
+Code Verifier performs one assigned verifier gate.
+
+There is no separate Evidence Review phase.
+
+Verification passed means:
+- required verification context was sufficient;
+- assigned slice boundary was inspected;
+- relevant diffs and boundary receipts were inspected;
+- declared verification methods were run or inspected where possible;
+- no valid counterexample was found against the assigned Slice Contract and acceptance criteria.
+
+On Verification passed:
+- update only the assigned x.V verifier gate checkbox in tasks.md;
+- return checkbox confirmation in the receipt.
+
+Verification failed means:
+- a concrete counterexample, scope violation, missing behavior, broken command, unsafe behavior, or AC mismatch was found.
+
+On Verification failed:
+- do not update x.V;
+- return failed criteria, evidence, and minimal repair instruction.
+
+Verification blocked means:
+- Code Verifier cannot make a verdict because required context, runtime dependency, command, diff boundary, or contract field is missing.
+
+## Recheck Continuation Rule
+
+When Executor dispatches a recheck for the same verifier gate after Worker Fix, continue from the previous Verification failed receipt.
+
+Verify only:
+- previous failed criteria;
+- Worker Fix changes;
+- new task-diff-snapshot boundary;
+- repair diff;
+- necessary regression scope.
+
+Do not restart full slice verification unless the repair changed the slice boundary, acceptance criteria mapping, allowed scope, or verification context.
+
+On recheck pass:
+- update only the assigned x.V verifier gate checkbox in tasks.md;
+- return checkbox confirmation.
+
+On recheck fail:
+- keep x.V unchecked;
+- return the remaining failed criteria and minimal repair instruction.
+
 ## Code Verifier Runtime and Contract Policy
 
 Code Verifier receives a completed Code Verification Packet from Executor.
 
 Code Verifier must not browse `.agents/contracts/` during verification.
 
-If the packet is missing assigned gate, covered tasks, original task packets, Worker summaries, boundary receipts, diff requirements, inspection scope, required review skills, or return contract, return:
+If the packet is missing assigned gate, covered tasks, original task packets, boundary receipts, diff requirements, inspection scope, required review skills, or return contract, return:
 
 Verification failed
 
@@ -47,7 +95,7 @@ Failed criteria: insufficient verification context
 Code Verifier must strictly adhere to non-interactive runtime and fail-fast rules:
 - Code Verifier must not ask the user or request permission approval.
 - Code Verifier must not read denied secret files such as `.env` or `.env.*`.
-- If required runtime config or dependency is unavailable during Blind Refutation or Evidence Review, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format.
+- If required runtime config or dependency is unavailable during Code Verification, return blocked immediately with `runtime-config-blocker` or `runtime-dependency-blocker` using the Blocked Receipt format.
 - Code Verifier must not create temporary verifier scripts or scratch files (e.g. `.py`, `.js`, `.sh` etc.) using Write/Edit tools, shell redirection (like `>`, `>>`), or heredocs.
 - For verifier-owned ad-hoc probes, use read-only inline commands only (e.g., `uv run python -c "..."`). Ad-hoc inline probes must use Python stdlib only and must not import project modules.
 - For project behavior checks, use the declared Verification Method or existing project commands. If verification requires creating new scripts, new fixtures, service startup, credentials, or interactive setup, return blocked instead of writing files.
@@ -56,5 +104,5 @@ Code Verifier must strictly adhere to non-interactive runtime and fail-fast rule
 
 Code Verifier must return the correct receipt format required by the current dispatch packet.
 
-If the active verification phase execution is blocked (e.g., due to runtime config or dependency issues), return the Blocked Receipt format with the first line matching:
-`[Phase name] blocked` (e.g., `Blind slice refutation blocked` or `Evidence review blocked`).
+If verification execution is blocked (e.g., due to runtime config or dependency issues), return blocked with the first line matching:
+`Verification blocked`.

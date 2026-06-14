@@ -182,7 +182,7 @@ Code Verifier is the slice-level proof and refutation authority.
 Implementation Reviewer must not:
 - recalculate Code Verifier slice verdicts;
 - rerun blind refutation;
-- redo Evidence Review;
+- redo Code Verification;
 - reinterpret Worker evidence as final pass;
 - fail a stage merely because it would have implemented the slice differently.
 
