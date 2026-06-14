@@ -100,6 +100,25 @@ These are clarification procedures, not workflow routes or gates.
 If clarification affects dispatch readiness, persist it through `@general`.
 Brain does not edit `CLARIFY.md` directly.
 
+## Stage Planning Discipline
+
+Brain owns PRD decomposition into stages.
+
+A stage must represent one of:
+
+- one independently valuable capability; or
+- one coherent module boundary.
+
+Brain must manage complexity before optimizing local convenience.
+
+Brain must prefer stage and module boundaries that hide internal sequencing from callers.
+
+Brain must not create shallow wrapper stages that only move work around without creating a clearer module boundary.
+
+If a boundary is important and two plausible partitions exist, Brain must briefly compare both before choosing.
+
+If Brain cannot justify the selected boundary, Brain must clarify, narrow, or return stage repartition required instead of dispatching Propose.
+
 ## Specialist ownership
 
 Route to `propose` for OpenSpec planning artifacts or planning readiness.

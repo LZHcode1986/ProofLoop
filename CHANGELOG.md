@@ -2,6 +2,15 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.1.1
+
+### 2026-06-14
+
+- **refactor**: ProofLoop 全局与技术规格文档分层瘦身，并细化 Brain 阶段规划与编码纪律
+  - `.opencode/agents/brain.md`: 新增 `Stage Planning Discipline` 章节，明确 Brain 将 PRD 分解为阶段（stage）和模块边界的设计准则，强调方案对比并避免浅层包装。
+  - `AGENTS.md`: 将 Customization Guide 替换为本项目全局 Agent 行为规范（开发环境模板、编码思考、简单优先、外科手术式修改等），完成文档分层并规范底线规则。
+  - `tech-spec.md`: 彻底剥离工作流与 packet 细则，瘦身为精细化项目技术 notes 指南，明确声明技术栈、命令约束及项目约束。
+
 ## v1.1
 
 ### 2026-06-14
