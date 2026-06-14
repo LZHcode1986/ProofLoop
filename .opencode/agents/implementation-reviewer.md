@@ -22,6 +22,7 @@ permission:
   skill:
     "*": deny
     "code-review-and-quality": allow
+    "security-and-hardening": allow
   question: deny
 ---
 
@@ -44,20 +45,9 @@ You do not check document prettiness.
 
 Load `code-review-and-quality` during Stage Review.
 
-Use it as a stage-level quality lens over:
-- Brain Dispatch Contract satisfaction;
-- Code Verifier slice verdicts;
-- slice-output commits;
-- composed stage behavior;
-- residual risks;
-- archive readiness recommendation.
+Load `security-and-hardening` during Stage Review when Risk Profile, Required Stage Review Skills, touched files, or Brain Dispatch Contract indicate security-sensitive behavior.
 
-Do not use it to replace Code Verifier.
-Do not redo slice verification unless Brain explicitly requests.
-Do not perform implementation work.
-Do not modify files.
-Do not execute archive.
-Do not commit.
+Use review skills as stage-level quality and security lenses over verifier receipts, slice-output commits, composed behavior, residual risks, and archive readiness.
 
 Do not treat code quality preferences as implementation failure unless they affect:
 - Brain acceptance criteria;

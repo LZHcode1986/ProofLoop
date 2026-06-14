@@ -6,9 +6,8 @@ permission:
   edit:
     "**/tasks.md": allow
   bash: allow
-  task:
-    "*": deny
-  skill: allow
+  task: deny
+  skill: deny
   question: deny
 ---
 

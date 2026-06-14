@@ -81,7 +81,7 @@ Do not create implementation commits before slice verification passes unless Bra
   - 
 - **Required Skills:**
   - test-driven-development | None
-- **Required Review Skills:**
+- **Required Stage Review Skills:**
   - code-review-and-quality
 - **CodeGraph Anchors:**
   - 
@@ -107,7 +107,7 @@ Do not create implementation commits before slice verification passes unless Bra
   - **Covered Tasks:** 3.1, 3.2
   - **Evidence Packet Required:** yes
   - **Inspection Scope:** Slice 1 artifacts + changed files + task snapshot receipts + tests + commands + CodeGraph evidence
-  - **PASS/FAIL Gate:** all Slice 1 ACs pass; no scope violation; required review skills applied
+  - **PASS/FAIL Gate:** all Slice 1 ACs pass; no scope violation; adversarial verification completed
   - **On PASS:** Committer creates slice-output commit
 
 ### 4. Reconciliation
@@ -136,7 +136,7 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Verification Method is explicit.
 - [ ] Expected Evidence is explicit.
 - [ ] Stop Conditions are explicit.
-- [ ] Required Review Skills are explicit.
+- [ ] Required Stage Review Skills are explicit.
 - [ ] CodeGraph anchors are included when needed.
 - [ ] Git boundary plan is explicit.
 - [ ] Task output uses task-diff-snapshot.

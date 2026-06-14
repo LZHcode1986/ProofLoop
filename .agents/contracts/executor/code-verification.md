@@ -31,7 +31,7 @@ Required fields:
 - Original Task Packets
 - Files Changed In Slice
 - Task Required Skills
-- Required Review Skills
+- Verification Lens
 - Verification Required
 - Checkbox Owner
 - Return Contract
@@ -75,15 +75,15 @@ Required for recheck mode only:
   - acceptance criteria mapping;
   - allowed / forbidden scope;
   - verification context.
-- Recheck should not load review skills unless the previous failure specifically requires skill-based review to verify the repair.
 
-## Review skill usage
+## Verification Lens
 
-- Review skills are not default behavior.
-- Initial Code Verification may use review skills only when Executor explicitly includes them in the current dispatch packet.
-- Recheck defaults to no skill loading.
-- Task Required Skills are evidence metadata only and do not authorize Code Verifier to load Worker skills.
-- Required Review Skills controls only Code Verifier review skills, not Worker implementation skills.
+- AC counterexample
+- scope violation
+- command failure
+- boundary receipt mismatch
+- diff regression
+- declared risk counterexample
 
 ## Packet shape
 
@@ -105,7 +105,7 @@ Boundary Diff Requirements:
 Original Task Packets:
 Files Changed In Slice:
 Task Required Skills:
-Required Review Skills:
+Verification Lens:
 Verification Required:
 
 Checkbox Owner:

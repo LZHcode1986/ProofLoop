@@ -20,6 +20,15 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `.opencode/agents/executor.md`: reduce Code Verification contract loading to `code-verification.md` only; slim orchestration text to control plane; keep detailed packet rules in contracts.
   - `install/install-proofloop.ps1`, `install/README.md`, `install/manual-install.md`: remove deleted contract files from install lists.
 
+- **refactor**: Move Executor Execution Summary into dedicated contract and tighten review skill ownership
+  - `.agents/contracts/executor/execution-summary.md`: add Executor-owned final apply-stage summary contract.
+  - `.opencode/agents/executor.md`: replace inline Execution Summary template with contract reference; simplify Parallel Rules and Runtime Blocker Routing.
+  - `.opencode/agents/code-verifier.md`: remove skill loading permission (`skill: allow` → `deny`).
+  - `.agents/contracts/executor/code-verification.md`: replace `Required Review Skills` with local `Verification Lens`; remove `Review skill usage` section.
+  - `.opencode/agents/implementation-reviewer.md`: allow `security-and-hardening` for security-sensitive Stage Review.
+  - `openspec/schemas/proofloop-spec-driven/templates/tasks.md`: rename `Required Review Skills` to `Required Stage Review Skills`; change verifier gate to `adversarial verification completed`.
+  - `install/*`: add `execution-summary.md` to required contract lists.
+
 ## v1.0.15
 
 ### 2026-06-14

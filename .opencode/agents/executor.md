@@ -56,6 +56,9 @@ For each dispatch flow, read only the exact contract file set listed below:
 - Code Verification:
   - `.agents/contracts/executor/code-verification.md`
 
+- Execution Summary:
+  - `.agents/contracts/executor/execution-summary.md`
+
 Executor must construct the packet before dispatch. The target agent receives the completed packet and should not browse the contract directory.
 
 ## Skill usage
@@ -95,24 +98,16 @@ Executor must not send a generic task request to Worker.
 
 ## Parallel Rules
 
-`[P]` means parallel candidate, not mandatory parallel execution. Default to serial execution.
+`[P]` means parallel candidate, not mandatory parallel execution.
 
-Only dispatch Worker tasks in parallel when all are true:
+Executor may dispatch Worker tasks in parallel only when:
+- tasks are explicitly marked `[P]`;
+- dependencies allow parallel execution;
+- allowed file scopes do not overlap.
 
-1. No dependency relationship.
-2. `Allowed File Scope` has no overlap.
-3. They do not modify the same `tasks.md` checkbox or verifier gate.
-4. They do not touch shared config, public types, migrations, lock files, generated files, or entry points at the same time.
-5. Each Worker receives an exclusive file scope.
-6. After parallel Workers finish, Executor collects each Worker receipt and closes each `task-diff-snapshot` boundary before entering the shared Code Verifier gate.
+If safety is unclear, execute serially.
 
-If safety cannot be proven, execute serially.
-
-### Parallel dispatch constraints
-
-- Executor only uses parallel candidates explicitly marked by Propose in tasks.md.
-- Executor may downgrade `[P]` to serial execution when safety is unclear.
-- Executor must not upgrade unmarked tasks to parallel execution by inference.
+Before Code Verification, every parallel Worker output must be closed with `task-diff-snapshot`.
 
 ## Responsibilities
 
@@ -124,7 +119,7 @@ If safety cannot be proven, execute serially.
 6. On Code Verification PASS, verify x.V checkbox confirmation and dispatch Committer for `slice-output`.
 7. On Code Verification FAIL, dispatch Worker Fix, close the fix with `task-diff-snapshot`, then continue the same verifier gate in recheck mode.
 8. On Code Verification BLOCKED, repair dispatch context if possible or return blocked to Brain.
-9. After all slices complete, return Execution Summary to Brain.
+9. After all slices complete, return Execution Summary using `.agents/contracts/executor/execution-summary.md`.
 10. Stop and return to Brain on blockers.
 
 ## Ownership
@@ -170,28 +165,13 @@ Worker runtime blocker:
 
 ## Runtime Blocker Routing
 
-Executor may resolve Worker or Code Verifier blockers only from non-secret context.
+When Worker or Code Verifier returns `runtime-config-blocker` or `runtime-dependency-blocker`, Executor may resolve it only from non-secret project context already available to the workflow.
 
-Allowed non-secret context includes:
-- `.env.example`
-- `README.md`
-- `docs/**`
-- compose files
-- package scripts
-- test config
-- config schemas
-- OpenSpec artifacts
-- Slice Contract
+If resolvable, re-dispatch the same Worker phase or same Code Verification gate with the additional context.
 
-Executor must not inspect:
-- `.env`
-- `.env.*`
-- credentials
-- token files
-- private keys
-- production secrets
+If not resolvable without secrets, user input, service startup, permission approval, or contract changes, return `Execution blocked` to Brain.
 
-If resolving requires denied secrets, credentials, permission approval, user input, service startup, or contract changes, return `Execution blocked` to Brain.
+Do not retry the same phase without new context.
 
 ## Checkbox Receipt Check
 
@@ -235,44 +215,4 @@ Do not dispatch Code Verifier after every ordinary task unless tasks explicitly 
 
 ## Execution Summary
 
-```text
-Execution complete | Execution blocked | Verification failed
-
-Change:
-Stage:
-
-Worker Implementation Receipts:
-- task:
-- receipt ref:
-
-Worker Hypothesis Verification Receipts:
-- task:
-- hypothesis:
-- ledger section:
-- receipt ref:
-
-Task Snapshot Receipts:
-- task:
-- receipt ref:
-
-Code Verifier Receipts:
-- slice:
-- verification receipt:
-- verdict:
-
-Slice Routing:
-- slice:
-- verdict:
-- next action:
-
-Slice Commits:
-- slice:
-- commit hash:
-
-Evidence Ledger:
-- path:
-- worker sections updated:
-- executor edited ledger: no
-
-Residual risks:
-```
+Return final apply-stage result using `.agents/contracts/executor/execution-summary.md`.
