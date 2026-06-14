@@ -117,11 +117,9 @@ Do not create implementation commits before slice verification passes unless Bra
   - **Expected Evidence:** `proofloop/evidence-ledger.md` contains complete `## 5. Execution Summary`
   - **Boundary Receipt:** task-diff-snapshot
 
-<!-- Additional Reconciliation rules:
-  - Frontend files touched: Reconciliation must include `cd frontend && npm run build`.
-  - Backend or pipeline behavior changed: Reconciliation must include targeted `uv run pytest ...`.
-  - Interactive change: Reconciliation must include full acceptance proof after all slices complete.
--->
+<!-- Reconciliation records evidence only.
+     Additional build/test requirements must appear in slice Verification Method,
+     Code Verifier gate, or Brain/IR stage review expectations, not here. -->
 
 ## Readiness Checklist
 

@@ -71,7 +71,9 @@ artifacts:
       and are indexed by reference in Execution Summary.
       Stage Review and archive result live outside the ledger in Implementation Reviewer
       output and Committer archive-output receipt.
-      The ledger must not contain final verdicts (PASS/FAIL/blocked/confirmed).
+      The ledger must not reinterpret final verdicts.
+      Specialist receipts remain authoritative.
+      Execution Summary may index verdict snapshots and receipt refs.
       It must not introduce new requirements.
     requires:
       - proposal
