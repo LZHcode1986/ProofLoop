@@ -90,9 +90,9 @@ apply:
     - dispatch Worker for tasks
     - collect Completion Receipts
     - dispatch Committer for task-diff-snapshot receipts after Worker tasks
-    - dispatch Reconciliation to record Execution Summary in proofloop/evidence-ledger.md
     - dispatch Code Verifier for every slice
     - dispatch Committer for slice-output commit after slice verifier PASS
+    - after all slice-output commits complete, dispatch Reconciliation to record Execution Summary in proofloop/evidence-ledger.md
     - stop and return blockers to Brain when contracts are insufficient
 
     High-risk requirements are handled through Risk Profile, stricter acceptance criteria, stronger evidence requirements, and Implementation Reviewer stage review.

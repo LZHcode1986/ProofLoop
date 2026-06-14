@@ -23,7 +23,7 @@ ProofLoop prevents this by requiring every Brain-dispatched task to carry a veri
 
 ## Workflow
 
-Evidence Ledger is the delivery evidence spine for OpenSpec Change. Brain seeds it, Propose materializes it, Executor maintains it, Code Verifier reads it, and Implementation Reviewer uses it for stage acceptance.
+Evidence Ledger is the delivery evidence spine for OpenSpec Change. Brain seeds it, Propose materializes it, Executor dispatches Reconciliation to record execution evidence in the ledger, Code Verifier reads it, and Implementation Reviewer uses it for stage acceptance.
 
 ```mermaid
 flowchart TD
@@ -46,7 +46,6 @@ flowchart TD
     PCV -->|check against| EL
     PCV --> X[Executor\nOpenSpec apply orchestrator]
 
-    X -->|read/write| EL
     X --> W[Worker\ntask execution]
     W --> TDS[Committer\ntask-diff-snapshot receipt]
     TDS --> SG{Slice complete?}
@@ -58,7 +57,9 @@ flowchart TD
     CV -- passed --> SC[Committer\nslice-output commit]
     SC --> NS{More slices?}
     NS -- Yes --> W
-    NS -- No --> IR[Implementation Reviewer\nstage acceptance + archive readiness]
+    NS -- No --> R[Reconciliation Worker\nrecord Execution Summary]
+    R -->|write Section 5| EL
+    R --> IR[Implementation Reviewer\nstage acceptance + archive readiness]
 
     IR -->|read full ledger| EL
     IR --> BA[Brain archive authorization]
@@ -107,11 +108,12 @@ Brain may dispatch Committer for direct-task-output if commit is requested.
 Brain creates Evidence Ledger Seed.
 Propose materializes proofloop/evidence-ledger.md.
 Planning Contract Verifier checks contract fidelity.
-Executor maintains execution evidence in the ledger.
+Executor dispatches tasks and verification.
 Worker returns structured Completion Receipt.
 Committer records task-diff-snapshot.
 Code Verifier checks assigned slice evidence.
 Committer commits slice-output after verifier PASS.
+Reconciliation Worker records Execution Summary in proofloop/evidence-ledger.md Section 5.
 Implementation Reviewer performs stage acceptance from full ledger.
 Brain authorizes archive.
 General executes archive.

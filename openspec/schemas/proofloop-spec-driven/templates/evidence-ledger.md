@@ -84,11 +84,10 @@ Minimal Next Action:
 ## 4. Worker Hypothesis Verification Sections
 
 <!-- Worker writes only assigned sections. Each section corresponds to one task/hypothesis. -->
-<!-- Do NOT write final verdicts (PASS/FAIL/blocked/confirmed) in this ledger. -->
-<!-- Final slice verdict lives in Code Verifier Receipt. -->
+<!-- Worker sections must not write final slice/stage verdicts. -->
 <!-- Code Verifier Receipt remains authoritative for slice verdicts. -->
 <!-- Committer Receipt remains authoritative for git boundary results. -->
-<!-- Section 5 indexes execution receipts so Brain and Implementation Reviewer do not depend on chat context transfer. -->
+<!-- Section 5 may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
 
 ### Task <task-id> / Hypothesis <hypothesis-id>
 

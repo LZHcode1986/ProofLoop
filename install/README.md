@@ -95,6 +95,7 @@ OpenSpec Change:
         -> Committer task-diff-snapshot
         -> Code Verifier per slice
         -> Committer slice-output
+        -> Reconciliation Worker records Execution Summary
         -> Implementation Reviewer
         -> Brain archive authorization
         -> Executor -> Committer archive-output

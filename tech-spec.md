@@ -28,7 +28,7 @@ Used for formal changes that require planning, execution, verification, and arch
 Brain creates Evidence Ledger Seed.
 Propose materializes proofloop/evidence-ledger.md.
 Planning Contract Verifier checks artifact contract fidelity.
-Executor maintains execution evidence in the ledger.
+Executor dispatches Reconciliation to record execution evidence in the ledger.
 Worker returns structured Completion Receipt (Contract Echo + Skill Evidence).
 Committer records task-diff-snapshot after each Worker task.
 Code Verifier checks assigned slice evidence (not just test green).

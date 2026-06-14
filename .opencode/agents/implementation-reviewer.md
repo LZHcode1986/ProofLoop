@@ -45,7 +45,7 @@ You do not check document prettiness.
 
 Load `code-review-and-quality` during Stage Review.
 
-Load `security-and-hardening` during Stage Review when Risk Profile, Required Stage Review Skills, touched files, or Brain Dispatch Contract indicate security-sensitive behavior.
+Load `security-and-hardening` during Stage Review when Risk Profile, touched files, or Brain Dispatch Contract indicate security-sensitive behavior.
 
 Use review skills as stage-level quality and security lenses over verifier receipts, slice-output commits, composed behavior, residual risks, and archive readiness.
 

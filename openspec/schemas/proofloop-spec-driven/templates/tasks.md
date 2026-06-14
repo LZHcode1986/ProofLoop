@@ -10,7 +10,7 @@
 
 - Acceptance criterion not testable.
 - Required change exceeds allowed scope.
-- CodeGraph impact exceeds allowed scope.
+- Required code reality impact exceeds allowed scope.
 - Required OpenSpec spec change discovered during execution.
 - Security/data/migration risk outside contract.
 
@@ -135,7 +135,6 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Verification Method is explicit.
 - [ ] Expected Evidence is explicit.
 - [ ] Stop Conditions are explicit.
-- [ ] CodeGraph anchors are included when needed. (optional)
 - [ ] Git boundary plan is explicit.
 - [ ] Task output uses task-diff-snapshot.
 - [ ] Slice output is committed only after verifier PASS.
