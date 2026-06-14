@@ -1,185 +1,166 @@
-# ProofLoop Global Rules
+# AGENTS.md Customization Guide
 
-This file is loaded by every agent. Keep it short and global.
+This file is a template guide for downstream projects.
 
-Detailed role behavior belongs in `.opencode/agents/*.md`.  
-Packet formats live under `.agents/contracts/`:
-- Brain dispatch packet formats live under `.agents/contracts/brain/`.
-- Executor subagent packet formats live under `.agents/contracts/executor/`.  
-OpenSpec artifact rules belong in `openspec/**`.  
-Reusable procedures belong in `.agents/skills/**`.
+When installing ProofLoop into a real repository, replace this guide with project-specific agent instructions. The final local `AGENTS.md` should describe only the rules that every agent working in that project must know.
 
-## Mission
+Do not use this file to store ProofLoop workflow internals, role-specific procedures, packet formats, or long process playbooks.
 
-ProofLoop ensures that agent work matches Brain and user intent.
+## What the local AGENTS.md should contain
 
-Every Brain-dispatched task must be verifiable.  
-Every subagent must execute mechanically.  
-Every result must return evidence that Brain can use for acceptance.
+A project-specific `AGENTS.md` should normally include the sections below.
+
+### Project identity
+
+Describe the project in a few lines:
+
+- product or repository name;
+- primary purpose;
+- main users or runtime context;
+- the most important business or engineering constraint.
+
+Keep this short. Agents need orientation, not a full PRD.
+
+### Authority and source of truth
+
+List the project-local authority order.
+
+Typical sources include:
+
+- user instruction;
+- current task or dispatch contract;
+- product requirements or specs;
+- architecture documents;
+- code and tests;
+- local conventions.
+
+State what agents should do when these sources conflict.
+
+### Repository map
+
+Explain the important top-level paths.
+
+Include only paths that help agents avoid mistakes, such as:
+
+- application source directories;
+- tests;
+- generated files;
+- migrations;
+- configuration;
+- scripts;
+- documentation;
+- files or directories agents should not edit.
+
+### Common commands
+
+List the project-local commands agents should prefer for:
+
+- dependency setup;
+- formatting;
+- linting;
+- type checking;
+- unit tests;
+- integration tests;
+- local build;
+- code generation.
+
+Include platform notes only when they matter.
+
+### Coding conventions
+
+Summarize conventions that apply across the project:
+
+- language or framework conventions;
+- naming rules;
+- error handling style;
+- logging style;
+- API compatibility expectations;
+- frontend or backend patterns;
+- test style.
+
+Do not duplicate rules already enforced by formatters or linters unless agents commonly miss them.
+
+### Verification expectations
+
+Define what counts as acceptable evidence for this project.
+
+Examples:
+
+- tests that should be run for common change types;
+- screenshots or manual checks for UI changes;
+- migration dry-run expectations;
+- API contract checks;
+- security or data-safety checks.
+
+Keep this project-specific. Generic workflow verification belongs in workflow contracts or agent instructions, not here.
+
+### Safety and boundaries
+
+State project-wide restrictions, such as:
+
+- secrets and credentials that must not be read or printed;
+- production data restrictions;
+- destructive command restrictions;
+- migration safety expectations;
+- generated file rules;
+- external service rules.
+
+### Collaboration rules
+
+Add project-wide collaboration expectations only when they are stable across agents.
+
+Examples:
+
+- when to ask for clarification;
+- when to stop and report a blocker;
+- when a change needs a formal spec update;
+- when maintainers must review manually.
+
+## What AGENTS.md should not contain
+
+Do not put the following in the local `AGENTS.md`:
+
+- detailed ProofLoop dispatch flows;
+- agent-specific role instructions;
+- packet schemas;
+- per-agent output formats;
+- long troubleshooting procedures;
+- task-by-task implementation plans;
+- temporary migration notes;
+- historical rationale that is not needed during execution;
+- product requirements that belong in specs or PRDs;
+- instructions for tools or agents not used by the local project.
+
+## Recommended local structure
+
+Projects may use this structure as a starting point:
+
+```md
+# <Project Name> Agent Instructions
+
+## Project summary
 
 ## Authority order
 
-1. User instruction
-2. Brain Dispatch Contract
-3. OpenSpec artifacts for formal changes
-4. Agent-specific instructions
-5. Skills
-6. Local conventions
+## Repository map
 
-If authority conflicts, stop and return to Brain.
+## Common commands
 
-## Routing
+## Coding conventions
 
-Brain chooses one route:
+## Verification expectations
 
-```text
-direct-task
-openspec-change
-```
-## Direct Task
+## Safety and boundaries
 
-```text
-Brain -> general -> Completion Receipt -> Brain self-check
+## Stop and clarify conditions
 ```
 
-Direct Task does not automatically commit.
+Add sections only when they are useful for every agent in the project.
 
-## OpenSpec Change
+## Maintenance rule
 
-```text
-Brain -> Evidence Ledger Seed
-      -> Propose
-      -> Planning Contract Verifier
-      -> Executor
-      -> Implementation Reviewer
-      -> Brain archive authorization
-      -> General archive execution
-      -> Committer archive-output if needed
-```
+Keep the local `AGENTS.md` short and current.
 
-Executor-owned internals:
-
-```text
-- Worker
-- Committer task-diff-snapshot
-- Code Verifier per slice
-- Committer slice-output
-```
-
-## Required dispatch contract
-
-Every Brain dispatch must include verifiable acceptance criteria.
-
-Minimum required fields:
-
-```text
-Route
-Task Type
-User Goal
-Brain Intent
-Scope
-Out of Scope
-Acceptance Criteria
-Verification Method
-Expected Evidence
-Allowed File Scope
-Forbidden File Scope
-Risk Profile
-Required Skills
-Stop Conditions
-Escalation Target
-```
-
-For openspec-change:
-
-```text
-Evidence Ledger Seed
-```
-
-If a task cannot be made verifiable, Brain must clarify or narrow before dispatch.
-
-## Canonical skills
-
-Do not rewrite OpenSpec canonical skills or shared TDD skill as part of ProofLoop flow changes.
-
-ProofLoop usage constraints belong in:
-
-```text
-.agents/contracts/proofloop-skill-usage.md
-.opencode/agents/*.md
-```
-
-## Mechanical subagent rule
-
-Subagents must not reinterpret Brain intent.
-
-They must stop and return to Brain when:
-
-- acceptance criteria are unclear or not testable
-- required scope exceeds allowed scope
-- required code reality cannot be established
-- the task requires an OpenSpec change not included in the route
-- security/data/migration/concurrency risk exceeds the contract
-
-## Verification rule
-
-Do not treat document debt as implementation failure.
-
-Use correct categories:
-
-```text
-IMPLEMENTATION DEFECT
-EVIDENCE DEFECT
-CONTRACT DEFECT
-PROTOCOL DEFECT
-```
-
-## Slice verification rule
-
-For OpenSpec changes:
-
-- every implementation slice must have Code Verifier
-- do not verify every task unless explicitly required
-- commit after slice verification passes, not after every task
-
-## CodeGraph rule
-
-CodeGraph is an optional code-reality lookup tool, not a workflow gate.
-
-Use CodeGraph before direct file reads when the task requires cross-file or symbol-level understanding, such as:
-- locating entry points;
-- finding definitions, callers, and callees;
-- estimating impact radius;
-- identifying related files or affected tests;
-- checking whether a change may affect code outside the declared scope.
-
-Do not require CodeGraph for single-file, obvious, or already-localized tasks.
-
-If CodeGraph is unavailable, stale, or not initialized, fall back to direct file reads and record that fallback in the receipt when relevant.
-
-## Committer rule
-
-Committer closes or records git boundaries. It does not decide task completion.
-
-Default:
-
-```text
-task -> task-diff-snapshot receipt
-slice verifier PASS -> slice-output commit
-archive output -> archive-output commit
-```
-
-General performs archive execution only after Brain authorizes archive.
-
-Brain does not run archive directly.  
-General does not commit archive output.
-
-## Dispatch Contract Loading Rule
-
-Agents must not browse `.agents/contracts/` as a runtime index.
-
-Each dispatch flow must name the exact contract file or file set it may read.
-
-Parent agents are responsible for reading the relevant contract file, constructing the completed packet, and sending that packet to the target agent.
-
-Target agents must validate the packet they receive and must not load unrelated contract files to compensate for missing dispatch context.
+When a rule becomes role-specific, move it to the relevant agent instruction.  
+When a rule becomes procedural, move it to a workflow contract or skill.  
+When a rule becomes product-specific, move it to the appropriate requirement, spec, or design document.
