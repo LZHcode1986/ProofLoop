@@ -2,6 +2,21 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.1.2
+
+### 2026-06-15
+
+- **refactor**: 整改 Evidence Ledger 结构与 Worker/Code Verifier 反驳流程
+  - `openspec/schemas/proofloop-spec-driven/templates/evidence-ledger.md`: 删除 `Planning Contract Result` Section，重编号 Worker Verification (Section 3) 和 Execution Summary (Section 4)。
+  - `openspec/schemas/proofloop-spec-driven/templates/tasks.md`: 为每个 Worker 任务增加 `Evidence Ledger Target` 属性，修改 Verifier gate 审查范围。
+  - `.opencode/agents/worker.md`: 增加 `Evidence Ledger responsibility` 章节，定义 Worker 任务完成的准则和写入范围。
+  - `.agents/contracts/executor/worker-implementation.md` & `worker-fix.md`: 引入 `Evidence Ledger Target` 必填项，细化更新规则。
+  - `.opencode/agents/executor.md`: 强制 Worker 派发必须携带 `Evidence Ledger Target`，重编号 Reconciliation 任务。
+  - `.agents/contracts/executor/code-verification.md` & `.opencode/agents/code-verifier.md`: Code Verifier 审查范围扩展至反驳 Worker 证据，增加 contradicted worker evidence 的验证失败卡点。
+  - `.opencode/agents/propose.md` & `planning-contract-verifier.md`: 调整 Overlay gates 和 Mechanical Dispatch Readiness 校验以适配新的 Section 4 结构，弱化 CodeGraph 强校验，增加 `Evidence Ledger Target` 卡点。
+  - `openspec/schemas/proofloop-spec-driven/schema.yaml`: 更新 `evidence-ledger` 和 `apply` 指令，适配重编号后的 Section 4。
+  - `README.md` & `.opencode/agents/implementation-reviewer.md`: 修正所有描述和 Mermaid 流程图中的 Section 5 引用至 Section 4。
+
 ## v1.1.1
 
 ### 2026-06-14

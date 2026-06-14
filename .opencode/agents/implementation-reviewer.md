@@ -65,7 +65,7 @@ Do not treat code quality preferences as implementation failure unless they affe
 Read the following inputs for stage acceptance:
 
 - **Evidence Ledger**: `proofloop/evidence-ledger.md` as the primary stage review index.
-- **Execution Summary**: `proofloop/evidence-ledger.md` section `## 5. Execution Summary`.
+- **Execution Summary**: `proofloop/evidence-ledger.md` section `## 4. Execution Summary`.
 - **Code Verification Receipts**: verifier gate verdicts, recheck receipts, task attribution.
 - **Committer Receipts**: boundary receipt refs indexed by Execution Summary.
 - **Slice commits**: commit hashes indexed by Execution Summary.

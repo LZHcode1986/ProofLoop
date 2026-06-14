@@ -18,6 +18,7 @@ Required fields:
 - Verifier Failure
 - Original Task Constraints
 - Context Files
+- Evidence Ledger Target
 - Checkbox Owner
 - Required Skills
 - Skill Instructions
@@ -57,6 +58,11 @@ Original Task Constraints:
 
 Context Files:
 
+Evidence Ledger Target:
+- path: proofloop/evidence-ledger.md
+- section: ## 3. Worker Hypothesis Verification Sections > Task <task-id>
+- update mode: append repair note | update evidence
+
 Checkbox Owner:
 - Worker owns the original implementation task checkbox state and must not modify other task or verifier gate checkboxes.
 - Code Verifier owns the assigned verifier gate checkbox and updates it only on Verification passed.
@@ -74,3 +80,7 @@ Rules:
 - Preserve original acceptance criteria and allowed file scope.
 - Do not introduce unrelated refactors or new behavior.
 - If diagnose is listed, use it to reproduce, minimize, hypothesize, instrument, fix, and regression-test.
+- If the fix changes implementation behavior or verification result, update the assigned Evidence Ledger Target.
+- Do not create a separate evidence backfill phase.
+- Preserve original task evidence and add repair evidence / updated verification notes.
+- Return evidence ledger section updated in the Worker Fix receipt.

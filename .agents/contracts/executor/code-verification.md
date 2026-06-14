@@ -30,6 +30,7 @@ Required fields:
 - Boundary Diff Requirements
 - Original Task Packets
 - Files Changed In Slice
+- Worker Evidence Sections
 - Task Required Skills
 - Verification Lens
 - Verification Required
@@ -49,9 +50,9 @@ Required for recheck mode only:
 ## Verification rules
 
 - Verify only the assigned slice or verifier gate.
-- Attempt to refute implementation against the Slice Contract and acceptance criteria.
+- Attempt to refute Worker evidence, Worker claims, boundary receipts, actual diffs, and implementation against the Slice Contract and acceptance criteria.
 - Use only the supplied gate fields, task packets, boundary receipts, changed files, diffs, and verification commands.
-- Inspect boundary receipts and actual diffs for every covered Worker attempt.
+- Inspect assigned Worker Evidence Ledger sections, boundary receipts, actual diffs, changed files, and verification commands for every covered Worker attempt.
 - Treat missing required verification context as `Verification blocked` or `Verification failed` according to the dispatch packet.
 - Do not perform a separate Evidence Review phase.
 - Do not implement fixes.
@@ -104,6 +105,10 @@ Boundary Receipts:
 Boundary Diff Requirements:
 Original Task Packets:
 Files Changed In Slice:
+Worker Evidence Sections:
+- task:
+- section:
+- expected evidence:
 Task Required Skills:
 Verification Lens:
 Verification Required:
@@ -133,6 +138,7 @@ On pass, include:
 - x.V checkbox confirmation
 - inspected boundary receipts
 - inspected diffs
+- inspected worker evidence sections
 - verification commands or inspection method
 - residual risk, if any
 
@@ -140,6 +146,7 @@ On failure, include:
 - Severity
 - Failed criteria
 - Evidence
+- contradicted worker evidence, if any
 - Minimal repair instruction
 
 On blocked, include:

@@ -91,6 +91,10 @@ Worker must not be expected to remember previous tasks or infer the next task.
 
 Each Worker dispatch must include the required fields defined in the respective contract file.
 
+Each Worker Implementation and Worker Fix dispatch must include Evidence Ledger Target derived from `tasks.md`.
+
+Executor must not ask Worker to infer evidence target from the full ledger.
+
 Executor must not send a generic task request to Worker.
 
 ## Parallel Rules
@@ -116,7 +120,7 @@ Before Code Verification, every parallel Worker output must be closed with `task
 6. On Code Verification PASS, verify x.V checkbox confirmation and dispatch Committer for `slice-output`.
 7. On Code Verification FAIL, dispatch Worker Fix, close the fix with `task-diff-snapshot`, then continue the same verifier gate in recheck mode.
 8. On Code Verification BLOCKED, repair dispatch context if possible or return blocked to Brain.
-9. After all slices complete, dispatch the Reconciliation task to record `## 5. Execution Summary` in `proofloop/evidence-ledger.md`, then return a short pointer to Brain.
+9. After all slices complete, dispatch the Reconciliation task to record `## 4. Execution Summary` in `proofloop/evidence-ledger.md`, then return a short pointer to Brain.
 10. Stop and return to Brain on blockers.
 
 ## Ownership
@@ -215,7 +219,7 @@ Do not dispatch Code Verifier after every ordinary task unless tasks explicitly 
 
 Executor does not write Execution Summary directly.
 
-After all slice-output commits are complete, dispatch the Reconciliation task from `tasks.md` to fill `## 5. Execution Summary` in `proofloop/evidence-ledger.md`.
+After all slice-output commits are complete, dispatch the Reconciliation task from `tasks.md` to fill `## 4. Execution Summary` in `proofloop/evidence-ledger.md`.
 
 Return only a short result pointer to Brain:
 - result

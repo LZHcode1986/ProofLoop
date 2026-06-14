@@ -64,8 +64,7 @@ artifacts:
     instruction: >
       Generate an evidence ledger seeded from the Brain Dispatch Contract.
       The ledger records: Brain Dispatch Snapshot, Planning Artifacts,
-      Planning Contract Result, Worker Hypothesis Verification Sections,
-      and Execution Summary.
+      Worker Hypothesis Verification Sections, and Execution Summary.
       Worker writes only assigned task/hypothesis sections.
       Code Verifier receipts and Committer boundary receipts remain authoritative
       and are indexed by reference in Execution Summary.
@@ -94,7 +93,8 @@ apply:
     - dispatch Committer for task-diff-snapshot receipts after Worker tasks
     - dispatch Code Verifier for every slice
     - dispatch Committer for slice-output commit after slice verifier PASS
-    - after all slice-output commits complete, dispatch Reconciliation to record Execution Summary in proofloop/evidence-ledger.md
+    - after all slice-output commits complete, dispatch Reconciliation to record Section 4 Execution Summary in proofloop/evidence-ledger.md
+    - Worker dispatch packets must include Evidence Ledger Target for the assigned task.
     - stop and return blockers to Brain when contracts are insufficient
 
     High-risk requirements are handled through Risk Profile, stricter acceptance criteria, stronger evidence requirements, and Implementation Reviewer stage review.

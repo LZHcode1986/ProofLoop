@@ -37,16 +37,17 @@ Code Verifier performs one assigned verifier gate.
 Verification passed means:
 - required verification context was sufficient;
 - assigned slice boundary was inspected;
+- assigned Worker evidence sections were inspected;
 - relevant diffs and boundary receipts were inspected;
 - declared verification methods were run or inspected where possible;
-- no valid counterexample was found against the assigned Slice Contract and acceptance criteria.
+- no valid counterexample was found against Worker evidence, implementation behavior, Slice Contract, and acceptance criteria.
 
 On Verification passed:
 - update only the assigned x.V verifier gate checkbox in tasks.md;
 - return checkbox confirmation in the receipt.
 
 Verification failed means:
-- a concrete counterexample, scope violation, missing behavior, broken command, unsafe behavior, or AC mismatch was found.
+- a concrete counterexample, contradicted Worker evidence, scope violation, missing behavior, broken command, unsafe behavior, or AC mismatch was found.
 
 On Verification failed:
 - do not update x.V;

@@ -25,6 +25,7 @@ Required fields:
 - Skill Instructions
 - Context Files
 - Allowed File Scope
+- Evidence Ledger Target
 - Boundary Receipt Required
 - Verification Commands
 - Checkbox Owner
@@ -33,7 +34,10 @@ Required fields:
 Worker-specific rules:
 - Work only on this task.
 - Do not broaden scope to satisfy future slice or stage concerns.
-- Update only the assigned implementation task checkbox after implementation and required checks pass.
+- Update only the assigned Evidence Ledger Target before marking the task complete.
+- Do not write final slice/stage verdicts.
+- Return evidence ledger section updated in the Worker receipt.
+- Update the assigned implementation task checkbox only after assigned work, required checks, evidence ledger update, and receipt are complete.
 - Code Verifier owns only verifier gate checkboxes.
 
 Packet shape:
@@ -67,6 +71,11 @@ Context Files:
 
 Allowed File Scope:
 
+Evidence Ledger Target:
+- path: proofloop/evidence-ledger.md
+- section: ## 3. Worker Hypothesis Verification Sections > Task <task-id>
+- expected evidence:
+
 Boundary Receipt Required:
 - commit receipt
 - no-op receipt
@@ -76,7 +85,7 @@ Verification Commands:
 
 Checkbox Owner:
 - Worker owns the assigned implementation task checkbox.
-- Worker updates only the assigned checkbox after implementation and required local checks pass.
+- Worker updates only the assigned checkbox after implementation, required local checks, evidence ledger update, and receipt are complete.
 - Code Verifier does not update normal implementation task checkboxes.
 - Code Verifier owns only its assigned verifier gate checkbox and updates it only on Verification passed.
 - If Code Verifier fails, normal implementation task checkboxes stay as Worker self-check evidence; the slice verifier gate remains unchecked until pass.
@@ -85,3 +94,7 @@ Rules:
 - Apply Shared Worker Dispatch Rules.
 - Work only on this task.
 - Do not broaden scope to satisfy future slice or stage concerns.
+- Update only the assigned Evidence Ledger Target before marking the task complete.
+- Do not write final slice/stage verdicts.
+- Return evidence ledger section updated in the Worker receipt.
+- Update the assigned implementation task checkbox only after assigned work, required checks, evidence ledger update, and receipt are complete.

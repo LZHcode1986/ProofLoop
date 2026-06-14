@@ -8,7 +8,7 @@ Last Updated:
 Ledger Owners:
 - planning seed: Propose
 - worker proof sections: Worker
-- execution summary: Reconciliation task writes Section 5
+- execution summary: Reconciliation task writes Section 4
 - verifier receipts: indexed in Execution Summary; authoritative in Code Verifier Receipt
 - committer receipts: indexed in Execution Summary; authoritative in Committer Receipt
 - stage review: outside ledger (Implementation Reviewer Output)
@@ -60,34 +60,13 @@ Planning Conflicts:
 
 ---
 
-## 3. Planning Contract Result
-
-Result:
-- BLOCKED | READY_WITH_WARNINGS | READY
-
-Intent Preservation:
-Acceptance Mapping:
-Mechanical Executability:
-Stop Conditions:
-Code Reality Check:
-Git Boundary Plan:
-
-Findings:
-- BLOCKER:
-- WARNING:
-- NOTE:
-
-Minimal Next Action:
-
----
-
-## 4. Worker Hypothesis Verification Sections
+## 3. Worker Hypothesis Verification Sections
 
 <!-- Worker writes only assigned sections. Each section corresponds to one task/hypothesis. -->
 <!-- Worker sections must not write final slice/stage verdicts. -->
 <!-- Code Verifier Receipt remains authoritative for slice verdicts. -->
 <!-- Committer Receipt remains authoritative for git boundary results. -->
-<!-- Section 5 may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
+<!-- This section may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
 
 ### Task <task-id> / Hypothesis <hypothesis-id>
 
@@ -120,7 +99,7 @@ Worker Notes:
 
 ---
 
-## 5. Execution Summary
+## 4. Execution Summary
 
 <!-- Reconciliation task writes this section after all slice-output commits are complete. -->
 <!-- This section indexes execution evidence. It does not reinterpret specialist verdicts. -->
@@ -135,6 +114,7 @@ Worker Receipts:
 - task:
 - receipt ref:
 - checkbox:
+- evidence ledger section:
 
 Git Boundary Receipts:
 - boundary:

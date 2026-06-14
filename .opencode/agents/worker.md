@@ -82,6 +82,32 @@ When loading `test-driven-development`, do not rewrite the skill. Follow ProofLo
 .agents/contracts/proofloop-skill-usage.md
 ```
 
+## Evidence Ledger responsibility
+
+When the dispatch packet includes Evidence Ledger Target, Worker must update only the assigned worker proof section before marking the task complete.
+
+Worker writes only:
+
+```text
+proofloop/evidence-ledger.md
+## 3. Worker Hypothesis Verification Sections
+Task <task-id>
+```
+
+Worker must not write:
+- final slice verdict;
+- final stage verdict;
+- Execution Summary;
+- archive result;
+- other task evidence sections.
+
+Worker task completion requires:
+- assigned work completed;
+- required local checks or inspections completed;
+- assigned Evidence Ledger section updated;
+- Worker receipt ready;
+- assigned task checkbox updated.
+
 ## Phase Receipts
 
 Worker must return the correct receipt format required by the current dispatch packet.

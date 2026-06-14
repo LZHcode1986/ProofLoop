@@ -82,9 +82,10 @@ After skill output, before reporting readiness, verify:
 5. tasks contains `## Dependencies`.
 6. tasks contains `## Parallel Opportunities`.
 7. parallel candidate tasks use `[P]`.
-8. Reconciliation contains `bash scripts/local-check.sh`.
-9. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
-10. Every spec dir name matches kebab-case: `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/`.
+8. Reconciliation contains Record Execution Summary targeting `proofloop/evidence-ledger.md` Section 4.
+9. Every Worker task has an Evidence Ledger Target.
+10. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
+11. Every spec dir name matches kebab-case: `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/`.
     - Exclude: leading number, trailing -bN/-vN, fix-/remediation-/visible- prefix, stage-N- prefix.
     - If any spec name fails: output `Planning blocked`.
 
@@ -160,7 +161,7 @@ Tasks Readiness Check:
 Planning Contract Result:
 - PLANNING CONTRACT: BLOCKED | READY_WITH_WARNINGS | READY
 
-CodeGraph Protocol Check:
+CodeGraph Protocol Check (optional):
 - result:
 - stale/fallback:
 
@@ -181,7 +182,7 @@ Git Boundary Plan:
 - slice commit: slice-output
 - archive commit: archive-output
 
-CodeGraph Evidence:
+CodeGraph Evidence (optional):
 - anchors:
 - stale/fallback:
 

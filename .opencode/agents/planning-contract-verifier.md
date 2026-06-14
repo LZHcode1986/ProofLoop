@@ -73,7 +73,7 @@ Check:
 - proposal must contain `## What Changes` section
 - tasks section order must be: Setup -> Blocking -> Slice 1..N -> Reconciliation
 - interactive change: first Blocking task MUST be Proof Task
-- Reconciliation must contain final repo gate: `bash scripts/local-check.sh`
+- Reconciliation must contain Record Execution Summary targeting `proofloop/evidence-ledger.md` Section 4.
 
 If any structure check fails:
 - verdict MUST be `PLANNING CONTRACT: BLOCKED`
@@ -125,9 +125,9 @@ Required fields:
 - verification method
 - expected evidence
 - required skills
-- required review skills
 - stop conditions
 - checkbox owner / task id
+- evidence ledger target
 - dependencies
 - parallel opportunities
 - `[P]` markers for safe parallel candidates
@@ -146,10 +146,17 @@ Block when:
 
 ### 6. Evidence Ledger Model Check
 
-Check Evidence Ledger follows Worker-owned model:
-
-- Ledger Owners must show: planning seed: Propose, worker proof sections: Worker
-- Verifier receipts, executor summaries, stage reviews, archive results must be outside ledger
+Check Evidence Ledger follows current model:
+- Ledger Owners must show:
+  - planning seed: Propose
+  - worker proof sections: Worker
+  - execution summary: Reconciliation task writes Section 4
+  - verifier receipts indexed in Execution Summary and authoritative in Code Verifier Receipt
+  - committer receipts indexed in Execution Summary and authoritative in Committer Receipt
+  - stage review outside ledger
+- Ledger must not contain Planning Contract Result.
+- Ledger must not contain Stage Review section.
+- Ledger must not reinterpret final verdicts.
 
 Check Evidence Ledger template does NOT contain any of:
 

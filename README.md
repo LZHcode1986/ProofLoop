@@ -58,7 +58,7 @@ flowchart TD
     SC --> NS{More slices?}
     NS -- Yes --> W
     NS -- No --> R[Reconciliation Worker\nrecord Execution Summary]
-    R -->|write Section 5| EL
+    R -->|write Section 4| EL
     R --> IR[Implementation Reviewer\nstage acceptance + archive readiness]
 
     IR -->|read full ledger| EL
@@ -113,7 +113,7 @@ Worker returns structured Completion Receipt.
 Committer records task-diff-snapshot.
 Code Verifier checks assigned slice evidence.
 Committer commits slice-output after verifier PASS.
-Reconciliation Worker records Execution Summary in proofloop/evidence-ledger.md Section 5.
+Reconciliation Worker records Execution Summary in proofloop/evidence-ledger.md Section 4.
 Implementation Reviewer performs stage acceptance from full ledger.
 Brain authorizes archive.
 General executes archive.
