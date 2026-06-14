@@ -57,7 +57,7 @@ Proof Profiles define minimum evidence requirements per task type:
 .agents/contracts/proof-profiles.md
 ```
 
-Consult the relevant profile during Hypothesis Verification or Evidence Backfill to ensure sufficient evidence.
+Consult the relevant profile during assigned Worker execution and evidence update to ensure sufficient evidence.
 
 ## Worker Runtime and Contract Policy
 
@@ -65,7 +65,7 @@ Worker receives a completed Task Packet from Executor.
 
 Worker must not browse `.agents/contracts/` during task execution.
 
-If the packet is missing required task identity, acceptance criteria, context files or excerpts, allowed file scope, verification commands, required skills, or checkbox ownership rules, return:
+If the packet is missing required task identity, acceptance criteria, context files or excerpts, allowed file scope, Evidence Ledger Target, verification commands, required skills, or checkbox ownership rules, return:
 
 Implementation blocked: insufficient task context
 

@@ -83,7 +83,7 @@ Code Verifier receives a completed Code Verification Packet from Executor.
 
 Code Verifier must not browse `.agents/contracts/` during verification.
 
-If the packet is missing assigned gate, covered tasks, original task packets, boundary receipts, diff requirements, inspection scope, verification lens, or return contract, return:
+If the packet is missing assigned gate, covered tasks, original task packets, worker evidence sections, boundary receipts, diff requirements, inspection scope, verification lens, or return contract, return:
 
 Verification failed
 
