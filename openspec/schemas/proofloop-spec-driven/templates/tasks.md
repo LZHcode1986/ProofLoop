@@ -145,4 +145,4 @@ Expected Evidence must be concrete enough for ledger recording.
 
 | Slice | Evidence Section | Task Receipt Section |
 | --- | --- | --- |
-| Slice 1 | 4. Execution Evidence > Slice 1 | Task 3.1 |
+| Slice 1 | 4. Worker Hypothesis Verification Sections + 5. Execution Summary | Task 3.1 / Slice 1 |
