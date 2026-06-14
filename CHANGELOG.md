@@ -13,6 +13,13 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `.agents/contracts/executor/shared-code-verification-rules.md`: remove Default review skills; make review skill usage explicit per dispatch packet; recheck defaults to no skill loading.
   - `.opencode/agents/implementation-reviewer.md`: `redo Evidence Review` → `redo Code Verification`.
 
+- **refactor**: Collapse Code Verification contract dependencies and remove unused executor-scoped evidence protocol
+  - `.agents/contracts/executor/code-verification.md`: merge shared Code Verification rules directly into the contract; Code Verification now requires only one contract file at dispatch time.
+  - `.agents/contracts/executor/shared-code-verification-rules.md`: delete after merging into `code-verification.md`.
+  - `.agents/contracts/executor/evidence-protocol.md`: delete unused executor-scoped evidence protocol after Evidence Review removal.
+  - `.opencode/agents/executor.md`: reduce Code Verification contract loading to `code-verification.md` only; slim orchestration text to control plane; keep detailed packet rules in contracts.
+  - `install/install-proofloop.ps1`, `install/README.md`, `install/manual-install.md`: remove deleted contract files from install lists.
+
 ## v1.0.15
 
 ### 2026-06-14

@@ -35,8 +35,6 @@ Executor owns Code Verifier phase sequencing.
 
 Code Verifier performs one assigned verifier gate.
 
-There is no separate Evidence Review phase.
-
 Verification passed means:
 - required verification context was sufficient;
 - assigned slice boundary was inspected;

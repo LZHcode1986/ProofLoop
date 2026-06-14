@@ -8,12 +8,11 @@ This contract has two modes:
 
 It does not define an Evidence Review phase.
 
-Also read:
-- .agents/contracts/executor/shared-code-verification-rules.md
-
 Packet title:
 
 Executor Dispatch: Code Verification
+
+## Required fields
 
 Required fields:
 - Verification Mode
@@ -47,20 +46,46 @@ Required for recheck mode only:
 - Repair Diff Scope
 - Regression Scope
 
-Rules:
+## Verification rules
+
 - Verify only the assigned slice or verifier gate.
 - Attempt to refute implementation against the Slice Contract and acceptance criteria.
-- Inspect actual diffs for every covered Worker boundary.
-- Treat missing required verification context as Verification blocked or Verification failed according to the dispatch packet.
+- Use only the supplied gate fields, task packets, boundary receipts, changed files, diffs, and verification commands.
+- Inspect boundary receipts and actual diffs for every covered Worker attempt.
+- Treat missing required verification context as `Verification blocked` or `Verification failed` according to the dispatch packet.
 - Do not perform a separate Evidence Review phase.
 - Do not implement fixes.
 - Do not commit.
-- On Verification passed, update only the assigned x.V verifier gate checkbox in tasks.md.
-- On Verification failed, do not update x.V.
-- On recheck, verify only previous failed criteria, repair diff, and necessary regression scope.
-- Do not restart full verification unless the repair changed the slice boundary, acceptance criteria mapping, allowed scope, or invalidated the original verification context.
+- Do not update normal implementation task checkboxes.
+- On `Verification passed`, update only the assigned x.V verifier gate checkbox in `tasks.md`.
+- On `Verification failed`, leave the assigned x.V verifier gate checkbox unchecked.
+- On `Verification blocked`, leave the assigned x.V verifier gate checkbox unchecked.
 
-Packet shape:
+## Recheck rules
+
+- Recheck continues the same verifier gate after Worker Fix.
+- Verify only:
+  - previous failed criteria;
+  - Worker Fix changes;
+  - new task-diff-snapshot boundary;
+  - repair diff;
+  - necessary regression scope.
+- Do not restart full slice verification unless the repair changed:
+  - slice boundary;
+  - acceptance criteria mapping;
+  - allowed / forbidden scope;
+  - verification context.
+- Recheck should not load review skills unless the previous failure specifically requires skill-based review to verify the repair.
+
+## Review skill usage
+
+- Review skills are not default behavior.
+- Initial Code Verification may use review skills only when Executor explicitly includes them in the current dispatch packet.
+- Recheck defaults to no skill loading.
+- Task Required Skills are evidence metadata only and do not authorize Code Verifier to load Worker skills.
+- Required Review Skills controls only Code Verifier review skills, not Worker implementation skills.
+
+## Packet shape
 
 Executor Dispatch: Code Verification
 
@@ -82,10 +107,12 @@ Files Changed In Slice:
 Task Required Skills:
 Required Review Skills:
 Verification Required:
+
 Checkbox Owner:
 - Code Verifier owns only the assigned x.V verifier gate checkbox.
 - On Verification passed, update only that checkbox.
 - Include checkbox confirmation in the receipt.
+- On Verification failed or blocked, leave the checkbox unchecked.
 
 For recheck mode only:
 Previous Verification Failure:
@@ -101,3 +128,21 @@ Return Contract:
 - Verification passed
 - Verification failed
 - Verification blocked
+
+On pass, include:
+- x.V checkbox confirmation
+- inspected boundary receipts
+- inspected diffs
+- verification commands or inspection method
+- residual risk, if any
+
+On failure, include:
+- Severity
+- Failed criteria
+- Evidence
+- Minimal repair instruction
+
+On blocked, include:
+- missing context
+- runtime blocker details
+- smallest additional context required

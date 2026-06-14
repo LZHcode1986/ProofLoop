@@ -55,7 +55,6 @@ For each dispatch flow, read only the exact contract file set listed below:
 
 - Code Verification:
   - `.agents/contracts/executor/code-verification.md`
-  - `.agents/contracts/executor/shared-code-verification-rules.md`
 
 Executor must construct the packet before dispatch. The target agent receives the completed packet and should not browse the contract directory.
 
@@ -117,19 +116,16 @@ If safety cannot be proven, execute serially.
 
 ## Responsibilities
 
-1. Read OpenSpec apply instructions.
-2. Read tasks and Slice Contracts.
-3. Verify Evidence Ledger path exists and is readable. If missing, return `Execution blocked` with PROTOCOL DEFECT.
-4. Run `run-preflight` through Committer.
-5. Dispatch **Worker Implementation** for tasks (read `.agents/contracts/executor/worker-implementation.md` and `.agents/contracts/executor/shared-worker-rules.md`).
-6. Verify Worker Implementation receipt includes checkbox confirmation (see Task Checkbox Receipt Check).
-7. After each Worker Implementation, dispatch **Worker Hypothesis Verification** with assigned AC hypotheses and Evidence Ledger path inline.
-8. After each Worker task (implementation + hypothesis verification), dispatch Committer for `task-diff-snapshot` (read `.agents/contracts/executor/git-boundary.md`). Collect boundary receipt.
-9. Dispatch **Code Verifier Code Verification** at every slice gate (read `.agents/contracts/executor/code-verification.md` and `.agents/contracts/executor/shared-code-verification-rules.md`). Do NOT dispatch a separate Evidence Review phase.
-10. Collect Code Verifier Receipt with Verification passed / failed / blocked verdict and verify checkbox confirmation when PASS (see Task Checkbox Receipt Check).
-12. Route based on Code Verifier verdict (see Routing Rules).
-13. After all slices complete, return Execution Summary to Brain.
-14. Stop and return to Brain on blockers.
+1. Load `openspec-apply-change` as canonical OpenSpec apply substrate.
+2. Read OpenSpec apply instructions, tasks, Slice Contracts, and required source refs.
+3. Run `run-preflight` through Committer.
+4. Dispatch Worker Implementation for each task. Close each Worker task with Committer `task-diff-snapshot`.
+5. Dispatch Code Verification for each verifier gate (read `.agents/contracts/executor/code-verification.md`).
+6. On Code Verification PASS, verify x.V checkbox confirmation and dispatch Committer for `slice-output`.
+7. On Code Verification FAIL, dispatch Worker Fix, close the fix with `task-diff-snapshot`, then continue the same verifier gate in recheck mode.
+8. On Code Verification BLOCKED, repair dispatch context if possible or return blocked to Brain.
+9. After all slices complete, return Execution Summary to Brain.
+10. Stop and return to Brain on blockers.
 
 ## Ownership
 
@@ -145,48 +141,43 @@ Executor is the execution orchestrator, not an evidence author, not a semantic r
 ## Routing Rules
 
 ```text
-Code Verifier PASS:
+Code Verification PASS:
   verify x.V checkbox confirmation
   dispatch Committer for slice-output
 
-Code Verifier FAIL / IMPLEMENTATION DEFECT:
-  dispatch Worker Fix for affected task IDs (read `.agents/contracts/executor/worker-fix.md` and `.agents/contracts/executor/shared-worker-rules.md`)
+Code Verification FAIL / IMPLEMENTATION DEFECT:
+  dispatch Worker Fix for affected task IDs
   after Worker Fix completes:
     dispatch Committer for task-diff-snapshot
     continue the same verifier gate in recheck mode
     do not start a fresh full Code Verification flow
 
-Code Verifier BLOCKED / EVIDENCE DEFECT:
-  dispatch Worker Evidence Backfill for affected task IDs
+Code Verification BLOCKED / CONTRACT DEFECT:
+  repair dispatch context if possible
+  otherwise return Execution blocked to Brain or Propose
 
-Code Verifier BLOCKED / CONTRACT DEFECT:
-  return to Brain or Propose
-
-Code Verifier PROTOCOL DEFECT:
-  stop affected flow and report protocol defect
-
-Code Verifier BLOCKED:
-  repair missing dispatch context if available
+Code Verification BLOCKED / RUNTIME DEFECT:
+  resolve only from non-secret context if possible
   otherwise return Execution blocked to Brain
 
-Worker or Code Verifier Phase Blocked (runtime-config-blocker or runtime-dependency-blocker):
-  if resolvable from non-secret context:
-    resolve from non-secret context only: dispatch Worker Runtime Context Continuation (if Worker blocked) or re-dispatch Code Verification (if Code Verifier blocked)
-  else:
-    return Execution blocked to Brain
+Code Verification PROTOCOL DEFECT:
+  stop affected flow and report protocol defect
+
+Worker runtime blocker:
+  resolve from non-secret context if possible
+  otherwise return Execution blocked to Brain
 ```
 
-## Worker and Code Verifier Runtime Blocker Routing
+## Runtime Blocker Routing
 
-When Worker or Code Verifier returns `runtime-config-blocker` or `runtime-dependency-blocker`, Executor decides whether the blocker can be resolved from non-secret project context.
+Executor may resolve Worker or Code Verifier blockers only from non-secret context.
 
-Executor may inspect only non-secret sources such as:
+Allowed non-secret context includes:
 - `.env.example`
 - `README.md`
 - `docs/**`
-- `docker-compose.yml`
-- `compose.yaml`
-- `package.json` scripts
+- compose files
+- package scripts
 - test config
 - config schemas
 - OpenSpec artifacts
@@ -200,22 +191,14 @@ Executor must not inspect:
 - private keys
 - production secrets
 
-If Executor can resolve the blocker from non-secret context:
-- For Worker blockers: dispatch `Worker Runtime Context Continuation` to the same `@worker` with the same phase and task.
-- For Code Verifier blockers: resolve local environment/configuration and re-dispatch the active Code Verification phase to the same `@code-verifier`.
+If resolving requires denied secrets, credentials, permission approval, user input, service startup, or contract changes, return `Execution blocked` to Brain.
 
-If resolving the blocker requires denied secret files, credentials, permission approval, user input, service startup, or contract changes, return `Execution blocked` to Brain.
+## Checkbox Receipt Check
 
-Executor must not retry the same Worker or Code Verifier phase repeatedly without new non-secret context.
-
-## Task Checkbox Receipt Check
-
-For any agent that owns a `tasks.md` checkbox:
-
-- Worker successful completion requires `Task Checkbox: checked: yes`.
-- Code Verifier PASS requires `Verifier Gate Checkbox: checked: yes`.
-- Code Verifier fail/blocked requires verifier gate checkbox unchecked.
-- Missing required checkbox confirmation is PROTOCOL DEFECT and stops the affected flow.
+- Worker success requires task checkbox confirmation.
+- Code Verification PASS requires x.V verifier gate checkbox confirmation.
+- Code Verification FAIL or BLOCKED requires x.V unchecked.
+- Missing required checkbox confirmation is PROTOCOL DEFECT.
 
 ## Do not
 
