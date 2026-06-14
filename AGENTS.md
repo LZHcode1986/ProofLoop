@@ -86,9 +86,6 @@ Allowed File Scope
 Forbidden File Scope
 Risk Profile
 Required Skills
-Required Review Skills
-CodeGraph Use
-CodeGraph Anchors
 Stop Conditions
 Escalation Target
 ```
@@ -121,7 +118,6 @@ They must stop and return to Brain when:
 - acceptance criteria are unclear or not testable
 - required scope exceeds allowed scope
 - required code reality cannot be established
-- CodeGraph impact exceeds allowed scope
 - the task requires an OpenSpec change not included in the route
 - security/data/migration/concurrency risk exceeds the contract
 
@@ -148,9 +144,18 @@ For OpenSpec changes:
 
 ## CodeGraph rule
 
-CodeGraph is a tool, not an agent.
+CodeGraph is an optional code-reality lookup tool, not a workflow gate.
 
-Use `.agents/contracts/codegraph-tool-protocol.md`.
+Use CodeGraph before direct file reads when the task requires cross-file or symbol-level understanding, such as:
+- locating entry points;
+- finding definitions, callers, and callees;
+- estimating impact radius;
+- identifying related files or affected tests;
+- checking whether a change may affect code outside the declared scope.
+
+Do not require CodeGraph for single-file, obvious, or already-localized tasks.
+
+If CodeGraph is unavailable, stale, or not initialized, fall back to direct file reads and record that fallback in the receipt when relevant.
 
 ## Committer rule
 

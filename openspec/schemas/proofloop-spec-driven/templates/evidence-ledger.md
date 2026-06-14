@@ -8,8 +8,9 @@ Last Updated:
 Ledger Owners:
 - planning seed: Propose
 - worker proof sections: Worker
-- verifier receipts: outside ledger (Code Verifier Receipt)
-- executor summary: outside ledger (Executor Summary)
+- execution summary: Reconciliation task writes Section 5
+- verifier receipts: indexed in Execution Summary; authoritative in Code Verifier Receipt
+- committer receipts: indexed in Execution Summary; authoritative in Committer Receipt
 - stage review: outside ledger (Implementation Reviewer Output)
 - archive result: outside ledger (Implementation Reviewer Output + Committer archive-output receipt)
 
@@ -32,9 +33,6 @@ Verification Method:
 Expected Evidence:
 Risk Profile:
 Required Skills:
-Required Review Skills:
-CodeGraph Use:
-CodeGraph Anchors:
 Stop Conditions:
 Final Acceptance Owner: Brain
 
@@ -71,7 +69,7 @@ Intent Preservation:
 Acceptance Mapping:
 Mechanical Executability:
 Stop Conditions:
-CodeGraph Anchor Check:
+Code Reality Check:
 Git Boundary Plan:
 
 Findings:
@@ -88,7 +86,9 @@ Minimal Next Action:
 <!-- Worker writes only assigned sections. Each section corresponds to one task/hypothesis. -->
 <!-- Do NOT write final verdicts (PASS/FAIL/blocked/confirmed) in this ledger. -->
 <!-- Final slice verdict lives in Code Verifier Receipt. -->
-<!-- Final stage verdict lives in Implementation Reviewer Output. -->
+<!-- Code Verifier Receipt remains authoritative for slice verdicts. -->
+<!-- Committer Receipt remains authoritative for git boundary results. -->
+<!-- Section 5 indexes execution receipts so Brain and Implementation Reviewer do not depend on chat context transfer. -->
 
 ### Task <task-id> / Hypothesis <hypothesis-id>
 
@@ -118,6 +118,52 @@ Worker Category:
 
 Worker Notes:
 <notes>
+
+---
+
+## 5. Execution Summary
+
+<!-- Reconciliation task writes this section after all slice-output commits are complete. -->
+<!-- This section indexes execution evidence. It does not reinterpret specialist verdicts. -->
+
+Result:
+- Execution complete | Execution blocked | Verification failed
+
+Change:
+Stage:
+
+Worker Receipts:
+- task:
+- receipt ref:
+- checkbox:
+
+Git Boundary Receipts:
+- boundary:
+- receipt ref:
+- commit hash or no-op:
+
+Code Verification Receipts:
+- slice:
+- verification mode:
+- receipt ref:
+- verdict:
+- x.V checkbox:
+
+Slice Routing:
+- slice:
+- verdict:
+- next action:
+
+Slice Commits:
+- slice:
+- commit hash:
+
+Residual Risks:
+
+Next Action:
+- return to Brain
+- Worker Fix required
+- blocked
 
 ---
 

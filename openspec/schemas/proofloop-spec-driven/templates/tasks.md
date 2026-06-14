@@ -81,10 +81,6 @@ Do not create implementation commits before slice verification passes unless Bra
   - 
 - **Required Skills:**
   - test-driven-development | None
-- **Required Stage Review Skills:**
-  - code-review-and-quality
-- **CodeGraph Anchors:**
-  - 
 - **Stop Conditions:**
   - 
 - **Task Boundary Receipt:** task-diff-snapshot
@@ -106,17 +102,20 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] 3.V [Slice-1] Code Verifier gate
   - **Covered Tasks:** 3.1, 3.2
   - **Evidence Packet Required:** yes
-  - **Inspection Scope:** Slice 1 artifacts + changed files + task snapshot receipts + tests + commands + CodeGraph evidence
+  - **Inspection Scope:** Slice 1 artifacts + changed files + task snapshot receipts + tests + commands + code reality evidence, when used
   - **PASS/FAIL Gate:** all Slice 1 ACs pass; no scope violation; adversarial verification completed
   - **On PASS:** Committer creates slice-output commit
 
 ### 4. Reconciliation
 
-- [ ] 4.1 Final repo gate
-  - **Allowed File Scope:** <paths required for evidence only, if any>
-  - **Verification Method:** `bash scripts/local-check.sh`
-  - **Expected Evidence:** command exits 0; output summary captured
-  - **Boundary Receipt:** task-diff-snapshot | stage-output if not part of a slice
+- [ ] 4.1 Record Execution Summary
+  - **Execution Type:** evidence-summary
+  - **Allowed File Scope:** proofloop/evidence-ledger.md
+  - **Work Request:** fill `## 5. Execution Summary` in `proofloop/evidence-ledger.md`
+  - **Inputs:** Worker receipts, task-diff-snapshot receipts, Code Verifier receipts, slice-output commit receipts, residual risks
+  - **Verification Method:** inspect receipt refs and commit hashes only; do not re-run stage verification
+  - **Expected Evidence:** `proofloop/evidence-ledger.md` contains complete `## 5. Execution Summary`
+  - **Boundary Receipt:** task-diff-snapshot
 
 <!-- Additional Reconciliation rules:
   - Frontend files touched: Reconciliation must include `cd frontend && npm run build`.
@@ -136,13 +135,12 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Verification Method is explicit.
 - [ ] Expected Evidence is explicit.
 - [ ] Stop Conditions are explicit.
-- [ ] Required Stage Review Skills are explicit.
-- [ ] CodeGraph anchors are included when needed.
+- [ ] CodeGraph anchors are included when needed. (optional)
 - [ ] Git boundary plan is explicit.
 - [ ] Task output uses task-diff-snapshot.
 - [ ] Slice output is committed only after verifier PASS.
 - [ ] Blocking section exists (Proof Task for interactive changes).
-- [ ] Reconciliation includes `bash scripts/local-check.sh`.
+- [ ] Reconciliation records Execution Summary in Evidence Ledger.
 
 ## Evidence Ledger Section
 

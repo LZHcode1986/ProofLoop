@@ -64,11 +64,11 @@ Do not treat code quality preferences as implementation failure unless they affe
 
 Read the following inputs for stage acceptance:
 
-- **Evidence Ledger**: worker hypothesis verification sections only. This is worker proof record, NOT final verdict.
-- **Executor Summary**: execution routing and receipt index.
-- **Code Verifier Receipts**: blind refutation, evidence review, slice verdict, task attribution.
-- **Committer Receipts**: task-diff-snapshot, slice-output commits, archive-output commit.
-- **Slice commits**: actual committed changes.
+- **Evidence Ledger**: `proofloop/evidence-ledger.md` as the primary stage review index.
+- **Execution Summary**: `proofloop/evidence-ledger.md` section `## 5. Execution Summary`.
+- **Code Verification Receipts**: verifier gate verdicts, recheck receipts, task attribution.
+- **Committer Receipts**: boundary receipt refs indexed by Execution Summary.
+- **Slice commits**: commit hashes indexed by Execution Summary.
 - **Brain Dispatch Contract**: final acceptance reference.
 
 Do NOT:

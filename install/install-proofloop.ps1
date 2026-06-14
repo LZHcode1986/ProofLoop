@@ -82,10 +82,8 @@ $Contracts = @(
   ".agents/contracts/executor/worker-implementation.md",
   ".agents/contracts/executor/worker-fix.md",
   ".agents/contracts/executor/code-verification.md",
-  ".agents/contracts/executor/execution-summary.md",
   ".agents/contracts/executor/shared-worker-rules.md",
   ".agents/contracts/proof-profiles.md",
-  ".agents/contracts/codegraph-tool-protocol.md",
   ".agents/contracts/proofloop-skill-usage.md"
 )
 

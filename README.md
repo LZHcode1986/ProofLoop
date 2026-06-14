@@ -67,14 +67,6 @@ flowchart TD
     AO -- Yes --> AC[Committer\narchive-output commit]
     AO -- No --> DONE[Done]
     AC --> DONE
-
-    CG[(CodeGraph Tool Protocol)]
-    B -. code reality lookup .-> CG
-    G -. code reality lookup .-> CG
-    P -. code anchors .-> CG
-    PCV -. anchor check .-> CG
-    W -. scoped lookup .-> CG
-    CV -. impact check .-> CG
 ```
 
 ## Core routing
@@ -150,7 +142,6 @@ Use:
 
 ```text
 Risk Profile
-Required Review Skills
 Stricter Acceptance Criteria
 Stronger Evidence Requirements
 ```
@@ -160,10 +151,6 @@ Examples:
 ```text
 Risk Profile:
 - security-sensitive
-
-Required Review Skills:
-- code-review-and-quality
-- security-and-hardening
 ```
 
 ## OpenSpec canonical skills are preserved
@@ -218,15 +205,9 @@ Do these artifacts faithfully and mechanically carry Brain's dispatch contract?
 
 ## CodeGraph
 
-CodeGraph is the standard code-reality lookup tool, not an agent.
+CodeGraph is an optional code-reality lookup tool, not a workflow gate.
 
-It replaces the default Reality Verifier / Reality Investigation Agent role.
-
-Agents use CodeGraph according to:
-
-```text
-.agents/contracts/codegraph-tool-protocol.md
-```
+See `AGENTS.md` for usage guidance.
 
 ## Committer
 
@@ -262,7 +243,7 @@ AGENTS.md
   role-specific agent definitions.
 
 .agents/contracts/
-  dispatch packet contracts, CodeGraph protocol, and ProofLoop skill usage overlay.
+  dispatch packet contracts and ProofLoop skill usage overlay.
 
 .agents/skills/
   canonical and shared skills. Do not rewrite canonical skill behavior unless explicitly approved.
@@ -280,5 +261,4 @@ install/
 2. Read `.opencode/agents/brain.md`.
 3. Read `.agents/contracts/brain/` and `.agents/contracts/executor/` for packet contracts.
 4. Read `.agents/contracts/proofloop-skill-usage.md`.
-5. Read `.agents/contracts/codegraph-tool-protocol.md`.
-6. Read `.opencode/agents/committer.md`.
+5. Read `.opencode/agents/committer.md`.

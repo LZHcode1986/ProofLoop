@@ -29,6 +29,19 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `openspec/schemas/proofloop-spec-driven/templates/tasks.md`: rename `Required Review Skills` to `Required Stage Review Skills`; change verifier gate to `adversarial verification completed`.
   - `install/*`: add `execution-summary.md` to required contract lists.
 
+- **refactor**: Reuse Evidence Ledger for Execution Summary and remove CodeGraph from workflow gates
+  - `.agents/contracts/executor/execution-summary.md`: delete (Execution Summary moves into ledger).
+  - `.agents/contracts/codegraph-tool-protocol.md`: delete (CodeGraph becomes optional tool, not required contract).
+  - `openspec/schemas/proofloop-spec-driven/templates/evidence-ledger.md`: add `## 5. Execution Summary` section; update Ledger Owners; remove CodeGraph fields.
+  - `openspec/schemas/proofloop-spec-driven/schema.yaml`: Execution Summary lives in ledger; apply instruction uses Reconciliation task.
+  - `openspec/schemas/proofloop-spec-driven/templates/tasks.md`: Reconciliation changed from Final repo gate to Record Execution Summary; remove Required Stage Review Skills and CodeGraph Anchors; Inspection Scope uses code reality evidence.
+  - `.opencode/agents/executor.md`: remove Execution Summary contract loading; Responsibilities dispatch Reconciliation to write ledger; Execution Summary written by Worker task.
+  - `.opencode/agents/implementation-reviewer.md`: use evidence-ledger.md as primary stage review index with Section 5.
+  - `.opencode/agents/code-verifier.md`: replace `required review skills` with `verification lens`.
+  - `AGENTS.md`: add optional CodeGraph usage rule; remove Required Review Skills and CodeGraph from required dispatch contract fields.
+  - `README.md`: update mermaid diagram to remove CodeGraph references; update CodeGraph and No P0/P1/P2 sections.
+  - `install/*`: remove deleted contract files from install lists.
+
 ## v1.0.15
 
 ### 2026-06-14

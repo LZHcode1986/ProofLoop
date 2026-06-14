@@ -56,9 +56,6 @@ For each dispatch flow, read only the exact contract file set listed below:
 - Code Verification:
   - `.agents/contracts/executor/code-verification.md`
 
-- Execution Summary:
-  - `.agents/contracts/executor/execution-summary.md`
-
 Executor must construct the packet before dispatch. The target agent receives the completed packet and should not browse the contract directory.
 
 ## Skill usage
@@ -119,7 +116,7 @@ Before Code Verification, every parallel Worker output must be closed with `task
 6. On Code Verification PASS, verify x.V checkbox confirmation and dispatch Committer for `slice-output`.
 7. On Code Verification FAIL, dispatch Worker Fix, close the fix with `task-diff-snapshot`, then continue the same verifier gate in recheck mode.
 8. On Code Verification BLOCKED, repair dispatch context if possible or return blocked to Brain.
-9. After all slices complete, return Execution Summary using `.agents/contracts/executor/execution-summary.md`.
+9. After all slices complete, dispatch the Reconciliation task to record `## 5. Execution Summary` in `proofloop/evidence-ledger.md`, then return a short pointer to Brain.
 10. Stop and return to Brain on blockers.
 
 ## Ownership
@@ -127,6 +124,7 @@ Before Code Verification, every parallel Worker output must be closed with `task
 Executor is the execution orchestrator, not an evidence author, not a semantic reviewer.
 
 - Executor does NOT write Evidence Ledger.
+- Execution Summary is written by the Reconciliation Worker task.
 - Executor does NOT edit implementation files.
 - Executor does NOT edit OpenSpec artifacts.
 - Executor does NOT write verifier results.
@@ -215,4 +213,12 @@ Do not dispatch Code Verifier after every ordinary task unless tasks explicitly 
 
 ## Execution Summary
 
-Return final apply-stage result using `.agents/contracts/executor/execution-summary.md`.
+Executor does not write Execution Summary directly.
+
+After all slice-output commits are complete, dispatch the Reconciliation task from `tasks.md` to fill `## 5. Execution Summary` in `proofloop/evidence-ledger.md`.
+
+Return only a short result pointer to Brain:
+- result
+- evidence ledger path
+- Execution Summary section
+- blocker, if any

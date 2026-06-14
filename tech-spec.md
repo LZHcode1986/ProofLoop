@@ -64,9 +64,9 @@ ProofLoop-specific usage rules live in:
 
 ## CodeGraph
 
-CodeGraph is a tool protocol, not an agent.
+CodeGraph is an optional code-reality lookup tool.
 
-Usage rules: `.agents/contracts/codegraph-tool-protocol.md`
+See `AGENTS.md` for usage guidance.
 
 ## Git boundaries
 

@@ -40,12 +40,6 @@ archive output -> archive-output commit
 
 If audit behavior is required, describe why and which boundary is stricter.
 
-## CodeGraph Anchors
-
-| Anchor | Type | Used By |
-| --- | --- | --- |
-|  |  |  |
-
 ## Risks and Mitigations
 
 - 

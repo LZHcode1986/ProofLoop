@@ -33,7 +33,7 @@ Route must be:
 openspec-change
 ```
 
-The Brain Dispatch Contract must include verifiable Acceptance Criteria, Verification Method, Expected Evidence, Scope, Out of Scope, Required Review Skills, and Stop Conditions.
+The Brain Dispatch Contract must include verifiable Acceptance Criteria, Verification Method, Expected Evidence, Scope, Out of Scope, and Stop Conditions.
 
 If it does not, return `Clarification required`.
 
@@ -96,7 +96,7 @@ If any gate fails: output `Planning blocked`.
 2. Preserve Brain intent and acceptance criteria.
 3. Generate proposal, design, specs, and tasks.
 4. Materialize Evidence Ledger from Brain Evidence Ledger Seed into `openspec/changes/<change-id>/proofloop/evidence-ledger.md` (relative path inside the active OpenSpec change: `proofloop/evidence-ledger.md`). Write Brain Dispatch Snapshot and planning artifact refs. Do not leave binding constraints only in prose.
-5. Use CodeGraph according to `.agents/contracts/codegraph-tool-protocol.md` when code anchors are needed.
+5. Use CodeGraph as optional code-reality lookup tool when cross-file understanding is needed.
 6. Generate Slice Contracts.
 7. Ensure every implementation slice has a Code Verifier gate.
 8. Ensure git boundary plan is explicit:

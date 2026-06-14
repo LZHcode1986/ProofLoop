@@ -64,10 +64,13 @@ artifacts:
     instruction: >
       Generate an evidence ledger seeded from the Brain Dispatch Contract.
       The ledger records: Brain Dispatch Snapshot, Planning Artifacts,
-      Planning Contract Result, and Worker Hypothesis Verification Sections.
+      Planning Contract Result, Worker Hypothesis Verification Sections,
+      and Execution Summary.
       Worker writes only assigned task/hypothesis sections.
-      Verifier receipts, executor summaries, stage reviews, and archive results
-      live outside the ledger in their respective receipts.
+      Code Verifier receipts and Committer boundary receipts remain authoritative
+      and are indexed by reference in Execution Summary.
+      Stage Review and archive result live outside the ledger in Implementation Reviewer
+      output and Committer archive-output receipt.
       The ledger must not contain final verdicts (PASS/FAIL/blocked/confirmed).
       It must not introduce new requirements.
     requires:
@@ -87,9 +90,9 @@ apply:
     - dispatch Worker for tasks
     - collect Completion Receipts
     - dispatch Committer for task-diff-snapshot receipts after Worker tasks
-    - assemble Evidence Packets
+    - dispatch Reconciliation to record Execution Summary in proofloop/evidence-ledger.md
     - dispatch Code Verifier for every slice
     - dispatch Committer for slice-output commit after slice verifier PASS
     - stop and return blockers to Brain when contracts are insufficient
 
-    High-risk requirements are handled through Required Review Skills, not a separate P2 flow.
+    High-risk requirements are handled through Risk Profile, stricter acceptance criteria, stronger evidence requirements, and Implementation Reviewer stage review.
