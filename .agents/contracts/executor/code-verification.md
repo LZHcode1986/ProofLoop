@@ -86,6 +86,14 @@ Required for recheck mode only:
 
 ## Proof Profile Refutation
 
+Profile-specific refutation is a second-pass refutation.
+
+Code Verifier first performs independent refutations from Slice Contract, covered tasks, changed files, diffs, boundary receipts, and declared verification method before reading Worker Evidence Ledger sections.
+
+After Worker Evidence Ledger sections are read, Code Verifier uses the Worker Proof Profile declaration to add the matching profile-specific refutation.
+
+Profile-specific refutation does not override the adversarial-first rule and does not make Worker evidence the starting proof.
+
 If a Worker Evidence Ledger section declares:
 
 ```text
