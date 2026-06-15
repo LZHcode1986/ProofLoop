@@ -87,9 +87,10 @@ Worker must read only the `Contract Ref` supplied in the Dispatch Envelope.
 Worker must not browse `.agents/contracts/` generally.
 
 Worker may read only:
+- the supplied Contract Ref;
 - `.agents/contracts/proof-profiles.md`;
-- explicit source artifacts and context files supplied in the dispatch packet;
-- required skill instructions named by the dispatch packet.
+- explicit source artifacts and context files supplied in the dispatch envelope;
+- required skill instructions named by the dispatch envelope.
 
 Worker must not read other `.agents/contracts/` files during task execution.
 
@@ -106,11 +107,7 @@ Worker must strictly adhere to non-interactive runtime and fail-fast rules:
 
 ## Skill usage
 
-When loading `test-driven-development`, do not rewrite the skill. Follow ProofLoop overlay rules in:
-
-```text
-.agents/contracts/proofloop-skill-usage.md
-```
+When loading `test-driven-development`, follow standard test-driven-development skill instructions. Do not rewrite the skill.
 
 ## Evidence Ledger responsibility
 

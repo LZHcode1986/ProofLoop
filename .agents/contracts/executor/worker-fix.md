@@ -12,9 +12,6 @@ Worker resolves fix context from the Dispatch Envelope, failed verifier receipt,
 
 If required fix context cannot be resolved, Worker returns the contract-defined blocked receipt.
 
-Also read:
-- .agents/contracts/executor/shared-worker-rules.md
-
 Packet title:
 
 Executor Dispatch: Worker Fix
@@ -41,7 +38,7 @@ Fix mode rules:
 - Preserve original acceptance criteria and allowed file scope.
 - Do not introduce unrelated refactors or behavior.
 
-Packet shape:
+Resolved Execution Context:
 
 Executor Dispatch: Worker Fix
 
@@ -85,8 +82,15 @@ Skill Instructions:
 - Use Shared Worker Dispatch Rules.
 
 Rules:
-- Apply Shared Worker Dispatch Rules.
 - Fix only the listed verifier failure.
+- Do not commit.
+- Do not invoke subagents.
+- Do not broaden scope.
+- If required context is missing, return the contract-defined blocked receipt.
+- Required Skills must be a final explicit list in the dispatch envelope (do not send inherited skill formulas). If none, write None.
+- Skill instructions require loading every listed skill before implementation and reporting evidence of its use.
+- Context files must include only the minimum files or excerpts needed; do not include broad repository background.
+- Allowed file scope must be explicit and narrow enough to prevent unrelated work.
 - Preserve original acceptance criteria and allowed file scope.
 - Do not introduce unrelated refactors or new behavior.
 - If diagnose is listed, use it to reproduce, minimize, hypothesize, instrument, fix, and regression-test.

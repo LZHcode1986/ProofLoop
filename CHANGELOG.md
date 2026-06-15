@@ -8,9 +8,9 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
 - **refactor**: 重构 openspec-apply-change skill 与 Executor 执行状态机，补齐 Proof Profiles 证据反驳闭环，并进行 Executor 瘦身重构
   - `.agents/skills/openspec-apply-change/SKILL.md`: 剥离原生直接实现及与多子代理冲突的行为，改造为纯粹的 OpenSpec apply substrate 接口。
-  - `.opencode/agents/executor.md`: 重构为 Dispatch Envelope + Contract Ref 派发逻辑，引入强 Execution State Machine，剥离 `proofloop-skill-usage.md` 依赖；删除臃肿的离散路由规则，整合为精简的 Ownership & Boundaries 章节，彻底降低模型运行干扰。
-  - `.opencode/agents/worker.md` & `code-verifier.md`: 限制契约目录浏览，接入 Dispatch Envelope Mode；Worker 自行根据执行特征选择 Proof Profile 并写入 Evidence Ledger；Code Verifier 根据 Ledger 中的 profile 声明检索 `proof-profiles.md` 进行反驳。
-  - `.agents/contracts/executor/worker-implementation.md` & `worker-fix.md` & `code-verification.md` & `git-boundary.md`: 增加 `## Dispatch Envelope Mode` 解析声明；在 implementation, fix 与 verification 契约中同步更新了 Proof Profile 证据约束与反驳/返回规约。
+  - `.opencode/agents/executor.md`: 重构为 Dispatch Envelope + Contract Ref 派发逻辑，引入强 Execution State Machine，剥离已手动删除的 `proofloop-skill-usage.md` 依赖；删除臃肿的离散路由规则，整合为精简的 Ownership & Boundaries 章节，彻底降低模型运行干扰。
+  - `.opencode/agents/worker.md` & `code-verifier.md` & `committer.md`: 统一接入 Dispatch Envelope + Contract Ref 模型，完全重构允许读取的白名单限制以规避歧义，去除已失效的 `proofloop-skill-usage.md` 引用。
+  - `.agents/contracts/executor/worker-implementation.md` & `worker-fix.md` & `code-verification.md` & `git-boundary.md`: 增加 `## Dispatch Envelope Mode` 解析声明；将 `shared-worker-rules.md` 完全内联并物理删除该外部契约文件；在契约中将过时的 `Packet shape` 语义标签规范重命名为 `Resolved Execution Context`。
 
 ## v1.1.2
 

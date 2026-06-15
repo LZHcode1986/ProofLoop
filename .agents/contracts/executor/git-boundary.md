@@ -32,7 +32,7 @@ Rules:
 - Boundary receipt is required before the next Worker or verifier dispatch.
 - If Committer returns failure, Executor stops and reports blocker.
 
-Packet shape:
+Resolved Execution Context:
 
 Executor Dispatch: Git Boundary
 

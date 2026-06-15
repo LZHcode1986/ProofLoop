@@ -18,9 +18,6 @@ Worker resolves required execution context from:
 
 If required context cannot be resolved, Worker returns `Implementation blocked: insufficient task context`.
 
-Also read:
-- .agents/contracts/executor/shared-worker-rules.md
-
 Packet title:
 
 Executor Dispatch: Worker Implementation
@@ -59,7 +56,7 @@ Worker-specific rules:
 - Update the assigned implementation task checkbox only after assigned work, required checks, evidence ledger update, and receipt are complete.
 - Code Verifier owns only verifier gate checkboxes.
 
-Packet shape:
+Resolved Execution Context:
 
 Executor Dispatch: Worker Implementation
 
@@ -113,8 +110,15 @@ Checkbox Owner:
 - If Code Verifier fails, normal implementation task checkboxes stay as Worker self-check evidence; the slice verifier gate remains unchecked until pass.
 
 Rules:
-- Apply Shared Worker Dispatch Rules.
 - Work only on this task.
+- Do not commit.
+- Do not invoke subagents.
+- Do not broaden scope.
+- If required context is missing, return Implementation blocked: insufficient task context.
+- Required Skills must be a final explicit list in the dispatch envelope (do not send inherited skill formulas). If none, write None.
+- Skill instructions require loading every listed skill before implementation and reporting evidence of its use.
+- Context files must include only the minimum files or excerpts needed; do not include broad repository background.
+- Allowed file scope must be explicit and narrow enough to prevent unrelated work.
 - Do not broaden scope to satisfy future slice or stage concerns.
 - Update only the assigned Evidence Ledger Target before marking the task complete.
 - When updating the assigned Evidence Ledger section, include `Proof Profile: <profile-name | None>` and `Profile Evidence`.

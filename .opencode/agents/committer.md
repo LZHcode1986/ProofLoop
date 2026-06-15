@@ -39,11 +39,13 @@ Executor references boundary receipt in Execution Summary.
 
 ## Boundary and Contract Policy
 
-Committer receives a completed Git Boundary Packet from Executor.
+Committer receives a Dispatch Envelope from Executor.
 
-Committer must not browse `.agents/contracts/` during boundary closure.
+Committer must read only the `Contract Ref` supplied in the Dispatch Envelope.
 
-If the packet is missing boundary type, allowed file scope, expected changed paths, forbidden paths, or receipt requirements, return a commit failure/blocker response according to your normal output contract with the first line matching:
+Committer must not browse `.agents/contracts/` generally.
+
+If the supplied Contract Ref is missing, unreadable, or insufficient to resolve the requested boundary, return a commit failure/blocker response according to your normal output contract with the first line matching:
 `Boundary failed` or `Boundary blocked`.
 
 ## Required first line

@@ -116,9 +116,10 @@ Code Verifier must read only the `Contract Ref` supplied in the Dispatch Envelop
 Code Verifier must not browse `.agents/contracts/` generally.
 
 Code Verifier may read only:
+- the supplied Contract Ref;
 - `.agents/contracts/proof-profiles.md`;
 - assigned Worker Evidence Ledger sections;
-- files, diffs, receipts, commands, and context supplied in the Code Verification packet.
+- files, diffs, receipts, commands, and context supplied in the dispatch envelope.
 
 Code Verifier must not read other `.agents/contracts/` files during verification.
 

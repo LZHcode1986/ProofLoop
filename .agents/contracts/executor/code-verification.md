@@ -126,7 +126,7 @@ Proof Profile is execution evidence, not a `tasks.md` field.
 - diff regression
 - declared risk counterexample
 
-## Packet shape
+## Resolved Execution Context
 
 Executor Dispatch: Code Verification
 
