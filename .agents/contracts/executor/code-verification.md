@@ -68,10 +68,14 @@ Required for recheck mode only:
 ## Verification rules
 
 - Verify only the assigned slice or verifier gate.
-- Attempt to refute Worker evidence, Worker claims, boundary receipts, actual diffs, and implementation against the Slice Contract and acceptance criteria.
+- Start from Slice Contract, covered tasks, changed files, diffs, boundary receipts, and declared verification method.
+- Before reading Worker Evidence Ledger sections, identify and attempt likely counterexamples against the implemented slice behavior.
+- Read Worker Evidence Ledger sections only after refutation planning/execution.
+- Treat Worker evidence as claims to compare against refutation results, not as the starting proof.
+- If any required refutation succeeds, return `Verification failed`.
+- If all required refutations fail, return `Verification passed`.
+- If a required refutation cannot be attempted because required context or runtime is unavailable, return `Verification blocked`.
 - Use only the supplied gate fields, task packets, boundary receipts, changed files, diffs, and verification commands.
-- Inspect assigned Worker Evidence Ledger sections, boundary receipts, actual diffs, changed files, and verification commands for every covered Worker attempt.
-- Treat missing required verification context as `Verification blocked` or `Verification failed` according to the dispatch packet.
 - Do not perform a separate Evidence Review phase.
 - Do not implement fixes.
 - Do not commit.
@@ -175,24 +179,53 @@ Return Contract:
 - Verification blocked
 
 On pass, include:
-- x.V checkbox confirmation
-- inspected boundary receipts
-- inspected diffs
-- inspected worker evidence sections
-- inspected Proof Profile declarations
-- profile-specific refutations attempted, or None
-- verification commands or inspection method
-- residual risk, if any
+- x.V checkbox confirmation;
+- attacked Worker claims or slice behaviors;
+- refutations attempted;
+- refutation result for each attempt: failed-to-refute;
+- proof-profile refutations attempted, or None;
+- why the failed refutations do not invalidate the slice;
+- commands or inspections used as supporting evidence;
+- residual risk, if any.
 
 On failure, include:
-- Severity
-- Failed criteria
-- Evidence
-- contradicted worker evidence, if any
-- invalid proof profile, missing profile evidence, or failed profile refutation, if any
-- Minimal repair instruction
+- successful refutation;
+- concrete counterexample;
+- contradicted Worker claim or evidence, if any;
+- failed Slice Contract / AC;
+- minimal repair instruction.
 
 On blocked, include:
-- missing context
-- runtime blocker details
-- smallest additional context required
+- required refutation that could not be attempted;
+- missing context or runtime blocker;
+- smallest additional context required.
+
+### Receipt Structure Template
+
+Code Verifier should structure the return receipt as follows:
+
+```text
+Verification passed | Verification failed | Verification blocked
+
+Refutation Summary:
+- Overall: all required refutations failed | one or more refutations succeeded | required refutation blocked
+
+Refutation Attempts:
+- Target:
+  - Source: Slice Contract / AC / changed behavior / diff / Proof Profile
+  - Attempt:
+  - Result: succeeded | failed-to-refute | blocked
+  - Evidence:
+
+Worker Evidence Comparison:
+- Read after refutation attempts: yes
+- Worker evidence contradicted by refutation: yes/no
+- Worker evidence omitted attacked case: yes/no
+- Missing critical evidence:
+- Consequence: failed | blocked | none
+
+Verdict Basis:
+- If passed: why no attempted refutation invalidated the slice
+- If failed: concrete counterexample and contradicted claim
+- If blocked: smallest missing context needed
+```

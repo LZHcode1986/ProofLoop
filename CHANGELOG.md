@@ -2,6 +2,20 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.2
+
+### 2026-06-15
+
+- **refactor**: Code Verifier 对抗式验证整改方案落地 — 确立对抗优先验证流程、重塑 Worker 证据角色，并规范回执结构
+  - `.opencode/agents/code-verifier.md`:
+    - 确立对抗式定位，将 Worker 证据视作“待攻击的主张”，必须在读取其之前先独立尝试反驳。
+    - 引入 `Adversarial-first verification flow`，规定“独立识别反例 -> 尝试反驳 -> 读取 Worker 证据与凭证 -> 对照 -> verdict”的验证流。
+    - 细化 verdict 说明，任意反驳成功即为 Verification failed，所有反驳失败才为 Verification passed，缺失上下文时为 Verification blocked，并明确 PASS 不等于单纯的证据复核通过。
+  - `.agents/contracts/executor/code-verification.md`:
+    - 调整 `Verification rules`：确立在读取 Worker 证据之前识别并尝试反驳反例的逻辑。
+    - 规范 `Return Contract`：针对 pass、failure、blocked 三种结果分别细化需要包含的对抗佐证或阻碍上下文内容。
+    - 引入 `Receipt Structure Template` 模块，明确回执需包含 Refutation Summary, Refutation Attempts, Worker Evidence Comparison, Verdict Basis 四大核心部分。
+
 ## v1.2.1
 
 ### 2026-06-15
