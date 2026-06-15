@@ -1,4 +1,4 @@
-# Executor Worker Fix Dispatch Contract
+# Worker Fix Dispatch Contract
 
 Use when Executor dispatches a bounded repair or diagnose loop to Worker after verifier failure.
 

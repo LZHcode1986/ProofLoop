@@ -1,4 +1,4 @@
-# Executor Code Verification Dispatch Contract
+# Code Verification Dispatch Contract
 
 Use when Executor dispatches one explicit slice verifier gate to Code Verifier.
 

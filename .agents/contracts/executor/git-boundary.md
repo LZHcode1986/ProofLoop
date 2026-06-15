@@ -1,4 +1,4 @@
-# Executor Git Boundary Dispatch Contract
+# Git Boundary Dispatch Contract
 
 Use when Executor closes a run checkpoint or Worker output boundary through Committer.
 

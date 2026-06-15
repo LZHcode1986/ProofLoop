@@ -1,4 +1,4 @@
-# Executor Worker Implementation Dispatch Contract
+# Worker Implementation Dispatch Contract
 
 Use when Executor dispatches one implementation-ready task to Worker.
 
