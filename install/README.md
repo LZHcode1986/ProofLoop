@@ -40,8 +40,8 @@ Do not overwrite OpenSpec canonical skills or shared TDD skill unless explicitly
 ## Default installed files
 
 ```text
-AGENTS.md
-README.md
+AGENTS.md.example
+tech-spec.md.example
 openspec/config.yaml.example
 openspec/schemas/proofloop-spec-driven/**
 scripts/local-check.sh

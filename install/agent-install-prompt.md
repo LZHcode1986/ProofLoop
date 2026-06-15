@@ -16,8 +16,8 @@ Do not overwrite:
 Install the ProofLoop overlay:
 
 ```text
-AGENTS.md
-README.md
+AGENTS.md.example
+tech-spec.md.example
 .opencode/agents/**
 .agents/contracts/**
 .agents/skills/workflow-intake/**

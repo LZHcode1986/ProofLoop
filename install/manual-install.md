@@ -16,8 +16,8 @@ Do not overwrite these files unless explicitly approved:
 ## Required root files
 
 ```text
-AGENTS.md
-README.md
+AGENTS.md.example
+tech-spec.md.example
 openspec/config.yaml.example
 ```
 

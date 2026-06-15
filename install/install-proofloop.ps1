@@ -47,7 +47,8 @@ if (Test-Path $gitDir) {
 # 3. Existing ProofLoop version detection
 $existingBrain = Join-Path $TargetProjectPath ".opencode/agents/brain.md"
 $existingAGENTS = Join-Path $TargetProjectPath "AGENTS.md"
-if ((Test-Path $existingBrain) -or (Test-Path $existingAGENTS)) {
+$existingAGENTSExample = Join-Path $TargetProjectPath "AGENTS.md.example"
+if ((Test-Path $existingBrain) -or (Test-Path $existingAGENTS) -or (Test-Path $existingAGENTSExample)) {
   Write-Warning "Target project already has ProofLoop overlay."
   if (-not $Force) {
     $confirm = Read-Host "Continue and overwrite core agents/contracts? (y/N)"
@@ -88,8 +89,8 @@ $Contracts = @(
 )
 
 $RootFiles = @(
-  "AGENTS.md",
-  "README.md",
+  "AGENTS.md.example",
+  "tech-spec.md.example",
   "openspec/config.yaml.example"
 )
 
@@ -272,7 +273,8 @@ foreach ($skill in $CanonicalSkills) {
   Write-Host "Verifying installation..." -ForegroundColor Cyan
 
   $requiredFiles = @(
-    "AGENTS.md",
+    "AGENTS.md.example",
+    "tech-spec.md.example",
     ".opencode/agents/brain.md",
     ".opencode/agents/executor.md",
     ".agents/contracts/brain/execute.md",
