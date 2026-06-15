@@ -15,7 +15,7 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
     - 优化 `Phase 1: Preflight`，在 worktree 为 dirty 状态时自动调度 Committer 进行 pre-execution checkpoint 并继续执行，只有在无法安全隔离文件时才 block。
     - 规范 `Phase 2: Worker task loop`，限制 Executor 必须以 `tasks.md` 为唯一调度源，且每个可执行任务只能派发一个 Task ID 对应的 Worker，严禁按范围/slice/文字批处理派发。
   - `.opencode/agents/committer.md`: 升级 `run-preflight` 边界行为，如果 worktree 不干净则为其创建 `pre-execution checkpoint` 并提交后返回 `Boundary closed`，只有无法安全提交时才返回 `Boundary blocked`。
-  - `.agents/contracts/executor/git-boundary.md`: 将 `run-checkpoint` 统一更名为 `run-preflight`，保持与调度术语一致，并更新了 preflight 脏工作区提交行为的说明。
+  - `.agents/contracts/executor/git-boundary.md`: 将 `run-checkpoint` 统一更名为 `run-preflight`，保持与调度术语一致，同时将废弃的 `worker-output` 统一拆分为 `task-diff-snapshot`、`slice-output` 与 `archive-output`，以与 Executor/Committer 实际边界类型完全对齐。
 
 ## v1.2.0
 

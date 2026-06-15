@@ -1,6 +1,6 @@
 # Git Boundary Dispatch Contract
 
-Use when Executor closes a run-preflight checkpoint or Worker output boundary through Committer.
+Use when Executor closes a run-preflight checkpoint, task-diff-snapshot, slice-output, or archive-output boundary through Committer.
 
 ## Dispatch Envelope Mode
 
@@ -36,13 +36,15 @@ Resolved Execution Context:
 
 Executor Dispatch: Git Boundary
 
-Boundary Type: run-preflight | worker-output
+Boundary Type: run-preflight | task-diff-snapshot | slice-output | archive-output
 Change:
-Task ID: <none for run-preflight>
+Task ID: <none for run-preflight, slice-output, and archive-output>
 Attempt: initial | repair-1 | repair-2 | diagnose | none
 Reason:
 - run-preflight: preserve pre-existing dirty worktree before apply execution by creating a checkpoint commit if dirty.
-- worker-output: close the completed Worker attempt before any next Worker or verifier.
+- task-diff-snapshot: record diff evidence after a Worker task without committing.
+- slice-output: create commit after Code Verifier passes a slice.
+- archive-output: create commit for archive output after Brain-authorized archive execution.
 Allowed File Scope:
 Expected Changed Paths:
 Forbidden Paths:
