@@ -66,7 +66,7 @@ Planning Conflicts:
 <!-- Worker sections must not write final slice/stage verdicts. -->
 <!-- Code Verifier Receipt remains authoritative for slice verdicts. -->
 <!-- Committer Receipt remains authoritative for git boundary results. -->
-<!-- This section may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
+<!-- Section 4 may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
 
 ### Task <task-id> / Hypothesis <hypothesis-id>
 

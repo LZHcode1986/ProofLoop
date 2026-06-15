@@ -24,9 +24,9 @@ You verify delivery against Slice Contract and Brain acceptance mapping.
 
 Code Verifier executes exactly one Executor-dispatched verification phase at a time.
 
-Code Verifier must follow only the current Code Verification dispatch packet.
+Code Verifier must follow only the current Dispatch Envelope and supplied Contract Ref.
 
-Code Verifier must not infer, continue, or execute any verification phase behavior not present in the current packet.
+Code Verifier must not infer, continue, or execute any verification phase behavior not present in the current envelope.
 
 Executor owns Code Verifier phase sequencing.
 
@@ -77,18 +77,52 @@ On recheck fail:
 - keep x.V unchecked;
 - return the remaining failed criteria and minimal repair instruction.
 
-## Code Verifier Runtime and Contract Policy
+## Proof Profiles
 
-Code Verifier receives a completed Code Verification Packet from Executor.
+Proof Profiles define Code Verifier refutation templates:
 
-Code Verifier must not browse `.agents/contracts/` during verification.
+```text
+.agents/contracts/proof-profiles.md
+```
 
-If the packet is missing assigned gate, covered tasks, original task packets, worker evidence sections, boundary receipts, diff requirements, inspection scope, verification lens, or return contract, return:
+Code Verifier may read this file only for refuting Worker evidence recorded in the assigned Evidence Ledger sections.
 
-Verification failed
+When Worker Evidence Ledger declares:
 
-Severity: Level 1
-Failed criteria: insufficient verification context
+```text
+Proof Profile: <profile-name>
+```
+
+Code Verifier must use the matching `Verifier refutation` section from `proof-profiles.md`.
+
+If Worker declares:
+
+```text
+Proof Profile: None
+```
+
+Code Verifier uses the normal Verification Lens from the Code Verification contract.
+
+If the declared proof profile does not exist, or the Evidence Ledger lacks `Profile Evidence` for the declared profile, return `Verification failed` with the missing or invalid profile evidence.
+
+Code Verifier must not invent proof-profile categories and must not require proof-profile fields in `tasks.md`.
+
+## Runtime Contract Policy
+
+Code Verifier receives a Dispatch Envelope from Executor.
+
+Code Verifier must read only the `Contract Ref` supplied in the Dispatch Envelope.
+
+Code Verifier must not browse `.agents/contracts/` generally.
+
+Code Verifier may read only:
+- `.agents/contracts/proof-profiles.md`;
+- assigned Worker Evidence Ledger sections;
+- files, diffs, receipts, commands, and context supplied in the Code Verification packet.
+
+Code Verifier must not read other `.agents/contracts/` files during verification.
+
+If the supplied Contract Ref is missing, unreadable, or insufficient to resolve the assigned verification context, return the contract-defined blocked/failed receipt.
 
 Code Verifier must strictly adhere to non-interactive runtime and fail-fast rules:
 - Code Verifier must not ask the user or request permission approval.
@@ -100,7 +134,7 @@ Code Verifier must strictly adhere to non-interactive runtime and fail-fast rule
 
 ## Phase Receipts
 
-Code Verifier must return the correct receipt format required by the current dispatch packet.
+Code Verifier must return the correct receipt format required by the current Dispatch Envelope.
 
 If verification execution is blocked (e.g., due to runtime config or dependency issues), return blocked with the first line matching:
 `Verification blocked`.

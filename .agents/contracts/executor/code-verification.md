@@ -2,6 +2,24 @@
 
 Use when Executor dispatches one explicit slice verifier gate to Code Verifier.
 
+## Dispatch Envelope Mode
+
+This contract is read by `@code-verifier` only when Executor supplies this path as the `Contract Ref` in a Dispatch Envelope.
+
+Executor does not expand this contract into a completed packet.
+
+Code Verifier resolves required verification context from:
+- the Dispatch Envelope;
+- `Task Source`;
+- OpenSpec apply `contextFiles`;
+- Slice Contract and verifier gate in `tasks.md`;
+- Evidence Ledger Worker sections;
+- Worker receipts;
+- boundary receipts;
+- changed files and diffs.
+
+If required verification context cannot be resolved, Code Verifier returns the contract-defined blocked/failed receipt.
+
 This contract has two modes:
 - initial
 - recheck
@@ -61,6 +79,28 @@ Required for recheck mode only:
 - On `Verification passed`, update only the assigned x.V verifier gate checkbox in `tasks.md`.
 - On `Verification failed`, leave the assigned x.V verifier gate checkbox unchecked.
 - On `Verification blocked`, leave the assigned x.V verifier gate checkbox unchecked.
+
+## Proof Profile Refutation
+
+If a Worker Evidence Ledger section declares:
+
+```text
+Proof Profile: <profile-name>
+```
+
+Code Verifier must read `.agents/contracts/proof-profiles.md` and apply the matching `Verifier refutation` template.
+
+If the section declares:
+
+```text
+Proof Profile: None
+```
+
+Code Verifier uses the normal Verification Lens.
+
+If the declared profile does not exist, or required `Profile Evidence` is missing, Code Verifier returns `Verification failed`.
+
+Proof Profile is execution evidence, not a `tasks.md` field.
 
 ## Recheck rules
 
@@ -139,6 +179,8 @@ On pass, include:
 - inspected boundary receipts
 - inspected diffs
 - inspected worker evidence sections
+- inspected Proof Profile declarations
+- profile-specific refutations attempted, or None
 - verification commands or inspection method
 - residual risk, if any
 
@@ -147,6 +189,7 @@ On failure, include:
 - Failed criteria
 - Evidence
 - contradicted worker evidence, if any
+- invalid proof profile, missing profile evidence, or failed profile refutation, if any
 - Minimal repair instruction
 
 On blocked, include:

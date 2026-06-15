@@ -2,6 +2,22 @@
 
 Use when Executor dispatches one implementation-ready task to Worker.
 
+## Dispatch Envelope Mode
+
+This contract is read by `@worker` only when Executor supplies this path as the `Contract Ref` in a Dispatch Envelope.
+
+Executor does not expand this contract into a completed packet.
+
+Worker resolves required execution context from:
+- the Dispatch Envelope;
+- `Task Source`;
+- OpenSpec apply `contextFiles`;
+- Slice Contract in `tasks.md`;
+- Evidence Ledger path;
+- receipt refs, when supplied.
+
+If required context cannot be resolved, Worker returns `Implementation blocked: insufficient task context`.
+
 Also read:
 - .agents/contracts/executor/shared-worker-rules.md
 
@@ -35,6 +51,9 @@ Worker-specific rules:
 - Work only on this task.
 - Do not broaden scope to satisfy future slice or stage concerns.
 - Update only the assigned Evidence Ledger Target before marking the task complete.
+- When updating the assigned Evidence Ledger section, include `Proof Profile: <profile-name | None>` and `Profile Evidence`.
+- Select the proof profile from `.agents/contracts/proof-profiles.md` based on the actual assigned task and produced evidence.
+- Do not broaden implementation scope merely to satisfy a proof profile.
 - Do not write final slice/stage verdicts.
 - Return evidence ledger section updated in the Worker receipt.
 - Update the assigned implementation task checkbox only after assigned work, required checks, evidence ledger update, and receipt are complete.
@@ -75,6 +94,9 @@ Evidence Ledger Target:
 - path: proofloop/evidence-ledger.md
 - section: ## 3. Worker Hypothesis Verification Sections > Task <task-id>
 - expected evidence:
+  - Proof Profile: <profile-name | None>
+  - Profile Evidence:
+    - <evidence item>
 
 Boundary Receipt Required:
 - commit receipt
@@ -95,6 +117,9 @@ Rules:
 - Work only on this task.
 - Do not broaden scope to satisfy future slice or stage concerns.
 - Update only the assigned Evidence Ledger Target before marking the task complete.
+- When updating the assigned Evidence Ledger section, include `Proof Profile: <profile-name | None>` and `Profile Evidence`.
+- Select the proof profile from `.agents/contracts/proof-profiles.md` based on the actual assigned task and produced evidence.
+- Do not broaden implementation scope merely to satisfy a proof profile.
 - Do not write final slice/stage verdicts.
 - Return evidence ledger section updated in the Worker receipt.
 - Update the assigned implementation task checkbox only after assigned work, required checks, evidence ledger update, and receipt are complete.

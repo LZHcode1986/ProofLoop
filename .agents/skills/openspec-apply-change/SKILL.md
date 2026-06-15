@@ -1,6 +1,6 @@
 ---
 name: openspec-apply-change
-description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
+description: Read OpenSpec apply substrate for an active change. Use when Executor needs change selection, status, apply instructions, context files, progress, and remaining task state before ProofLoop execution.
 license: MIT
 compatibility: Requires openspec CLI.
 metadata:
@@ -9,148 +9,145 @@ metadata:
   generatedBy: "1.3.1"
 ---
 
-Implement tasks from an OpenSpec change.
+# openspec-apply-change
 
-**Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
+Use this skill to obtain OpenSpec apply substrate for an active change.
 
-**Steps**
+When used by `@executor`, this skill does not implement tasks directly.
+ProofLoop multi-agent execution is owned by `executor.md`.
 
-1. **Select the change**
+## Input
 
-   If a name is provided, use it. Otherwise:
-   - Infer from conversation context if the user mentioned a change
-   - Auto-select if only one active change exists
-   - If ambiguous, run `openspec list --json` to get available changes and use the **AskUserQuestion tool** to let the user select
+Optionally specify a change name.
 
-   Always announce: "Using change: <name>" and how to override (e.g., `/opsx-apply <other>`).
+If omitted:
+- infer from conversation context if one active change is clear;
+- auto-select if only one active change exists;
+- if ambiguous, run `openspec list --json` and return `Execution blocked` with candidate changes.
 
-2. **Check status to understand the schema**
-   ```bash
-   openspec status --change "<name>" --json
-   ```
-   Parse the JSON to understand:
-   - `schemaName`: The workflow being used (e.g., "spec-driven")
-   - Which artifact contains the tasks (typically "tasks" for spec-driven, check status for others)
+Do not ask the user directly from Executor mode.
 
-3. **Get apply instructions**
+Always announce:
 
-   ```bash
-   openspec instructions apply --change "<name>" --json
-   ```
-
-   This returns:
-   - `contextFiles`: artifact ID -> array of concrete file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
-   - Progress (total, complete, remaining)
-   - Task list with status
-   - Dynamic instruction based on current state
-
-   **Handle states:**
-   - If `state: "blocked"` (missing artifacts): show message, suggest using openspec-continue-change
-   - If `state: "all_done"`: congratulate, suggest archive
-   - Otherwise: proceed to implementation
-
-4. **Read context files**
-
-   Read every file path listed under `contextFiles` from the apply instructions output.
-   The files depend on the schema being used:
-   - **spec-driven**: proposal, specs, design, tasks
-   - Other schemas: follow the contextFiles from CLI output
-
-5. **Show current progress**
-
-   Display:
-   - Schema being used
-   - Progress: "N/M tasks complete"
-   - Remaining tasks overview
-   - Dynamic instruction from CLI
-
-6. **Implement tasks (loop until done or blocked)**
-
-   For each pending task:
-   - Show which task is being worked on
-   - Make the code changes required
-   - Keep changes minimal and focused
-   - Mark task complete in the tasks file: `- [ ]` → `- [x]`
-   - Continue to next task
-
-   **Pause if:**
-   - Task is unclear → ask for clarification
-   - Implementation reveals a design issue → suggest updating artifacts
-   - Error or blocker encountered → report and wait for guidance
-   - User interrupts
-
-7. **On completion or pause, show status**
-
-   Display:
-   - Tasks completed this session
-   - Overall progress: "N/M tasks complete"
-   - If all done: suggest archive
-   - If paused: explain why and wait for guidance
-
-**Output During Implementation**
-
-```
-## Implementing: <change-name> (schema: <schema-name>)
-
-Working on task 3/7: <task description>
-[...implementation happening...]
-✓ Task complete
-
-Working on task 4/7: <task description>
-[...implementation happening...]
-✓ Task complete
+```text
+Using change: <name>
 ```
 
-**Output On Completion**
+## Steps
 
-```
-## Implementation Complete
+### 1. Select the change
 
-**Change:** <change-name>
-**Schema:** <schema-name>
-**Progress:** 7/7 tasks complete ✓
+Use the provided change name, inferred change name, or the only active change.
 
-### Completed This Session
-- [x] Task 1
-- [x] Task 2
-...
+If ambiguous:
 
-All tasks complete! Ready to archive this change.
+```text
+Execution blocked
+Reason: ambiguous OpenSpec change
+Candidates:
+- <change>
 ```
 
-**Output On Pause (Issue Encountered)**
+### 2. Check status
 
-```
-## Implementation Paused
+Run:
 
-**Change:** <change-name>
-**Schema:** <schema-name>
-**Progress:** 4/7 tasks complete
-
-### Issue Encountered
-<description of the issue>
-
-**Options:**
-1. <option 1>
-2. <option 2>
-3. Other approach
-
-What would you like to do?
+```bash
+openspec status --change "<name>" --json
 ```
 
-**Guardrails**
-- Keep going through tasks until done or blocked
-- Always read context files before starting (from the apply instructions output)
-- If task is ambiguous, pause and ask before implementing
-- If implementation reveals issues, pause and suggest artifact updates
-- Keep code changes minimal and scoped to each task
-- Update task checkbox immediately after completing each task
-- Pause on errors, blockers, or unclear requirements - don't guess
-- Use contextFiles from CLI output, don't assume specific file names
+Parse:
+- schemaName;
+- task artifact;
+- artifact completion state.
 
-**Fluid Workflow Integration**
+### 3. Get apply instructions
 
-This skill supports the "actions on a change" model:
+Run:
 
-- **Can be invoked anytime**: Before all artifacts are done (if tasks exist), after partial implementation, interleaved with other actions
-- **Allows artifact updates**: If implementation reveals design issues, suggest updating artifacts - not phase-locked, work fluidly
+```bash
+openspec instructions apply --change "<name>" --json
+```
+
+Use the result for:
+- contextFiles;
+- progress;
+- task list and status;
+- dynamic apply instruction;
+- apply state.
+
+### 4. Handle apply state
+
+If `state: "blocked"`:
+
+```text
+Execution blocked
+Reason: missing or incomplete OpenSpec apply artifacts
+```
+
+If `state: "all_done"`:
+
+```text
+Apply substrate complete
+State: all_done
+Next owner: Executor / Brain flow
+```
+
+Do not declare archive readiness.
+
+Otherwise:
+
+```text
+Apply substrate ready
+State: active
+```
+
+### 5. Read context files
+
+Read every file path listed under `contextFiles` from the apply instructions output.
+
+Use contextFiles from the CLI output. Do not assume fixed filenames.
+
+## ProofLoop Executor Mode
+
+When used by `@executor`, this skill provides OpenSpec apply substrate only.
+
+Executor may use this skill to:
+- select or confirm the active change;
+- run `openspec status --change "<name>" --json`;
+- run `openspec instructions apply --change "<name>" --json`;
+- read returned `contextFiles`;
+- understand progress, state, remaining tasks, and dynamic apply instruction.
+
+This skill does not own ProofLoop multi-subagent execution.
+
+When used by `@executor`, do not:
+- implement code directly;
+- edit files directly;
+- mark task checkboxes directly;
+- ask the user directly;
+- update planning artifacts directly;
+- declare archive readiness.
+
+If the selected change is ambiguous, artifacts are missing, or the apply substrate is blocked, return `Execution blocked` with the smallest blocker summary to Brain.
+
+After apply substrate discovery, Executor follows `executor.md` for ProofLoop execution state sequencing.
+
+## Output
+
+```text
+OpenSpec Apply Substrate
+
+Change:
+Schema:
+State: active | blocked | all_done
+Progress:
+Context Files:
+- <path>
+Remaining Tasks:
+- <task id / summary>
+Dynamic Instruction:
+- <summary>
+Blocker:
+- <only if blocked>
+```

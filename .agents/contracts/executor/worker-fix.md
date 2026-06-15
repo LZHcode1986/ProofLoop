@@ -2,6 +2,16 @@
 
 Use when Executor dispatches a bounded repair or diagnose loop to Worker after verifier failure.
 
+## Dispatch Envelope Mode
+
+This contract is read by `@worker` only when Executor supplies this path as the `Contract Ref` in a Worker Fix Dispatch Envelope.
+
+Executor does not expand this contract into a completed packet.
+
+Worker resolves fix context from the Dispatch Envelope, failed verifier receipt, task source, Evidence Ledger, changed files, and receipt refs.
+
+If required fix context cannot be resolved, Worker returns the contract-defined blocked receipt.
+
 Also read:
 - .agents/contracts/executor/shared-worker-rules.md
 
@@ -81,6 +91,8 @@ Rules:
 - Do not introduce unrelated refactors or new behavior.
 - If diagnose is listed, use it to reproduce, minimize, hypothesize, instrument, fix, and regression-test.
 - If the fix changes implementation behavior or verification result, update the assigned Evidence Ledger Target.
+- If the fix changes behavior, evidence, or the applicable proof profile, update the assigned Evidence Ledger section's `Proof Profile` and `Profile Evidence`.
+- Preserve previous profile evidence when still relevant; append repair evidence instead of erasing history.
 - Do not create a separate evidence backfill phase.
 - Preserve original task evidence and add repair evidence / updated verification notes.
 - Return evidence ledger section updated in the Worker Fix receipt.

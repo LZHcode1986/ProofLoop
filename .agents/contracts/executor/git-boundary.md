@@ -2,6 +2,14 @@
 
 Use when Executor closes a run checkpoint or Worker output boundary through Committer.
 
+## Dispatch Envelope Mode
+
+This contract is read by `@committer` only when Executor supplies this path as the `Contract Ref` in a Dispatch Envelope.
+
+Executor does not expand this contract into a completed packet.
+
+Committer resolves the requested boundary from the Dispatch Envelope and current repository state.
+
 Packet title:
 
 Executor Dispatch: Git Boundary
