@@ -1,6 +1,6 @@
 # Git Boundary Dispatch Contract
 
-Use when Executor closes a run checkpoint or Worker output boundary through Committer.
+Use when Executor closes a run-preflight checkpoint or Worker output boundary through Committer.
 
 ## Dispatch Envelope Mode
 
@@ -36,12 +36,12 @@ Resolved Execution Context:
 
 Executor Dispatch: Git Boundary
 
-Boundary Type: run-checkpoint | worker-output
+Boundary Type: run-preflight | worker-output
 Change:
-Task ID: <none for run-checkpoint>
+Task ID: <none for run-preflight>
 Attempt: initial | repair-1 | repair-2 | diagnose | none
 Reason:
-- run-checkpoint: preserve pre-existing dirty worktree before apply execution.
+- run-preflight: preserve pre-existing dirty worktree before apply execution by creating a checkpoint commit if dirty.
 - worker-output: close the completed Worker attempt before any next Worker or verifier.
 Allowed File Scope:
 Expected Changed Paths:

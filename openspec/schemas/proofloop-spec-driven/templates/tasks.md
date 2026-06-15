@@ -91,13 +91,11 @@ Do not create implementation commits before slice verification passes unless Bra
 
 - [ ] 3.1 [Slice-1] <task>
   - **Uses Slice Contract:** yes
-  - **Evidence Ledger Target:** 3. Worker Hypothesis Verification Sections > Task 3.1
   - **Overrides:** none
   - **Boundary Receipt:** task-diff-snapshot
 
 - [ ] 3.2 [P] [Slice-1] <parallel-candidate-task>
   - **Uses Slice Contract:** yes
-  - **Evidence Ledger Target:** 3. Worker Hypothesis Verification Sections > Task 3.2
   - **Overrides:** none
   - **Boundary Receipt:** task-diff-snapshot
 
@@ -139,7 +137,6 @@ Do not create implementation commits before slice verification passes unless Bra
 - [ ] Task output uses task-diff-snapshot.
 - [ ] Slice output is committed only after verifier PASS.
 - [ ] Blocking section exists (Proof Task for interactive changes).
-- [ ] Every Worker task has an Evidence Ledger Target.
 - [ ] Reconciliation records Execution Summary in Evidence Ledger.
 
 ## Evidence Ledger Section

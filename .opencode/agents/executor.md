@@ -94,7 +94,7 @@ If substrate is blocked or ambiguous, return `Execution blocked` to Brain.
 
 ### Phase 1: Preflight
 
-Dispatch `@committer` with a Dispatch Envelope:
+Before first Worker dispatch, dispatch `@committer` with a Dispatch Envelope:
 
 ```text
 Target Agent: committer
@@ -105,7 +105,22 @@ Boundary ID: run-preflight
 
 Wait for the committer receipt.
 
+- If the worktree is clean, continue.
+- If the worktree is dirty, Committer creates a pre-execution checkpoint commit, then continue.
+- If Committer cannot safely separate files, return `Execution blocked`.
+
 ### Phase 2: Worker task loop
+
+Executor uses tasks.md as the scheduling source.
+
+For each executable task, dispatch exactly one Worker with exactly one Task ID.
+
+Do not dispatch one Worker for:
+- a task range;
+- a whole slice;
+- multiple task IDs;
+
+When tasks.md marks tasks as `[P]`, follow the parallel-candidate semantics already defined in tasks.md. Parallel scheduling, if used, still means multiple one-task Worker dispatches, not one batch Worker dispatch.
 
 For each executable Worker task:
 
@@ -134,6 +149,8 @@ Receipt Refs: <Worker receipt>
 ```
 
 Wait for task-diff-snapshot receipt.
+
+Before a verifier gate, ensure all covered task receipts and task-diff-snapshot receipts have been collected.
 
 ### Phase 3: Slice verification loop
 

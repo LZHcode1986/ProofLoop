@@ -95,8 +95,8 @@ After Brain-authorized archive execution by general:
 Inspect worktree before execution.
 
 - If clean: return `Boundary clean`.
-- If dirty unrelated files exist: return `Boundary blocked`.
-- Do not auto-commit pre-existing dirty work unless explicitly instructed.
+- If dirty: Create a pre-execution checkpoint commit (e.g., `pre-execution checkpoint: <context>`) containing the dirty files, then return `Boundary closed`.
+- If Committer cannot safely commit the dirty files, return `Boundary blocked`.
 
 ### task-diff-snapshot
 

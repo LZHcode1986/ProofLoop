@@ -83,11 +83,8 @@ After skill output, before reporting readiness, verify:
 6. tasks contains `## Parallel Opportunities`.
 7. parallel candidate tasks use `[P]`.
 8. Reconciliation contains Record Execution Summary targeting `proofloop/evidence-ledger.md` Section 4.
-9. Every Worker task has an Evidence Ledger Target.
-10. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
-11. Every spec dir name matches kebab-case: `/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/`.
-    - Exclude: leading number, trailing -bN/-vN, fix-/remediation-/visible- prefix, stage-N- prefix.
-    - If any spec name fails: output `Planning blocked`.
+9. Evidence Ledger template follows Worker-owned model (no old owner model, no CV result sections).
+10. `bash scripts/local-check.sh` passes.
 
 If any gate fails: output `Planning blocked`.
 
@@ -111,6 +108,7 @@ If any gate fails: output `Planning blocked`.
 `Proposal ready` may be reported only when:
 
 - `openspec validate <change> --strict` passes after the latest Propose artifact edit.
+- `bash scripts/local-check.sh` passes after the latest Propose edit.
 - The latest `planning-contract-verifier` result was produced after the latest Propose artifact edit.
 - The latest `planning-contract-verifier` result is `READY` or acceptable `READY_WITH_WARNINGS`.
 - No `BLOCKED` projection defect exists.
@@ -197,7 +195,7 @@ Next action:
 ## Fail-closed rules
 
 ```text
-openspec validate --strict failed:
+openspec validate --strict failed or bash scripts/local-check.sh failed:
   => Final output MUST be "Planning blocked"
   => proposal MUST NOT be reported as ready
   => tasks readiness MUST NOT be considered passed

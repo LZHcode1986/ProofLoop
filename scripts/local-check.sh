@@ -43,20 +43,22 @@ echo "[4/5] Checking for common issues..."
 # 5. Spec naming check
 echo "[5/5] Checking spec naming..."
 error=0
-for dir in openspec/specs/*/; do
+shopt -s nullglob 2>/dev/null || true
+for dir in openspec/specs/*/ openspec/changes/*/specs/*/; do
     if [ -d "$dir" ]; then
         name=$(basename "$dir")
         if ! echo "$name" | grep -qE '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'; then
-            echo "FAIL: Invalid spec name: $name"
+            echo "FAIL: Invalid spec name: $name in $dir"
             error=1
         fi
         # Check for forbidden patterns
         if echo "$name" | grep -qE '^(stage-|fix-|remediation-|visible-)'; then
-            echo "FAIL: Spec name contains stage/fix/remediation/visible prefix: $name"
+            echo "FAIL: Spec name contains forbidden prefix: $name in $dir"
             error=1
         fi
     fi
 done
+shopt -u nullglob 2>/dev/null || true
 if [ "$error" -eq 1 ]; then exit 1; fi
 
 echo "=== All checks passed ==="

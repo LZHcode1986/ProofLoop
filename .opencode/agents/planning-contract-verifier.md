@@ -123,11 +123,10 @@ Required fields:
 - allowed file scope
 - forbidden file scope
 - verification method
-- expected evidence
+- expected evidence sufficient for Worker ledger recording
 - required skills
 - stop conditions
 - checkbox owner / task id
-- evidence ledger target
 - dependencies
 - parallel opportunities
 - `[P]` markers for safe parallel candidates
