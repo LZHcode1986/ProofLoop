@@ -89,7 +89,7 @@ Allowed File Scope:
 
 Evidence Ledger Target:
 - path: proofloop/evidence-ledger.md
-- section: ## 3. Worker Hypothesis Verification Sections > Task <task-id>
+- section: ## 3. Worker Hypothesis Verification Sections > Task <task-id> (or ## 4. Execution Summary for Reconciliation task)
 - expected evidence:
   - Proof Profile: <profile-name | None>
   - Profile Evidence:

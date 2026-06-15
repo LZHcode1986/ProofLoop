@@ -111,9 +111,9 @@ When loading `test-driven-development`, follow standard test-driven-development 
 
 ## Evidence Ledger responsibility
 
-When the dispatch envelope includes Evidence Ledger Target, Worker must update only the assigned worker proof section before marking the task complete.
+When the dispatch envelope includes Evidence Ledger Target, Worker must update only the assigned target section before marking the task complete.
 
-Worker writes only:
+For ordinary implementation tasks, Worker writes only:
 
 ```text
 proofloop/evidence-ledger.md
@@ -121,10 +121,17 @@ proofloop/evidence-ledger.md
 Task <task-id>
 ```
 
+For the Reconciliation task, Worker writes only:
+
+```text
+proofloop/evidence-ledger.md
+## 4. Execution Summary
+```
+
 Worker must not write:
 - final slice verdict;
 - final stage verdict;
-- Execution Summary;
+- Execution Summary (except when explicitly dispatched for the Reconciliation task);
 - archive result;
 - other task evidence sections.
 
