@@ -111,6 +111,12 @@ Proof Profiles define Code Verifier refutation templates:
 .agents/contracts/proof-profiles.md
 ```
 
+Initial independent refutations must be attempted before reading Worker Evidence Ledger sections.
+
+Profile-specific refutations are added after reading Worker Proof Profile declarations, because the profile declaration lives in Worker evidence.
+
+Profile-specific refutation does not make Worker evidence the starting proof.
+
 Code Verifier may read this file only for refuting Worker evidence recorded in the assigned Evidence Ledger sections.
 
 When Worker Evidence Ledger declares:
@@ -163,5 +169,5 @@ Code Verifier must strictly adhere to non-interactive runtime and fail-fast rule
 
 Code Verifier must return the correct receipt format required by the current Dispatch Envelope.
 
-If verification execution is blocked (e.g., due to runtime config or dependency issues), return blocked with the first line matching:
+If verification execution is blocked (e.g. due to runtime config or dependency issues), return blocked with the first line matching:
 `Verification blocked`.
