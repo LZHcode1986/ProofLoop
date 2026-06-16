@@ -108,6 +108,12 @@ After `ai-structured-prd` produces PRD Context content or a final PRD draft, Bra
 
 Batch PRD Context updates across multiple user answers before dispatching. Do not dispatch `@general` after every single user answer.
 
+## PRD confirmation → technical handoff
+
+After the user confirms the PRD, if they request technical design or implementation next steps, Brain dispatches `@general` with `brain/technical-handoff.md` to load `prd-to-tech-design-prep`.
+
+Technical handoff is optional — skip it if no technical clarification is needed and proceed directly to stage candidates.
+
 ## Product Stage Candidates
 
 After the PRD is confirmed, prepare stage candidates before dispatching Propose.
@@ -138,6 +144,8 @@ Brain must not create shallow wrapper stages that only move work around without 
 If a boundary is important and two plausible partitions exist, Brain must briefly compare both before choosing.
 
 If Brain cannot justify the selected boundary, Brain must clarify, narrow, or return stage repartition required instead of dispatching Propose.
+
+For PRD-derived Product Stage Candidates, "module boundary" means a user-facing product capability or domain boundary, not a code module, file boundary, framework component, or implementation task group.
 
 ## Specialist ownership
 

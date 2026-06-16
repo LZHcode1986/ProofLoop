@@ -27,6 +27,10 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `.agents/skills/grill-me-prd/`: 删除（旧技能与新流程冲突）
   - `.opencode/agents/propose.md`、`.agents/skills/README.md`、`README.md`、`install/*`: 移除已删除文件 `proofloop-skill-usage.md` 的所有引用
 
+- **refactor**: 将 Brain dispatch 规则从 `ai-structured-prd` skill 移至 `brain.md`（skill 只描述 WHAT，不描述 WHO 派发）
+  - `.agents/skills/ai-structured-prd/SKILL.md`: Step 7 Confirm handoff 删除 "Brain should dispatch `@general`..." 行，改为纯确认描述
+  - `.opencode/agents/brain.md`: 新增 `PRD confirmation → technical handoff` 节，规定 PRD 确认后 Brain 按需派发 `@general` + `technical-handoff.md` 加载 `prd-to-tech-design-prep`
+
 ## v1.2.2
 
 ### 2026-06-15

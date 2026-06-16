@@ -76,7 +76,7 @@ Use the smallest mode that fits the request:
 
 7. **Confirm handoff**
    - Ask the user to confirm the PRD before any technical design.
-   - If the user wants technical next steps, Brain should dispatch `@general` with the `brain/technical-handoff.md` contract to load `prd-to-tech-design-prep`.
+   - If the PRD is confirmed, it is ready for downstream dispatch (technical handoff, stage candidates, or Propose).
 
 ## Clarification question format
 
