@@ -18,6 +18,15 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - `docs/ai-structured-prd/` 和 `docs/prd-to-tech-design-prep/`: 保留作为方法论设计源文件
   - 旧 skills `workflow-intake` 和 `grill-me-prd` 保留但不再被引用
 
+- **refactor**: Stage Candidates 后移至 Review 之后 + 清理 proofloop-skill-usage.md 残留
+  - `.agents/skills/ai-structured-prd/SKILL.md`: Standard workflow 重排为 Draft → Review → Stage Candidates → Confirm，Stage Candidates 仅限 PRD ready 后产出
+  - `.agents/skills/ai-structured-prd/references/prd-template.md`: `Stage Plan` 改名为 `Optional: Product Stage Candidates`，强调产品边界而非技术任务
+  - `.agents/skills/ai-structured-prd/references/review-rubric.md`: 新增 blocking gap — stage candidates 不能写成技术任务拆解
+  - `.opencode/agents/brain.md`: 新增 `Product Stage Candidates` 节，PRD 确认后 Brain 准备 stage candidates 再派发 Propose
+  - `.agents/skills/workflow-intake/`: 删除（旧技能与新流程冲突）
+  - `.agents/skills/grill-me-prd/`: 删除（旧技能与新流程冲突）
+  - `.opencode/agents/propose.md`、`.agents/skills/README.md`、`README.md`、`install/*`: 移除已删除文件 `proofloop-skill-usage.md` 的所有引用
+
 ## v1.2.2
 
 ### 2026-06-15
