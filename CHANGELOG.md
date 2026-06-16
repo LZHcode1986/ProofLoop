@@ -6,6 +6,9 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
 ### 2026-06-16
 
+- **refactor**: test-driven-development skill 更新 — 适配 ProofLoop Worker 执行模型，统一为机械式 RED/GREEN/REFACTOR 循环
+  - `.agents/skills/test-driven-development/SKILL.md`: 重写为 Worker 非交互模式，新增 Required Context 解析、TDD Cycle 完成记录、Stop Conditions 和 Proof Profile 对接
+
 - **refactor**: PRD 工作流整改 — 按方法论报告替换 workflow-intake/grill-me-prd 为 ai-structured-prd/prd-to-tech-design-prep
   - `.agents/skills/ai-structured-prd/`: 新增核心 PRD 技能，覆盖方法论 SOP 7 步（Intent/Context/Draft/Review 四模式 + PRD Context 独立维护 + Stage Partitioning + 100 分评分表）
   - `.agents/skills/prd-to-tech-design-prep/`: 新增后置技能，负责 PRD 确认后的技术澄清、术语检查和 Technical Design Input Brief 生成
