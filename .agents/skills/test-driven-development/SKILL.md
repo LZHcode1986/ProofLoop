@@ -1,119 +1,225 @@
 ---
 name: test-driven-development
-description: Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions "red-green-refactor", wants integration tests, or asks for test-first development.
+description: Use when a implements behavior, fixes a bug, or changes logic. Enforces a mechanical test-first RED/GREEN/REFACTOR loop against the assigned Worker execution context, with optional reference docs loaded only when needed.
 ---
 
 # Test-Driven Development
 
-## Philosophy
+## Core Rule
 
-**Core principle**: Tests should verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't.
+No production behavior change before a failing behavior test or proof probe.
 
-**Good tests** are integration-style: they exercise real code paths through public APIs. They describe _what_ the system does, not _how_ it does it. A good test reads like a specification - "user can checkout with valid cart" tells you exactly what capability exists. These tests survive refactors because they don't care about internal structure.
+Work one behavior at a time.
 
-**Bad tests** are coupled to implementation. They mock internal collaborators, test private methods, or verify through external means (like querying a database directly instead of using the interface). The warning sign: your test breaks when you refactor, but behavior hasn't changed. If you rename an internal function and tests fail, those tests were testing implementation, not behavior.
+## Required Context
 
-See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
+Use only the resolved execution context supplied to the Worker, including when available:
 
-## Anti-Pattern: Horizontal Slices
+- Task Text
+- Task Acceptance Criteria
+- Slice Goal
+- Slice Acceptance Criteria
+- Verification Commands
+- Expected Evidence
+- Allowed / Forbidden File Scope
+- Stop Conditions
+- required source refs
 
-**DO NOT write all tests first, then all implementation.** This is "horizontal slicing" - treating RED as "write all tests" and GREEN as "write all code."
+Do not ask the user.
 
-This produces **crap tests**:
+Do not invent missing behavior.
 
-- Tests written in bulk test _imagined_ behavior, not _actual_ behavior
-- You end up testing the _shape_ of things (data structures, function signatures) rather than user-facing behavior
-- Tests become insensitive to real changes - they pass when behavior breaks, fail when behavior is fine
-- You outrun your headlights, committing to test structure before understanding the implementation
+Return blocked when the resolved execution context does not provide enough information to identify the behavior under test, verification target, expected evidence, or allowed file scope.
 
-**Correct approach**: Vertical slices via tracer bullets. One test → one implementation → repeat. Each test responds to what you learned from the previous cycle. Because you just wrote the code, you know exactly what behavior matters and how to verify it.
+Blocked response:
 
-```
-WRONG (horizontal):
-  RED:   test1, test2, test3, test4, test5
-  GREEN: impl1, impl2, impl3, impl4, impl5
-
-RIGHT (vertical):
-  RED→GREEN: test1→impl1
-  RED→GREEN: test2→impl2
-  RED→GREEN: test3→impl3
-  ...
+```text
+Implementation blocked: insufficient task context
 ```
 
-## Workflow
+## Optional References
 
-### 1. Planning
+Do not load all reference docs by default. Load only the one needed for the current decision:
 
-When exploring the codebase, use the project's domain glossary so that test names and interface vocabulary match the project's language, and respect ADRs in the area you're touching.
+- Read `tests.md` when deciding whether a test observes behavior through a public interface.
+- Read `mocking.md` before adding or relying on mocks.
+- Read `interface-design.md` when the required behavior is hard to test through the current interface.
+- Read `refactoring.md` only during REFACTOR.
+- Read `deep-modules.md` only when refactor work reveals a shallow or over-wide interface.
 
-Before writing any code:
+Do not use reference docs to broaden product scope or override the assigned task context.
 
-- [ ] Confirm with user what interface changes are needed
-- [ ] Confirm with user which behaviors to test (prioritize)
-- [ ] Identify opportunities for [deep modules](deep-modules.md) (small interface, deep implementation)
-- [ ] Design interfaces for [testability](interface-design.md)
-- [ ] List the behaviors to test (not implementation steps)
-- [ ] Get user approval on the plan
+## Choose Test Level
 
-Ask: "What should the public interface look like? Which behaviors are most important to test?"
+Choose the smallest test or proof that can verify the required behavior.
 
-**You can't test everything.** Confirm with the user exactly which behaviors matter most. Focus testing effort on critical paths and complex logic, not every possible edge case.
+| Behavior type | Preferred proof |
+|---|---|
+| Pure logic | Unit test |
+| API, database, file system, or component boundary | Integration test |
+| Page route, user action, or visible UI result | E2E test or runtime proof |
+| Bug fix | Reproduction test that fails before the fix |
+| Behavior not suited to automation | Executable inspection or proof from Verification Commands |
 
-### 2. Tracer Bullet
+Prefer real code paths over mocks.
 
-Write ONE test that confirms ONE thing about the system:
+Use mocks only when real dependencies are unavailable, slow, nondeterministic, or explicitly allowed by the task context.
 
+## TDD Loop
+
+### 1. RED
+
+Write one failing test or proof probe for one required behavior.
+
+The behavior must come from the Worker resolved execution context:
+
+- Task Text
+- Task Acceptance Criteria
+- Slice Goal
+- Slice Acceptance Criteria
+- Verification Commands
+- Expected Evidence
+- Allowed / Forbidden File Scope
+
+The RED test or proof must:
+
+- map to one behavior required by the assigned Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria;
+- use a public interface or observable behavior;
+- stay within Allowed File Scope;
+- fail before implementation;
+- fail for the expected reason.
+
+Run the narrowest command that executes this test or proof.
+
+If it passes immediately, the RED step is invalid. Replace it with a test or proof that demonstrates the required behavior is currently missing or broken.
+
+If it fails because of typo, import error, invalid setup, or unrelated environment failure, fix the test setup and rerun until the failure proves the target behavior is missing.
+
+If the resolved execution context does not provide enough information to identify the behavior under test, return blocked instead of inferring product intent:
+
+```text
+Implementation blocked: insufficient task context
 ```
-RED:   Write test for first behavior → test fails
-GREEN: Write minimal code to pass → test passes
+
+### 2. VERIFY RED
+
+Record the RED evidence before writing production code:
+
+```text
+RED:
+- behavior:
+- test/probe:
+- command:
+- expected failure:
+- actual failure:
 ```
 
-This is your tracer bullet - proves the path works end-to-end.
+Do not write production code until RED is valid.
 
-### 3. Incremental Loop
+### 3. GREEN
 
-For each remaining behavior:
-
-```
-RED:   Write next test → fails
-GREEN: Minimal code to pass → passes
-```
+Implement the smallest change that makes the RED test or proof pass.
 
 Rules:
 
-- One test at a time
-- Only enough code to pass current test
-- Don't anticipate future tests
-- Keep tests focused on observable behavior
+- stay within Allowed File Scope;
+- do not add behavior outside the assigned Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria;
+- do not weaken, delete, or skip the RED test;
+- do not refactor unrelated code;
+- do not fix unrelated issues unless required by the current behavior.
 
-### 4. Refactor
+Run the same narrow test or proof command used for RED.
 
-After all tests pass, look for [refactor candidates](refactoring.md):
+### 4. VERIFY GREEN
 
-- [ ] Extract duplication
-- [ ] Deepen modules (move complexity behind simple interfaces)
-- [ ] Apply SOLID principles where natural
-- [ ] Consider what new code reveals about existing code
-- [ ] Run tests after each refactor step
+The GREEN step is valid only when:
 
-**Never refactor while RED.** Get to GREEN first.
+- the RED test or proof now passes;
+- required local checks from the task context also pass;
+- no tests were skipped, deleted, or weakened.
 
-## Checklist Per Cycle
+Record:
 
-```
-[ ] Test describes behavior, not implementation
-[ ] Test uses public interface only
-[ ] Test would survive internal refactor
-[ ] Code is minimal for this test
-[ ] No speculative features added
+```text
+GREEN:
+- changed files:
+- command:
+- passing result:
 ```
 
-## OpenCode Worker Non-interactive Mode
+### 5. REFACTOR
 
-When this skill is loaded by a `@worker` subagent:
-- Do not ask the user questions.
-- Treat the Task Packet, Slice Contract, and Acceptance Criteria as the approved testing scope.
-- If the public interface, behavior, or verification target is missing or ambiguous, return:
-  `Implementation blocked: untestable task packet`.
-- Do not invent extra product scope to make TDD possible.
-- Produce RED/GREEN/REFACTOR evidence in the required structured fields of the Worker response packet.
+Refactor only after GREEN is valid.
+
+Allowed:
+
+- remove duplication;
+- improve names;
+- simplify structure;
+- move complexity behind the same public interface.
+
+Forbidden:
+
+- adding behavior;
+- changing acceptance semantics;
+- broadening scope;
+- skipping relevant checks after refactor.
+
+After refactor, rerun the relevant test or proof command.
+
+Record:
+
+```text
+REFACTOR:
+- done: yes/no
+- changed files:
+- command:
+- passing result:
+```
+
+## Proof Profile
+
+If the assigned task matches a profile in `.agents/contracts/proof-profiles.md`, record the selected profile and satisfy its minimum evidence.
+
+If no profile fits, use:
+
+```text
+Proof Profile: None
+```
+
+Do not broaden implementation scope to force a profile match.
+
+## Completion Record
+
+Before marking the task complete, record:
+
+```text
+Proof Profile: <profile-name | None>
+
+TDD Cycle:
+- RED evidence:
+- GREEN evidence:
+- REFACTOR evidence:
+
+Mapping:
+- Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria:
+- why this test/proof verifies it:
+
+Residual Risk:
+- untested risk:
+- blocked risk:
+```
+
+## Stop Conditions
+
+Return blocked instead of guessing when:
+
+- behavior under test is ambiguous;
+- verification target is missing;
+- expected evidence is missing;
+- allowed file scope is missing;
+- required runtime dependency is unavailable;
+- implementation requires forbidden files;
+- the required behavior is outside the assigned task or slice context;
+- the only possible proof would rely on unauthorized mocks, secrets, external services, or interactive setup.
+```
