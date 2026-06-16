@@ -2,6 +2,19 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.3
+
+### 2026-06-16
+
+- **refactor**: PRD 工作流整改 — 按方法论报告替换 workflow-intake/grill-me-prd 为 ai-structured-prd/prd-to-tech-design-prep
+  - `.agents/skills/ai-structured-prd/`: 新增核心 PRD 技能，覆盖方法论 SOP 7 步（Intent/Context/Draft/Review 四模式 + PRD Context 独立维护 + Stage Partitioning + 100 分评分表）
+  - `.agents/skills/prd-to-tech-design-prep/`: 新增后置技能，负责 PRD 确认后的技术澄清、术语检查和 Technical Design Input Brief 生成
+  - `.agents/contracts/brain/technical-handoff.md`: 新增 Brain 派发契约，PRD 确认后派发 `@general` 加载 `prd-to-tech-design-prep`
+  - `.opencode/agents/brain.md`: 新增 `PRD file persistence` 节，规定 Brain 运行 `ai-structured-prd` 后通过 `@general` 派发文件写入；skill 权限和规则引用从 `workflow-intake`/`grill-me-prd` 更新为 `ai-structured-prd`/`prd-to-tech-design-prep`
+  - `.agents/skills/README.md`: 更新 workflow orchestration 技能引用和 v3.3 责任模型第 10 条
+  - `docs/ai-structured-prd/` 和 `docs/prd-to-tech-design-prep/`: 保留作为方法论设计源文件
+  - 旧 skills `workflow-intake` 和 `grill-me-prd` 保留但不再被引用
+
 ## v1.2.2
 
 ### 2026-06-15

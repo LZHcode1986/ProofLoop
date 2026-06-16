@@ -34,8 +34,8 @@ permission:
     "git stash*": deny
   skill:
     "*": ask
-    "workflow-intake": allow
-    "grill-me-prd": allow
+    "ai-structured-prd": allow
+    "prd-to-tech-design-prep": allow
   task:
     "*": deny
     "general": allow
@@ -92,13 +92,21 @@ Create a new task only when no valid `task_id` exists or Brain explicitly change
 Never dispatch without a verifiable Brain Dispatch Contract.
 
 If Brain cannot form one:
-- use `workflow-intake` for raw product-definition ambiguity;
-- use `grill-me-prd` for structured PRD-context gaps.
+- use `ai-structured-prd` for raw product-definition ambiguity, structured PRD Context, and review;
+- use `prd-to-tech-design-prep` for PRD-to-technical-design handoff after PRD confirmation.
 
 These are clarification procedures, not workflow routes or gates.
 
 If clarification affects dispatch readiness, persist it through `@general`.
 Brain does not edit `CLARIFY.md` directly.
+
+## PRD file persistence
+
+Brain runs `ai-structured-prd` for conversation, reasoning, and content generation. Brain does not write PRD Context or PRD.md directly.
+
+After `ai-structured-prd` produces PRD Context content or a final PRD draft, Brain dispatches `@general` with the `general-edit` dispatch contract to write or update the file.
+
+Batch PRD Context updates across multiple user answers before dispatching. Do not dispatch `@general` after every single user answer.
 
 ## Stage Planning Discipline
 

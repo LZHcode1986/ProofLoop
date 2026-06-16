@@ -33,8 +33,8 @@ Use `.agents/contracts/proofloop-skill-usage.md` and `.opencode/agents/worker.md
 
 ## Workflow orchestration skills
 
-- `workflow-intake/SKILL.md`
-- `grill-me-prd/SKILL.md`
+- `ai-structured-prd/SKILL.md` — core PRD skill: Intent/Context/Draft/Review modes with PRD Context
+- `prd-to-tech-design-prep/SKILL.md` — post-PRD technical handoff and clarification
 
 ## v3.3 responsibility model
 
@@ -47,3 +47,4 @@ Use `.agents/contracts/proofloop-skill-usage.md` and `.opencode/agents/worker.md
 7. `executor` loads `openspec-apply-change`.
 8. `executor` dispatches `worker`, `code-verifier`, and `committer` using contracts under `.agents/contracts/executor/`.
 9. `implementation-reviewer` loads `openspec-archive-change` only after Brain authorizes archive.
+10. Brain dispatches `@general` to load `prd-to-tech-design-prep` via `brain/technical-handoff.md`.
