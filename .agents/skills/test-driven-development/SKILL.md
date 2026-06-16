@@ -222,4 +222,3 @@ Return blocked instead of guessing when:
 - implementation requires forbidden files;
 - the required behavior is outside the assigned task or slice context;
 - the only possible proof would rely on unauthorized mocks, secrets, external services, or interactive setup.
-```

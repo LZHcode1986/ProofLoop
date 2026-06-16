@@ -65,7 +65,6 @@ scripts/local-check.sh
 .agents/contracts/executor/code-verification.md
 .agents/contracts/executor/shared-worker-rules.md
 .agents/contracts/proof-profiles.md
-.agents/contracts/proofloop-skill-usage.md
 ```
 
 ## Default NOT installed

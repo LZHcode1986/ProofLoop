@@ -32,3 +32,4 @@ Score out of 100. Do not reward technical detail if product intent is unclear.
 - Inferred assumptions are presented as confirmed.
 - Terms such as user, customer, account, admin, project, workspace, or owner are used inconsistently.
 - Product facts that affect implementation are missing, such as login, data persistence, roles, uploads, privacy, or mobile usage.
+- Stage candidates, if present, are technical task breakdowns rather than product-delivery boundaries.

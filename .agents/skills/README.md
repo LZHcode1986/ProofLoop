@@ -29,7 +29,7 @@ Keep these names and files stable for OpenSpec compatibility:
 - `test-driven-development/SKILL.md`
 
 Do not patch this file for ProofLoop worker behavior.  
-Use `.agents/contracts/proofloop-skill-usage.md` and `.opencode/agents/worker.md`.
+Use `.opencode/agents/worker.md`.
 
 ## Workflow orchestration skills
 

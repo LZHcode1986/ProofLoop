@@ -108,6 +108,18 @@ After `ai-structured-prd` produces PRD Context content or a final PRD draft, Bra
 
 Batch PRD Context updates across multiple user answers before dispatching. Do not dispatch `@general` after every single user answer.
 
+## Product Stage Candidates
+
+After the PRD is confirmed, prepare stage candidates before dispatching Propose.
+
+Stage candidates are product-delivery slices for Brain dispatch:
+- Each candidate maps to user-visible value or a coherent product capability.
+- Each candidate preserves PRD acceptance criteria, scope, and non-goals.
+- Candidates do not include file scopes, implementation order, framework choices, database choices, API design, schema, or task breakdown.
+- Output candidates as product boundaries only.
+
+Then select exactly one candidate and dispatch Propose with the `brain/propose.md` contract.
+
 ## Stage Planning Discipline
 
 Brain owns PRD decomposition into stages.

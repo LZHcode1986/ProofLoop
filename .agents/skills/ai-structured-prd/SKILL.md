@@ -60,15 +60,19 @@ Use the smallest mode that fits the request:
    - Use user-observable acceptance criteria: "when..., the user should see/be able to...".
    - Include non-goals and version boundaries.
 
-5. **Partition stage candidates**
-   - Break the PRD into stage candidates before formal planning.
-   - Each stage should: deliver one independently valuable function or module boundary, keep acceptance criteria coherent, minimize change amplification.
-   - Output stage plan in the PRD under the Stage Plan section.
-
-6. **Review PRD**
+5. **Review PRD**
    - Score with the 100-point rubric in `references/review-rubric.md`.
    - Output readiness: `ready`, `mostly ready`, `needs revision`, or `blocked`.
    - If blocked, ask only the highest-leverage clarification question.
+
+6. **Prepare stage candidates only after PRD readiness**
+   - Do not create stage candidates while core PRD facts are still unstable.
+   - Stage candidates are product-delivery slices for Brain dispatch, not technical tasks.
+   - Each candidate must map to user-visible value or a coherent product capability.
+   - Each candidate must preserve PRD acceptance criteria, scope, and non-goals.
+   - Do not include file scopes, implementation order, framework choices, database choices, API design, schema, or task breakdown.
+   - Output stage candidates only after PRD review is `ready` or `mostly ready`, or when Brain explicitly needs dispatch preparation.
+   - Optional reference: `references/prd-template.md` section "Optional: Product Stage Candidates".
 
 7. **Confirm handoff**
    - Ask the user to confirm the PRD before any technical design.
@@ -107,7 +111,10 @@ Output:
 1. `PRD Context Snapshot` summary.
 2. Full PRD using `references/prd-template.md`.
 3. Remaining open questions, separated into critical and optional.
-4. Stage plan with candidates for Brain dispatch.
+4. Optional `Product Stage Candidates` only when:
+   - the PRD is mostly ready or ready;
+   - Brain needs dispatch preparation;
+   - the candidates can be expressed as product value boundaries, not technical work packages.
 
 ### Review mode
 

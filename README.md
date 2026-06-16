@@ -168,7 +168,6 @@ ProofLoop does not rewrite:
 ProofLoop usage constraints live in:
 
 ```text
-.agents/contracts/proofloop-skill-usage.md
 .opencode/agents/*.md
 openspec/schemas/proofloop-spec-driven/**
 openspec/config.yaml
@@ -186,7 +185,6 @@ Worker non-interactive behavior is defined in:
 
 ```text
 .opencode/agents/worker.md
-.agents/contracts/proofloop-skill-usage.md
 ```
 
 ## Planning Contract Verifier
@@ -262,5 +260,5 @@ install/
 1. Read `AGENTS.md`.
 2. Read `.opencode/agents/brain.md`.
 3. Read `.agents/contracts/brain/` and `.agents/contracts/executor/` for packet contracts.
-4. Read `.agents/contracts/proofloop-skill-usage.md`.
+4. Read `.agents/contracts/brain/` and `.agents/contracts/executor/` for packet contracts.
 5. Read `.opencode/agents/committer.md`.

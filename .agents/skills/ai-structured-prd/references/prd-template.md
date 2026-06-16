@@ -81,11 +81,16 @@ Do not specify the technical solution. Explain the product fact.
 ### Later versions
 - [future idea]
 
-## 11. Stage Plan
-| Stage | Objective | Boundary | Out of Scope | Acceptance Criteria |
+## 11. Optional: Product Stage Candidates
+
+Use this section only after the PRD is mostly ready or confirmed.
+
+These are product-delivery slices for Brain dispatch, not technical implementation tasks.
+
+| Candidate | User-visible objective | Product boundary | Out of scope | Acceptance criteria refs |
 |---|---|---|---|---|
-| 1 | [goal] | [scope] | [non-goals] | [AC refs] |
-| 2 | [goal] | [scope] | [non-goals] | [AC refs] |
+| 1 | [what user value this stage delivers] | [what product scope is included] | [what remains excluded] | [AC refs] |
+| 2 | [what user value this stage delivers] | [what product scope is included] | [what remains excluded] | [AC refs] |
 
 ## 12. Risks and edge cases
 - If [edge case], the expected behavior is [handling].

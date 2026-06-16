@@ -41,11 +41,7 @@ If it does not, return `Clarification required`.
 
 Load `openspec-propose` as canonical OpenSpec substrate.
 
-Do not rewrite the skill. Follow ProofLoop overlay rules in:
-
-```text
-.agents/contracts/proofloop-skill-usage.md
-```
+Do not rewrite the skill. ProofLoop overlay rules are in `.agents/contracts/brain/` and `.opencode/agents/`.
 ## Spec delta rule
 
 Before writing `specs/<capability>/spec.md`, inspect existing base specs under `openspec/specs/**`.
