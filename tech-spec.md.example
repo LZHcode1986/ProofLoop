@@ -48,6 +48,22 @@ Document concrete project-specific technical constraints:
 - local service requirements:
 - known command caveats:
 
+## Architecture source of truth
+
+If you are using the AI coding architecture methodology, link the four core architecture files here:
+
+- AI coding architecture: ./ai-coding-architecture.md
+- Contract/state matrix: ./contract-state-matrix.md
+- Hard parts register: ./hard-parts-register.md
+- Task acceptance matrix: ./task-acceptance-matrix.md
+
+## ProofLoop projection rules
+
+- Propose may project these docs into OpenSpec artifacts.
+- Propose must not weaken acceptance criteria.
+- Executor must use tasks and evidence requirements derived from OpenSpec artifacts.
+- Any architecture drift must update the relevant source document through Brain-authorized General edit.
+
 ## Do not put here
 
 - ProofLoop route definitions.
