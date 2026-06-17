@@ -2,6 +2,16 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.5
+
+### 2026-06-17
+
+- **refactor**: ProofLoop Verification-Repair Loop 综合整改方案落地 — 建立有界 Verification-Repair 循环，复用任务上下文，并规范证据账本
+  - `.opencode/agents/executor.md`: 合并 `Phase 3` 与 `Phase 3F` 为有界的 `Verification-Repair Loop`，实现 `repair-1 -> repair-2 -> diagnose -> Brain` 级联升级与 Brain escalation；执行阶段前仅读取对应 phase-specific contract 模版，限制盲目目录索引。
+  - `.agents/contracts/executor/code-verification.md`: Failed receipt 增加 `Impacted Tasks`、`Failure Signature` 和 `Recommended Recheck Scope`；规定 Verifier 必须尽力对失败进行主次任务归因（primary/secondary/uncertain）。
+  - `.agents/contracts/executor/worker-fix.md`: 明确 Worker Fix 是原实施 `task_id` 的 continuation，复用 owner。每个 Worker Fix 限制只修复单个 Task ID。引入 Evidence Ledger 更新规范，必须更新现有 section 并追加 Repair History。
+  - `openspec/schemas/proofloop-spec-driven/templates/evidence-ledger.md`: Task section 模版中新增 `Proof Profile`、`Profile Evidence` 和 `Repair History`；加入规则注释，限制 Worker Fix 产生重复的 top-level task 证据区。
+
 ## v1.2.4
 
 ### 2026-06-17

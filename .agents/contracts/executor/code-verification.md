@@ -78,10 +78,13 @@ Required for recheck mode only:
 - Use only the supplied gate fields, task packets, boundary receipts, changed files, diffs, and verification commands.
 - Do not perform a separate Evidence Review phase.
 - Do not implement fixes.
+- Do not broaden scope.
 - Do not commit.
 - Do not update normal implementation task checkboxes.
 - On `Verification passed`, update only the assigned x.V verifier gate checkbox in `tasks.md`.
 - On `Verification failed`, leave the assigned x.V verifier gate checkbox unchecked.
+- On `Verification failed`, Code Verifier must identify impacted Task ID(s) when possible.
+- If attribution is uncertain, mark the task as uncertain instead of guessing.
 - On `Verification blocked`, leave the assigned x.V verifier gate checkbox unchecked.
 
 ## Proof Profile Refutation
@@ -201,7 +204,15 @@ On failure, include:
 - concrete counterexample;
 - contradicted Worker claim or evidence, if any;
 - failed Slice Contract / AC;
-- minimal repair instruction.
+- minimal repair instruction;
+- Impacted Tasks:
+  - <task-id>: primary | secondary | uncertain
+- Failure Signature:
+  - <stable short signature for repeated-failure detection>
+- Recommended Recheck Scope:
+  - previous failed criteria
+  - repair diff
+  - necessary regression scope
 
 On blocked, include:
 - required refutation that could not be attempted;
@@ -236,4 +247,15 @@ Verdict Basis:
 - If passed: why no attempted refutation invalidated the slice
 - If failed: concrete counterexample and contradicted claim
 - If blocked: smallest missing context needed
+
+Impacted Tasks: (only for failure)
+- <task-id>: primary | secondary | uncertain
+
+Failure Signature: (only for failure)
+- <stable short signature for repeated-failure detection>
+
+Recommended Recheck Scope: (only for failure)
+- previous failed criteria
+- repair diff
+- necessary regression scope
 ```

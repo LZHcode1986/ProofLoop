@@ -38,7 +38,15 @@ Direct Tasks belong to Brain -> general.
 
 ## Dispatch Contract Policy
 
-Executor must not read `.agents/contracts/executor/*.md` during runtime.
+Executor must not browse `.agents/contracts/executor/` as an index during runtime.
+
+Executor must not read executor contracts ahead of their phase.
+
+Immediately before dispatching a phase, Executor must read only the phase-specific Contract Ref used by that dispatch.
+
+Executor must not read unrelated executor contracts.
+
+Executor must not use executor contracts to perform the target subagent's judgment.
 
 Executor dispatches a minimal `Dispatch Envelope`, not a completed contract packet.
 
@@ -46,7 +54,7 @@ Each Dispatch Envelope must include exactly one `Contract Ref` for the target su
 
 The target subagent must read only the supplied `Contract Ref` and must not browse `.agents/contracts/` as a directory.
 
-If Executor reads an execution contract instead of passing it as a `Contract Ref`, that is a protocol defect.
+If Executor reads an execution contract instead of passing it as a `Contract Ref` (except when reading the phase-specific Contract Ref immediately before dispatching that phase), that is a protocol defect.
 
 ## Dispatch Envelope
 
@@ -87,14 +95,14 @@ Executor owns ProofLoop apply execution sequencing.
 
 1. Load `openspec-apply-change`.
 2. Use it only for change selection, OpenSpec status, OpenSpec apply instructions, contextFiles, progress, and state handling.
-3. Do not read `.agents/contracts/executor/*.md`.
+3. Do not read executor contracts ahead of their phase.
 4. Do not implement code, edit files, mark checkboxes, ask the user, update artifacts, or declare archive readiness.
 
 If substrate is blocked or ambiguous, return `Execution blocked` to Brain.
 
 ### Phase 1: Preflight
 
-Before first Worker dispatch, dispatch `@committer` with a Dispatch Envelope:
+Before first Worker dispatch, read `.agents/contracts/executor/git-boundary.md` and dispatch `@committer` with a Dispatch Envelope:
 
 ```text
 Target Agent: committer
@@ -124,6 +132,9 @@ When tasks.md marks tasks as `[P]`, follow the parallel-candidate semantics alre
 
 For each executable Worker task:
 
+Before dispatching Worker implementation, read:
+`.agents/contracts/executor/worker-implementation.md`
+
 Dispatch `@worker` with a Dispatch Envelope:
 
 ```text
@@ -138,7 +149,7 @@ Evidence Ledger Path: proofloop/evidence-ledger.md
 
 Wait for Worker receipt.
 
-Then dispatch `@committer` for task boundary:
+Then read `.agents/contracts/executor/git-boundary.md` and dispatch `@committer` for task boundary:
 
 ```text
 Target Agent: committer
@@ -152,9 +163,17 @@ Wait for task-diff-snapshot receipt.
 
 Before a verifier gate, ensure all covered task receipts and task-diff-snapshot receipts have been collected.
 
-### Phase 3: Slice verification loop
+### Phase 3: Verification-Repair Loop
 
-For each verifier gate after covered Worker task boundaries are closed:
+For each verifier gate after covered Worker task boundaries are closed, Executor runs a bounded verification-repair loop for that gate.
+
+Executor owns loop sequencing only.
+Executor does not verify, diagnose, implement, commit, or reinterpret acceptance criteria.
+
+#### Phase 3.0: Initial verification
+
+Before dispatching Code Verifier, read:
+`.agents/contracts/executor/code-verification.md`
 
 Dispatch `@code-verifier` with a Dispatch Envelope:
 
@@ -174,34 +193,77 @@ Wait for Code Verifier receipt.
 
 If Verification passed:
 - require x.V checkbox confirmation in the verifier receipt;
-- dispatch `@committer` with `git-boundary.md` for `slice-output`.
-
-If Verification failed:
-- enter Phase 3F Worker Fix.
+- read `.agents/contracts/executor/git-boundary.md`;
+- dispatch `@committer` for `slice-output`;
+- continue to the next verifier gate.
 
 If Verification blocked:
-- return `Execution blocked` unless the missing context can be resolved from already-available non-secret context.
+- return `Execution blocked` to Brain.
 
-### Phase 3F: Worker Fix loop
+If Verification failed:
+- enter repair routing for the same verifier gate.
 
-Dispatch `@worker` with a Dispatch Envelope:
+#### Phase 3.1: Repair routing
+
+Executor reads the Code Verifier failed receipt.
+
+The failed receipt should include:
+- Failed Gate;
+- Failed Criteria;
+- Verifier Evidence;
+- Minimal Repair Instruction;
+- Failure Signature;
+- Impacted Tasks:
+  - <task-id>: primary | secondary | uncertain
+
+Executor must not diagnose the cause itself.
+Executor routes repair based on the verifier receipt.
+
+If a valid original implementation task_id exists for an impacted task, Executor must dispatch Worker Fix as a continuation of that same task_id and owner.
+
+#### Phase 3.2: Bounded repair attempts
+
+For the same failed verifier gate, Executor may run at most two repair attempts before diagnose.
+
+Repair attempt rules:
+- repair-1 uses Fix Mode: repair.
+- repair-2 uses Fix Mode: repair.
+- Each Worker Fix dispatch is bounded to one Task ID.
+- Each Worker Fix dispatch reuses the original implementation task_id and owner continuation.
+- Multiple impacted tasks require separate Worker Fix continuations.
+- Prefer sequential repair unless tasks are explicitly parallel-safe and file scopes do not overlap.
+
+Before each Worker Fix dispatch, read:
+`.agents/contracts/executor/worker-fix.md`
+
+Worker Fix Dispatch Envelope:
 
 ```text
 Target Agent: worker
 Phase: worker-fix
 Contract Ref: .agents/contracts/executor/worker-fix.md
+Task ID: <original implementation task-id>
+Continuation: true
+Previous Worker Task ID: <same task-id>
 Gate ID: <failed verifier gate>
 Task Source: <tasks.md path>
 Evidence Ledger Path: proofloop/evidence-ledger.md
-Receipt Refs: <Verification failed receipt>
-Mode: recheck-repair
+Receipt Refs: <original Worker receipt + failed verifier receipt + relevant boundary receipts + prior repair receipts>
+Fix Mode: repair
+Attempt: repair-1 | repair-2
 ```
 
-Wait for Worker Fix receipt.
+After each Worker Fix receipt:
+- read `.agents/contracts/executor/git-boundary.md`;
+- dispatch `@committer` for `task-diff-snapshot`;
+- set Attempt to repair-1 or repair-2.
 
-Dispatch `@committer` with `git-boundary.md` for `task-diff-snapshot`.
+Then recheck the same verifier gate.
 
-Return to the same verifier gate in recheck mode:
+Before recheck, read:
+`.agents/contracts/executor/code-verification.md`
+
+Recheck Dispatch Envelope:
 
 ```text
 Target Agent: code-verifier
@@ -214,9 +276,61 @@ Mode: recheck
 
 Do not restart full verification unless Code Verifier reports that slice boundary, AC mapping, allowed scope, or verification context changed.
 
+#### Phase 3.3: Diagnose escalation
+
+If the same gate still fails after repair-2, or the same Failure Signature repeats twice, enter diagnose.
+
+Before diagnose Worker Fix dispatch, read:
+`.agents/contracts/executor/worker-fix.md`
+
+Diagnose Worker Fix Dispatch Envelope:
+
+```text
+Target Agent: worker
+Phase: worker-fix
+Contract Ref: .agents/contracts/executor/worker-fix.md
+Task ID: <original implementation task-id>
+Continuation: true
+Previous Worker Task ID: <same task-id>
+Gate ID: <failed verifier gate>
+Task Source: <tasks.md path>
+Evidence Ledger Path: proofloop/evidence-ledger.md
+Receipt Refs: <original Worker receipt + verifier failures + repair receipts + boundary receipts>
+Fix Mode: diagnose
+Attempt: diagnose
+Required Skills:
+- diagnose
+Failed Attempts:
+- <repair-1 failure, action, receipt, recheck result>
+- <repair-2 failure, action, receipt, recheck result>
+```
+
+After diagnose Worker Fix receipt:
+- read `.agents/contracts/executor/git-boundary.md`;
+- dispatch `@committer` for `task-diff-snapshot`;
+- set Attempt to diagnose;
+- recheck the same verifier gate.
+
+#### Phase 3.4: Brain escalation
+
+If diagnose recheck still fails, return to Brain.
+
+The Brain return must include:
+- failed gate;
+- latest verifier failure;
+- Failure Signature;
+- impacted task routing;
+- repair-1 / repair-2 / diagnose Worker Fix receipts;
+- task-diff-snapshot boundary receipts;
+- attempted repair actions;
+- diagnose findings or blocker;
+- whether the suspected unresolved issue is implementation, integration, planning/spec ambiguity, verifier ambiguity, or allowed-scope conflict.
+
+Executor must not continue repair attempts after diagnose failure.
+
 ### Phase 4: Reconciliation
 
-After all slice-output commits complete, dispatch the Reconciliation Worker task from `tasks.md` using the same Worker Implementation envelope pattern.
+After all slice-output commits complete, read `.agents/contracts/executor/worker-implementation.md` and dispatch the Reconciliation Worker task from `tasks.md` using the same Worker Implementation envelope pattern.
 
 Reconciliation writes `proofloop/evidence-ledger.md` Section 4 Execution Summary.
 

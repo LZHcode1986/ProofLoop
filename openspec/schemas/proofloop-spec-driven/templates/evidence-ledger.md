@@ -67,6 +67,9 @@ Planning Conflicts:
 <!-- Code Verifier Receipt remains authoritative for slice verdicts. -->
 <!-- Committer Receipt remains authoritative for git boundary results. -->
 <!-- Section 4 may index verdict snapshots and receipt refs without reinterpreting specialist verdicts. -->
+<!-- For an existing Task ID, Worker Fix updates the existing Task section. -->
+<!-- Worker Fix must not create duplicate top-level Task sections for the same Task ID. -->
+<!-- Repair History records concise repair/diagnose attempts; current Worker Verification remains the latest task state. -->
 
 ### Task <task-id> / Hypothesis <hypothesis-id>
 
@@ -86,6 +89,20 @@ Worker Verification:
 - runtime/manual check:
 - fixture/source:
 - residual risk:
+
+Proof Profile:
+<profile-name | None>
+
+Profile Evidence:
+- <evidence item>
+
+Repair History:
+- attempt:
+  mode: initial | repair | diagnose
+  verifier failure addressed:
+  action taken:
+  result:
+  receipt refs:
 
 Worker Category:
 - none
