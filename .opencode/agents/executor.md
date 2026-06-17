@@ -271,6 +271,9 @@ Target Agent: code-verifier
 Phase: code-verification
 Contract Ref: .agents/contracts/executor/code-verification.md
 Gate ID: <same x.V>
+Task Source: <tasks.md path>
+Context Files Source: <OpenSpec apply contextFiles>
+Evidence Ledger Path: proofloop/evidence-ledger.md
 Receipt Refs: <previous failure + Worker Fix receipt + new task-diff-snapshot receipt>
 Mode: recheck
 ```
