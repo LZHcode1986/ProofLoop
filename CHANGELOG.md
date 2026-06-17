@@ -2,6 +2,16 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.4
+
+### 2026-06-17
+
+- **refactor**: 引入 PRD-to-AI-Architecture 方法论并与 ProofLoop 工作流深度整合
+  - `.agents/skills/prd-to-ai-architecture/`: 部署方法论新技能，并新增了对应的模版文件。
+  - `.agents/skills/README.md`: 注册新技能说明，更正 v3.3 职责模型关于 `prd-to-ai-architecture` 的加载和派发说明。
+  - `.opencode/agents/brain.md`: 将新技能加白允许，更正 `PRD confirmation → technical handoff` 路由逻辑，确立由 Brain 加载技能并与用户确认技术架构、由 `@general` 写入或更新文档的机制。
+  - `tech-spec.md`: 新建项目根目录全局技术规范与架构入口索引文件。
+
 ## v1.2.3
 
 ### 2026-06-16

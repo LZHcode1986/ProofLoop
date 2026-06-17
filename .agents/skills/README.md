@@ -35,6 +35,7 @@ Use `.opencode/agents/worker.md`.
 
 - `ai-structured-prd/SKILL.md` — core PRD skill: Intent/Context/Draft/Review modes with PRD Context
 - `prd-to-tech-design-prep/SKILL.md` — post-PRD technical handoff and clarification
+- `prd-to-ai-architecture/SKILL.md` — post-technical-clarification architecture package generator. Produces `tech-spec.md` plus AI coding architecture package (`ai-coding-architecture.md`, `contract-state-matrix.md`, `hard-parts-register.md`, `task-acceptance-matrix.md`). Use only after PRD confirmation and technical design input is ready.
 
 ## v3.3 responsibility model
 
@@ -48,3 +49,4 @@ Use `.opencode/agents/worker.md`.
 8. `executor` dispatches `worker`, `code-verifier`, and `committer` using contracts under `.agents/contracts/executor/`.
 9. `implementation-reviewer` loads `openspec-archive-change` only after Brain authorizes archive.
 10. Brain dispatches `@general` to load `prd-to-tech-design-prep` via `brain/technical-handoff.md`.
+11. Brain loads `prd-to-ai-architecture` after technical handoff to propose and confirm the architecture package, then dispatches `@general` to write or update the files.
