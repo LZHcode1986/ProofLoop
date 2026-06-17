@@ -49,4 +49,4 @@ Use `.opencode/agents/worker.md`.
 8. `executor` dispatches `worker`, `code-verifier`, and `committer` using contracts under `.agents/contracts/executor/`.
 9. `implementation-reviewer` loads `openspec-archive-change` only after Brain authorizes archive.
 10. Brain loads `prd-to-tech-design-prep` when PRD-confirmed work needs user-facing technical clarification; `@general` only persists Brain-confirmed output.
-11. Brain loads `prd-to-ai-architecture` when implementation preparation needs architecture constraints; `@general` only writes or updates the four architecture package files under the `tech-spec/` directory.
+11. Brain loads `prd-to-ai-architecture` when implementation preparation needs architecture constraints; Brain confirms the architecture package artifact by artifact and dispatches `@general` after each confirmed artifact. `@general` only writes or updates the confirmed artifact under the `tech-spec/` directory. After all four artifacts are persisted, Brain performs a package-level consistency check.

@@ -113,13 +113,23 @@ Batch PRD Context updates across multiple user answers before dispatching. Do no
 
 After the user confirms the PRD, if technical clarification is needed, Brain loads `prd-to-tech-design-prep` and confirms the Technical Design Input Brief with the user.
 
-If implementation preparation needs architecture constraints, Brain loads `prd-to-ai-architecture`, proposes the architecture package, and confirms it with the user.
+If implementation preparation needs architecture constraints, Brain loads `prd-to-ai-architecture` and runs an incremental architecture confirmation flow.
 
-After user confirmation, Brain dispatches `@general` with `general-edit` to write or update the architecture package under the `tech-spec/` directory:
+Brain confirms and persists the architecture package artifact by artifact, in this order:
 - `tech-spec/ai-coding-architecture.md`
 - `tech-spec/contract-state-matrix.md`
 - `tech-spec/hard-parts-register.md`
 - `tech-spec/task-acceptance-matrix.md`
+
+For each artifact:
+- ask only the next highest-leverage blocking question, or present a compact candidate if no blocking question remains;
+- confirm the artifact with the user;
+- dispatch `@general` with `general-edit` to write or update only that confirmed artifact;
+- then continue to the next artifact.
+
+After all four artifacts are persisted, Brain performs a package-level consistency check before stage candidates or Propose dispatch.
+
+Brain may batch the package only when the user explicitly requests batch or fast mode.
 
 Brain must not write files directly. `@general` must not load PRD or architecture skills.
 

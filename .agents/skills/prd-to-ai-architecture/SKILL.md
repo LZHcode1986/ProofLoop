@@ -68,6 +68,22 @@ Optional:
    - Before coding, verify all core PRD requirements map to modules, contracts, tasks, and acceptance checks.
    - If critical fields are missing, stop and ask for clarification or record them as assumptions.
 
+## ProofLoop Confirmation Cadence
+
+When used by ProofLoop Brain, do not require one package-wide confirmation before any file is written.
+
+Brain should confirm and persist one artifact at a time:
+1. `tech-spec/ai-coding-architecture.md`
+2. `tech-spec/contract-state-matrix.md`
+3. `tech-spec/hard-parts-register.md`
+4. `tech-spec/task-acceptance-matrix.md`
+
+For each artifact, Brain may ask one blocking question at a time, confirm the artifact with the user, then dispatch `@general` to persist only that confirmed artifact.
+
+The skill may reason about the whole package internally, but user-facing confirmation and file persistence are incremental.
+
+If a later artifact exposes a necessary change to an earlier artifact, Brain must confirm the revision with the user before dispatching `@general` to update the earlier file.
+
 ## Required Outputs
 
 Produce these artifacts unless the user asks for a smaller scope (they should be placed under the `tech-spec/` directory):

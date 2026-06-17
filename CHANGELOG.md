@@ -7,9 +7,9 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 ### 2026-06-17
 
 - **refactor**: 引入 PRD-to-AI-Architecture 方法论并与 ProofLoop 工作流深度整合
-  - `.agents/skills/prd-to-ai-architecture/`: 部署方法论新技能，并将四件套架构产物输出路径变更为 `tech-spec/` 目录。
-  - `.agents/skills/README.md`: 注册新技能说明，更正 v3.3 职责模型以正确表述 Brain 加载技能（prd-to-tech-design-prep 和 prd-to-ai-architecture）、@general 仅将架构包输出到 `tech-spec/` 目录的界限。
-  - `.opencode/agents/brain.md`: 将新技能加白允许，更正 `PRD confirmation → technical handoff` 路由逻辑，确立由 Brain 加载技能并与用户确认技术架构、由 `@general` 写入或更新 `tech-spec/` 下架构四件套文档的机制。
+  - `.agents/skills/prd-to-ai-architecture/`: 部署方法论新技能，将四件套架构产物输出路径变更为 `tech-spec/` 目录，并添加 `ProofLoop Confirmation Cadence` 规范增量落盘。
+  - `.agents/skills/README.md`: 注册新技能说明，更正 v3.3 职责模型以正确表述 Brain 加载技能（prd-to-tech-design-prep 和 prd-to-ai-architecture）并实行增量确认、@general 配合单件落盘至 `tech-spec/` 目录。
+  - `.opencode/agents/brain.md`: 将新技能加白允许，更正 `PRD confirmation → technical handoff` 路由逻辑，确立由 Brain 独立增量确认与单件落盘的机制。
   - `.agents/contracts/brain/technical-handoff.md`: 修正派遣契约中关于加载技能的执行者描述，划清 Brain 与 @general 的职责分工。
   - `tech-spec.md.example`: 同步更新 example 模版文件，指定四件套输出路径，以保持其示范引导功能。
 
