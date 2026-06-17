@@ -26,6 +26,7 @@ Do not:
 - Turn the PRD into a task breakdown.
 - Ask users to understand deep technical terms before explaining them.
 - Reopen product discovery unless a product decision blocks technical design.
+- Run deep architecture grilling. If the conversation moves into architecture trade-offs, framework choices, data ownership, API contracts, or state design, hand off to `prd-to-ai-architecture`.
 
 ## Workflow
 

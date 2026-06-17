@@ -48,23 +48,33 @@ Optional:
    - Mark each item as `confirmed`, `assumed`, or `open`.
    - Do not treat missing technical decisions as confirmed.
 
-2. **Architecture Brief**
+2. **Architecture Grilling With Docs**
+   - Before producing or confirming each architecture artifact, challenge the plan against PRD, technical brief, existing docs, and codebase facts when available.
+   - Ask one blocking architecture question at a time.
+   - If an answer can be derived from existing docs or code, inspect those first instead of asking the user.
+   - When a term is vague or overloaded, propose one canonical term and terms to avoid.
+   - When user assumptions conflict with existing docs or code, surface the conflict and ask which source should win.
+   - Use concrete scenarios to pressure-test roles, permissions, data ownership, state transitions, fallback behavior, integrations, and edge cases.
+   - For each question, provide a recommended default.
+   - Record hard-to-reverse, surprising, or trade-off-heavy decisions in the decision log of `tech-spec/ai-coding-architecture.md`.
+
+3. **Architecture Brief**
    - Create `tech-spec/ai-coding-architecture.md`.
    - Include system context, module boundaries, runtime flows, technical context, and decision log.
    - Keep it lightweight by default; expand only when risk requires it.
 
-3. **Contracts & Constraints**
+4. **Contracts & Constraints**
    - Create `tech-spec/contract-state-matrix.md`.
    - Lock API routes, event streams, file paths, database/JSON schema, task states, ports, and error behavior.
    - Create `tech-spec/hard-parts-register.md`.
    - Explicitly list difficult work that AI must not skip.
 
-4. **Tasks & Tests**
+5. **Tasks & Tests**
    - Create `tech-spec/task-acceptance-matrix.md`.
    - Split implementation into dependency-ordered tasks.
    - Give each task a definition of done, test or acceptance evidence, affected files/modules, and forbidden shortcuts.
 
-5. **Pre-Code Audit**
+6. **Pre-Code Audit**
    - Before coding, verify all core PRD requirements map to modules, contracts, tasks, and acceptance checks.
    - If critical fields are missing, stop and ask for clarification or record them as assumptions.
 
@@ -77,6 +87,8 @@ Brain should confirm and persist one artifact at a time:
 2. `tech-spec/contract-state-matrix.md`
 3. `tech-spec/hard-parts-register.md`
 4. `tech-spec/task-acceptance-matrix.md`
+
+Before confirming each artifact, Brain may run architecture grilling for that artifact. Grilling should stop as soon as the artifact is clear enough to persist; do not keep asking non-blocking questions.
 
 For each artifact, Brain may ask one blocking question at a time, confirm the artifact with the user, then dispatch `@general` to persist only that confirmed artifact.
 
@@ -116,6 +128,10 @@ Do not proceed to implementation planning unless:
 - Hard parts include forbidden shortcuts and minimum acceptable implementation.
 - Tasks are dependency ordered.
 - Each task has acceptance evidence.
+- Domain terms that affect architecture are canonicalized.
+- Key roles, permissions, ownership, and state transitions have been scenario-tested.
+- Architecture-impacting assumptions are labeled as confirmed, assumed, or open.
+- Hard-to-reverse or surprising decisions are captured in the architecture decision log.
 
 ## Anti-Patterns
 
