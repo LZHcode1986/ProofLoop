@@ -251,6 +251,7 @@ Evidence Ledger Path: proofloop/evidence-ledger.md
 Receipt Refs: <original Worker receipt + failed verifier receipt + relevant boundary receipts + prior repair receipts>
 Fix Mode: repair
 Attempt: repair-1 | repair-2
+Required Skills: <original implementation task Required Skills, or None if the original task has no Required Skills>
 ```
 
 After each Worker Fix receipt:
@@ -298,8 +299,7 @@ Evidence Ledger Path: proofloop/evidence-ledger.md
 Receipt Refs: <original Worker receipt + verifier failures + repair receipts + boundary receipts>
 Fix Mode: diagnose
 Attempt: diagnose
-Required Skills:
-- diagnose
+Required Skills: <original implementation task Required Skills + diagnose, or only - diagnose if the original task has no Required Skills>
 Failed Attempts:
 - <repair-1 failure, action, receipt, recheck result>
 - <repair-2 failure, action, receipt, recheck result>
