@@ -52,10 +52,10 @@ Document concrete project-specific technical constraints:
 
 If you are using the AI coding architecture methodology, link the four core architecture files here:
 
-- AI coding architecture: ./ai-coding-architecture.md
-- Contract/state matrix: ./contract-state-matrix.md
-- Hard parts register: ./hard-parts-register.md
-- Task acceptance matrix: ./task-acceptance-matrix.md
+- AI coding architecture: ./tech-spec/ai-coding-architecture.md
+- Contract/state matrix: ./tech-spec/contract-state-matrix.md
+- Hard parts register: ./tech-spec/hard-parts-register.md
+- Task acceptance matrix: ./tech-spec/task-acceptance-matrix.md
 
 ## ProofLoop projection rules
 
