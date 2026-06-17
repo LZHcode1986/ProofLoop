@@ -1,19 +1,19 @@
 # tech-spec.md
 
 ## 1. 技术栈入口
-- Runtime: Node.js (v18+)
-- Backend: Express / TypeScript
-- Frontend: HTML / Vanilla CSS / Vanilla JS
-- Data/Storage: SQLite
-- Test: Jest
+- Runtime: OpenCode + OpenSpec workflow
+- Scripts: PowerShell / Shell
+- Data/Storage: repo-local Markdown / YAML artifacts
+- Test/Validation: `scripts/local-check.sh` and workflow-specific verification
+- Package/runtime dependencies: project-specific, confirm before implementation
 
 ## 2. 全局技术规范
-- Coding conventions: TypeScript strict mode
-- Error handling: Standardized error handling with structured JSON
-- Logging: Console logging for server events
-- Config: Environment-based configuration
-- Security/privacy: No raw SQL, input sanitization
-- Testing posture: Unit and integration testing using Jest
+- Coding conventions: Follow AGENTS.md for coding guidelines.
+- Error handling: Output structured validation errors, do not fail silently.
+- Logging: Log validation steps in scripts.
+- Config: Keep variables in openspec/config.yaml or environment variables.
+- Security/privacy: Sanitize inputs in validation scripts.
+- Testing posture: Rely on local verification scripts and adversarial verifications.
 
 ## 3. 架构 source of truth
 - AI coding architecture: ./ai-coding-architecture.md

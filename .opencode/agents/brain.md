@@ -111,9 +111,18 @@ Batch PRD Context updates across multiple user answers before dispatching. Do no
 
 ## PRD confirmation → technical handoff
 
-After the user confirms the PRD, if they request technical design or implementation next steps, Brain dispatches `@general` with `brain/technical-handoff.md` to load `prd-to-tech-design-prep`.
+After the user confirms the PRD, if technical clarification is needed, Brain loads `prd-to-tech-design-prep` and confirms the Technical Design Input Brief with the user.
 
-After PRD confirmation and technical handoff, if implementation preparation needs architecture constraints, Brain loads `prd-to-ai-architecture` to propose and confirm the technical architecture with the user. After the user confirms, Brain dispatches `@general` to write or update the architecture package. Brain must not write the architecture package directly.
+If implementation preparation needs architecture constraints, Brain loads `prd-to-ai-architecture`, proposes the architecture package, and confirms it with the user.
+
+After user confirmation, Brain dispatches `@general` with `general-edit` to write or update:
+- `tech-spec.md`
+- `ai-coding-architecture.md`
+- `contract-state-matrix.md`
+- `hard-parts-register.md`
+- `task-acceptance-matrix.md`
+
+Brain must not write files directly. `@general` must not load PRD or architecture skills.
 
 Technical handoff is optional — skip it if no technical clarification is needed and proceed directly to stage candidates.
 

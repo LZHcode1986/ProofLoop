@@ -77,6 +77,8 @@ Produce these artifacts unless the user asks for a smaller scope:
 - `hard-parts-register.md`
 - `task-acceptance-matrix.md`
 
+For ProofLoop integration, also create or update `tech-spec.md` as the technical stack entry and source-of-truth index. `tech-spec.md` must not replace the four architecture package files.
+
 For detailed templates, read:
 
 - `references/architecture-template.md`
