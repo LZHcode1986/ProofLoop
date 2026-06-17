@@ -49,18 +49,18 @@ Optional:
    - Do not treat missing technical decisions as confirmed.
 
 2. **Architecture Brief**
-   - Create `ai-coding-architecture.md`.
+   - Create `tech-spec/ai-coding-architecture.md`.
    - Include system context, module boundaries, runtime flows, technical context, and decision log.
    - Keep it lightweight by default; expand only when risk requires it.
 
 3. **Contracts & Constraints**
-   - Create `contract-state-matrix.md`.
+   - Create `tech-spec/contract-state-matrix.md`.
    - Lock API routes, event streams, file paths, database/JSON schema, task states, ports, and error behavior.
-   - Create `hard-parts-register.md`.
+   - Create `tech-spec/hard-parts-register.md`.
    - Explicitly list difficult work that AI must not skip.
 
 4. **Tasks & Tests**
-   - Create `task-acceptance-matrix.md`.
+   - Create `tech-spec/task-acceptance-matrix.md`.
    - Split implementation into dependency-ordered tasks.
    - Give each task a definition of done, test or acceptance evidence, affected files/modules, and forbidden shortcuts.
 
@@ -70,14 +70,12 @@ Optional:
 
 ## Required Outputs
 
-Produce these artifacts unless the user asks for a smaller scope:
+Produce these artifacts unless the user asks for a smaller scope (they should be placed under the `tech-spec/` directory):
 
-- `ai-coding-architecture.md`
-- `contract-state-matrix.md`
-- `hard-parts-register.md`
-- `task-acceptance-matrix.md`
-
-For ProofLoop integration, also create or update `tech-spec.md` as the technical stack entry and source-of-truth index. `tech-spec.md` must not replace the four architecture package files.
+- `tech-spec/ai-coding-architecture.md`
+- `tech-spec/contract-state-matrix.md`
+- `tech-spec/hard-parts-register.md`
+- `tech-spec/task-acceptance-matrix.md`
 
 For detailed templates, read:
 

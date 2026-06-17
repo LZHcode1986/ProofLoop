@@ -35,7 +35,7 @@ Use `.opencode/agents/worker.md`.
 
 - `ai-structured-prd/SKILL.md` — core PRD skill: Intent/Context/Draft/Review modes with PRD Context
 - `prd-to-tech-design-prep/SKILL.md` — post-PRD technical handoff and clarification
-- `prd-to-ai-architecture/SKILL.md` — post-technical-clarification architecture package generator. Produces `tech-spec.md` plus AI coding architecture package (`ai-coding-architecture.md`, `contract-state-matrix.md`, `hard-parts-register.md`, `task-acceptance-matrix.md`). Use after PRD confirmation. If technical design input is missing or uncertain, Brain should load `prd-to-tech-design-prep` first.
+- `prd-to-ai-architecture/SKILL.md` — post-technical-clarification architecture package generator. Produces the AI coding architecture package (`ai-coding-architecture.md`, `contract-state-matrix.md`, `hard-parts-register.md`, `task-acceptance-matrix.md` under the `tech-spec/` directory). Use after PRD confirmation. If technical design input is missing or uncertain, Brain should load `prd-to-tech-design-prep` first.
 
 ## v3.3 responsibility model
 
@@ -49,4 +49,4 @@ Use `.opencode/agents/worker.md`.
 8. `executor` dispatches `worker`, `code-verifier`, and `committer` using contracts under `.agents/contracts/executor/`.
 9. `implementation-reviewer` loads `openspec-archive-change` only after Brain authorizes archive.
 10. Brain loads `prd-to-tech-design-prep` when PRD-confirmed work needs user-facing technical clarification; `@general` only persists Brain-confirmed output.
-11. Brain loads `prd-to-ai-architecture` when implementation preparation needs architecture constraints; `@general` only writes or updates `tech-spec.md` and the four architecture package files.
+11. Brain loads `prd-to-ai-architecture` when implementation preparation needs architecture constraints; `@general` only writes or updates the four architecture package files under the `tech-spec/` directory.

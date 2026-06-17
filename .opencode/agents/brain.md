@@ -115,12 +115,11 @@ After the user confirms the PRD, if technical clarification is needed, Brain loa
 
 If implementation preparation needs architecture constraints, Brain loads `prd-to-ai-architecture`, proposes the architecture package, and confirms it with the user.
 
-After user confirmation, Brain dispatches `@general` with `general-edit` to write or update:
-- `tech-spec.md`
-- `ai-coding-architecture.md`
-- `contract-state-matrix.md`
-- `hard-parts-register.md`
-- `task-acceptance-matrix.md`
+After user confirmation, Brain dispatches `@general` with `general-edit` to write or update the architecture package under the `tech-spec/` directory:
+- `tech-spec/ai-coding-architecture.md`
+- `tech-spec/contract-state-matrix.md`
+- `tech-spec/hard-parts-register.md`
+- `tech-spec/task-acceptance-matrix.md`
 
 Brain must not write files directly. `@general` must not load PRD or architecture skills.
 
