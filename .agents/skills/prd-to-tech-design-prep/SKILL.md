@@ -20,13 +20,14 @@ Do:
 - Identify domain terminology conflicts.
 - Use scenario pressure tests for ambiguous roles, data visibility, permissions, fallback behavior, and integrations.
 - Produce a technical design input brief that another AI or developer can use.
+- Hand off to `prd-to-ai-architecture` if the conversation moves into architecture trade-offs, framework choices, data ownership, API contracts, or state design.
 
 Do not:
 - Choose a framework, database, hosting provider, architecture pattern, schema, or API contract unless the user explicitly asks to proceed into technical design.
 - Turn the PRD into a task breakdown.
 - Ask users to understand deep technical terms before explaining them.
 - Reopen product discovery unless a product decision blocks technical design.
-- Run deep architecture grilling. If the conversation moves into architecture trade-offs, framework choices, data ownership, API contracts, or state design, hand off to `prd-to-ai-architecture`.
+- Run deep architecture grilling.
 
 ## Workflow
 
