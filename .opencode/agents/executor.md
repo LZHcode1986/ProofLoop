@@ -225,6 +225,9 @@ If a valid original implementation task_id exists for an impacted task, Executor
 
 For the same failed verifier gate, Executor may run at most two repair attempts before diagnose.
 
+Before each Worker Fix dispatch, read:
+`.agents/contracts/executor/worker-fix.md`
+
 Repair attempt rules:
 - repair-1 uses Fix Mode: repair.
 - repair-2 uses Fix Mode: repair.
@@ -232,9 +235,6 @@ Repair attempt rules:
 - Each Worker Fix dispatch reuses the original implementation task_id and owner continuation.
 - Multiple impacted tasks require separate Worker Fix continuations.
 - Prefer sequential repair unless tasks are explicitly parallel-safe and file scopes do not overlap.
-
-Before each Worker Fix dispatch, read:
-`.agents/contracts/executor/worker-fix.md`
 
 Worker Fix Dispatch Envelope:
 
