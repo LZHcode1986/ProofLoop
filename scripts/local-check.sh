@@ -13,6 +13,7 @@ if command -v openspec &> /dev/null; then
     for change_dir in openspec/changes/*/; do
         if [ -d "$change_dir" ]; then
             change_id=$(basename "$change_dir")
+            if [ "$change_id" = "archive" ]; then continue; fi
             echo "  Validating change: $change_id"
             openspec validate "$change_id" --strict || exit 1
         fi
@@ -46,6 +47,10 @@ error=0
 shopt -s nullglob 2>/dev/null || true
 for dir in openspec/specs/*/ openspec/changes/*/specs/*/; do
     if [ -d "$dir" ]; then
+        # Skip archived specs
+        if [[ "$dir" == *"openspec/changes/archive/"* ]]; then
+            continue
+        fi
         name=$(basename "$dir")
         if ! echo "$name" | grep -qE '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'; then
             echo "FAIL: Invalid spec name: $name in $dir"

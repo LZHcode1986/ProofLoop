@@ -2,6 +2,13 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.6
+
+### 2026-06-18
+
+- **fix**: 修复本地校验脚本在校验 spec 命名时会错误检查已归档变更文档（`archive` 目录）的 bug。
+  - `scripts/local-check.sh`: 增加对 `openspec/changes/archive/` 路径的过滤，防止 spec 命名校验程序扫描和校验已归档的 delta 变更。
+
 ## v1.2.5
 
 ### 2026-06-17
