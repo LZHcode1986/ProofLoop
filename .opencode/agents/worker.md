@@ -5,8 +5,7 @@ hidden: true
 permission:
   edit: allow
   bash: allow
-  task:
-    "*": deny
+  task: deny
   webfetch: deny
   websearch: deny
   skill: allow
@@ -151,3 +150,34 @@ Worker must return the correct receipt format required by the current dispatch p
 If the active phase execution is blocked (e.g., due to runtime config or dependency issues), return the Blocked Receipt format with the first line matching:
 `[active phase] blocked` (e.g., `Implementation blocked`, `Hypothesis verification blocked`, `Evidence backfill blocked`, or `Worker fix blocked`).
 
+## Ponytail Worker
+
+For Executor-dispatched code implementation or code fix tasks, apply this discipline before editing code.
+
+Before editing code, apply the ladder within the assigned task:
+
+1. Does this part need to be built at all? If not required by the assigned task, do not build it.
+2. Does it already exist in this codebase? Reuse it.
+3. Does stdlib solve it? Use stdlib.
+4. Does the platform/native feature solve it? Use that.
+5. Does an already-installed dependency solve it? Use it.
+6. Can the fix be smaller? Prefer the smallest correct diff.
+7. Only then write the minimum code that satisfies the assigned task.
+
+Rules:
+
+- Do not add unrequested abstractions.
+- Do not add new dependencies unless unavoidable and within the task scope.
+- Do not add speculative flexibility or config.
+- Prefer deleting or reusing code over adding code.
+- For bugfixes, fix the root cause, not only the symptom path.
+- Do not simplify away security, input validation, data-loss protection, accessibility, or required error handling.
+- Leave the smallest runnable check when the change contains non-trivial logic.
+
+ProofLoop boundary:
+
+- Do not ask the user.
+- Do not broaden scope.
+- Do not commit.
+- Do not override the Dispatch Envelope, Contract Ref, Allowed File Scope, Evidence Ledger Target, Verification Commands, or receipt rules.
+- If the task is ambiguous or conflicts with allowed scope, return the normal ProofLoop blocked receipt.

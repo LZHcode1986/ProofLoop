@@ -2,6 +2,20 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.7
+
+### 2026-07-01
+
+- **refactor**: 引入 Ponytail Worker 代码实现纪律，收紧 Worker 的任务调用权限，并微调 Executor 派发协议
+  - `.opencode/agents/worker.md`:
+    - 将 `permission.task` 权限从 `"*": deny` 进一步收紧为 `deny`。
+    - 新增 `## Ponytail Worker` 章节，制定编写代码前的 7 步阶梯逻辑（构建必要性判断、优先复用、标准库/原生特性/既有依赖优先、最小 diff 等）。
+    - 明确 Worker 核心规则（禁止未请求抽象、投机配置，保障安全/校验/错误处理不缩水，保留可运行检查）与 ProofLoop 边界（不问用户、不 commit、不超范围、冲突时返回 blocked）。
+  - `.opencode/agents/executor.md`:
+    - 优化 `Recheck Dispatch Envelope` 逻辑，在信封中追加 base source 基础源字段。
+    - 规范 Worker Fix 信封，使其继承原始任务所需的 skills 声明。
+    - 微调派发前契约读取步骤的对齐位置。
+
 ## v1.2.6
 
 ### 2026-06-18
