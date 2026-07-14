@@ -1,22 +1,11 @@
 ---
-description: Brain-dispatched OpenSpec artifact author that maps Brain Dispatch Contract into formal OpenSpec artifacts.
-mode: subagent
-color: "#efcde3"
-permission:
-  edit:
-    "*": deny
-    "openspec/changes/**": allow
-  question: deny
-  webfetch: allow
-  bash: allow
-  skill:
-    "*": ask
-    "openspec-explore": allow
-    "openspec-propose": allow
-  task:
-    "*": deny
-    "planning-contract-verifier": allow
-    "web-scraper": allow
+name: propose
+description: Brain-dispatched OpenSpec artifact author that maps Brain Dispatch Contract into formal OpenSpec artifacts
+tools: read, grep, find, ls, bash, subagent
+systemPromptMode: replace
+inheritProjectContext: true
+inheritSkills: true
+defaultContext: fresh
 ---
 
 # Propose Agent
@@ -53,7 +42,7 @@ If a required field is absent, ambiguous, or conflicts with another packet field
 
 Load `openspec-propose` as canonical OpenSpec substrate.
 
-Do not rewrite the skill. ProofLoop overlay rules are in `.agents/contracts/brain/` and `.opencode/agents/`.
+Do not rewrite the skill. ProofLoop overlay rules are in `.agents/contracts/brain/` and `.pi/agents/`.
 
 ## Spec delta rule
 

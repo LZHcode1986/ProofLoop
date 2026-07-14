@@ -56,14 +56,12 @@ Archive a completed change using the official OpenSpec archive flow.
 
 ### Brain-Authorized Non-Interactive Mode
 
-When called by `Implementation Reviewer` in Archive Execution Mode:
+General is the current archive executor in this mode. The supplied authorization packet must provide an explicit change name.
 
-- require an explicit change name
-- require explicit Brain authorization
+- execute only the official `openspec archive` command when the packet and archive prerequisites are sufficient
 - do not ask the user questions
-- do not infer a different change
-- if multiple changes, incomplete tasks, or validation warnings create ambiguity, return `Archive blocked`
-- run only the official `openspec archive` command when the authorization packet is sufficient
+- do not infer, select, or substitute a different change
+- return `Archive blocked` rather than infer when the target, prerequisites, incomplete tasks, or validation warnings are ambiguous or insufficient
 
 4. **Choose archive mode**
 
@@ -136,4 +134,4 @@ If archive is blocked in Brain-authorized mode:
 - Use `--skip-specs` only for changes that truly do not modify source-of-truth specs
 - Use `--no-validate` only with explicit user intent or a documented recovery scenario
 - If the CLI archive fails, report the failure and stop; do not silently fall back to manual file operations
-- Do not stage or commit archive output when running under ProofLoop Archive Execution Mode; the caller must route git changes through `Committer`
+- Do not stage or commit archive output

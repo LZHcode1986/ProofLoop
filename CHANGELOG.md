@@ -2,6 +2,16 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.8
+
+### 2026-07-14
+
+- **refactor**: ProofLoop 工作流契约、交接与归档闭环加固
+  - 统一 `.pi`、`.agents/contracts/brain` 与 OpenCode agents 的 12 字段 Brain Dispatch Core Packet 和 fail-closed 约束；加入会话本地 continuation 策略、Plan/Execution/Review 交接清单，以及新鲜 Verifier recheck。
+  - 完善归档状态直至 `CLOSED`：Reviewer 提出建议、Brain 授权、General 执行归档，并在归档产生文件变更时由 Committer 关闭 `archive-output` 边界；归档 skill 同步收敛为 CLI-first、执行导向，不再表述 Reviewer 执行归档。
+  - 同步 OpenCode agents，新增 `.opencode/agents/general.md`，同时保持 OpenCode Brain `## Continuation-first routing` 的 `task_id` 行为不变。
+- **fix**: 修复 Web Scraper 的 Pi 集成，改用 `pi-web-access` provider，并补齐子代理工具白名单中的 `web_search`、`fetch_content`、`get_search_content`。未改动仍受独立 Fake-IP/SSRF 配置问题影响的 GitHub 直接 `fetch_content`；也未移除 `.proofloop/runs/.gitkeep` 或清理 `.gitignore`。
+
 ## v1.2.7
 
 ### 2026-07-01

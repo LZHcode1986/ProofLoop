@@ -1,0 +1,67 @@
+{
+  "permission": {
+    "*": "allow",
+
+    "path": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "**/.ssh/**": "deny",
+      "**/.aws/**": "deny",
+      "**/.gnupg/**": "deny",
+      "**/.git/config": "deny"
+    },
+
+    "bash": {
+      "*": "ask",
+
+      "rm -rf *": "deny",
+      "sudo *": "deny",
+
+      "git push*": "deny",
+      "git reset --hard*": "deny",
+      "git clean*": "deny",
+      "git checkout -- *": "deny",
+      "git restore *": "deny",
+      "git rebase*": "deny",
+      "git merge*": "deny",
+      "git cherry-pick*": "deny",
+      "git revert*": "deny",
+      "git stash*": "deny",
+      "git add*": "deny",
+      "git commit*": "deny",
+
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "git branch --show-current": "allow",
+      "git rev-parse*": "allow",
+
+      "npm test*": "allow",
+      "npm run test*": "allow",
+      "npm run lint*": "allow",
+      "npm run build*": "allow",
+
+      "pnpm test*": "allow",
+      "pnpm lint*": "allow",
+      "pnpm build*": "allow",
+
+      "openspec list*": "allow",
+      "openspec status*": "allow",
+      "openspec instructions*": "allow",
+      "openspec validate*": "allow",
+
+      "rg *": "allow",
+      "Get-Content *": "allow",
+      "Get-ChildItem *": "allow",
+      "Test-Path *": "allow",
+      "Select-String *": "allow",
+
+      "codegraph status*": "allow"
+    },
+
+    "external_directory": "ask"
+  }
+}
