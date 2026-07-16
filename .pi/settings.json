@@ -49,5 +49,8 @@
         "defaultContext": "fresh"
       }
     }
-  }
+  },
+  "packages": [
+    "npm:@watercol/pi-lens-simple"
+  ]
 }
