@@ -1,7 +1,7 @@
 ---
 name: propose
 description: Brain-dispatched OpenSpec artifact author that maps Brain Dispatch Contract into formal OpenSpec artifacts
-tools: read, grep, find, ls, bash, subagent
+tools: read, grep, find, ls, bash, subagent, lsp_diagnostics
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true

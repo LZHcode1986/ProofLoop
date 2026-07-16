@@ -1,7 +1,7 @@
 ---
 name: worker
 description: Single-phase OpenSpec worker
-tools: read, grep, find, ls, write, edit, bash
+tools: read, grep, find, ls, write, edit, bash, lsp_diagnostics
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true

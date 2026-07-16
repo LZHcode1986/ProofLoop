@@ -1,7 +1,7 @@
 ---
 name: code-verifier
 description: Single-phase slice-level implementation verifier
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, lsp_diagnostics
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true

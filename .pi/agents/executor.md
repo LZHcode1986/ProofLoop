@@ -1,7 +1,7 @@
 ---
 name: executor
 description: Brain-dispatched OpenSpec apply-stage orchestrator
-tools: read, grep, find, ls, bash, subagent
+tools: read, grep, find, ls, bash, subagent, lsp_diagnostics
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: true
