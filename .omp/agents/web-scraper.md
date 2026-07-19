@@ -1,15 +1,9 @@
 ---
-description: External research subagent for Brain or Propose.
-mode: subagent
-hidden: true
-permission:
-  webfetch: allow
-  websearch: allow
-  edit: deny
-  bash: deny
-  question: deny
-  task:
-    "*": deny
+name: web-scraper
+description: External research subagent for Brain or Propose
+model: opencode-go/deepseek-v4-flash
+thinkingLevel: max
+tools: read, grep, find, ls, web_search, fetch_content, get_search_content
 ---
 
 # Web Scraper

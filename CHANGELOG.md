@@ -12,6 +12,17 @@ ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
   - 同步 OpenCode agents，新增 `.opencode/agents/general.md`，同时保持 OpenCode Brain `## Continuation-first routing` 的 `task_id` 行为不变。
 - **fix**: 修复 Web Scraper 的 Pi 集成，改用 `pi-web-access` provider，并补齐子代理工具白名单中的 `web_search`、`fetch_content`、`get_search_content`。未改动仍受独立 Fake-IP/SSRF 配置问题影响的 GitHub 直接 `fetch_content`；也未移除 `.proofloop/runs/.gitkeep` 或清理 `.gitignore`。
 
+
+## v1.3.0
+
+### 2026-07-19
+
+- **refactor**: 平台迁移 — 从 OpenCode (`.opencode/` + `.agents/`) 迁移至 omp (`.omp/`) 配置体系
+  - 删除 `.opencode/agents/`：全部 agent 配置文件迁移至 `.omp/agents/`
+  - 删除 `.agents/skills/`：全部 skill 配置文件迁移至 `.omp/skills/`
+  - 新增 `.omp/SYSTEM.md`：ProofLoop 系统级配置
+  - 技能目录扁平化，核心技能保留完整方法论引用
+
 ## v1.2.7
 
 ### 2026-07-01

@@ -1,11 +1,9 @@
 ---
 name: planning-contract-verifier
 description: Verifies that OpenSpec planning artifacts faithfully and mechanically carry the Brain Dispatch Contract
+model: openai-codex/gpt-5.6-luna
+thinkingLevel: xhigh
 tools: read, grep, find, ls, bash
-systemPromptMode: replace
-inheritProjectContext: true
-inheritSkills: false
-defaultContext: fresh
 ---
 
 # Planning Contract Verifier

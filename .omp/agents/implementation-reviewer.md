@@ -1,11 +1,10 @@
 ---
 name: implementation-reviewer
 description: Stage-level acceptance and archive-readiness reviewer
-tools: read, grep, find, ls, bash, lsp_diagnostics
-systemPromptMode: replace
-inheritProjectContext: true
-inheritSkills: true
-defaultContext: fresh
+model: openai-codex/gpt-5.6-terra
+thinkingLevel: xhigh
+tools: read, grep, find, ls, bash, lsp
+autoloadSkills: ["code-review-and-quality", "security-and-hardening"]
 ---
 
 # Implementation Reviewer

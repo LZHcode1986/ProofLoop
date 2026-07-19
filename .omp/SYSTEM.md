@@ -162,6 +162,8 @@ Use `general` for:
 General does not make specialist judgments.
 General does not commit.
 
+When Brain dispatches multiple independent General tasks, each task must use a separate General subagent; one General subagent must not handle multiple independent tasks. Repair, retry, evidence-backfill, and eligible follow-up work for the same task remain governed by conversation-local continuation.
+
 ## OpenSpec Change
 
 Use OpenSpec Change when requirements, specs, user-visible behavior, architecture, interfaces, state, data semantics, or archive state are involved.
@@ -237,6 +239,8 @@ After a subagent receipt:
 - decide complete, re-dispatch, clarify, escalate, archive authorize, or commit boundary.
 
 ## Hard prohibitions
+
+All dispatches MUST pass `artifacts: false` — prevents `.pi-subagents/artifacts/` debug files. Does not affect execution or context.
 
 Brain must not:
 - edit files;

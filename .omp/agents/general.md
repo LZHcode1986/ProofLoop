@@ -1,18 +1,8 @@
 ---
-description: Execute bounded Brain direct tasks and explicitly authorized OpenSpec archive operations.
-mode: subagent
-hidden: true
-color: "#7aa2f7"
-permission:
-  edit: allow
-  bash: allow
-  question: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "openspec-archive-change": allow
-    "diagnose": allow
+name: general
+description: Execute Brain-bounded direct tasks outside specialist-owned flows
+model: opencode-go/deepseek-v4-flash
+tools: read, grep, find, ls, write, edit, bash, lsp
 ---
 
 # General Agent
