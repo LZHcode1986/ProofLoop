@@ -128,14 +128,14 @@ Do not dispatch one Worker for:
 
 When tasks.md marks tasks as `[P]`, follow the parallel-candidate semantics already defined in tasks.md. Parallel scheduling, if used, still means multiple one-task Worker dispatches, not one batch Worker dispatch.
 
-## Conversation-local Task Continuation Protocol (run_id-based)
+## Conversation-local Task Continuation Protocol (agent ID + IRC)
 
 ### First dispatch
 
-For the first execution of a work item, dispatch a fresh Worker and retain its result `run_id` and prior receipt references in the live Executor session:
+For the first execution of a work item, dispatch a fresh Worker via `task` and retain its agent ID and prior receipt references in the live Executor session:
 
 ```text
-worker.run_id = subagent result.runId
+worker.agent_id = <agent ID from task result>
 worker.receiptRefs = <Worker, verifier, and boundary receipts available so far>
 ```
 
@@ -143,24 +143,17 @@ This context exists only while the same Pi parent conversation and Executor sess
 
 ### Rework dispatch (Verifier FAIL → same work rework)
 
-When Code Verifier returns FAIL and the work boundary has NOT changed, and the original Worker `run_id` remains available in live context:
+When Code Verifier returns FAIL and the work boundary has NOT changed, and the original Worker agent ID remains available in live context:
 
-1. Resume the original Worker with `subagent({ action: "resume", id: run_id, message: "..." })`.
-2. Pass unchanged acceptance criteria, allowed files, the new verifier findings, and retained receipt references.
+1. Instruct the original Worker via `hub send` (IRC) with the new verifier findings, unchanged acceptance criteria, allowed files, and retained receipt references.
+2. Use `hub send` with `await: true` to receive the Worker's updated Completion Receipt.
 3. Do NOT create a fresh Worker for this eligible same-owner continuation.
 
-If the live Executor context or original Worker `run_id` is unavailable, return `Execution blocked`. Do not claim a durable recovery guarantee.
+If the live Executor context or original Worker agent ID is unavailable, return `Execution blocked`. Do not claim a durable recovery guarantee.
 
 ### Steering (Worker still running)
 
-If the Worker is still active and needs a mid-run constraint update, use `steer_subagent({ id: run_id, message: "..." })` instead of resume.
-
-### When NOT to resume
-
-- Acceptance criteria substantially changed → new work item.
-- Allowed file scope substantially changed → new work item.
-- Original Worker approach rejected entirely → new work item.
-- Security audit requires clean start → new work item.
+If the Worker is still active and needs a mid-run constraint update, use `hub send` (IRC) with the constraint message instead of waiting for completion.
 
 A new work item is not recovery of the original work item. If dispatch requires unavailable prior context, return `Execution blocked` rather than inferring it.
 
@@ -257,7 +250,7 @@ The failed receipt should include:
 Executor must not diagnose the cause itself.
 Executor routes repair based on the verifier receipt.
 
-If a valid original Worker `run_id` exists in the live Executor session for an impacted work item, Executor must dispatch Worker Fix as a continuation of that same Worker session (resume the original `run_id`). If that live context is unavailable, return `Execution blocked`; do not create a recovery Worker.
+If a valid original Worker agent ID exists in the live Executor session for an impacted work item, Executor must dispatch Worker Fix via `hub send` (IRC) as a continuation of that same Worker session. If that live context is unavailable, return `Execution blocked`; do not create a recovery Worker.
 
 #### Phase 3.2: Bounded repair attempts
 
@@ -270,7 +263,7 @@ Repair attempt rules:
 - repair-1 uses Fix Mode: repair.
 - repair-2 uses Fix Mode: repair.
 - Each Worker Fix dispatch is bounded to one Task ID.
-- Each Worker Fix dispatch reuses the original Worker `run_id` and owner continuation (resume, not fresh).
+- Each Worker Fix dispatch reuses the original Worker agent ID and owner continuation (IRC, not fresh task).
 - Multiple impacted tasks require separate Worker Fix continuations.
 - Prefer sequential repair unless tasks are explicitly parallel-safe and file scopes do not overlap.
 

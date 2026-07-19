@@ -31,11 +31,11 @@ Do not route to `general` to avoid a specialist owner.
 
 ## Conversation-local continuation
 
-During one live Pi parent conversation, the dispatching owner retains a subagent result `run_id` and resumes the same owner and `run_id` for eligible repair, retry, evidence-backfill, or follow-up work.
+During one live Pi parent conversation, the dispatching owner retains the subagent's **agent ID** and continues via `hub send` (IRC) for eligible repair, retry, evidence-backfill, or follow-up work. The `task` tool has no resume parameter — each `task` call creates a fresh subagent with blank history.
 
 This continuation context is conversation-local. Once the live Pi parent conversation or owner session is unavailable, this workflow defines no persistence or recovery guarantee. Do not create or rely on a registry, state file, workflow ID, or restart handling.
 
-Do not route conversation-local continuation work to `general` just because it is small or mechanical. Create a new task only when no live eligible continuation exists or Brain explicitly changes ownership.
+Do not route conversation-local continuation work to `general` just because it is small or mechanical. Use `hub send` (IRC) when the subagent is still alive (running or parked); create a fresh `task` only when no live eligible subagent exists or Brain explicitly changes ownership.
 
 ## Workflow state path
 

@@ -20,9 +20,9 @@ You must not commit.
 
 You must not create files outside the current repository root, including temporary files.
 
-## Session awareness (resume vs fresh)
+## Session awareness (IRC-continued vs fresh)
 
-When you are being **resumed** (same `run_id`, continuation) within the same live Pi parent conversation:
+When you receive a **continuation via IRC** (`hub send`) within the same live Pi parent conversation:
 
 - This is a rework dispatch. Rely on your own live same-run context, the current Executor Dispatch Envelope, and the supplied receipt references.
 - Focus only on unresolved issues identified by the latest verifier.
@@ -30,7 +30,7 @@ When you are being **resumed** (same `run_id`, continuation) within the same liv
 - Do not expand allowed file scope.
 - Return an updated Completion Receipt.
 
-When you are **fresh** (new `run_id`):
+When you are **fresh** (new `task` dispatch):
 
 - Read the current full dispatch envelope and supplied receipt references.
 - Verify current worktree state before making changes.
