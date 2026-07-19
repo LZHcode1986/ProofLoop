@@ -1,26 +1,15 @@
 {
   "mcpServers": {
     "codegraph": {
-      "command": "codegraph-mcp",
+      "command": "codegraph",
       "args": [
-        "--workspace",
-        "D:/software-dev/ProofLoop",
-        "--profile",
-        "graph"
+        "serve",
+        "--mcp",        
+        "--path",
+        "<your-project-directory>"
       ],
-      "cwd": "D:/software-dev/ProofLoop",
-      "lifecycle": "keep-alive",
-      "directTools": [
-        "codegraph_symbol_search",
-        "codegraph_get_callers",
-        "codegraph_get_callees",
-        "codegraph_get_dependency_graph",
-        "codegraph_get_call_graph",
-        "codegraph_analyze_impact",
-        "codegraph_find_related_tests",
-        "codegraph_index_files",
-        "codegraph_reindex_workspace"
-      ]
+      "cwd": "<your-project-directory>",
+      "lifecycle": "keep-alive"
     }
   }
 }
