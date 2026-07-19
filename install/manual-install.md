@@ -7,10 +7,10 @@ Copy files into the target project preserving paths.
 Do not overwrite these files unless explicitly approved:
 
 ```text
-.agents/skills/openspec-propose/SKILL.md
-.agents/skills/openspec-apply-change/SKILL.md
-.agents/skills/openspec-archive-change/SKILL.md
-.agents/skills/test-driven-development/SKILL.md
+.omp/skills/openspec-propose/SKILL.md
+.omp/skills/openspec-apply-change/SKILL.md
+.omp/skills/openspec-archive-change/SKILL.md
+.omp/skills/test-driven-development/SKILL.md
 ```
 
 ## Required root files
@@ -24,31 +24,21 @@ openspec/config.yaml.example
 ## Required agents
 
 ```text
-.opencode/agents/brain.md
-.opencode/agents/propose.md
-.opencode/agents/executor.md
-.opencode/agents/worker.md
-.opencode/agents/code-verifier.md
-.opencode/agents/planning-contract-verifier.md
-.opencode/agents/implementation-reviewer.md
-.opencode/agents/committer.md
-.opencode/agents/web-scraper.md
+.omp/agents/code-verifier.md
+.omp/agents/committer.md
+.omp/agents/designer.md
+.omp/agents/executor.md
+.omp/agents/general.md
+.omp/agents/implementation-reviewer.md
+.omp/agents/planning-contract-verifier.md
+.omp/agents/propose.md
+.omp/agents/web-scraper.md
+.omp/agents/worker.md
 ```
 
-## Optional agents
+ProofLoop now ships with `.omp/` configuration. All agent files are in `.omp/agents/`.
 
-```text
-.opencode/agents/spec-verifier.md        # -InstallDeprecatedAliases (deprecated)
-```
-
-ProofLoop does not ship a general agent. Direct Task uses the host runtime's general agent constrained by Brain Dispatch Contract and Completion Receipt format.
-
-Do not install as active default:
-
-```text
-.opencode/agents/reality-verifier.md
-.opencode/agents/reality-verifier-codegraph.md
-```
+ProofLoop no longer includes deprecated agents (`spec-verifier`, `reality-verifier`, `reality-verifier-codegraph`).
 
 ## Required contracts
 

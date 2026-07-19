@@ -45,15 +45,16 @@ tech-spec.md.example
 openspec/config.yaml.example
 openspec/schemas/proofloop-spec-driven/**
 scripts/local-check.sh
-.opencode/agents/brain.md
-.opencode/agents/propose.md
-.opencode/agents/executor.md
-.opencode/agents/worker.md
-.opencode/agents/code-verifier.md
-.opencode/agents/planning-contract-verifier.md
-.opencode/agents/implementation-reviewer.md
-.opencode/agents/committer.md
-.opencode/agents/web-scraper.md
+.omp/agents/code-verifier.md
+.omp/agents/committer.md
+.omp/agents/designer.md
+.omp/agents/executor.md
+.omp/agents/general.md
+.omp/agents/implementation-reviewer.md
+.omp/agents/planning-contract-verifier.md
+.omp/agents/propose.md
+.omp/agents/web-scraper.md
+.omp/agents/worker.md
 .agents/contracts/brain/external-research.md
 .agents/contracts/brain/general-edit.md
 .agents/contracts/brain/propose.md
@@ -68,16 +69,11 @@ scripts/local-check.sh
 ```
 
 ## Default NOT installed
-
 ```text
-.agents/skills/**                        (use -InstallCanonicalSkills for missing, -OverwriteCanonicalSkills to overwrite)
-.opencode/agents/general.md              (ProofLoop does not ship a general agent)
-.opencode/agents/reality-verifier.md     (deprecated)
-.opencode/agents/reality-verifier-codegraph.md (deprecated)
-.opencode/agents/spec-verifier.md        (use -InstallDeprecatedAliases)
+.omp/skills/**                            (use -InstallCanonicalSkills for missing, -OverwriteCanonicalSkills to overwrite)
 ```
 
-ProofLoop does not ship a general agent. Direct Task uses the host runtime's general agent constrained by Brain Dispatch Contract and Completion Receipt format.
+ProofLoop now ships with `.omp/` configuration. `general.md` and `designer.md` are included as standard agents.
 
 ## Installed workflow
 

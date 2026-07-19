@@ -45,10 +45,10 @@ if (Test-Path $gitDir) {
 }
 
 # 3. Existing ProofLoop version detection
-$existingBrain = Join-Path $TargetProjectPath ".opencode/agents/brain.md"
+$existingOmp = Join-Path $TargetProjectPath ".omp/agents/code-verifier.md"
 $existingAGENTS = Join-Path $TargetProjectPath "AGENTS.md"
 $existingAGENTSExample = Join-Path $TargetProjectPath "AGENTS.md.example"
-if ((Test-Path $existingBrain) -or (Test-Path $existingAGENTS) -or (Test-Path $existingAGENTSExample)) {
+if ((Test-Path $existingOmp) -or (Test-Path $existingAGENTS) -or (Test-Path $existingAGENTSExample)) {
   Write-Warning "Target project already has ProofLoop overlay."
   if (-not $Force) {
     $confirm = Read-Host "Continue and overwrite core agents/contracts? (y/N)"
@@ -62,15 +62,16 @@ if ((Test-Path $existingBrain) -or (Test-Path $existingAGENTS) -or (Test-Path $e
 # --- File Lists ---
 
 $DefaultAgents = @(
-  ".opencode/agents/brain.md",
-  ".opencode/agents/propose.md",
-  ".opencode/agents/executor.md",
-  ".opencode/agents/worker.md",
-  ".opencode/agents/code-verifier.md",
-  ".opencode/agents/planning-contract-verifier.md",
-  ".opencode/agents/implementation-reviewer.md",
-  ".opencode/agents/committer.md",
-  ".opencode/agents/web-scraper.md"
+  ".omp/agents/code-verifier.md",
+  ".omp/agents/committer.md",
+  ".omp/agents/designer.md",
+  ".omp/agents/executor.md",
+  ".omp/agents/general.md",
+  ".omp/agents/implementation-reviewer.md",
+  ".omp/agents/planning-contract-verifier.md",
+  ".omp/agents/propose.md",
+  ".omp/agents/web-scraper.md",
+  ".omp/agents/worker.md"
 )
 
 $Contracts = @(
@@ -100,16 +101,17 @@ $Scripts = @(
 $SchemaDir = "openspec/schemas/proofloop-spec-driven"
 
 $CanonicalSkills = @(
-  ".agents/skills/openspec-propose/SKILL.md",
-  ".agents/skills/openspec-apply-change/SKILL.md",
-  ".agents/skills/openspec-archive-change/SKILL.md",
-  ".agents/skills/test-driven-development/SKILL.md",
-  ".agents/skills/code-review-and-quality/SKILL.md",
-  ".agents/skills/diagnose/SKILL.md",
-  ".agents/skills/grill-me-prd/SKILL.md",
-  ".agents/skills/openspec-explore/SKILL.md",
-  ".agents/skills/security-and-hardening/SKILL.md",
-  ".agents/skills/workflow-intake/SKILL.md"
+  ".omp/skills/ai-structured-prd/SKILL.md",
+  ".omp/skills/code-review-and-quality/SKILL.md",
+  ".omp/skills/diagnose/SKILL.md",
+  ".omp/skills/openspec-apply-change/SKILL.md",
+  ".omp/skills/openspec-archive-change/SKILL.md",
+  ".omp/skills/openspec-explore/SKILL.md",
+  ".omp/skills/openspec-propose/SKILL.md",
+  ".omp/skills/prd-to-ai-architecture/SKILL.md",
+  ".omp/skills/prd-to-tech-design-prep/SKILL.md",
+  ".omp/skills/security-and-hardening/SKILL.md",
+  ".omp/skills/test-driven-development/SKILL.md"
 )
 
 # --- Rollback tracking ---
@@ -246,11 +248,7 @@ try {
   Write-Host "Installing schema..." -ForegroundColor Cyan
   Copy-SchemaDir -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
 
-# --- Optional: Deprecated Aliases ---
-  if ($InstallDeprecatedAliases) {
-    Write-Host "Installing deprecated compatibility aliases..." -ForegroundColor Cyan
-    Copy-Safe -RelativePath ".opencode/agents/spec-verifier.md" -SourceRoot $RepoRoot -TargetRoot $TargetProjectPath
-  }
+
 
 # --- Canonical Skills (skip by default) ---
 Write-Host "Checking canonical skills..." -ForegroundColor Cyan
@@ -274,8 +272,8 @@ foreach ($skill in $CanonicalSkills) {
   $requiredFiles = @(
     "AGENTS.md.example",
     "tech-spec.md.example",
-    ".opencode/agents/brain.md",
-    ".opencode/agents/executor.md",
+    ".omp/agents/code-verifier.md",
+    ".omp/agents/executor.md",
     ".agents/contracts/brain/execute.md",
     ".agents/contracts/executor/worker-implementation.md",
     ".agents/contracts/executor/shared-worker-rules.md"

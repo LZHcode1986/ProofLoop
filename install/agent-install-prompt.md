@@ -7,10 +7,10 @@ Do not overwrite OpenSpec canonical skills or shared TDD skill.
 Do not overwrite:
 
 ```text
-.agents/skills/openspec-propose/SKILL.md
-.agents/skills/openspec-apply-change/SKILL.md
-.agents/skills/openspec-archive-change/SKILL.md
-.agents/skills/test-driven-development/SKILL.md
+.omp/skills/openspec-propose/SKILL.md
+.omp/skills/openspec-apply-change/SKILL.md
+.omp/skills/openspec-archive-change/SKILL.md
+.omp/skills/test-driven-development/SKILL.md
 ```
 
 Install the ProofLoop overlay:
@@ -18,10 +18,9 @@ Install the ProofLoop overlay:
 ```text
 AGENTS.md.example
 tech-spec.md.example
-.opencode/agents/**
+.omp/agents/**
 .agents/contracts/**
-.agents/skills/workflow-intake/**
-.agents/skills/grill-me-prd/**
+.omp/skills/**
 openspec/schemas/proofloop-spec-driven/**
 install/**
 ```
@@ -49,17 +48,14 @@ OpenSpec Change:
 Important rules:
 
 - Do not use P0/P1/P2 workflow routing.
-- Do not install Reality Verifier as default active flow.
 - Use CodeGraph Tool Protocol for code reality.
-- Use planning-contract-verifier instead of active spec-verifier.
-- Keep spec-verifier only as deprecated compatibility alias if necessary.
 - Direct Task goes to general.
 - bugfix uses general with diagnose.
 - Executor dispatch contracts live under `.agents/contracts/executor/`.
 - Worker runtime and fail-fast policies live in `.agents/contracts/executor/shared-worker-rules.md`.
 - AGENTS.md must stay short and global.
 - README.md must include the updated flowchart.
-- Brain uses workflow-intake and grill-me-prd only as pre-dispatch clarify-or-narrow procedures, not as workflow routes or gates.
+- `.omp/` replaces `.opencode/` configuration. All agents live in `.omp/agents/`, skills in `.omp/skills/`.
 - Brain has edit denied and acts as a pure governance control plane; all file modifications are performed through subagents.
 - Brain routes in this order: continuation, specialist owner, committer boundary, general fallback.
 - general is the general-purpose executor for Brain-bounded tasks after specialist and committer checks.
