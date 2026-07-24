@@ -1,0 +1,10 @@
+{
+  "plugin": [
+    [
+      "opencode-subagent-control@latest",
+      {
+        "enabled": true
+      }
+    ]
+  ]
+}
