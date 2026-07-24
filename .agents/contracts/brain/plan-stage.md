@@ -54,11 +54,11 @@ Out of Scope: <what not to plan>
 Blocking Hard Parts: <list>
 Allowed Scope: <delivery/stages/<stage-id>/>
 Forbidden Scope: <authority documents>
-Acceptance Criteria: <SPV PLAN_READY>
-Verification Method: <SPV reverse validation>
+Acceptance Criteria: <PLAN_READY>
+Verification Method: <Planner internal SPV validation>
 Expected Evidence: <tasks.md + evidence.md>
 Authoritative Inputs: <CONTEXT.md, PRD.md, tech-spec/*>
 Constraints: <no file path prediction, vertical Slices only>
 Stop Conditions: <PLAN_GAP, AUTHORITY_GAP, TECHNICAL_DISCOVERY_REQUIRED>
-Expected Result: <Plan ready | Plan blocked>
+Expected Result: <Plan ready (SPV validated) | Plan blocked>
 ```

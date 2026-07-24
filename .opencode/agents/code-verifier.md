@@ -4,7 +4,19 @@ mode: subagent
 hidden: true
 permission:
   edit: deny
-  bash: allow
+  bash:
+    "*": deny
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "Get-Content *": allow
+    "Get-ChildItem *": allow
+    "Test-Path *": allow
+    "rg *": allow
+    "python -m pytest *": allow
+    "python -c *": allow
+    "npm test *": allow
   read: allow
   glob: allow
   grep: allow
@@ -104,4 +116,3 @@ CV must NOT:
 CV may:
 - read code and documents
 - run existing project commands
-- use read-only inline commands only (e.g., `python -c "..."`) — do NOT create temporary .py/.js/.sh files

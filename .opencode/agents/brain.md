@@ -96,7 +96,10 @@ Brain must not:
 | External technical research | `researcher` with `brain/research.md` |
 | Local technical experiment | `prototype` with `brain/prototype.md` |
 | Bounded local fix | `general` with `brain/general-direct-task.md` |
-| Git boundary | `committer` with `brain/authority-update-commit.md` |
+| Git boundary (authority-update) | `committer` with `brain/authority-update-commit.md` |
+| Planner stage plan ready | `committer` with stage-plan boundary |
+| General direct fix done | `committer` with direct-fix boundary |
+| Stage Review accepted | `committer` with stage-close boundary |
 
 ## Workflow state path
 
@@ -106,7 +109,7 @@ PLANNING → PLAN_READY → EXECUTING → UNDER_REVIEW → COMPLETED
 
 Brain alone advances these states based on agent receipts:
 
-- `PLANNING` → `PLAN_READY`: Planner + SPV report plan ready
+- `PLANNING` → `PLAN_READY`: Planner report plan ready
 - `PLAN_READY` → `EXECUTING`: Brain dispatches Executor
 - `EXECUTING` → `UNDER_REVIEW`: Executor reports all Slices complete
 - `UNDER_REVIEW` → `COMPLETED` / `COMPLETED_WITH_DEVIATION`: Stage Reviewer report + Brain acceptance
@@ -185,6 +188,20 @@ Every Brain dispatch must contain:
 - Stop Conditions
 - Expected Result
 
+### Boundary Type enumeration
+
+When dispatching to `committer`, include a `Boundary Type` field:
+
+| Boundary Type | Commit behavior |
+|---|---|
+| `baseline-authority` | Seed or reset authority documents (CONTEXT.md, PRD.md, tech-spec/*) |
+| `stage-plan` | Commit Planner's stage plan after approval |
+| `slice-output` | Commit Worker slice output (tasks.md, evidence.md) |
+| `authority-update` | Commit Brain authority document changes |
+| `prototype-checkpoint` | Commit isolated prototype findings |
+| `stage-close` | Commit final stage close — delivery/ boundary |
+| `direct-fix` | Commit general direct fix output |
+
 Read the exact contract file before dispatch. Do not browse `.agents/contracts/` as an index.
 
 ## Self-check after receipt
@@ -201,7 +218,7 @@ When a subagent cannot resolve:
 
 | Signal | Route |
 |---|---|
-| IMPLEMENTATION_DEFECT | Re-dispatch to same Worker |
+| IMPLEMENTATION_DEFECT | Brain → Executor → Executor continuation original Worker → fresh CV recheck → targeted Stage Review |
 | PLAN_GAP | Route to Planner |
 | TECHNICAL_UNKNOWN | Route to Researcher / Prototype |
 | AUTHORITY_GAP | Brain updates authority |

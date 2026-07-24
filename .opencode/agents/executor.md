@@ -11,6 +11,8 @@ permission:
     "git diff*": allow
     "git log*": allow
     "git show*": allow
+    "git worktree *": allow
+    "git branch *": allow
     "git branch --show-current": allow
     "git checkout*": allow
     "git merge*": allow
@@ -21,6 +23,10 @@ permission:
     "Test-Path *": allow
     "New-Item *": allow
     "Remove-Item *": allow
+    "python .agents/validators/proofloop-validate-stage.py *": allow
+    "python .agents/validators/proofloop-check-slice-doc-scope.py *": allow
+    "python .agents/validators/proofloop-extract-slice.py *": allow
+    "python .agents/validators/proofloop-merge-slice-docs.py *": allow
   skill: deny
   task:
     "*": deny

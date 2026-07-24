@@ -61,8 +61,12 @@ def main():
         tasks_path = Path.cwd() / "delivery" / "stages" / stage_id / "tasks.md"
     else:
         # Auto-detect
-        tasks_path = Path.cwd() / "delivery"
-        for stage_dir in tasks_path.iterdir():
+        stages_dir = Path.cwd() / "delivery" / "stages"
+        if not stages_dir.exists():
+            print(f"ERROR: No delivery/stages/ directory found. Use --stage or --path.")
+            sys.exit(1)
+        tasks_path = stages_dir
+        for stage_dir in stages_dir.iterdir():
             if stage_dir.is_dir():
                 tp = stage_dir / "tasks.md"
                 if tp.exists():

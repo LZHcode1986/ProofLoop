@@ -10,76 +10,84 @@ Validates authority document mechanical facts:
 Usage: python proofloop-validate-authority.py [--path <root-path>]
 """
 
-import os
 import re
 import sys
 from pathlib import Path
 
 
-def collect_ids(root: Path) -> dict:
-    """Collect all IDs from authority documents."""
-    ids = {}
-    patterns = {
-        "CAP-\\d+": "PRD capability",
-        "FLOW-\\d+": "PRD flow",
-        "FR-\\d+": "functional requirement",
-        "AC-\\d+": "acceptance criteria",
-        "NFR-\\d+": "non-functional requirement",
-        "SEC-\\d+": "security requirement",
-        "HP-\\d+": "hard part",
-        "TYPE-\\w+": "canonical type",
-        "OUT-\\w+-\\d+": "observable outcome",
-    }
+ID_PATTERNS = {
+    "CAP-\\d+": "PRD capability",
+    "FLOW-\\d+": "PRD flow",
+    "FR-\\d+": "functional requirement",
+    "AC-\\d+": "acceptance criteria",
+    "NFR-\\d+": "non-functional requirement",
+    "SEC-\\d+": "security requirement",
+    "HP-\\d+": "hard part",
+    "TYPE-\\w+": "canonical type",
+    "OUT-\\w+-\\d+": "observable outcome",
+}
 
+
+def is_definition_line(line: str, id_val: str) -> bool:
+    """Check if a line contains an ID definition (not just a reference)."""
+    stripped = line.strip()
+    if stripped.startswith(f"### {id_val}") or stripped.startswith(f"## {id_val}"):
+        return True
+    if stripped.startswith(f"| {id_val} ") or stripped.startswith(f"|{id_val} "):
+        return True
+    if re.match(rf"^\*\*{re.escape(id_val)}\*\*", stripped):
+        return True
+    if re.match(rf"^- {re.escape(id_val)}:", stripped):
+        return True
+    return False
+
+
+def collect_definitions(root: Path) -> dict:
+    """Collect IDs that are defined (not just referenced) in authority documents."""
+    ids = {}
     for md_file in root.rglob("*.md"):
         if ".git" in md_file.parts:
             continue
         text = md_file.read_text(encoding="utf-8")
-        for pattern, category in patterns.items():
+        for pattern, category in ID_PATTERNS.items():
             for match in re.finditer(pattern, text):
                 id_val = match.group(0)
-                if id_val not in ids:
-                    ids[id_val] = []
-                ids[id_val].append((category, str(md_file.relative_to(root))))
-
+                line_start = text.rfind("\n", 0, match.start()) + 1
+                line_end = text.find("\n", match.end())
+                if line_end == -1:
+                    line_end = len(text)
+                line = text[line_start:line_end]
+                if is_definition_line(line, id_val):
+                    if id_val not in ids:
+                        ids[id_val] = []
+                    ids[id_val].append((category, str(md_file.relative_to(root))))
     return ids
 
 
-def check_duplicates(ids: dict) -> list:
-    """Check for duplicate IDs across different categories."""
+def check_duplicates(defs: dict) -> list:
+    """Check for duplicate IDs defined in multiple files."""
     issues = []
-    for id_val, occurrences in ids.items():
-        categories = set(c for c, _ in occurrences)
+    for id_val, occurrences in defs.items():
         files = [f for _, f in occurrences]
-        if len(set(files)) > 1 and len(occurrences) > 1:
-            # Same ID in different files is OK for refs, flag if different categories
-            if len(categories) > 1:
-                issues.append(
-                    f"DUPLICATE: {id_val} used in multiple categories: {categories}"
-                )
+        if len(set(files)) > 1:
+            issues.append(
+                f"DUPLICATE: {id_val} defined in multiple files: {files}"
+            )
     return issues
 
 
-def check_refs(root: Path) -> list:
-    """Check that references point to existing IDs."""
+def check_refs(root: Path, defs: dict) -> list:
+    """Check that references point to defined IDs."""
     issues = []
-    all_ids = set()
+    defined_ids = set(defs.keys())
 
-    for md_file in root.rglob("*.md"):
-        if ".git" in md_file.parts:
-            continue
-        text = md_file.read_text(encoding="utf-8")
-        for match in re.finditer(r"(CAP-\d+|FLOW-\d+|FR-\d+|AC-\d+|NFR-\d+|SEC-\d+|HP-\d+|TYPE-\w+|OUT-\w+-\d+)", text):
-            all_ids.add(match.group(0))
-
-    # Check inline refs like [CAP-001] or CAP-001 references
     for md_file in root.rglob("*.md"):
         if ".git" in md_file.parts:
             continue
         text = md_file.read_text(encoding="utf-8")
         for match in re.finditer(r"\[([A-Z]+-\d+)\]", text):
             ref = match.group(1)
-            if ref not in all_ids:
+            if ref not in defined_ids:
                 issues.append(
                     f"MISSING REF: {ref} referenced in {md_file.relative_to(root)} but not defined"
                 )
@@ -116,9 +124,9 @@ def main():
     root = Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1] == "--path" else Path.cwd()
     print(f"Validating authority documents in: {root}")
 
-    ids = collect_ids(root)
-    duplicates = check_duplicates(ids)
-    ref_issues = check_refs(root)
+    defs = collect_definitions(root)
+    duplicates = check_duplicates(defs)
+    ref_issues = check_refs(root, defs)
     type_issues = check_canonical_types(root)
 
     all_issues = duplicates + ref_issues + type_issues
@@ -129,7 +137,7 @@ def main():
             print(f"  - {issue}")
         sys.exit(1)
     else:
-        print(f"\nAll checks passed ({len(ids)} IDs found).")
+        print(f"\nAll checks passed ({len(defs)} IDs defined).")
         sys.exit(0)
 
 

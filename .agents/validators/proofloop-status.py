@@ -27,13 +27,28 @@ def read_progress_status(root: Path) -> dict:
     if status:
         result["overall_status"] = status.group(1)
 
+    # Read Stage-level status from the Stage Details section
+    stage_statuses = {}
+    stage_sections = re.split(r"^### ", text, flags=re.MULTILINE)
+    for section in stage_sections:
+        stage_match = re.match(r"(\S+)\s*[—–-]\s*(.+)", section)
+        if stage_match:
+            stage_id = stage_match.group(1)
+            status_line = re.search(r"Status:\s*(\S+)", section)
+            if status_line:
+                stage_statuses[stage_id] = status_line.group(1)
+
+    result["stage_statuses"] = stage_statuses
     return result
 
 
-def scan_stages(root: Path) -> list:
+def scan_stages(root: Path, stage_statuses: dict | None = None) -> list:
     stages_dir = root / "delivery" / "stages"
     if not stages_dir.exists():
         return []
+
+    if stage_statuses is None:
+        stage_statuses = {}
 
     stages = []
     for stage_dir in sorted(stages_dir.iterdir()):
@@ -52,8 +67,8 @@ def scan_stages(root: Path) -> list:
             stage_info["tasks_checked"] = len(checked)
             stage_info["tasks_total"] = len(total)
 
-            status = re.search(r"Status:\s*(\S+)", text)
-            stage_info["status"] = status.group(1) if status else "unknown"
+        # Stage status from progress.md, not tasks.md
+        stage_info["status"] = stage_statuses.get(stage_dir.name, "unknown")
 
         stages.append(stage_info)
 
@@ -99,7 +114,7 @@ def main():
     print(f"  Git Dirty: {git['dirty']}")
 
     # Stages
-    stages = scan_stages(root)
+    stages = scan_stages(root, progress.get("stage_statuses"))
     print(f"\n=== Stages ({len(stages)}) ===")
     for s in stages:
         print(f"  {s['id']}: {s.get('status', 'unknown')} | "

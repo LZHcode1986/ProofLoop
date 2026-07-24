@@ -5,8 +5,8 @@ hidden: true
 color: "#bb9af7"
 permission:
   edit:
-    "delivery/stages/**": allow
     "*": deny
+    "delivery/stages/**": allow
   read: allow
   glob: allow
   grep: allow
@@ -19,7 +19,9 @@ permission:
   webfetch: deny
   skill:
     "codebase-design": allow
-  task: deny
+  task:
+    "*": deny
+    "stage-plan-verifier": allow
 ---
 
 # Planner Agent
@@ -216,6 +218,10 @@ None
 
 <!-- EVIDENCE:S1:END -->
 ```
+
+## SPV dispatch
+
+After creating `tasks.md`, call `stage-plan-verifier` with the Stage ID to validate the plan. Only return to Brain after SPV returns PLAN_READY.
 
 ## Stop conditions
 

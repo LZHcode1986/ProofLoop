@@ -4,7 +4,7 @@ proofloop-check-slice-doc-scope.py
 Checks that the current branch only modified its own SLICE/EVIDENCE markers.
 Ensures markers are intact and other Slice regions are unchanged.
 
-Usage: python proofloop-check-slice-doc-scope.py --slice <slice-id> [--base <base-ref>]
+Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> [--base <base-ref>]
 """
 
 import re
@@ -34,8 +34,6 @@ def check_markers(text: str) -> list:
         if e not in begins:
             issues.append(f"Missing BEGIN marker for {e[0]}:{e[1]}")
 
-    # Check marker ordering — each BEGIN must have a matching END after it,
-    # and markers must not have been moved to unrelated positions.
     positions = []
     for m in re.finditer(r"<!-- (SLICE|EVIDENCE):(\S+):(BEGIN|END) -->", text):
         positions.append((m.start(), m.group(1), m.group(2), m.group(3)))
@@ -53,7 +51,8 @@ def check_markers(text: str) -> list:
 
 
 def check_other_slices_unchanged(
-    current_text: str, base_text: str, current_slice: str
+    current_text: str, base_text: str, current_slice: str,
+    current_ev_text: str | None = None, base_ev_text: str | None = None
 ) -> list:
     issues = []
     all_slices = set()
@@ -75,11 +74,26 @@ def check_other_slices_unchanged(
         if current_ev != base_ev:
             issues.append(f"Evidence {slice_id} region was modified (not your slice)")
 
+    if current_ev_text is not None and base_ev_text is not None:
+        for slice_id in all_slices:
+            if slice_id == current_slice:
+                continue
+            current_ev_region = get_slice_region(current_ev_text, "EVIDENCE", slice_id)
+            base_ev_region = get_slice_region(base_ev_text, "EVIDENCE", slice_id)
+            if current_ev_region != base_ev_region:
+                issues.append(f"Evidence {slice_id} region in evidence.md was modified (not your slice)")
+
     return issues
 
 
-def find_stage_files(base_dir: Path):
+def find_stage_files(base_dir: Path, stage_id: str | None = None):
     """Find tasks.md and evidence.md under the stage directory structure."""
+    if stage_id:
+        stage_dir = base_dir / "delivery" / "stages" / stage_id
+        if stage_dir.is_dir():
+            return stage_dir / "tasks.md", stage_dir / "evidence.md"
+        return None, None
+
     stages_dir = base_dir / "delivery" / "stages"
     if not stages_dir.exists():
         return None, None
@@ -92,52 +106,70 @@ def find_stage_files(base_dir: Path):
     return None, None
 
 
+def get_base_text(base_ref: str, file_path: Path, cwd: Path) -> str | None:
+    try:
+        rel_path = str(file_path.relative_to(cwd))
+        result = subprocess.run(
+            ["git", "show", f"{base_ref}:{rel_path}"],
+            capture_output=True, text=True, encoding="utf-8"
+        )
+        if result.returncode == 0:
+            return result.stdout
+        else:
+            print(f"WARNING: Could not get base version from {base_ref}: {result.stderr.strip()}")
+    except Exception as e:
+        print(f"WARNING: Could not get base version: {e}")
+    return None
+
+
 def main():
     if "--slice" not in sys.argv:
-        print("Usage: python proofloop-check-slice-doc-scope.py --slice <slice-id> [--base <base-ref>]")
+        print("Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> [--base <base-ref>]")
         sys.exit(1)
 
     slice_idx = sys.argv.index("--slice")
     slice_id = sys.argv[slice_idx + 1]
+
+    stage_id = None
+    if "--stage" in sys.argv:
+        stage_idx = sys.argv.index("--stage")
+        stage_id = sys.argv[stage_idx + 1]
 
     base_ref = None
     if "--base" in sys.argv:
         base_idx = sys.argv.index("--base")
         base_ref = sys.argv[base_idx + 1]
 
-    tasks_file, evidence_file = find_stage_files(Path.cwd())
+    tasks_file, evidence_file = find_stage_files(Path.cwd(), stage_id)
 
     if tasks_file is None:
         print("No tasks.md found under delivery/stages/")
         sys.exit(1)
 
-    current_text = tasks_file.read_text(encoding="utf-8")
+    current_tasks_text = tasks_file.read_text(encoding="utf-8")
+    current_ev_text = evidence_file.read_text(encoding="utf-8") if evidence_file and evidence_file.exists() else None
 
-    # Get base version if --base provided
-    base_text = None
+    base_tasks_text = None
+    base_ev_text = None
     if base_ref:
-        try:
-            rel_path = str(tasks_file.relative_to(Path.cwd()))
-            result = subprocess.run(
-                ["git", "show", f"{base_ref}:{rel_path}"],
-                capture_output=True, text=True, encoding="utf-8"
-            )
-            if result.returncode == 0:
-                base_text = result.stdout
-            else:
-                print(f"WARNING: Could not get base version from {base_ref}: {result.stderr.strip()}")
-        except Exception as e:
-            print(f"WARNING: Could not get base version: {e}")
+        base_tasks_text = get_base_text(base_ref, tasks_file, Path.cwd())
+        if evidence_file and evidence_file.exists():
+            base_ev_text = get_base_text(base_ref, evidence_file, Path.cwd())
 
     all_issues = []
 
-    # Check markers
-    marker_issues = check_markers(current_text)
+    marker_issues = check_markers(current_tasks_text)
     all_issues.extend(marker_issues)
 
-    # Check other slices unchanged (only if base available)
-    if base_text:
-        slice_issues = check_other_slices_unchanged(current_text, base_text, slice_id)
+    if current_ev_text:
+        ev_marker_issues = check_markers(current_ev_text)
+        all_issues.extend(ev_marker_issues)
+
+    if base_tasks_text:
+        slice_issues = check_other_slices_unchanged(
+            current_tasks_text, base_tasks_text, slice_id,
+            current_ev_text, base_ev_text
+        )
         all_issues.extend(slice_issues)
     else:
         print("INFO: No base ref provided, skipping cross-slice modification check")

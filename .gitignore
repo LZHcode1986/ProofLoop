@@ -1,4 +1,5 @@
 docs/
+.proofloop/
 
 __pycache__/
 *.pyc

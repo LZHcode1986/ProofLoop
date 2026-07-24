@@ -7,18 +7,18 @@ permission:
   glob: allow
   grep: allow
   edit:
+    "*": deny
     "prototype/**": allow
     "experiment/**": allow
     "throwaway/**": allow
-    "*": deny
   bash: allow
   question: deny
   webfetch: allow
   websearch: allow
   skill: deny
   task:
-    "researcher": allow
     "*": deny
+    "researcher": allow
 ---
 
 # Prototype Agent
@@ -78,7 +78,8 @@ Temporary Branch/Checkpoint
 After Brain accepts the result:
 1. Brain updates Tech Spec and Hard Part status
 2. Committer creates authority-update boundary
-3. Remove worktree
-4. Delete local prototype branch
+3. If Checkpoint Commit is `on-success` or `always`, Committer creates a local `prototype-checkpoint` tag on the Prototype branch (no push, no merge into Stage/main)
+4. Remove worktree
+5. Delete local prototype branch
 
 INCONCLUSIVE results or pending Tech Spec updates are NOT cleaned up.

@@ -16,8 +16,7 @@ from pathlib import Path
 def replace_region(text: str, marker_type: str, slice_id: str, new_content: str) -> str:
     """Replace the content between markers with new content."""
     pattern = rf"(<!-- {marker_type}:{slice_id}:BEGIN -->).*?(<!-- {marker_type}:{slice_id}:END -->)"
-    replacement = rf"\1{new_content}\2"
-    result = re.sub(pattern, replacement, text, count=1, flags=re.DOTALL)
+    result = re.sub(pattern, lambda m: m.group(1) + new_content + m.group(2), text, count=1, flags=re.DOTALL)
     return result
 
 
