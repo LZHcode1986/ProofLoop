@@ -98,6 +98,7 @@ All Modes share this envelope:
 Target Agent: worker
 Contract Ref: .agents/contracts/executor/worker.md
 Mode: <implement | finalize | recover | repair | diagnose | resolve-conflict>
+Continuation: <task_id | none>
 Slice ID: <same>
 [Mode-specific fields as specified above]
 Expected Result: <per Mode>

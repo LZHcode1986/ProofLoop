@@ -15,6 +15,7 @@ Both Modes include:
 
 - Slice ID
 - Mode
+- Continuation / Task ID
 - Expected Result: Verification passed | Verification failed | Verification blocked
 
 ## Initial-specific fields
@@ -51,6 +52,7 @@ Both Modes include:
 Target Agent: code-verifier
 Contract Ref: .agents/contracts/executor/code-verifier.md
 Mode: initial
+Continuation: <task_id | none>
 Slice ID: <same>
 Slice Contract: <refs>
 Covered Tasks: <list>
@@ -71,6 +73,7 @@ Expected Result: Verification passed | Verification failed | Verification blocke
 Target Agent: code-verifier
 Contract Ref: .agents/contracts/executor/code-verifier.md
 Mode: recheck
+Continuation: <task_id | none>
 Slice ID: <same>
 Previous Failed Criteria: <list>
 Concrete Counterexample: <description>

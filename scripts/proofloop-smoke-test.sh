@@ -35,8 +35,7 @@ run_tool() {
     if [ "${rc}" -eq 127 ]; then
       step_fail "${name} (command not found, exit ${rc})"
     else
-      # Tool ran and exited non-zero — still a pass for smoke test (tool works)
-      step_pass "${name} (tool exited ${rc})"
+      step_fail "${name} (exit ${rc})"
     fi
   fi
 }

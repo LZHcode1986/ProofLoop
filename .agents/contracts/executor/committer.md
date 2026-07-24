@@ -34,6 +34,7 @@ A Slice has passed CV and scope check, and is ready to be committed.
 Target Agent: committer
 Contract Ref: .agents/contracts/executor/committer.md
 Mode: slice-output
+Continuation: <task_id | none>
 Stage ID: <Sxx>
 Slice ID: <Sxx-Sx>
 Current CV Verdict: PASS

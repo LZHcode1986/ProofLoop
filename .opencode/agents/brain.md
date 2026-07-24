@@ -260,7 +260,8 @@ Each Stage candidate must pass:
 
 Every Brain dispatch must contain:
 
-- Route
+- Target Agent
+- Contract Ref
 - Objective / Brain Intent
 - Continuation / Task ID
 - Allowed Scope
