@@ -42,9 +42,9 @@ You receive a Slice Packet containing:
 You must update the `Worker Status` field in your Slice's `tasks.md` region:
 
 - `planned` — initial state
-- `executing` — when you start working
+- `executing` — actively working on a Mode
 - `ready-for-cv` — all Tasks done, TDD run, Evidence written
-- `repairing` — CV failed, you are fixing
+- `repairing` — CV failed, repairing or diagnosing
 - `blocked` — cannot proceed
 
 ## Worker Mode Loop
@@ -148,16 +148,110 @@ Recover uses test-driven-development for unfinished implementation work.
 
 Diagnose first uses diagnose, then uses test-driven-development for the corrective behavior change.
 
-## Mode Results
+## Mode Execution Flows
 
-| Mode | Worker must complete | Allowed return |
-|---|---|---|
-| `implement` | Complete Tasks via TDD, full verification, overwrite Evidence | `READY_FOR_CV` or blocker |
-| `finalize` | No implementation changes, full verification, overwrite Evidence | `READY_FOR_CV` or `IMPLEMENTATION_DEFECT` |
-| `recover` | Verify current state, complete remaining Tasks, overwrite Evidence | `READY_FOR_CV`, `IMPLEMENTATION_DEFECT`, or blocker |
-| `repair` | Fix per first CV counterexample, full verification, overwrite Evidence | `READY_FOR_CV` or blocker |
-| `diagnose` | Load diagnose, root-cause fix, regression proof, overwrite Evidence | `READY_FOR_CV` or blocker |
-| `resolve-conflict` | Resolve mechanical conflict only, verify | `CONFLICT_RESOLVED` or `SEMANTIC_CONFLICT` |
+### Mode: implement
+
+Entry:
+- new runnable Slice, no prior work
+
+Flow:
+1. Set Status: executing.
+2. For each Task: implement, run local check, check off checkbox immediately.
+3. Run full Slice TDD suite.
+4. Overwrite Evidence section.
+5. Set Status: ready-for-cv.
+6. Return READY_FOR_CV.
+
+Allowed return: READY_FOR_CV or blocker
+
+### Mode: finalize
+
+Entry:
+- all Tasks checked
+- Evidence incomplete or stale
+
+Flow:
+1. Set Status: executing.
+2. Do not modify implementation or Task checkboxes.
+3. Run full Slice verification.
+4. On PASS, overwrite Evidence and return READY_FOR_CV.
+5. On failure, return IMPLEMENTATION_DEFECT with failure evidence.
+6. Do not switch to repair autonomously.
+
+Allowed return: READY_FOR_CV or IMPLEMENTATION_DEFECT
+
+### Mode: recover
+
+Entry:
+- initial implementation interrupted
+- Worker context lost
+
+Flow:
+1. Set Status: executing.
+2. Read current tasks.md, evidence.md, and code diff.
+3. Verify checked Tasks against actual code state.
+4. If checked Task has no matching implementation, uncheck and redo.
+5. Complete remaining unchecked Tasks.
+6. Run full Slice TDD suite.
+7. Overwrite Evidence.
+8. Set Status: ready-for-cv.
+9. Return READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker.
+
+Allowed return: READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker
+
+### Mode: repair
+
+Entry:
+- first CV FAIL
+- CV counterexample and failure signature provided
+
+Flow:
+1. Set Status: repairing.
+2. Fix the specific failure per CV counterexample only.
+3. Do not broaden scope or refactor unrelated code.
+4. Run full Slice TDD suite.
+5. Overwrite Evidence.
+6. Set Status: ready-for-cv.
+7. Return READY_FOR_CV or blocker.
+
+Allowed return: READY_FOR_CV or blocker
+
+### Mode: diagnose
+
+Entry:
+- second CV FAIL
+- previous CV failures and repair attempts provided
+
+Flow:
+1. Set Status: repairing.
+2. Load diagnose skill.
+3. Find root cause of persistent failure.
+4. Fix root cause.
+5. Add regression test.
+6. Run full Slice TDD suite.
+7. Overwrite Evidence.
+8. Set Status: ready-for-cv.
+9. Return READY_FOR_CV or blocker.
+
+Allowed return: READY_FOR_CV or blocker
+
+### Mode: resolve-conflict
+
+Entry:
+- mechanical merge conflict during integration
+- conflict description and files provided
+
+Flow:
+1. Set Status: executing.
+2. Resolve mechanical conflict only.
+3. Do not modify behavior or add features.
+4. Verify resolution compiles and basic integrity holds.
+5. Update Evidence only if code, tests, or behavior changed.
+6. Return CONFLICT_RESOLVED or SEMANTIC_CONFLICT.
+7. Do not run full TDD suite.
+
+Allowed return: CONFLICT_RESOLVED or SEMANTIC_CONFLICT
 
 ## Evidence Invariant
 

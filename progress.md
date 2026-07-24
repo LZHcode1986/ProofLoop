@@ -1,11 +1,11 @@
 # Project Progress (Template)
 
-> 将此文件复制到你的项目根目录，由 Brain 维护。
-> 记录 Stage Roadmap 和项目级进度。
+> Copy this file to your project root. Maintained by Brain.
+> Records Stage Roadmap and project-level progress.
 
 ## Project Goal
 
-[一句话描述项目目标]
+[One-sentence project goal]
 
 ## Current Status
 
@@ -14,13 +14,23 @@
 - Last Reviewed Stage:
 - Last Updated:
 
+## Workflow Checkpoint
+
+- Current Phase:
+- Active Skill or Agent:
+- Completed Artifacts:
+- Current Artifact:
+- Last Passed Gate:
+- Latest Finding or Blocker:
+- Pending Transition:
+
 ## Stage Roadmap
 
 | Stage | Goal | Dependencies | Status | Result |
 |---|---|---|---|---|
-| S01 | [Stage 目标] | — | planned | — |
-| S02 | [Stage 目标] | S01 | planned | — |
-| S03 | [Stage 目标] | S01, S02 | planned | — |
+| S01 | [Stage goal] | — | planned | — |
+| S02 | [Stage goal] | S01 | planned | — |
+| S03 | [Stage goal] | S01, S02 | planned | — |
 
 ## Stage Details
 
@@ -36,4 +46,4 @@
 
 ---
 
-> Stage 状态: planned / blocked / ready / active / under-review / completed / completed-with-deviation / deferred / repartition-required
+> Stage status: planned / blocked / ready / active / under-review / completed / completed-with-deviation / deferred / repartition-required

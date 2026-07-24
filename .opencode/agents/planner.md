@@ -131,6 +131,10 @@ For each Slice:
 
 ### 10. MECHANICAL GATE
 - Run proofloop-validate-stage.py.
+Verify:
+- Contract Matrix IDs appear in Stage-level Matrix References.
+- Each Matrix ID is referenced by at least one Slice.
+- Slice → Stage Closure covers the corresponding Matrix Acceptance.
 
 FAIL:
 - Return to the corresponding planning phase based on failure type.
@@ -246,6 +250,11 @@ If migration batches cannot stay independently green, use a shared integration b
 
 - OUT-<ID>-01 ...
 
+## Task Acceptance Matrix References
+
+- TA-001 — <acceptance requirement>
+- TA-004 — <acceptance requirement>
+
 ## Authority References
 
 ## Dependencies
@@ -272,6 +281,11 @@ If migration batches cannot stay independently green, use a shared integration b
 ### Public Seam
 
 ### Authority References
+
+### Matrix References
+
+- TA-001
+- TA-004
 
 ### Dependency Outputs
 

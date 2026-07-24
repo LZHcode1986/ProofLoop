@@ -476,7 +476,9 @@ def check_no_contract_runtime_ids(root: Path) -> list:
     """Scan all Brain and Executor contracts for runtime fields."""
     issues = []
     patterns = ["Continuation / Task ID", "Session ID:", "task_id:"]
-    # 'Continuation:' as a standalone field (not 'Cleanup Continuation:' or continuity references)
+    # Also check for bare \btask_id\b and \bsession_id\b without colon
+    bare_task_id = re.compile(r'(?<!\w)task_id(?!\s*:)(?!\w)')
+    bare_session_id = re.compile(r'(?<!\w)session_id(?!\s*:)(?!\w)')
     continuation_pattern = re.compile(r'(?<!\w)Continuation:(?!\s*(?:is not|is owned by|handle|Fresh|not a Contract|not persisted|must not))')
     for dir_name in ["brain", "executor"]:
         contracts_dir = root / ".agents" / "contracts" / dir_name
@@ -489,85 +491,152 @@ def check_no_contract_runtime_ids(root: Path) -> list:
                     issues.append(f"{dir_name}/{contract_file.name}: Contains '{pattern}' (runtime field not allowed in contract)")
                     break
             else:
-                # Skip Cleanup Continuation line
+                # Check for bare task_id or session_id without colon
                 for line in text.splitlines():
-                    if 'Cleanup Continuation' in line:
+                    stripped = line.strip()
+                    if stripped.startswith('#') or stripped.startswith('<!--') or stripped.startswith('>'):
                         continue
-                    if continuation_pattern.search(line):
-                        issues.append(f"{dir_name}/{contract_file.name}: Contains standalone 'Continuation:' (runtime field not allowed in contract)")
+                    if bare_task_id.search(stripped) or bare_session_id.search(stripped):
+                        issues.append(f"{dir_name}/{contract_file.name}: Contains bare 'task_id' or 'session_id' without colon (runtime field not allowed in contract)")
                         break
+                else:
+                    # Check for standalone Continuation:
+                    for line in text.splitlines():
+                        if 'Cleanup Continuation' in line:
+                            continue
+                        if continuation_pattern.search(line):
+                            issues.append(f"{dir_name}/{contract_file.name}: Contains standalone 'Continuation:' (runtime field not allowed in contract)")
+                            break
     return issues
 
 
 def check_worker_mode_consistency(root: Path) -> list:
-    """Verify Worker mode consistency across 3 sources."""
+    """Verify Worker mode consistency across 3 sources using precise table parsing."""
     issues = []
     expected_modes = {"implement", "finalize", "recover", "repair", "diagnose", "resolve-conflict"}
 
     sources = []
 
-    # 1. Worker Contract (.agents/contracts/executor/worker.md)
+    # 1. Worker Contract — parse Modes table
     worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
     if worker_contract.exists():
         text = worker_contract.read_text(encoding="utf-8")
+        # Find modes in the Modes table (between | Mode | When to use | and next section)
+        mode_section = text.split("## Modes")[1].split("##")[0] if "## Modes" in text else ""
         found = set()
         for m in expected_modes:
-            if m in text.lower():
+            if f"`{m}`" in mode_section:
                 found.add(m)
-        sources.append(("Worker Contract", found))
+        extra = set()
+        # Check for any unexpected mode in backticks
+        for token in mode_section.split():
+            if token.startswith("`") and token.endswith("`") and token[1:-1] not in expected_modes:
+                extra.add(token[1:-1])
+        sources.append(("Worker Contract", found, extra))
     else:
         issues.append("Worker Contract file not found at .agents/contracts/executor/worker.md")
 
-    # 2. Executor Mode Selection (executor.md)
+    # 2. Executor Mode Selection table
     executor_file = root / ".opencode" / "agents" / "executor.md"
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
+        mode_section = text.split("## Executor Mode Selection")[1].split("##")[0] if "## Executor Mode Selection" in text else ""
         found = set()
         for m in expected_modes:
-            if m in text.lower():
+            if f"`{m}`" in mode_section:
                 found.add(m)
-        sources.append(("Executor Mode Selection", found))
+        extra = set()
+        for token in mode_section.split():
+            if token.startswith("`") and token.endswith("`") and token[1:-1] not in expected_modes:
+                extra.add(token[1:-1])
+        sources.append(("Executor Mode Selection", found, extra))
     else:
         issues.append("executor.md not found")
 
-    # 3. Worker Mode Results (worker.md)
+    # 3. Worker Mode Execution Flows
     worker_file = root / ".opencode" / "agents" / "worker.md"
     if worker_file.exists():
         text = worker_file.read_text(encoding="utf-8")
-        found = set()
-        for m in expected_modes:
-            if m in text.lower():
-                found.add(m)
-        sources.append(("Worker Mode Results", found))
+        if "## Mode Execution Flows" in text:
+            # Find the section between ## Mode Execution Flows and the next ## heading
+            start = text.index("## Mode Execution Flows")
+            rest = text[start:]
+            # Find the next ## heading that is not ###
+            end = len(rest)
+            for i, line in enumerate(rest.splitlines()):
+                if line.startswith("## ") and "Mode Execution Flows" not in line:
+                    end = len("\n".join(rest.splitlines()[:i]))
+                    break
+            mode_section = rest[:end]
+            found = set()
+            for m in expected_modes:
+                if f"### Mode: {m}" in mode_section:
+                    found.add(m)
+            extra = set()
+            for line in mode_section.splitlines():
+                if line.startswith("### Mode: "):
+                    mode_name = line[10:].strip()
+                    if mode_name not in expected_modes:
+                        extra.add(mode_name)
+            sources.append(("Worker Mode Flows", found, extra))
+        else:
+            sources.append(("Worker Mode Flows", set(), set()))
     else:
         issues.append("worker.md not found")
 
-    for source_name, found in sources:
-        missing = expected_modes - found
-        if missing:
-            issues.append(f"{source_name}: Missing modes: {sorted(missing)}")
-        extra = found - expected_modes
+    for name, found, extra in sources:
+        if found != expected_modes:
+            missing = expected_modes - found
+            if missing:
+                issues.append(f"{name}: Missing modes: {missing}")
         if extra:
-            issues.append(f"{source_name}: Extra modes: {sorted(extra)}")
+            issues.append(f"{name}: Unexpected extra modes: {extra}")
 
     return issues
 
 
 def check_brain_bash_deny(root: Path) -> list:
-    """Verify Brain's bash starts with '*': deny."""
+    """Verify Brain's bash starts with deny and only read-only commands."""
     issues = []
     brain_file = root / ".opencode" / "agents" / "brain.md"
     if not brain_file.exists():
-        issues.append("brain.md not found")
         return issues
+    
     text = brain_file.read_text(encoding="utf-8")
-    bash_section = get_yaml_section(text, "  bash")
-    if bash_section:
-        lines = [l.strip() for l in bash_section.splitlines() if l.strip()]
-        if not lines or not lines[0].startswith('"*": deny'):
+    
+    # Use proper YAML parsing
+    try:
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return issues
+        data = yaml.safe_load(parts[1])
+        if not isinstance(data, dict):
+            return issues
+        perm = data.get("permission", {})
+        bash_config = perm.get("bash", {})
+        if not isinstance(bash_config, dict):
+            issues.append("Brain: bash must be a dict")
+            return issues
+        
+        if bash_config.get("*") != "deny":
             issues.append("Brain: First bash rule must be '\"*\": deny'")
-    else:
-        issues.append("Brain: Missing bash section")
+            return issues
+        
+        # Verify allowlist contains only read-only commands
+        allowed_read_only = {
+            "git status*", "git log*", "git diff*", "git show*",
+            "git branch --show-current", "rg *", "Select-String *",
+            "Get-Content *", "Get-ChildItem *", "Test-Path *"
+        }
+        
+        allowed = {k for k in bash_config if k != "*"}
+        unexpected = allowed - allowed_read_only
+        if unexpected:
+            issues.append(f"Brain bash: unexpected allow entries: {unexpected}")
+        
+    except Exception as e:
+        issues.append(f"Brain: YAML parse error in bash check: {e}")
+    
     return issues
 
 
@@ -622,6 +691,70 @@ def check_brain_stage_tests_preserved(root: Path) -> list:
     for test in expected_tests:
         if test not in text:
             issues.append(f"Brain: Missing Stage Test '{test}'")
+    return issues
+
+
+def check_return_value_consistency(root: Path) -> list:
+    """Verify Worker allowed returns match between Worker, Contract, and Executor."""
+    issues = []
+
+    # Expected mapping from the specification
+    expected_returns = {
+        "implement": {"READY_FOR_CV", "blocker"},
+        "finalize": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT"},
+        "recover": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT", "blocker"},
+        "repair": {"READY_FOR_CV", "blocker"},
+        "diagnose": {"READY_FOR_CV", "blocker"},
+        "resolve-conflict": {"CONFLICT_RESOLVED", "SEMANTIC_CONFLICT"},
+    }
+
+    # Check Worker Contract Allowed results table
+    worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
+    if worker_contract.exists():
+        text = worker_contract.read_text(encoding="utf-8")
+        if "## Allowed results per Mode" in text:
+            section = text.split("## Allowed results per Mode")[1].split("##")[0] if "##" in text.split("## Allowed results per Mode")[1] else text.split("## Allowed results per Mode")[1]
+            for mode, expected in expected_returns.items():
+                for ret in expected:
+                    if ret == "blocker":
+                        continue
+                    # Check both with and without backticks
+                    if f"`{ret}`" not in section and ret not in section:
+                        issues.append(f"Worker Contract: Missing return '{ret}' for mode '{mode}' in Allowed results table")
+        else:
+            issues.append("Worker Contract: Missing 'Allowed results per Mode' section")
+
+    # Check Worker Mode Execution Flows
+    worker_file = root / ".opencode" / "agents" / "worker.md"
+    if worker_file.exists():
+        text = worker_file.read_text(encoding="utf-8")
+        if "## Mode Execution Flows" in text:
+            section = text.split("## Mode Execution Flows")[1].split("##")[0]
+            for mode, expected in expected_returns.items():
+                mode_block = section.split(f"### Mode: {mode}")
+                if len(mode_block) > 1:
+                    block = mode_block[1].split("###")[0]
+                    for ret in expected:
+                        if ret not in block:
+                            issues.append(f"Worker: Missing return '{ret}' in Mode '{mode}' execution flow")
+        else:
+            issues.append("Worker: Missing 'Mode Execution Flows' section")
+
+    # Check Executor Return Routing table
+    executor_file = root / ".opencode" / "agents" / "executor.md"
+    if executor_file.exists():
+        text = executor_file.read_text(encoding="utf-8")
+        if "## Worker Return Routing" in text:
+            section = text.split("## Worker Return Routing")[1].split("##")[0]
+            all_returns = set()
+            for mode_returns in expected_returns.values():
+                all_returns.update(mode_returns)
+            for ret in all_returns:
+                if ret != "blocker" and ret not in section:
+                    issues.append(f"Executor: Missing return '{ret}' in Worker Return Routing table")
+        else:
+            issues.append("Executor: Missing 'Worker Return Routing' section")
+
     return issues
 
 
@@ -719,6 +852,8 @@ def main():
     for issue in check_brain_stage_tests_preserved(root):
         check_results.append(("FAIL", issue))
     for issue in check_contract_no_continuation_field(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_return_value_consistency(root):
         check_results.append(("FAIL", issue))
 
     passed = sum(1 for r in check_results if r[0] == "PASS")

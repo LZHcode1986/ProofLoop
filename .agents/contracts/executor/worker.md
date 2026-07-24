@@ -13,6 +13,17 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 | `diagnose` | Second CV FAIL, root-cause diagnosis and fix |
 | `resolve-conflict` | Merge conflict during integration |
 
+## Allowed results per Mode
+
+| Mode | Allowed results |
+|---|---|
+| implement | READY_FOR_CV or blocker |
+| finalize | READY_FOR_CV or IMPLEMENTATION_DEFECT |
+| recover | READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker |
+| repair | READY_FOR_CV or blocker |
+| diagnose | READY_FOR_CV or blocker |
+| resolve-conflict | CONFLICT_RESOLVED or SEMANTIC_CONFLICT |
+
 ## Common fields
 
 All Modes include:
@@ -99,7 +110,7 @@ Contract Ref: .agents/contracts/executor/worker.md
 Mode: <implement | finalize | recover | repair | diagnose | resolve-conflict>
 Slice ID: <same>
 [Mode-specific fields as specified above]
-Expected Result: <per Mode>
+Expected Result: <per Mode allowed results>
 ```
 
 ## Runtime continuity

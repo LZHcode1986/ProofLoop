@@ -6,7 +6,7 @@ Dispatch a Stage execution to Executor.
 
 ## Use when
 
-A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED.
+A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED or explicitly DEFERRED with Brain acceptance.
 
 ## Target-specific required fields
 
@@ -20,7 +20,6 @@ A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED
 - SPV PLAN_READY Reference
 - Integration Branch
 - Blocking Hard Parts status
-- Execution Continuation State
 
 ## Expected results
 
@@ -49,7 +48,9 @@ Stage Plan Commit / Base Ref: <ref>
 Stage Validator PASS Reference: <ref>
 SPV PLAN_READY Reference: <ref>
 Integration Branch: <branch>
-Blocking Hard Parts: <VALIDATED>
+Blocking Hard Parts Status:
+- <HP-ID>: VALIDATED
+- <HP-ID>: DEFERRED — <Brain acceptance and residual risk>
 Allowed Scope: <Stage branch>
 Forbidden Scope: <other Stage branches, authority docs>
 Acceptance Criteria: <all Slices complete + CV PASS>

@@ -35,7 +35,10 @@ When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates resul
 
 ## Stop routing
 
-- TECHNICAL_UNKNOWN → Brain dispatches Researcher, continues original task_id
+- TECHNICAL_UNKNOWN → Brain dispatches Researcher
+- When research completes:
+  - continue the original Prototype session if its runtime handle is available;
+  - otherwise create a fresh Prototype with complete persisted experiment context.
 - PROTOTYPE_BLOCKED → Brain evaluates whether to defer Hard Part
 
 ## Packet

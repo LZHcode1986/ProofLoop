@@ -183,15 +183,15 @@ When an active Skill defines its own persistence procedure (e.g., `prd-to-ai-arc
 
 ## Hard Part Management
 
-Before dispatching a Stage, verify all blocking Hard Parts are VALIDATED.
+Before dispatching a Stage, verify all blocking Hard Parts are:
+- VALIDATED; or
+- explicitly DEFERRED with Brain acceptance and documented residual risk.
 
 If a Hard Part is IDENTIFIED, route to:
 - `researcher` for external fact gathering
 - `prototype` for local validation
 
-When Prototype returns `RESEARCH_REQUIRED`, Brain dispatches Researcher, validates the result, then continues the original Prototype session.
-
-Only VALIDATED or DEFERRED (with explicit Brain acceptance) Hard Parts allow Stage execution.
+When Prototype returns `RESEARCH_REQUIRED`, Brain dispatches Researcher, validates the result, then continues the original Prototype session (if handle available) or creates a fresh Prototype from persisted experiment context.
 
 ## Stage Goal Selection
 
@@ -216,16 +216,6 @@ Selection flow:
 5. Select one Stage Goal.
 6. Select the relevant `task-acceptance-matrix` entries.
 7. Dispatch Planner.
-
-## Hard Prohibitions
-
-Brain must not:
-- implement code
-- run Worker or CV verification
-- create Slice or Task
-- modify Stage `tasks.md` or `evidence.md`
-- resolve Git conflicts
-- commit
 
 ## Brain Contract Map
 
@@ -298,10 +288,6 @@ Brain must not edit:
 - `.opencode/**` — agent definitions
 - `.proofloop/**` — runtime worktrees
 
-When an active Skill defines its own persistence procedure, follow the Skill procedure. Otherwise Brain may update authority documents directly.
-
-## Authority Update Transaction
-
 When a technical conclusion affects multiple documents, Brain must update them as a single consistency transaction:
 
 ```text
@@ -319,7 +305,7 @@ Prototype VALIDATED
 | Signal | Route |
 |---|---|
 | IMPLEMENTATION_DEFECT | Brain → Executor continuation → original Worker → fresh CV → targeted Stage Review |
-| PLAN_GAP | Route to Planner |
+| PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If Stage boundary itself is invalid → return to STAGE_SELECTION / REPARTITION_REQUIRED. Otherwise dispatch Planner with specific new information. |
 | TECHNICAL_UNKNOWN | Route to Researcher / Prototype |
 | AUTHORITY_GAP | Brain updates authority |
 | RUNTIME_BLOCKER | Brain blocks Stage, updates progress |

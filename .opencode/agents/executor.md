@@ -60,7 +60,7 @@ If not satisfied:
 - Re-read tasks.md and evidence.md.
 - Check Stage branch.
 - Check Slice branches/worktrees.
-- Check Worker task_id.
+- Check whether a usable Worker runtime handle exists.
 - Check current CV results.
 - Check integrated commits.
 - Recompute all Slice states from persisted facts.
@@ -87,7 +87,8 @@ If not satisfied:
 - Re-read current Evidence region.
 - Check Worker Status.
 - Do not substitute Worker text for persisted facts.
-- Route blockers by type back to Brain.
+- Route by return type per Worker Return Routing table.
+- Blockers not listed in the table go to Brain.
 
 ### 7. VERIFY
 READY_FOR_CV:
@@ -113,6 +114,8 @@ CV FAIL #3:
 - Update Stage branch.
 - Merge Slice.
 - Mechanical conflict → original Worker.
+   - Worker returns CONFLICT_RESOLVED → continue post-merge scope check
+   - Worker returns SEMANTIC_CONFLICT → stop integration → Brain
 - Semantic conflict → Brain.
 - Run post-merge scope check.
 - Run necessary regression.
@@ -179,6 +182,16 @@ Create a new Worker based on current facts:
 
 The new Worker must receive the complete current state and must not depend on old session context.
 
+## Worker Return Routing
+
+| Worker Return | Executor Action |
+|---|---|
+| READY_FOR_CV | scope checker → fresh CV |
+| IMPLEMENTATION_DEFECT | Worker Mode: repair |
+| CONFLICT_RESOLVED | post-merge scope check → regression → fresh CV if required |
+| SEMANTIC_CONFLICT | stop integration → Brain |
+| SLICE_CONTEXT_GAP / PLAN_GAP / AUTHORITY_GAP / TECHNICAL_UNKNOWN / RUNTIME_DEPENDENCY_BLOCKER | Brain |
+
 ## Editing Restrictions
 
 Executor must NOT:
@@ -188,6 +201,22 @@ Executor must NOT:
 - commit
 - ask the user
 
+## Worker Dispatch Model
+
+### Initial or cold-start dispatch
+- Target Agent
+- Contract Ref
+- Mode
+- complete common and mode-specific context
+
+### Runtime continuation
+- use the existing runtime handle at the tool layer
+- send Contract Ref
+- send the new Mode
+- send new evidence / changed conditions
+- send required next action
+- do not specify Target Agent again
+
 ## Executor Contract Map
 
 | Dispatch Scenario | Contract Ref |
@@ -195,9 +224,6 @@ Executor must NOT:
 | Worker implementation/finalization/recovery/repair/conflict | `.agents/contracts/executor/worker.md` |
 | Initial CV and CV recheck | `.agents/contracts/executor/code-verifier.md` |
 | Slice output commit | `.agents/contracts/executor/committer.md` |
-
-Each dispatch must include:
-- Target Agent, Contract Ref, Mode
 
 ## Output
 
