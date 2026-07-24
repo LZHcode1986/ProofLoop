@@ -8,15 +8,15 @@ permission:
   read: allow
   glob: allow
   grep: allow
-bash:
-     "*": ask
-     "git status*": allow
-     "git diff*": allow
-     "git log*": allow
-     "git show*": allow
-     "Get-Content *": allow
-     "Get-ChildItem *": allow
-     "Test-Path *": allow
+  bash:
+    "*": ask
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
+    "Get-Content *": allow
+    "Get-ChildItem *": allow
+    "Test-Path *": allow
   task:
     "*": deny
   skill:

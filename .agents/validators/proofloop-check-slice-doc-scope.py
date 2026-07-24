@@ -64,6 +64,22 @@ def check_marker_integrity(text: str) -> list[str]:
     return issues
 
 
+def check_target_marker_exists(text: str, marker_type: str, slice_id: str, label: str) -> list[str]:
+    issues = []
+    escaped = re.escape(slice_id)
+    begin = re.search(rf"<!-- {marker_type}:{escaped}:BEGIN -->", text)
+    end = re.search(rf"<!-- {marker_type}:{escaped}:END -->", text)
+    if not begin:
+        issues.append(f"{label}: Missing BEGIN marker for {marker_type}:{slice_id}")
+    if not end:
+        issues.append(f"{label}: Missing END marker for {marker_type}:{slice_id}")
+    return issues
+
+
+def get_marker_set(text: str) -> set[tuple[str, str]]:
+    return {(mtype, sid) for _, mtype, sid, _ in find_all_markers(text)}
+
+
 def check_non_slice_unchanged(
     current_text: str, base_text: str, slice_id: str, marker_type: str
 ) -> list[str]:
@@ -75,7 +91,7 @@ def check_non_slice_unchanged(
 
 
 def main():
-    if "--slice" not in sys.argv or "--base" not in sys.argv:
+    if "--slice" not in sys.argv or "--base" not in sys.argv or "--stage" not in sys.argv:
         print("Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> --base <base-ref>")
         sys.exit(1)
 
@@ -85,13 +101,11 @@ def main():
     base_idx = sys.argv.index("--base")
     base_ref = sys.argv[base_idx + 1]
 
-    stage_id = None
-    if "--stage" in sys.argv:
-        stage_idx = sys.argv.index("--stage")
-        stage_id = sys.argv[stage_idx + 1]
+    stage_idx = sys.argv.index("--stage")
+    stage_id = sys.argv[stage_idx + 1]
 
     cwd = Path.cwd()
-    stage_dir = cwd / "delivery" / "stages" / (stage_id or "")
+    stage_dir = cwd / "delivery" / "stages" / stage_id
     tasks_file = stage_dir / "tasks.md"
     evidence_file = stage_dir / "evidence.md"
 
@@ -99,21 +113,52 @@ def main():
         print(f"FATAL: tasks.md not found at {tasks_file}")
         sys.exit(1)
 
+    if not evidence_file.exists():
+        print(f"FATAL: evidence.md not found at {evidence_file}")
+        sys.exit(1)
+
     current_tasks = tasks_file.read_text(encoding="utf-8")
-    current_evidence = evidence_file.read_text(encoding="utf-8") if evidence_file.exists() else None
+    current_evidence = evidence_file.read_text(encoding="utf-8")
 
     base_tasks = get_base_text(base_ref, tasks_file, cwd)
-    base_evidence = get_base_text(base_ref, evidence_file, cwd) if evidence_file.exists() else None
+    base_evidence = get_base_text(base_ref, evidence_file, cwd)
 
     all_issues = []
 
     all_issues.extend(check_marker_integrity(current_tasks))
-    if current_evidence:
-        all_issues.extend(check_marker_integrity(current_evidence))
+    all_issues.extend(check_marker_integrity(current_evidence))
+
+    all_issues.extend(check_target_marker_exists(current_tasks, "SLICE", slice_id, "current tasks.md"))
+    all_issues.extend(check_target_marker_exists(base_tasks, "SLICE", slice_id, "base tasks.md"))
+    all_issues.extend(check_target_marker_exists(current_evidence, "EVIDENCE", slice_id, "current evidence.md"))
+    all_issues.extend(check_target_marker_exists(base_evidence, "EVIDENCE", slice_id, "base evidence.md"))
+
+    current_slice_markers = get_marker_set(current_tasks)
+    base_slice_markers = get_marker_set(base_tasks)
+    if current_slice_markers != base_slice_markers:
+        added = current_slice_markers - base_slice_markers
+        removed = base_slice_markers - current_slice_markers
+        parts = []
+        if added:
+            parts.append(f"added {sorted(added)}")
+        if removed:
+            parts.append(f"removed {sorted(removed)}")
+        all_issues.append(f"SLICE markers in tasks.md differ from base: {'; '.join(parts)}")
+
+    current_evidence_markers = get_marker_set(current_evidence)
+    base_evidence_markers = get_marker_set(base_evidence)
+    if current_evidence_markers != base_evidence_markers:
+        added = current_evidence_markers - base_evidence_markers
+        removed = base_evidence_markers - current_evidence_markers
+        parts = []
+        if added:
+            parts.append(f"added {sorted(added)}")
+        if removed:
+            parts.append(f"removed {sorted(removed)}")
+        all_issues.append(f"EVIDENCE markers in evidence.md differ from base: {'; '.join(parts)}")
 
     all_issues.extend(check_non_slice_unchanged(current_tasks, base_tasks, slice_id, "SLICE"))
-    if current_evidence and base_evidence:
-        all_issues.extend(check_non_slice_unchanged(current_evidence, base_evidence, slice_id, "EVIDENCE"))
+    all_issues.extend(check_non_slice_unchanged(current_evidence, base_evidence, slice_id, "EVIDENCE"))
 
     if all_issues:
         for issue in all_issues:

@@ -35,7 +35,10 @@ A technical question requires local validation in an isolated worktree before it
 - Environment
 - Cleanup Continuation: <auto | manual>
 - Checkpoint Commit: <on-success | always | never>
-- Research Delegation: allowed | denied
+- External Research Status:
+  - not-required
+  - already-provided
+  - return-research-required
 
 ## Packet shape
 
@@ -55,7 +58,7 @@ Failure Criteria: <what would disprove>
 Environment: <local config>
 Cleanup Continuation: <auto | manual>
 Checkpoint Commit: <on-success | always | never>
-Research Delegation: allowed
+External Research Status: not-required
 Allowed Scope: <prototype/ experiment/ throwaway/>
 Forbidden Scope: <production code paths>
 Acceptance Criteria: <clear result>

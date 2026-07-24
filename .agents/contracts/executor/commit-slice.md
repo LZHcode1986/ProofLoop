@@ -15,8 +15,10 @@ A Slice has passed CV and scope check, and is ready to be committed.
 - Slice ID
 - Stage ID
 - Changed files
-- Current CV Verdict
-- Scope Check PASS receipt
+- Current CV Verdict: PASS
+- Scope Check Result: PASS
+- Scope Check Base Ref:
+- Verification Result Reference:
 
 ## Rules
 

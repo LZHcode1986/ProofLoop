@@ -8,9 +8,7 @@ permission:
   grep: allow
   edit:
     "*": deny
-    "prototype/**": allow
-    "experiment/**": allow
-    "throwaway/**": allow
+    ".proofloop/worktrees/prototype-*/**": allow
   bash: allow
   question: deny
   webfetch: deny
