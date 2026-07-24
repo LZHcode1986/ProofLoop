@@ -39,22 +39,9 @@ Both Modes include:
 - Repair Diff
 - Necessary Regression Scope
 
-## Verification flow (initial)
 
-1. Read Slice Contract, covered Tasks, TDD Proof Plan, actual code, tests, diff
-2. Before reading Worker Evidence, independently identify likely counterexamples
-3. Execute refutation attempts
-4. Then read Worker Evidence and Proof Profile declarations
-5. Add profile-specific refutation
-6. Compare Worker claims against actual results
-7. Return verdict
 
-## Recheck rules
 
-- CV is fresh for every invocation (no context reuse)
-- Verify only: previous failed criteria, repair changes, necessary regression
-- Do NOT restart full Slice verification unless the repair changed Slice boundary, authority refs, or verification context
-- If orchestration session is lost, rerun initial CV (no receipt file)
 
 ## Packet shape templates
 

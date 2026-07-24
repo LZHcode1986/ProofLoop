@@ -35,7 +35,8 @@ Edit complete, Edit blocked, or GENERAL_SCOPE_EXCEEDED.
 ## Packet
 
 ```text
-Route: general
+Target Agent: general
+Contract Ref: .agents/contracts/brain/general.md
 Objective: <what to accomplish>
 Continuation: <task_id | none>
 Allowed Scope: <file paths>

@@ -36,7 +36,8 @@ Plan blocked with stop condition if unresolved.
 ## Packet
 
 ```text
-Route: planner
+Target Agent: planner
+Contract Ref: .agents/contracts/brain/plan-stage.md
 Objective: <create Stage plan>
 Continuation: <task_id | none>
 Stage ID: <Sxx>

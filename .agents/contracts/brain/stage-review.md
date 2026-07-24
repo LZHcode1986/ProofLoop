@@ -30,7 +30,8 @@ ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
 ## Packet
 
 ```text
-Route: stage-reviewer
+Target Agent: stage-reviewer
+Contract Ref: .agents/contracts/brain/stage-review.md
 Objective: <review Stage>
 Continuation: <task_id | none>
 Stage ID: <Sxx>

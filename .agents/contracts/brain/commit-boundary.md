@@ -40,7 +40,8 @@ Boundary closed with commit hash, or Boundary blocked.
 ## Packet
 
 ```text
-Route: committer
+Target Agent: committer
+Contract Ref: .agents/contracts/brain/commit-boundary.md
 Objective: <commit objective>
 Continuation: <task_id | none>
 Boundary Type: <type from enumeration>

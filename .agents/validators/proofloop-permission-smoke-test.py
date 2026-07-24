@@ -7,6 +7,11 @@ Usage: python proofloop-permission-smoke-test.py [--path <root-path>]
 """
 
 import sys
+try:
+    import yaml
+except ImportError:
+    print("FATAL: PyYAML not installed (pip install pyyaml)")
+    sys.exit(1)
 from pathlib import Path
 
 
@@ -327,113 +332,120 @@ def check_skill_description_length(root: Path) -> list:
 
 
 def check_agent_skill_visibility(root: Path) -> list:
-    """Check agent skill visibility matches expected allowlist."""
+    """Check agent skill visibility matches expected allowlist using YAML parsing."""
     issues = []
     agent_dir = root / ".opencode" / "agents"
 
-    expected_skills = {
+    expected = {
         "brain": {"*": "deny", "ai-structured-prd": "allow", "prd-to-tech-design-prep": "allow", "prd-to-ai-architecture": "allow", "codebase-design": "allow"},
         "planner": {"*": "deny", "codebase-design": "allow"},
         "worker": {"*": "deny", "test-driven-development": "allow", "diagnose": "allow", "codebase-design": "allow"},
         "stage-reviewer": {"*": "deny", "code-review-and-quality": "allow", "security-and-hardening": "allow"},
-        "general": None,  # skip
     }
 
-    deny_agents = ["executor", "code-verifier", "researcher", "prototype"]
+    deny_agents = {"executor", "code-verifier", "researcher", "prototype", "committer"}
 
-    for agent_name, expected in expected_skills.items():
+    for agent_name in sorted(expected.keys()):
         file = agent_dir / f"{agent_name}.md"
         if not file.exists():
             continue
         text = file.read_text(encoding="utf-8")
-        # find skill section
-        lines = text.splitlines()
-        in_skill = False
-        skill_lines = []
-        for i, line in enumerate(lines):
-            if line.strip().startswith("skill:"):
-                in_skill = True
-                rest = line.strip()[len("skill:"):].strip()
-                if rest:
-                    skill_lines.append(rest)
+        try:
+            parts = text.split("---", 2)
+            if len(parts) < 3:
                 continue
-            if in_skill:
-                if line.strip().startswith("#") or (line.strip().startswith("---") and i > 0):
-                    break
-                if line.strip() and (line[0:2] == "  " or line[0:4] == "    "):
-                    skill_lines.append(line.strip())
-                else:
-                    break
+            data = yaml.safe_load(parts[1])
+            if not isinstance(data, dict):
+                continue
+            perm = data.get("permission", {})
+            skill_config = perm.get("skill", {})
+            if not isinstance(skill_config, dict):
+                continue
+            expected_skills = expected[agent_name]
+            for sk, expected_val in expected_skills.items():
+                actual_val = skill_config.get(sk)
+                if actual_val != expected_val:
+                    issues.append(f"{agent_name}.md: skill '{sk}' is '{actual_val}', expected '{expected_val}'")
+            for sk in skill_config:
+                if sk not in expected_skills:
+                    issues.append(f"{agent_name}.md: unexpected extra skill '{sk}' in allowlist")
+        except Exception as e:
+            issues.append(f"{agent_name}.md: YAML parse error: {e}")
 
-        if agent_name in deny_agents:
-            if len(skill_lines) == 1 and skill_lines[0] in ("deny", '"deny"'):
+    for agent_name in sorted(deny_agents):
+        file = agent_dir / f"{agent_name}.md"
+        if not file.exists():
+            continue
+        text = file.read_text(encoding="utf-8")
+        try:
+            parts = text.split("---", 2)
+            if len(parts) < 3:
                 continue
-            issues.append(f"{agent_name}.md: Expected 'skill: deny' for {agent_name}")
-        elif expected:
-            has_deny = any(l.startswith('"*":') or l.startswith('*:') for l in skill_lines if 'deny' in l)
-            if not has_deny:
-                issues.append(f"{agent_name}.md: Missing '\"*\": deny' in skill section")
-
-    # Also check Committer has skill: deny
-    committer_file = agent_dir / "committer.md"
-    if committer_file.exists():
-        text = committer_file.read_text(encoding="utf-8")
-        lines = text.splitlines()
-        in_skill = False
-        skill_lines = []
-        for i, line in enumerate(lines):
-            if line.strip().startswith("skill:"):
-                in_skill = True
-                rest = line.strip()[len("skill:"):].strip()
-                if rest:
-                    skill_lines.append(rest)
-                continue
-            if in_skill:
-                if line.strip().startswith("#") or (line.strip().startswith("---") and i > 0):
-                    break
-                if line.strip() and (line[0:2] == "  " or line[0:4] == "    "):
-                    skill_lines.append(line.strip())
-                else:
-                    break
-        if not (len(skill_lines) == 1 and skill_lines[0] in ("deny", '"deny"')):
-            issues.append("committer.md: Expected 'skill: deny'")
+            data = yaml.safe_load(parts[1])
+            perm = data.get("permission", {})
+            skill_config = perm.get("skill", "MISSING")
+            if skill_config is None or skill_config == "MISSING":
+                issues.append(f"{agent_name}.md: missing 'skill' section")
+            elif isinstance(skill_config, str) and skill_config != "deny":
+                issues.append(f"{agent_name}.md: skill is '{skill_config}', expected 'deny'")
+            elif isinstance(skill_config, dict):
+                issues.append(f"{agent_name}.md: skill is a dict, expected flat 'deny'")
+        except Exception as e:
+            issues.append(f"{agent_name}.md: YAML parse error: {e}")
 
     return issues
 
 
 def check_brain_contract_map(root: Path) -> list:
-    """Check Brain Contract Map references exist."""
+    """Check all brain contract files are referenced in brain.md."""
     issues = []
     brain_file = root / ".opencode" / "agents" / "brain.md"
-    if not brain_file.exists():
+    contracts_dir = root / ".agents" / "contracts" / "brain"
+    if not brain_file.exists() or not contracts_dir.exists():
         return issues
-    text = brain_file.read_text(encoding="utf-8")
-
-    import re
-    refs = re.findall(r'→\s*(brain/[^\s]+\.md)', text)
-    contracts_dir = root / ".agents" / "contracts"
-    for ref in refs:
-        ref_path = contracts_dir / ref
-        if not ref_path.exists():
-            issues.append(f"Brain Contract Map: '{ref}' → file not found at {ref_path}")
+    
+    brain_text = brain_file.read_text(encoding="utf-8")
+    
+    actual_files = set(f.name for f in contracts_dir.glob("*.md"))
+    referenced = set()
+    for fname in actual_files:
+        if fname in brain_text:
+            referenced.add(fname)
+    
+    missing_from_brain = actual_files - referenced
+    for fname in sorted(missing_from_brain):
+        issues.append(f"Brain contract '{fname}' exists but is not referenced in brain.md")
+    
+    if len(referenced) < 7:
+        issues.append(f"brain.md references only {len(referenced)} contracts, expected at least 7")
+    
     return issues
 
 
 def check_executor_contract_map(root: Path) -> list:
-    """Check Executor Contract Map references exist."""
+    """Check Executor Contract Map references exist in executor.md and match actual files."""
     issues = []
     executor_file = root / ".opencode" / "agents" / "executor.md"
-    if not executor_file.exists():
+    contracts_dir = root / ".agents" / "contracts" / "executor"
+    if not executor_file.exists() or not contracts_dir.exists():
         return issues
-    text = executor_file.read_text(encoding="utf-8")
-
-    import re
-    refs = re.findall(r'→\s*(executor/[^\s]+\.md)', text)
-    contracts_dir = root / ".agents" / "contracts"
-    for ref in refs:
-        ref_path = contracts_dir / ref
-        if not ref_path.exists():
-            issues.append(f"Executor Contract Map: '{ref}' → file not found at {ref_path}")
+    
+    executor_text = executor_file.read_text(encoding="utf-8")
+    
+    actual_files = set(f.name for f in contracts_dir.glob("*.md"))
+    
+    referenced = set()
+    for fname in actual_files:
+        if fname in executor_text:
+            referenced.add(fname)
+    
+    missing_from_executor = actual_files - referenced
+    for fname in sorted(missing_from_executor):
+        issues.append(f"Executor contract '{fname}' exists but is not referenced in executor.md")
+    
+    if len(referenced) < 3:
+        issues.append(f"executor.md references only {len(referenced)} contracts, expected at least 3")
+    
     return issues
 
 
@@ -452,6 +464,11 @@ def check_no_orphan_executor_contracts(root: Path) -> list:
         if ref not in executor_text:
             issues.append(f"Orphan executor contract: {ref} not referenced in executor.md")
     return issues
+
+
+def check_no_orphan_brain_contracts(root: Path) -> list:
+    """Check all brain contract files are referenced in brain.md (reverse check)."""
+    return check_brain_contract_map(root)
 
 
 def main():
@@ -506,6 +523,8 @@ def main():
     for issue in check_executor_contract_map(root):
         check_results.append(("FAIL", issue))
     for issue in check_no_orphan_executor_contracts(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_no_orphan_brain_contracts(root):
         check_results.append(("FAIL", issue))
 
     passed = sum(1 for r in check_results if r[0] == "PASS")

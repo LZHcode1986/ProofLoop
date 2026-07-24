@@ -41,7 +41,8 @@ When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates resul
 ## Packet
 
 ```text
-Route: prototype
+Target Agent: prototype
+Contract Ref: .agents/contracts/brain/prototype.md
 Objective: <validate technical question>
 Continuation: <task_id | none>
 Prototype ID: <proto-xxx>

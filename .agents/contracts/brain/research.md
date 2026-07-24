@@ -28,7 +28,8 @@ Research findings returned. May resolve a Hard Part or inform a technical decisi
 ## Packet
 
 ```text
-Route: researcher
+Target Agent: researcher
+Contract Ref: .agents/contracts/brain/research.md
 Objective: <research goal>
 Continuation: <task_id | none>
 Research Goal: <what to learn>

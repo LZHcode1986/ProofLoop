@@ -31,7 +31,8 @@ All Slices complete with CV PASS. Execution Handoff returned to Brain.
 ## Packet
 
 ```text
-Route: executor
+Target Agent: executor
+Contract Ref: .agents/contracts/brain/execute-stage.md
 Objective: <execute Stage>
 Continuation: <task_id | none>
 Stage ID: <Sxx>
