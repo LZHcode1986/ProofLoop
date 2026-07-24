@@ -21,8 +21,6 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "New-Item *": allow
-    "Remove-Item *": allow
     "python .agents/validators/proofloop-validate-stage.py *": allow
     "python .agents/validators/proofloop-check-slice-doc-scope.py *": allow
     "python .agents/validators/proofloop-extract-slice.py *": allow
@@ -130,6 +128,17 @@ After Worker returns, re-read the Slice region:
 | All checked but Evidence incomplete | Dispatch Slice Finalization |
 | Evidence exists but checkboxes incomplete | Do NOT enter CV |
 
+### Scope check before CV
+
+After Worker return checks pass, run scope checker before dispatching CV:
+
+```text
+python .agents/validators/proofloop-check-slice-doc-scope.py \
+  --stage <stage-id> --slice <slice-id> --base <base-ref>
+```
+
+If scope check FAILS, do NOT dispatch CV — route to Brain as SCOPE_VIOLATION.
+
 ## CV dispatch
 
 ### Initial CV
@@ -226,6 +235,7 @@ If conflict resolution changes implementation or Evidence:
 ```text
 Worker updates Evidence
 Fresh scoped CV recheck
+Scope check
 Committer: slice-output
 ```
 

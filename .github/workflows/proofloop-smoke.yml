@@ -1,0 +1,54 @@
+name: ProofLoop 2.0 Smoke Test
+
+on: [push, pull_request]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Run Authority Validator
+        run: python .agents/validators/proofloop-validate-authority.py
+      
+      - name: Run Permission Smoke Test
+        run: python .agents/validators/proofloop-permission-smoke-test.py
+      
+      - name: Run Status Check
+        run: python .agents/validators/proofloop-status.py
+      
+      - name: Check YAML Frontmatter
+        run: |
+          python -c "
+          import yaml, pathlib
+          errors = []
+          for f in pathlib.Path('.opencode/agents').glob('*.md'):
+              text = f.read_text()
+              if text.startswith('---'):
+                  parts = text.split('---', 2)
+                  try:
+                      cfg = yaml.safe_load(parts[1])
+                      if 'permission' not in cfg:
+                          errors.append(f'{f.name}: missing permission')
+                  except Exception as e:
+                      errors.append(f'{f.name}: YAML parse error: {e}')
+          if errors:
+              for e in errors:
+                  print(f'FAIL: {e}')
+              exit(1)
+          print('All agent YAML frontmatter valid')
+          "
+      
+      - name: Check Agent File Completeness
+        run: |
+          for agent in brain planner stage-plan-verifier executor worker code-verifier stage-reviewer committer researcher prototype general; do
+            path=".opencode/agents/$agent.md"
+            if [ ! -f "$path" ]; then
+              echo "FAIL: Missing agent $agent at $path"
+              exit 1
+            fi
+          done
+          echo "All 11 agent files present"

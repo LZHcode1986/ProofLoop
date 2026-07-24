@@ -18,6 +18,7 @@ permission:
     "git rev-parse*": allow
     "git branch --show-current": allow
     "git log*": allow
+  external_directory: deny
   question: deny
   webfetch: deny
   websearch: deny

@@ -8,15 +8,15 @@ permission:
   read: allow
   glob: allow
   grep: allow
-  bash:
-    "*": deny
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
+bash:
+     "*": ask
+     "git status*": allow
+     "git diff*": allow
+     "git log*": allow
+     "git show*": allow
+     "Get-Content *": allow
+     "Get-ChildItem *": allow
+     "Test-Path *": allow
   task:
     "*": deny
   skill:
@@ -101,3 +101,5 @@ All findings return to Brain. Stage Reviewer does NOT:
 - commit
 - recalculate CV verdicts
 - rerun blind refutation
+
+Stage Reviewer may run test and build commands (via `bash: ask`) to verify Stage behavior, but does NOT edit project files.

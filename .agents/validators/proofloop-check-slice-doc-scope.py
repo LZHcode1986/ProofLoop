@@ -2,177 +2,118 @@
 proofloop-check-slice-doc-scope.py
 
 Checks that the current branch only modified its own SLICE/EVIDENCE markers.
-Ensures markers are intact and other Slice regions are unchanged.
+Ensures markers are unique, properly ordered, and non-slice regions unchanged.
 
-Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> [--base <base-ref>]
+Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> --base <base-ref>
 """
 
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 
-def get_slice_region(text: str, marker_type: str, slice_id: str) -> str | None:
-    pattern = rf"<!-- {marker_type}:{slice_id}:BEGIN -->(.*?)<!-- {marker_type}:{slice_id}:END -->"
-    match = re.search(pattern, text, re.DOTALL)
-    return match.group(0) if match else None
+def get_base_text(base_ref: str, file_path: Path, cwd: Path) -> str:
+    rel_path = str(file_path.relative_to(cwd))
+    result = subprocess.run(
+        ["git", "show", f"{base_ref}:{rel_path}"],
+        capture_output=True, text=True, encoding="utf-8"
+    )
+    if result.returncode != 0:
+        print(f"FATAL: Cannot read base version from {base_ref}:{rel_path}: {result.stderr.strip()}")
+        sys.exit(1)
+    return result.stdout
 
 
-def check_markers(text: str) -> list:
-    begin_markers = re.findall(r"<!-- (SLICE|EVIDENCE):(\S+):BEGIN -->", text)
-    end_markers = re.findall(r"<!-- (SLICE|EVIDENCE):(\S+):END -->", text)
+def remove_marker_blocks(text: str, marker_type: str, slice_id: str) -> str:
+    """Remove all marker blocks of the given type for the given slice."""
+    escaped = re.escape(slice_id)
+    pattern = rf"<!-- {marker_type}:{escaped}:BEGIN -->.*?<!-- {marker_type}:{escaped}:END -->"
+    return re.sub(pattern, "", text, flags=re.DOTALL)
 
-    begins = {(m, s) for m, s in begin_markers}
-    ends = {(m, s) for m, s in end_markers}
 
+def find_all_markers(text: str) -> list[tuple[int, str, str, str]]:
+    pattern = r"<!-- (SLICE|EVIDENCE):(\S+):(BEGIN|END) -->"
+    return [(m.start(), m.group(1), m.group(2), m.group(3)) for m in re.finditer(pattern, text)]
+
+
+def check_marker_integrity(text: str) -> list[str]:
     issues = []
-    for b in begins:
-        if b not in ends:
-            issues.append(f"Missing END marker for {b[0]}:{b[1]}")
-    for e in ends:
-        if e not in begins:
-            issues.append(f"Missing BEGIN marker for {e[0]}:{e[1]}")
+    markers = find_all_markers(text)
 
-    positions = []
-    for m in re.finditer(r"<!-- (SLICE|EVIDENCE):(\S+):(BEGIN|END) -->", text):
-        positions.append((m.start(), m.group(1), m.group(2), m.group(3)))
-    depth = {}
-    for pos, mtype, sid, kind in positions:
-        key = (mtype, sid)
-        if kind == "BEGIN":
-            depth[key] = depth.get(key, 0) + 1
-        else:
-            depth[key] = depth.get(key, 0) - 1
-            if depth[key] < 0:
-                issues.append(f"Unmatched END marker for {mtype}:{sid} at position {pos}")
+    by_key = defaultdict(list)
+    for pos, mtype, sid, kind in markers:
+        by_key[(mtype, sid)].append((pos, kind))
+
+    for (mtype, sid), entries in by_key.items():
+        begins = [p for p, k in entries if k == "BEGIN"]
+        ends = [p for p, k in entries if k == "END"]
+
+        if len(begins) > 1:
+            issues.append(f"Duplicate BEGIN markers for {mtype}:{sid} (found {len(begins)})")
+        if len(ends) > 1:
+            issues.append(f"Duplicate END markers for {mtype}:{sid} (found {len(ends)})")
+        if len(begins) == 0:
+            issues.append(f"Missing BEGIN marker for {mtype}:{sid}")
+        if len(ends) == 0:
+            issues.append(f"Missing END marker for {mtype}:{sid}")
+        if len(begins) == 1 and len(ends) == 1 and begins[0] > ends[0]:
+            issues.append(f"Marker {mtype}:{sid}: END appears before BEGIN")
 
     return issues
 
 
-def check_other_slices_unchanged(
-    current_text: str, base_text: str, current_slice: str,
-    current_ev_text: str | None = None, base_ev_text: str | None = None
-) -> list:
-    issues = []
-    all_slices = set()
-    for m in re.finditer(r"<!-- SLICE:(\S+):BEGIN -->", current_text):
-        all_slices.add(m.group(1))
-    for m in re.finditer(r"<!-- EVIDENCE:(\S+):BEGIN -->", current_text):
-        all_slices.add(m.group(1))
-
-    for slice_id in all_slices:
-        if slice_id == current_slice:
-            continue
-        current_region = get_slice_region(current_text, "SLICE", slice_id)
-        base_region = get_slice_region(base_text, "SLICE", slice_id)
-        if current_region != base_region:
-            issues.append(f"Slice {slice_id} region was modified (not your slice)")
-
-        current_ev = get_slice_region(current_text, "EVIDENCE", slice_id)
-        base_ev = get_slice_region(base_text, "EVIDENCE", slice_id)
-        if current_ev != base_ev:
-            issues.append(f"Evidence {slice_id} region was modified (not your slice)")
-
-    if current_ev_text is not None and base_ev_text is not None:
-        for slice_id in all_slices:
-            if slice_id == current_slice:
-                continue
-            current_ev_region = get_slice_region(current_ev_text, "EVIDENCE", slice_id)
-            base_ev_region = get_slice_region(base_ev_text, "EVIDENCE", slice_id)
-            if current_ev_region != base_ev_region:
-                issues.append(f"Evidence {slice_id} region in evidence.md was modified (not your slice)")
-
-    return issues
-
-
-def find_stage_files(base_dir: Path, stage_id: str | None = None):
-    """Find tasks.md and evidence.md under the stage directory structure."""
-    if stage_id:
-        stage_dir = base_dir / "delivery" / "stages" / stage_id
-        if stage_dir.is_dir():
-            return stage_dir / "tasks.md", stage_dir / "evidence.md"
-        return None, None
-
-    stages_dir = base_dir / "delivery" / "stages"
-    if not stages_dir.exists():
-        return None, None
-    for stage_dir in sorted(stages_dir.iterdir()):
-        if stage_dir.is_dir():
-            tasks_file = stage_dir / "tasks.md"
-            evidence_file = stage_dir / "evidence.md"
-            if tasks_file.exists():
-                return tasks_file, evidence_file
-    return None, None
-
-
-def get_base_text(base_ref: str, file_path: Path, cwd: Path) -> str | None:
-    try:
-        rel_path = str(file_path.relative_to(cwd))
-        result = subprocess.run(
-            ["git", "show", f"{base_ref}:{rel_path}"],
-            capture_output=True, text=True, encoding="utf-8"
-        )
-        if result.returncode == 0:
-            return result.stdout
-        else:
-            print(f"WARNING: Could not get base version from {base_ref}: {result.stderr.strip()}")
-    except Exception as e:
-        print(f"WARNING: Could not get base version: {e}")
-    return None
+def check_non_slice_unchanged(
+    current_text: str, base_text: str, slice_id: str, marker_type: str
+) -> list[str]:
+    stripped_current = remove_marker_blocks(current_text, marker_type, slice_id)
+    stripped_base = remove_marker_blocks(base_text, marker_type, slice_id)
+    if stripped_current != stripped_base:
+        return [f"Non-{marker_type} regions differ from base (modified content outside your slice markers)"]
+    return []
 
 
 def main():
-    if "--slice" not in sys.argv:
-        print("Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> [--base <base-ref>]")
+    if "--slice" not in sys.argv or "--base" not in sys.argv:
+        print("Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> --base <base-ref>")
         sys.exit(1)
 
     slice_idx = sys.argv.index("--slice")
     slice_id = sys.argv[slice_idx + 1]
+
+    base_idx = sys.argv.index("--base")
+    base_ref = sys.argv[base_idx + 1]
 
     stage_id = None
     if "--stage" in sys.argv:
         stage_idx = sys.argv.index("--stage")
         stage_id = sys.argv[stage_idx + 1]
 
-    base_ref = None
-    if "--base" in sys.argv:
-        base_idx = sys.argv.index("--base")
-        base_ref = sys.argv[base_idx + 1]
+    cwd = Path.cwd()
+    stage_dir = cwd / "delivery" / "stages" / (stage_id or "")
+    tasks_file = stage_dir / "tasks.md"
+    evidence_file = stage_dir / "evidence.md"
 
-    tasks_file, evidence_file = find_stage_files(Path.cwd(), stage_id)
-
-    if tasks_file is None:
-        print("No tasks.md found under delivery/stages/")
+    if not tasks_file.exists():
+        print(f"FATAL: tasks.md not found at {tasks_file}")
         sys.exit(1)
 
-    current_tasks_text = tasks_file.read_text(encoding="utf-8")
-    current_ev_text = evidence_file.read_text(encoding="utf-8") if evidence_file and evidence_file.exists() else None
+    current_tasks = tasks_file.read_text(encoding="utf-8")
+    current_evidence = evidence_file.read_text(encoding="utf-8") if evidence_file.exists() else None
 
-    base_tasks_text = None
-    base_ev_text = None
-    if base_ref:
-        base_tasks_text = get_base_text(base_ref, tasks_file, Path.cwd())
-        if evidence_file and evidence_file.exists():
-            base_ev_text = get_base_text(base_ref, evidence_file, Path.cwd())
+    base_tasks = get_base_text(base_ref, tasks_file, cwd)
+    base_evidence = get_base_text(base_ref, evidence_file, cwd) if evidence_file.exists() else None
 
     all_issues = []
 
-    marker_issues = check_markers(current_tasks_text)
-    all_issues.extend(marker_issues)
+    all_issues.extend(check_marker_integrity(current_tasks))
+    if current_evidence:
+        all_issues.extend(check_marker_integrity(current_evidence))
 
-    if current_ev_text:
-        ev_marker_issues = check_markers(current_ev_text)
-        all_issues.extend(ev_marker_issues)
-
-    if base_tasks_text:
-        slice_issues = check_other_slices_unchanged(
-            current_tasks_text, base_tasks_text, slice_id,
-            current_ev_text, base_ev_text
-        )
-        all_issues.extend(slice_issues)
-    else:
-        print("INFO: No base ref provided, skipping cross-slice modification check")
+    all_issues.extend(check_non_slice_unchanged(current_tasks, base_tasks, slice_id, "SLICE"))
+    if current_evidence and base_evidence:
+        all_issues.extend(check_non_slice_unchanged(current_evidence, base_evidence, slice_id, "EVIDENCE"))
 
     if all_issues:
         for issue in all_issues:

@@ -9,6 +9,7 @@ permission:
   webfetch: deny
   websearch: deny
   skill: allow
+  external_directory: deny
   question: deny
 ---
 

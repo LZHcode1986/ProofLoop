@@ -9,7 +9,7 @@ permission:
   glob: allow
   grep: allow
   edit: deny
-  bash: deny
+  bash: ask
   question: deny
   task: deny
   skill: deny
@@ -57,5 +57,7 @@ Still Unknown
 - Researcher does not implement code
 - Researcher does not edit the repository
 - Researcher does not make product decisions
-- Researcher may be dispatched by Brain or Prototype
+- Researcher is dispatched only by Brain
 - Researcher must not dispatch sub-agents
+- Researcher may request `bash: ask` approval to clone repositories for local experiments
+- Researcher does NOT edit the repository or modify project files

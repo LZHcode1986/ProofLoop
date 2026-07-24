@@ -15,13 +15,13 @@ permission:
     "Test-Path *": allow
     "rg *": allow
     "python -m pytest *": allow
-    "python -c *": allow
     "npm test *": allow
   read: allow
   glob: allow
   grep: allow
   task: deny
   skill: deny
+  external_directory: deny
   question: deny
   webfetch: deny
   websearch: deny

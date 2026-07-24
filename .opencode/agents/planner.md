@@ -15,6 +15,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
+    "python .agents/validators/proofloop-validate-stage.py *": allow
   question: deny
   webfetch: deny
   skill:
@@ -219,9 +220,20 @@ None
 <!-- EVIDENCE:S1:END -->
 ```
 
+## Verification workflow
+
+```text
+Write tasks.md + evidence.md
+  → Stage Validator: python .agents/validators/proofloop-validate-stage.py --stage <stage-id>
+  → If FAIL: fix plan and re-run
+  → SPV: call stage-plan-verifier with Stage ID
+  → If not PLAN_READY: fix issue and re-run full chain
+  → Return to Brain
+```
+
 ## SPV dispatch
 
-After creating `tasks.md`, call `stage-plan-verifier` with the Stage ID to validate the plan. Only return to Brain after SPV returns PLAN_READY.
+After Stage Validator PASSES, call `stage-plan-verifier` with the Stage ID to validate the plan. Only return to Brain after SPV returns PLAN_READY.
 
 ## Stop conditions
 

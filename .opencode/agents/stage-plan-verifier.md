@@ -12,6 +12,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
+  external_directory: deny
   question: deny
   webfetch: deny
   websearch: deny

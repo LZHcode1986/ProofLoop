@@ -8,14 +8,15 @@ This contract is read by Committer only when Executor supplies the path as `Cont
 
 ## When to use
 
-A Slice has passed CV and is ready to be committed.
+A Slice has passed CV and scope check, and is ready to be committed.
 
 ## Required fields
 
 - Slice ID
 - Stage ID
 - Changed files
-- CV PASS receipt
+- Current CV Verdict
+- Scope Check PASS receipt
 
 ## Rules
 
@@ -33,6 +34,6 @@ Boundary Type: slice-output
 Stage ID: <Sxx>
 Slice ID: <Sxx-Sx>
 Changed Files: <list>
-CV Receipt: <ref>
+Verification Result Reference: <ref>
 Expected Result: Boundary closed | Boundary blocked
 ```
