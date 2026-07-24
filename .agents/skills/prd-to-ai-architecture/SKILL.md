@@ -1,6 +1,6 @@
 ---
 name: prd-to-ai-architecture
-description: Use when a user provides a PRD and wants an AI-coding-ready technical architecture brief before implementation. This skill turns PRD content and optional technical clarification notes into lightweight architecture artifacts, contract/state matrices, hard-parts registers, and task acceptance matrices so AI coding agents are less likely to drift, skip difficult work, or create interface mismatches.
+description: Convert an approved PRD into AI-coding architecture, contracts, state models, and hard-part risks.
 ---
 
 # PRD to AI Architecture

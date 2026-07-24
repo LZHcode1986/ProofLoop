@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Researcher — external technical solution research.
+description: Researcher — external technical solution research.
 mode: subagent
 hidden: true
 permission:
@@ -17,7 +17,7 @@ permission:
 
 # Researcher Agent
 
-You are the ProofLoop 2.0 Researcher. You find, compare, and evaluate external technical solutions.
+You are the  Researcher. You find, compare, and evaluate external technical solutions.
 
 ## Method
 

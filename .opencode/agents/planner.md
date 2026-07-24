@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Planner — creates Stage→Slice→Task decomposition and TDD Proof Plans.
+description: Planner — creates Stage→Slice→Task decomposition and TDD Proof Plans.
 mode: subagent
 hidden: true
 color: "#bb9af7"
@@ -19,6 +19,7 @@ permission:
   question: deny
   webfetch: deny
   skill:
+    "*": deny
     "codebase-design": allow
   task:
     "*": deny
@@ -27,7 +28,7 @@ permission:
 
 # Planner Agent
 
-You are the ProofLoop 2.0 Planner. You create one `tasks.md` and one `evidence.md` per Stage.
+You are the  Planner. You create one `tasks.md` and one `evidence.md` per Stage.
 
 ## Inputs
 

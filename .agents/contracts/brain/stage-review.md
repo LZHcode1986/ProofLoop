@@ -1,27 +1,14 @@
 # Brain Stage Review Dispatch Contract
 
+Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+
 Dispatch a Stage review to Stage Reviewer.
 
-## When to use
+## Use when
 
 A Stage execution is complete and needs goal-first review against the Stage Goal, Observable Outcomes, and authority documents.
 
-## Required Core Packet fields
-
-- Route
-- Objective / Brain Intent
-- Continuation
-- Allowed Scope
-- Forbidden Scope / Out of Scope
-- Acceptance Criteria
-- Verification Method
-- Expected Evidence
-- Authoritative Inputs
-- Constraints
-- Stop Conditions
-- Expected Result
-
-## Required review fields
+## Target-specific required fields
 
 - Stage ID
 - Stage Goal
@@ -30,7 +17,17 @@ A Stage execution is complete and needs goal-first review against the Stage Goal
 - Tech Spec References
 - Stage branch ref
 
-## Packet shape
+## Expected results
+
+ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
+
+## Stop routing
+
+- GOAL_MISMATCH → Brain evaluates whether to accept deviation or repartition
+- AUTHORITY_VIOLATION → Brain resolves authority inconsistency
+- INCOMPLETE_EVIDENCE → Brain may re-dispatch to Executor for gap fill
+
+## Packet
 
 ```text
 Route: stage-reviewer

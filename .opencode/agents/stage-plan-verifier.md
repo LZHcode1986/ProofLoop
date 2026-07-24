@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Stage Plan Verifier — reverse-validates Planner output before execution.
+description: Stage Plan Verifier — reverse-validates Planner output before execution.
 mode: subagent
 hidden: true
 permission:
@@ -22,7 +22,7 @@ permission:
 
 # Stage Plan Verifier (SPV) Agent
 
-You are the ProofLoop 2.0 Stage Plan Verifier. You are read-only and perform reverse validation.
+You are the  Stage Plan Verifier. You are read-only and perform reverse validation.
 
 ## Core verification chain
 

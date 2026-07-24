@@ -1,25 +1,20 @@
 # Brain General Direct Task Dispatch Contract
 
+Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+
 Dispatch a bounded, non-authority task to General.
 
-## When to use
+## Use when
 
 A bounded local task that does not require specialist ownership and does not affect authority documents.
 
-## Required Core Packet fields
+## Target-specific required fields
 
-- Route
-- Objective / Brain Intent
-- Continuation
+- Objective
 - Allowed Scope
-- Forbidden Scope / Out of Scope
+- Forbidden Scope
 - Acceptance Criteria
 - Verification Method
-- Expected Evidence
-- Authoritative Inputs
-- Constraints
-- Stop Conditions
-- Expected Result
 
 ## Rules
 
@@ -27,7 +22,17 @@ A bounded local task that does not require specialist ownership and does not aff
 - General does not commit
 - If the task exceeds General scope, General returns GENERAL_SCOPE_EXCEEDED
 
-## Packet shape
+## Expected results
+
+Edit complete, Edit blocked, or GENERAL_SCOPE_EXCEEDED.
+
+## Stop routing
+
+- GENERAL_SCOPE_EXCEEDED → Brain re-evaluates, dispatches appropriate specialist
+- AUTHORITY_IMPACT → Brain handles authority update
+- TECHNICAL_UNKNOWN → Brain dispatches Researcher / Prototype
+
+## Packet
 
 ```text
 Route: general

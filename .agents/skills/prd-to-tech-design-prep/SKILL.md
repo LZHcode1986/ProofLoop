@@ -1,6 +1,6 @@
 ---
 name: prd-to-tech-design-prep
-description: prepare a non-technical, user-answerable handoff from an approved prd into later technical design. use when a prd has been confirmed and the user wants implementation preparation, technical clarification questions, glossary explanations, domain/term checks, scenario pressure tests, or a technical design input brief before architecture, task planning, or coding. does not create full architecture, database schema, api contracts, or task breakdown unless the user explicitly moves into a separate technical design workflow.
+description: Prepare an approved PRD for technical design by resolving terminology, scenarios, and missing technical inputs.
 ---
 
 # prd-to-tech-design-prep

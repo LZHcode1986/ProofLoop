@@ -1,27 +1,14 @@
 # Brain Execute Stage Dispatch Contract
 
+Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+
 Dispatch a Stage execution to Executor.
 
-## When to use
+## Use when
 
 A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED.
 
-## Required Core Packet fields
-
-- Route
-- Objective / Brain Intent
-- Continuation
-- Allowed Scope
-- Forbidden Scope / Out of Scope
-- Acceptance Criteria
-- Verification Method
-- Expected Evidence
-- Authoritative Inputs
-- Constraints
-- Stop Conditions
-- Expected Result
-
-## Required execution fields
+## Target-specific required fields
 
 - Stage ID
 - Stage Goal
@@ -30,7 +17,18 @@ A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED
 - Slice DAG
 - Blocking Hard Parts status
 
-## Packet shape
+## Expected results
+
+All Slices complete with CV PASS. Execution Handoff returned to Brain.
+
+## Stop routing
+
+- UNRESOLVED_IMPLEMENTATION_DEFECT → continuation to Executor
+- PLAN_GAP → route to Planner
+- AUTHORITY_GAP → Brain updates authority
+- TECHNICAL_UNKNOWN → route to Researcher / Prototype
+
+## Packet
 
 ```text
 Route: executor

@@ -1,6 +1,6 @@
 ---
 name: ai-structured-prd
-description: convert messy product ideas, chat history, notes, screenshots, or partial requirements into an ai-usable structured prd for non-technical users. use when the user wants to turn an idea into a prd, prepare requirements before ai coding, maintain prd context across a long conversation, review a prd for clarity, or identify missing product decisions before technical design. focuses on intent, users, scenarios, flows, scope, acceptance criteria, decision ledger, glossary, and readiness; does not create full technical architecture or implementation plans.
+description: Turn rough product ideas or existing requirements into a structured PRD before technical design.
 ---
 
 # ai-structured-prd

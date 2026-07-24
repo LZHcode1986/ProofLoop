@@ -1,27 +1,14 @@
 # Brain Prototype Dispatch Contract
 
+Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+
 Dispatch a local technical experiment to Prototype.
 
-## When to use
+## Use when
 
 A technical question requires local validation in an isolated worktree before it can be accepted into Tech Spec.
 
-## Required Core Packet fields
-
-- Route
-- Objective / Brain Intent
-- Continuation
-- Allowed Scope
-- Forbidden Scope / Out of Scope
-- Acceptance Criteria
-- Verification Method
-- Expected Evidence
-- Authoritative Inputs
-- Constraints
-- Stop Conditions
-- Expected Result
-
-## Required prototype fields
+## Target-specific required fields
 
 - Hard Part ID
 - Prototype ID: <proto-xxx>
@@ -40,7 +27,18 @@ A technical question requires local validation in an isolated worktree before it
   - already-provided
   - return-research-required
 
-## Packet shape
+## Expected results
+
+VALIDATED, REJECTED, INCONCLUSIVE, or RESEARCH_REQUIRED.
+
+When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates result, then continues original Prototype task_id.
+
+## Stop routing
+
+- TECHNICAL_UNKNOWN → Brain dispatches Researcher, continues original task_id
+- PROTOTYPE_BLOCKED → Brain evaluates whether to defer Hard Part
+
+## Packet
 
 ```text
 Route: prototype
@@ -67,5 +65,5 @@ Expected Evidence: <experiment results>
 Authoritative Inputs: <refs>
 Constraints: <limits>
 Stop Conditions: <when to stop>
-Expected Result: <VALIDATED | REJECTED | INCONCLUSIVE | BLOCKED>
+Expected Result: <VALIDATED | REJECTED | INCONCLUSIVE | RESEARCH_REQUIRED | BLOCKED>
 ```

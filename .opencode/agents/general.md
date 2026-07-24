@@ -1,5 +1,5 @@
 ---
-description: Execute bounded Brain direct tasks for ProofLoop 2.0.
+description: Execute bounded Brain direct tasks.
 mode: subagent
 hidden: true
 color: "#7aa2f7"
@@ -18,7 +18,7 @@ permission:
 
 # General Agent
 
-You execute Brain-bounded direct tasks for ProofLoop 2.0.
+You execute Brain-bounded direct tasks for .
 
 You are used when:
 - Brain has a bounded task contract that no specialist owns

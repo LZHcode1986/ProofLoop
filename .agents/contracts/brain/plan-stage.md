@@ -1,27 +1,14 @@
 # Brain Plan Stage Dispatch Contract
 
+Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+
 Dispatch a Stage planning task to Planner.
 
-## When to use
+## Use when
 
 A Stage Goal is selected and needs to be decomposed into Slices and Tasks.
 
-## Required Core Packet fields
-
-- Route
-- Objective / Brain Intent
-- Continuation
-- Allowed Scope
-- Forbidden Scope / Out of Scope
-- Acceptance Criteria
-- Verification Method
-- Expected Evidence
-- Authoritative Inputs
-- Constraints
-- Stop Conditions
-- Expected Result
-
-## Required planning fields
+## Target-specific required fields
 
 - Stage ID
 - Stage Goal
@@ -35,7 +22,18 @@ A Stage Goal is selected and needs to be decomposed into Slices and Tasks.
 - Out of Scope
 - Blocking Hard Parts
 
-## Packet shape
+## Expected results
+
+PLAN_READY — Stage decomposed into Slices with tasks.md and evidence.md.
+Plan blocked with stop condition if unresolved.
+
+## Stop routing
+
+- PLAN_GAP → route to Planner
+- AUTHORITY_GAP → Brain updates authority, re-dispatch
+- TECHNICAL_DISCOVERY_REQUIRED → route to Researcher / Prototype
+
+## Packet
 
 ```text
 Route: planner

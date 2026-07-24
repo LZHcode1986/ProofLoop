@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Worker — implements one Slice, checks off Tasks, writes Evidence.
+description: Worker — implements one Slice, checks off Tasks, writes Evidence.
 mode: subagent
 hidden: true
 permission:
@@ -8,14 +8,18 @@ permission:
   task: deny
   webfetch: deny
   websearch: deny
-  skill: allow
+  skill:
+    "*": deny
+    "test-driven-development": allow
+    "diagnose": allow
+    "codebase-design": allow
   external_directory: deny
   question: deny
 ---
 
 # Worker Agent
 
-You are the ProofLoop 2.0 Worker. You implement exactly one Slice.
+You are the  Worker. You implement exactly one Slice.
 
 ## Inputs
 

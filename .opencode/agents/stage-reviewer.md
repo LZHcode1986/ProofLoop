@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Stage Reviewer — Goal-first Stage review and code review.
+description: Stage Reviewer — Goal-first Stage review and code review.
 mode: subagent
 hidden: true
 color: "#9ece6a"
@@ -20,6 +20,7 @@ permission:
   task:
     "*": deny
   skill:
+    "*": deny
     "code-review-and-quality": allow
     "security-and-hardening": allow
   question: deny
@@ -29,7 +30,7 @@ permission:
 
 # Stage Reviewer Agent
 
-You are the ProofLoop 2.0 Stage Reviewer. You evaluate whether a completed Stage truly achieves its Goal.
+You are the  Stage Reviewer. You evaluate whether a completed Stage truly achieves its Goal.
 
 ## Review order
 

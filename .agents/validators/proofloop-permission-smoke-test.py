@@ -300,6 +300,160 @@ def check_prototype_no_tag(root: Path) -> list:
     return issues
 
 
+def check_skill_description_length(root: Path) -> list:
+    """Check all skill descriptions are ≤ 180 characters."""
+    issues = []
+    skills_dir = root / ".agents" / "skills"
+    if not skills_dir.exists():
+        return issues
+    for skill_dir in sorted(skills_dir.iterdir()):
+        skill_file = skill_dir / "SKILL.md"
+        if not skill_file.exists():
+            continue
+        text = skill_file.read_text(encoding="utf-8")
+        # parse description from YAML frontmatter
+        if not text.startswith("---"):
+            continue
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            continue
+        for line in parts[1].splitlines():
+            if line.startswith("description:"):
+                desc = line[len("description:"):].strip().strip('"').strip("'")
+                if len(desc) > 180:
+                    issues.append(f"{skill_dir.name}/SKILL.md: description is {len(desc)} chars (max 180)")
+                break
+    return issues
+
+
+def check_agent_skill_visibility(root: Path) -> list:
+    """Check agent skill visibility matches expected allowlist."""
+    issues = []
+    agent_dir = root / ".opencode" / "agents"
+
+    expected_skills = {
+        "brain": {"*": "deny", "ai-structured-prd": "allow", "prd-to-tech-design-prep": "allow", "prd-to-ai-architecture": "allow", "codebase-design": "allow"},
+        "planner": {"*": "deny", "codebase-design": "allow"},
+        "worker": {"*": "deny", "test-driven-development": "allow", "diagnose": "allow", "codebase-design": "allow"},
+        "stage-reviewer": {"*": "deny", "code-review-and-quality": "allow", "security-and-hardening": "allow"},
+        "general": None,  # skip
+    }
+
+    deny_agents = ["executor", "code-verifier", "researcher", "prototype"]
+
+    for agent_name, expected in expected_skills.items():
+        file = agent_dir / f"{agent_name}.md"
+        if not file.exists():
+            continue
+        text = file.read_text(encoding="utf-8")
+        # find skill section
+        lines = text.splitlines()
+        in_skill = False
+        skill_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith("skill:"):
+                in_skill = True
+                rest = line.strip()[len("skill:"):].strip()
+                if rest:
+                    skill_lines.append(rest)
+                continue
+            if in_skill:
+                if line.strip().startswith("#") or (line.strip().startswith("---") and i > 0):
+                    break
+                if line.strip() and (line[0:2] == "  " or line[0:4] == "    "):
+                    skill_lines.append(line.strip())
+                else:
+                    break
+
+        if agent_name in deny_agents:
+            if len(skill_lines) == 1 and skill_lines[0] in ("deny", '"deny"'):
+                continue
+            issues.append(f"{agent_name}.md: Expected 'skill: deny' for {agent_name}")
+        elif expected:
+            has_deny = any(l.startswith('"*":') or l.startswith('*:') for l in skill_lines if 'deny' in l)
+            if not has_deny:
+                issues.append(f"{agent_name}.md: Missing '\"*\": deny' in skill section")
+
+    # Also check Committer has skill: deny
+    committer_file = agent_dir / "committer.md"
+    if committer_file.exists():
+        text = committer_file.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        in_skill = False
+        skill_lines = []
+        for i, line in enumerate(lines):
+            if line.strip().startswith("skill:"):
+                in_skill = True
+                rest = line.strip()[len("skill:"):].strip()
+                if rest:
+                    skill_lines.append(rest)
+                continue
+            if in_skill:
+                if line.strip().startswith("#") or (line.strip().startswith("---") and i > 0):
+                    break
+                if line.strip() and (line[0:2] == "  " or line[0:4] == "    "):
+                    skill_lines.append(line.strip())
+                else:
+                    break
+        if not (len(skill_lines) == 1 and skill_lines[0] in ("deny", '"deny"')):
+            issues.append("committer.md: Expected 'skill: deny'")
+
+    return issues
+
+
+def check_brain_contract_map(root: Path) -> list:
+    """Check Brain Contract Map references exist."""
+    issues = []
+    brain_file = root / ".opencode" / "agents" / "brain.md"
+    if not brain_file.exists():
+        return issues
+    text = brain_file.read_text(encoding="utf-8")
+
+    import re
+    refs = re.findall(r'→\s*(brain/[^\s]+\.md)', text)
+    contracts_dir = root / ".agents" / "contracts"
+    for ref in refs:
+        ref_path = contracts_dir / ref
+        if not ref_path.exists():
+            issues.append(f"Brain Contract Map: '{ref}' → file not found at {ref_path}")
+    return issues
+
+
+def check_executor_contract_map(root: Path) -> list:
+    """Check Executor Contract Map references exist."""
+    issues = []
+    executor_file = root / ".opencode" / "agents" / "executor.md"
+    if not executor_file.exists():
+        return issues
+    text = executor_file.read_text(encoding="utf-8")
+
+    import re
+    refs = re.findall(r'→\s*(executor/[^\s]+\.md)', text)
+    contracts_dir = root / ".agents" / "contracts"
+    for ref in refs:
+        ref_path = contracts_dir / ref
+        if not ref_path.exists():
+            issues.append(f"Executor Contract Map: '{ref}' → file not found at {ref_path}")
+    return issues
+
+
+def check_no_orphan_executor_contracts(root: Path) -> list:
+    """Check all executor contract files are referenced in executor.md."""
+    issues = []
+    executor_file = root / ".opencode" / "agents" / "executor.md"
+    contracts_dir = root / ".agents" / "contracts" / "executor"
+    if not executor_file.exists() or not contracts_dir.exists():
+        return issues
+
+    executor_text = executor_file.read_text(encoding="utf-8")
+
+    for contract_file in sorted(contracts_dir.glob("*.md")):
+        ref = f"executor/{contract_file.name}"
+        if ref not in executor_text:
+            issues.append(f"Orphan executor contract: {ref} not referenced in executor.md")
+    return issues
+
+
 def main():
     root = Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1] == "--path" else Path.cwd()
     print(f"Permission smoke test for: {root}\n")
@@ -340,6 +494,18 @@ def main():
     for issue in check_cv_no_python_c(root):
         check_results.append(("FAIL", issue))
     for issue in check_prototype_no_tag(root):
+        check_results.append(("FAIL", issue))
+
+    # New checks from refactoring
+    for issue in check_skill_description_length(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_agent_skill_visibility(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_brain_contract_map(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_executor_contract_map(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_no_orphan_executor_contracts(root):
         check_results.append(("FAIL", issue))
 
     passed = sum(1 for r in check_results if r[0] == "PASS")

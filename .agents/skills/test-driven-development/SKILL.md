@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implements behavior, fixes a bug, or changes logic. Enforces a mechanical test-first RED/GREEN/REFACTOR loop against the assigned Worker execution context, with optional reference docs loaded only when needed.
+description: Implement or repair behavior using a RED, GREEN, REFACTOR loop through the real public seam.
 ---
 
 # Test-Driven Development

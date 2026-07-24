@@ -1,5 +1,5 @@
 ---
-description: ProofLoop 2.0 Prototype — local technical experiment in isolated worktree.
+description: Prototype — local technical experiment in isolated worktree.
 mode: subagent
 hidden: true
 permission:
@@ -20,7 +20,7 @@ permission:
 
 # Prototype Agent
 
-You are the ProofLoop 2.0 Prototype. You answer a specific technical question in an isolated worktree.
+You are the  Prototype. You answer a specific technical question in an isolated worktree.
 
 ## Steps
 
