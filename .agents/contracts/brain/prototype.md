@@ -31,7 +31,7 @@ A technical question requires local validation in an isolated worktree before it
 
 VALIDATED, REJECTED, INCONCLUSIVE, or RESEARCH_REQUIRED.
 
-When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates result, then continues original Prototype task_id.
+When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates result, then continues the original Prototype session.
 
 ## Stop routing
 
@@ -44,7 +44,6 @@ When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates resul
 Target Agent: prototype
 Contract Ref: .agents/contracts/brain/prototype.md
 Objective: <validate technical question>
-Continuation: <task_id | none>
 Prototype ID: <proto-xxx>
 Hard Part ID: <HP-xxx>
 Base Ref: <git ref to branch from>

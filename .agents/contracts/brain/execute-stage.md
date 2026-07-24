@@ -15,7 +15,12 @@ A Stage plan is ready (SPV PLAN_READY) and all blocking Hard Parts are VALIDATED
 - tasks.md path
 - evidence.md path
 - Slice DAG
+- Stage Plan Commit / Base Ref
+- Stage Validator PASS Reference
+- SPV PLAN_READY Reference
+- Integration Branch
 - Blocking Hard Parts status
+- Execution Continuation State
 
 ## Expected results
 
@@ -27,6 +32,7 @@ All Slices complete with CV PASS. Execution Handoff returned to Brain.
 - PLAN_GAP → route to Planner
 - AUTHORITY_GAP → Brain updates authority
 - TECHNICAL_UNKNOWN → route to Researcher / Prototype
+- SEMANTIC_CONFLICT → Brain
 
 ## Packet
 
@@ -34,12 +40,15 @@ All Slices complete with CV PASS. Execution Handoff returned to Brain.
 Target Agent: executor
 Contract Ref: .agents/contracts/brain/execute-stage.md
 Objective: <execute Stage>
-Continuation: <task_id | none>
 Stage ID: <Sxx>
 Stage Goal: <one sentence>
 tasks.md: <path>
 evidence.md: <path>
 Slice DAG: <dependencies>
+Stage Plan Commit / Base Ref: <ref>
+Stage Validator PASS Reference: <ref>
+SPV PLAN_READY Reference: <ref>
+Integration Branch: <branch>
 Blocking Hard Parts: <VALIDATED>
 Allowed Scope: <Stage branch>
 Forbidden Scope: <other Stage branches, authority docs>
@@ -48,6 +57,6 @@ Verification Method: <Executor reconciliation>
 Expected Evidence: <Execution Handoff>
 Authoritative Inputs: <tasks.md, evidence.md, tech-spec/*>
 Constraints: <one Stage at a time>
-Stop Conditions: <UNRESOLVED_IMPLEMENTATION_DEFECT, PLAN_GAP, AUTHORITY_GAP, TECHNICAL_UNKNOWN>
+Stop Conditions: <UNRESOLVED_IMPLEMENTATION_DEFECT, PLAN_GAP, AUTHORITY_GAP, TECHNICAL_UNKNOWN, SEMANTIC_CONFLICT>
 Expected Result: <Execution complete | Execution blocked>
 ```

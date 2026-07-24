@@ -7,6 +7,7 @@ Usage: python proofloop-permission-smoke-test.py [--path <root-path>]
 """
 
 import sys
+import re
 try:
     import yaml
 except ImportError:
@@ -339,7 +340,7 @@ def check_agent_skill_visibility(root: Path) -> list:
     expected = {
         "brain": {"*": "deny", "ai-structured-prd": "allow", "prd-to-tech-design-prep": "allow", "prd-to-ai-architecture": "allow", "codebase-design": "allow"},
         "planner": {"*": "deny", "codebase-design": "allow"},
-        "worker": {"*": "deny", "test-driven-development": "allow", "diagnose": "allow", "codebase-design": "allow"},
+        "worker": {"*": "deny", "test-driven-development": "allow", "diagnose": "allow"},
         "stage-reviewer": {"*": "deny", "code-review-and-quality": "allow", "security-and-hardening": "allow"},
     }
 
@@ -471,6 +472,183 @@ def check_no_orphan_brain_contracts(root: Path) -> list:
     return check_brain_contract_map(root)
 
 
+def check_no_contract_runtime_ids(root: Path) -> list:
+    """Scan all Brain and Executor contracts for runtime fields."""
+    issues = []
+    patterns = ["Continuation / Task ID", "Session ID:", "task_id:"]
+    # 'Continuation:' as a standalone field (not 'Cleanup Continuation:' or continuity references)
+    continuation_pattern = re.compile(r'(?<!\w)Continuation:(?!\s*(?:is not|is owned by|handle|Fresh|not a Contract|not persisted|must not))')
+    for dir_name in ["brain", "executor"]:
+        contracts_dir = root / ".agents" / "contracts" / dir_name
+        if not contracts_dir.exists():
+            continue
+        for contract_file in sorted(contracts_dir.glob("*.md")):
+            text = contract_file.read_text(encoding="utf-8")
+            for pattern in patterns:
+                if pattern in text:
+                    issues.append(f"{dir_name}/{contract_file.name}: Contains '{pattern}' (runtime field not allowed in contract)")
+                    break
+            else:
+                # Skip Cleanup Continuation line
+                for line in text.splitlines():
+                    if 'Cleanup Continuation' in line:
+                        continue
+                    if continuation_pattern.search(line):
+                        issues.append(f"{dir_name}/{contract_file.name}: Contains standalone 'Continuation:' (runtime field not allowed in contract)")
+                        break
+    return issues
+
+
+def check_worker_mode_consistency(root: Path) -> list:
+    """Verify Worker mode consistency across 3 sources."""
+    issues = []
+    expected_modes = {"implement", "finalize", "recover", "repair", "diagnose", "resolve-conflict"}
+
+    sources = []
+
+    # 1. Worker Contract (.agents/contracts/executor/worker.md)
+    worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
+    if worker_contract.exists():
+        text = worker_contract.read_text(encoding="utf-8")
+        found = set()
+        for m in expected_modes:
+            if m in text.lower():
+                found.add(m)
+        sources.append(("Worker Contract", found))
+    else:
+        issues.append("Worker Contract file not found at .agents/contracts/executor/worker.md")
+
+    # 2. Executor Mode Selection (executor.md)
+    executor_file = root / ".opencode" / "agents" / "executor.md"
+    if executor_file.exists():
+        text = executor_file.read_text(encoding="utf-8")
+        found = set()
+        for m in expected_modes:
+            if m in text.lower():
+                found.add(m)
+        sources.append(("Executor Mode Selection", found))
+    else:
+        issues.append("executor.md not found")
+
+    # 3. Worker Mode Results (worker.md)
+    worker_file = root / ".opencode" / "agents" / "worker.md"
+    if worker_file.exists():
+        text = worker_file.read_text(encoding="utf-8")
+        found = set()
+        for m in expected_modes:
+            if m in text.lower():
+                found.add(m)
+        sources.append(("Worker Mode Results", found))
+    else:
+        issues.append("worker.md not found")
+
+    for source_name, found in sources:
+        missing = expected_modes - found
+        if missing:
+            issues.append(f"{source_name}: Missing modes: {sorted(missing)}")
+        extra = found - expected_modes
+        if extra:
+            issues.append(f"{source_name}: Extra modes: {sorted(extra)}")
+
+    return issues
+
+
+def check_brain_bash_deny(root: Path) -> list:
+    """Verify Brain's bash starts with '*': deny."""
+    issues = []
+    brain_file = root / ".opencode" / "agents" / "brain.md"
+    if not brain_file.exists():
+        issues.append("brain.md not found")
+        return issues
+    text = brain_file.read_text(encoding="utf-8")
+    bash_section = get_yaml_section(text, "  bash")
+    if bash_section:
+        lines = [l.strip() for l in bash_section.splitlines() if l.strip()]
+        if not lines or not lines[0].startswith('"*": deny'):
+            issues.append("Brain: First bash rule must be '\"*\": deny'")
+    else:
+        issues.append("Brain: Missing bash section")
+    return issues
+
+
+def check_worker_no_codebase_design(root: Path) -> list:
+    """Verify Worker no longer has codebase-design skill."""
+    issues = []
+    worker_file = root / ".opencode" / "agents" / "worker.md"
+    if not worker_file.exists():
+        issues.append("worker.md not found")
+        return issues
+    text = worker_file.read_text(encoding="utf-8")
+    if '"codebase-design": allow' in text:
+        issues.append("Worker: Must NOT have 'codebase-design: allow' in skill section")
+    return issues
+
+
+def check_skill_no_general_persist(root: Path) -> list:
+    """Verify prd-to-ai-architecture SKILL.md no longer has dispatch @general to persist."""
+    issues = []
+    skill_file = root / ".agents" / "skills" / "prd-to-ai-architecture" / "SKILL.md"
+    if not skill_file.exists():
+        issues.append("prd-to-ai-architecture/SKILL.md not found")
+        return issues
+    text = skill_file.read_text(encoding="utf-8")
+    if "dispatch @general to persist" in text:
+        issues.append("SKILL.md: Must NOT contain 'dispatch @general to persist'")
+    if "dispatch @general to update" in text:
+        issues.append("SKILL.md: Must NOT contain 'dispatch @general to update'")
+    return issues
+
+
+def check_brain_stage_tests_preserved(root: Path) -> list:
+    """Verify Brain still has all 10 Stage Tests."""
+    issues = []
+    brain_file = root / ".opencode" / "agents" / "brain.md"
+    if not brain_file.exists():
+        issues.append("brain.md not found")
+        return issues
+    text = brain_file.read_text(encoding="utf-8")
+    expected_tests = [
+        "Value Test",
+        "Goal Test",
+        "Acceptance Test",
+        "Cohesion Test",
+        "Deep Module Test",
+        "Independence Test",
+        "Horizontal Layer Rejection",
+        "Hard Part Readiness",
+        "Size Test",
+        "Alternative Partition Test",
+    ]
+    for test in expected_tests:
+        if test not in text:
+            issues.append(f"Brain: Missing Stage Test '{test}'")
+    return issues
+
+
+def check_contract_no_continuation_field(root: Path) -> list:
+    """Verify contracts don't have Continuation as a non-comment field."""
+    import re
+    issues = []
+    for dir_name in ["brain", "executor"]:
+        contracts_dir = root / ".agents" / "contracts" / dir_name
+        if not contracts_dir.exists():
+            continue
+        for contract_file in sorted(contracts_dir.glob("*.md")):
+            text = contract_file.read_text(encoding="utf-8")
+            for i, line in enumerate(text.splitlines(), 1):
+                stripped = line.strip()
+                if "Continuation:" in stripped:
+                    if stripped.startswith("#") or stripped.startswith("<!--") or stripped.startswith(">"):
+                        continue
+                    if "Reference" in stripped or "refer" in stripped.lower():
+                        continue
+                    if "Cleanup Continuation" in stripped:
+                        continue
+                    issues.append(f"{dir_name}/{contract_file.name}: Line {i}: Contains 'Continuation:' outside comments/references")
+                    break
+    return issues
+
+
 def main():
     root = Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[1] == "--path" else Path.cwd()
     print(f"Permission smoke test for: {root}\n")
@@ -525,6 +703,22 @@ def main():
     for issue in check_no_orphan_executor_contracts(root):
         check_results.append(("FAIL", issue))
     for issue in check_no_orphan_brain_contracts(root):
+        check_results.append(("FAIL", issue))
+
+    # New contract runtime checks
+    for issue in check_no_contract_runtime_ids(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_worker_mode_consistency(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_brain_bash_deny(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_worker_no_codebase_design(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_skill_no_general_persist(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_brain_stage_tests_preserved(root):
+        check_results.append(("FAIL", issue))
+    for issue in check_contract_no_continuation_field(root):
         check_results.append(("FAIL", issue))
 
     passed = sum(1 for r in check_results if r[0] == "PASS")

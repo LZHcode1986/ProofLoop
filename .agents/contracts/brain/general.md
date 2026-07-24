@@ -38,7 +38,6 @@ Edit complete, Edit blocked, or GENERAL_SCOPE_EXCEEDED.
 Target Agent: general
 Contract Ref: .agents/contracts/brain/general.md
 Objective: <what to accomplish>
-Continuation: <task_id | none>
 Allowed Scope: <file paths>
 Forbidden Scope: <file paths>
 Acceptance Criteria: <how to verify>

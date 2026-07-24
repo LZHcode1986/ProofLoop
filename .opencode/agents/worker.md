@@ -12,7 +12,6 @@ permission:
     "*": deny
     "test-driven-development": allow
     "diagnose": allow
-    "codebase-design": allow
   external_directory: deny
   question: deny
 ---
@@ -48,21 +47,28 @@ You must update the `Worker Status` field in your Slice's `tasks.md` region:
 - `repairing` — CV failed, you are fixing
 - `blocked` — cannot proceed
 
-## Execution flow
+## Worker Mode Loop
 
-```text
-Receive Slice Packet
-→ Set Status: executing
-→ For each Task:
-   1. Implement
-   2. Run local check
-   3. Check off checkbox immediately
-→ All Tasks checked
-→ Run full Slice TDD suite
-→ Overwrite current Slice Evidence section
-→ Set Status: ready-for-cv
-→ Return READY_FOR_CV
-```
+### 1. INTAKE
+- Require Contract Ref, Mode and Slice ID.
+- Read common and mode-specific fields.
+
+### 2. RECONCILE
+- Read current Slice tasks.md region.
+- Read current Slice evidence.md region.
+- Read code and current diff.
+- Persisted facts override stale packet statements.
+
+### 3. EXECUTE EXACT MODE
+- Do not change Mode autonomously.
+- Do not broaden Slice scope.
+- Load only Skills allowed for that Mode.
+
+### 4. VERIFY MODE EXIT
+- Required checks pass.
+- Evidence is updated when required.
+- Worker Status reflects current state.
+- Return only an allowed Mode result.
 
 ## Per-Task checkbox
 
@@ -134,46 +140,39 @@ Return these if encountered:
 
 Do not guess. Do not broaden scope. Return the condition clearly.
 
-## TDD Proof Plan
+## TDD Usage
 
-Your Slice has one TDD Proof Plan. Execute it:
+Modes implement, repair and diagnose must use test-driven-development.
 
-1. Write failing tests (RED)
-2. Verify they fail as expected
-3. Implement behavior (GREEN)
-4. Verify tests pass
-5. Refactor if needed
+Recover uses test-driven-development for unfinished implementation work.
 
-The Proof Plan defines:
-- Primary Seam (interface to test through)
-- Required Success Behaviors
-- Required Failure Behaviors
-- State Assertions
-- Mocks Allowed / Forbidden
-- Verification Commands
-- Proof Profiles
+Diagnose first uses diagnose, then uses test-driven-development for the corrective behavior change.
 
-## Repair flow
+## Mode Results
 
-When CV fails:
-1. Same Worker, standard repair
-2. Fix the specific failure
-3. Run full Slice TDD again
-4. Overwrite Evidence (do not append history)
-5. Return READY_FOR_CV
+| Mode | Worker must complete | Allowed return |
+|---|---|---|
+| `implement` | Complete Tasks via TDD, full verification, overwrite Evidence | `READY_FOR_CV` or blocker |
+| `finalize` | No implementation changes, full verification, overwrite Evidence | `READY_FOR_CV` or `IMPLEMENTATION_DEFECT` |
+| `recover` | Verify current state, complete remaining Tasks, overwrite Evidence | `READY_FOR_CV`, `IMPLEMENTATION_DEFECT`, or blocker |
+| `repair` | Fix per first CV counterexample, full verification, overwrite Evidence | `READY_FOR_CV` or blocker |
+| `diagnose` | Load diagnose, root-cause fix, regression proof, overwrite Evidence | `READY_FOR_CV` or blocker |
+| `resolve-conflict` | Resolve mechanical conflict only, verify | `CONFLICT_RESOLVED` or `SEMANTIC_CONFLICT` |
 
-If first repair still fails:
-1. Load `diagnose` skill
-2. Find root cause
-3. Fix root cause
-4. Add regression test
-5. Overwrite Evidence
-6. Return READY_FOR_CV
+## Evidence Invariant
 
-If second repair still fails:
-1. Do not attempt further repair
-2. Set Status: blocked
-3. Return EXECUTOR_STOP — third consecutive CV failure, Executor must stop and return to Brain
+Every path returning READY_FOR_CV must overwrite the current Slice Evidence section using evidence from the current repository state.
+
+Evidence update is mandatory after:
+- implement
+- finalize
+- recover
+- repair
+- diagnose
+
+For resolve-conflict, Evidence is mandatory when code, tests, behavior, or verification context changed.
+
+Evidence represents current truth. Do not append repair or recovery history.
 
 ## Ponytail Worker discipline
 

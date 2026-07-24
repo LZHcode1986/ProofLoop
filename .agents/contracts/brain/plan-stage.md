@@ -17,10 +17,17 @@ A Stage Goal is selected and needs to be decomposed into Slices and Tasks.
 - Expected Public Seam
 - PRD References
 - Tech Spec References
+- Relevant Task Acceptance Matrix Items
+- Matrix Item IDs
+- Matrix Acceptance Requirements
 - Dependencies
 - Constraints
 - Out of Scope
 - Blocking Hard Parts
+- Existing tasks.md path, if present
+- Existing evidence.md path, if present
+- Latest Validator Result, if present
+- Latest SPV Findings, if present
 
 ## Expected results
 
@@ -39,7 +46,6 @@ Plan blocked with stop condition if unresolved.
 Target Agent: planner
 Contract Ref: .agents/contracts/brain/plan-stage.md
 Objective: <create Stage plan>
-Continuation: <task_id | none>
 Stage ID: <Sxx>
 Stage Goal: <one sentence>
 Observable Outcomes: <list>
@@ -47,16 +53,23 @@ Primary Domain Capability: <capability>
 Expected Public Seam: <interface>
 PRD References: <refs>
 Tech Spec References: <refs>
+Relevant Task Acceptance Matrix Items: <refs>
+Matrix Item IDs: <ids>
+Matrix Acceptance Requirements: <requirements>
 Dependencies: <list>
 Constraints: <limits>
 Out of Scope: <what not to plan>
 Blocking Hard Parts: <list>
+Existing tasks.md path: <path | none>
+Existing evidence.md path: <path | none>
+Latest Validator Result: <result | none>
+Latest SPV Findings: <findings | none>
 Allowed Scope: <delivery/stages/<stage-id>/>
 Forbidden Scope: <authority documents>
 Acceptance Criteria: <PLAN_READY>
 Verification Method: <Planner internal SPV validation>
 Expected Evidence: <tasks.md + evidence.md>
-Authoritative Inputs: <CONTEXT.md, PRD.md, tech-spec/*>
+Authoritative Inputs: <CONTEXT.md, PRD.md, tech-spec/*, task-acceptance-matrix.md>
 Constraints: <no file path prediction, vertical Slices only>
 Stop Conditions: <PLAN_GAP, AUTHORITY_GAP, TECHNICAL_DISCOVERY_REQUIRED>
 Expected Result: <Plan ready (SPV validated) | Plan blocked>

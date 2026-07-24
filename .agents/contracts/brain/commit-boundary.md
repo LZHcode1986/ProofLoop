@@ -43,7 +43,6 @@ Boundary closed with commit hash, or Boundary blocked.
 Target Agent: committer
 Contract Ref: .agents/contracts/brain/commit-boundary.md
 Objective: <commit objective>
-Continuation: <task_id | none>
 Boundary Type: <type from enumeration>
 Description: <what changed>
 Changed Files: <list>

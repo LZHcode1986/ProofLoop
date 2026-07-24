@@ -90,11 +90,13 @@ Brain should confirm and persist one artifact at a time:
 
 Before confirming each artifact, Brain may run architecture grilling for that artifact. Grilling should stop as soon as the artifact is clear enough to persist; do not keep asking non-blocking questions.
 
-For each artifact, Brain may ask one blocking question at a time, confirm the artifact with the user, then dispatch `@general` to persist only that confirmed artifact.
+For each artifact, Brain may ask one blocking question at a time, confirm the artifact with the user, then Brain writes the artifact directly.
 
 The skill may reason about the whole package internally, but user-facing confirmation and file persistence are incremental.
 
-If a later artifact exposes a necessary change to an earlier artifact, Brain must confirm the revision with the user before dispatching `@general` to update the earlier file.
+If a later artifact exposes a necessary change to an earlier artifact, Brain must confirm the revision with the user before updating the earlier file, and check consistency against previously confirmed artifacts.
+
+Brain records the durable workflow checkpoint in progress.md after each confirmed artifact.
 
 ## Required Outputs
 

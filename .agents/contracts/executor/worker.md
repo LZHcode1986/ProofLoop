@@ -19,7 +19,6 @@ All Modes include:
 
 - Slice ID
 - Mode
-- Continuation / Task ID (when applicable)
 - Slice Goal
 - Observable Outcome
 - Public Seam
@@ -98,10 +97,16 @@ All Modes share this envelope:
 Target Agent: worker
 Contract Ref: .agents/contracts/executor/worker.md
 Mode: <implement | finalize | recover | repair | diagnose | resolve-conflict>
-Continuation: <task_id | none>
 Slice ID: <same>
 [Mode-specific fields as specified above]
 Expected Result: <per Mode>
 ```
 
+## Runtime continuity
 
+Runtime session continuity is owned by Executor.
+
+- If a usable Worker handle exists for the same Slice, Executor continues that Worker session.
+- If no handle exists, Executor creates a fresh Worker with the complete persisted state required by the selected Mode.
+- Runtime handles are not Contract fields and must not be persisted.
+- Worker never creates or selects its own continuation handle.
