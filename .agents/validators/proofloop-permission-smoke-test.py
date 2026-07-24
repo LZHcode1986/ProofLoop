@@ -475,10 +475,11 @@ def check_no_orphan_brain_contracts(root: Path) -> list:
 def check_no_contract_runtime_ids(root: Path) -> list:
     """Scan all Brain and Executor contracts for runtime fields."""
     issues = []
-    patterns = ["Continuation / Task ID", "Session ID:", "task_id:"]
+    patterns = ["Continuation / Task ID", "Session ID:", "task_id:", "ses_id:"]
     # Also check for bare \btask_id\b and \bsession_id\b without colon
     bare_task_id = re.compile(r'(?<!\w)task_id(?!\s*:)(?!\w)')
     bare_session_id = re.compile(r'(?<!\w)session_id(?!\s*:)(?!\w)')
+    bare_ses_id = re.compile(r'(?<!\w)ses_id(?!\s*:)(?!\w)')
     continuation_pattern = re.compile(r'(?<!\w)Continuation:(?!\s*(?:is not|is owned by|handle|Fresh|not a Contract|not persisted|must not))')
     for dir_name in ["brain", "executor"]:
         contracts_dir = root / ".agents" / "contracts" / dir_name
@@ -496,8 +497,8 @@ def check_no_contract_runtime_ids(root: Path) -> list:
                     stripped = line.strip()
                     if stripped.startswith('#') or stripped.startswith('<!--') or stripped.startswith('>'):
                         continue
-                    if bare_task_id.search(stripped) or bare_session_id.search(stripped):
-                        issues.append(f"{dir_name}/{contract_file.name}: Contains bare 'task_id' or 'session_id' without colon (runtime field not allowed in contract)")
+                    if bare_task_id.search(stripped) or bare_session_id.search(stripped) or bare_ses_id.search(stripped):
+                        issues.append(f"{dir_name}/{contract_file.name}: Contains bare 'task_id', 'session_id', or 'ses_id' without colon (runtime field not allowed in contract)")
                         break
                 else:
                     # Check for standalone Continuation:
@@ -558,14 +559,13 @@ def check_worker_mode_consistency(root: Path) -> list:
     if worker_file.exists():
         text = worker_file.read_text(encoding="utf-8")
         if "## Mode Execution Flows" in text:
-            # Find the section between ## Mode Execution Flows and the next ## heading
             start = text.index("## Mode Execution Flows")
-            rest = text[start:]
-            # Find the next ## heading that is not ###
+            rest = text[start + len("## Mode Execution Flows"):]
+            lines = rest.splitlines()
             end = len(rest)
-            for i, line in enumerate(rest.splitlines()):
+            for i, line in enumerate(lines):
                 if line.startswith("## ") and "Mode Execution Flows" not in line:
-                    end = len("\n".join(rest.splitlines()[:i]))
+                    end = len("\n".join(lines[:i]))
                     break
             mode_section = rest[:end]
             found = set()
@@ -713,12 +713,19 @@ def check_return_value_consistency(root: Path) -> list:
     if worker_contract.exists():
         text = worker_contract.read_text(encoding="utf-8")
         if "## Allowed results per Mode" in text:
-            section = text.split("## Allowed results per Mode")[1].split("##")[0] if "##" in text.split("## Allowed results per Mode")[1] else text.split("## Allowed results per Mode")[1]
+            start = text.index("## Allowed results per Mode")
+            rest = text[start + len("## Allowed results per Mode"):]
+            lines = rest.splitlines()
+            end = len(rest)
+            for i, line in enumerate(lines):
+                if line.startswith("## ") and "Allowed results" not in line:
+                    end = len("\n".join(lines[:i]))
+                    break
+            section = rest[:end]
             for mode, expected in expected_returns.items():
                 for ret in expected:
                     if ret == "blocker":
                         continue
-                    # Check both with and without backticks
                     if f"`{ret}`" not in section and ret not in section:
                         issues.append(f"Worker Contract: Missing return '{ret}' for mode '{mode}' in Allowed results table")
         else:
@@ -745,7 +752,15 @@ def check_return_value_consistency(root: Path) -> list:
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
         if "## Worker Return Routing" in text:
-            section = text.split("## Worker Return Routing")[1].split("##")[0]
+            start = text.index("## Worker Return Routing")
+            rest = text[start + len("## Worker Return Routing"):]
+            lines = rest.splitlines()
+            end = len(rest)
+            for i, line in enumerate(lines):
+                if line.startswith("## ") and "Worker Return Routing" not in line:
+                    end = len("\n".join(lines[:i]))
+                    break
+            section = rest[:end]
             all_returns = set()
             for mode_returns in expected_returns.values():
                 all_returns.update(mode_returns)

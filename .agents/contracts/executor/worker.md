@@ -77,9 +77,10 @@ Additional fields:
 ### repair
 
 Additional fields:
-- Failed CV criteria
-- Concrete counterexample
-- Failure signature
+- Failure Source: CV | finalize | recover
+- Failed Criterion
+- Concrete Reproduction or Counterexample
+- Failure Signature
 - Original Slice Packet
 
 ### diagnose

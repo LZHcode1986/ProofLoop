@@ -204,7 +204,7 @@ Each Stage candidate must pass:
 5. **Deep Module Test**: hides complexity behind stable interface
 6. **Independence Test**: dependencies are clear and sortable
 7. **Horizontal Layer Rejection**: not just UI/API/DB layer
-8. **Hard Part Readiness**: blocking issues are VALIDATED
+8. **Hard Part Readiness**: blocking issues are VALIDATED or explicitly DEFERRED with Brain acceptance and documented residual risk
 9. **Size Test**: not too small or too large
 10. **Alternative Partition Test**: compare two reasonable partitions
 

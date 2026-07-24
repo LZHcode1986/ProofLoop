@@ -191,7 +191,12 @@ Flow:
 1. Set Status: executing.
 2. Read current tasks.md, evidence.md, and code diff.
 3. Verify checked Tasks against actual code state.
-4. If checked Task has no matching implementation, uncheck and redo.
+4. If a checked Task is not supported by current code or proof:
+   - do not uncheck it;
+   - do not silently redo it under recover Mode;
+   - return IMPLEMENTATION_DEFECT;
+   - include the mismatched Task, missing implementation/proof,
+     current diff, and reproduction evidence.
 5. Complete remaining unchecked Tasks.
 6. Run full Slice TDD suite.
 7. Overwrite Evidence.
@@ -203,8 +208,15 @@ Allowed return: READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker
 ### Mode: repair
 
 Entry:
-- first CV FAIL
-- CV counterexample and failure signature provided
+- first CV FAIL; or
+- bounded IMPLEMENTATION_DEFECT returned by finalize or recover.
+
+Required fields:
+- Failure Source: CV | finalize | recover
+- Failed Criterion
+- Concrete Reproduction or Counterexample
+- Failure Signature
+- Original Slice Packet
 
 Flow:
 1. Set Status: repairing.

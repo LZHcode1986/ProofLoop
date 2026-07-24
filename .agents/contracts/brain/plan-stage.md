@@ -36,7 +36,12 @@ Plan blocked with stop condition if unresolved.
 
 ## Stop routing
 
-- PLAN_GAP → route to Planner
+- PLAN_GAP
+  → Brain evaluates the cause:
+    - missing planning detail → continue Planner with new information
+    - invalid or oversized Stage boundary → return to STAGE_SELECTION / REPARTITION_REQUIRED
+    - missing architecture authority → AUTHORITY_GAP
+    - unresolved technical assumption → Researcher / Prototype
 - AUTHORITY_GAP → Brain updates authority, re-dispatch
 - TECHNICAL_DISCOVERY_REQUIRED → route to Researcher / Prototype
 
