@@ -711,12 +711,11 @@ def check_return_value_consistency(root: Path) -> list:
         "resolve-conflict": {"CONFLICT_RESOLVED", "SEMANTIC_CONFLICT"},
     }
 
-    # Expected action patterns for each return in the Executor routing table
     expected_executor_actions = {
-        "READY_FOR_CV": "scope checker",
-        "IMPLEMENTATION_DEFECT": "repair",
-        "CONFLICT_RESOLVED": "post-merge",
-        "SEMANTIC_CONFLICT": "stop integration",
+        "READY_FOR_CV": ["scope checker", "fresh CV"],
+        "IMPLEMENTATION_DEFECT": ["repair"],
+        "CONFLICT_RESOLVED": ["post-merge"],
+        "SEMANTIC_CONFLICT": ["stop integration", "Brain"],
     }
 
     def extract_section(text: str, heading: str) -> str:
@@ -733,133 +732,137 @@ def check_return_value_consistency(root: Path) -> list:
                 break
         return rest[:end]
 
+    def parse_return_set(value: str) -> set[str]:
+        """Parse a comma/or-separated return value list into a set of strings."""
+        parts = re.split(r"\s*(?:,|\bor\b)\s*", value)
+        return {
+            part.strip().strip("`")
+            for part in parts
+            if part.strip()
+        }
+
+    def parse_allowed_returns(mode_block: str) -> set[str] | None:
+        """Parse 'Allowed return: ...' line from a mode block."""
+        for line in mode_block.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("Allowed return:"):
+                continue
+            value = stripped.removeprefix("Allowed return:").strip()
+            return parse_return_set(value)
+        return None
+
     # 1. Check Worker Contract Allowed results table
     worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
-    worker_contract_data = {}
     contract_actual_returns = {}
+    contract_modes_found = set()
     if worker_contract.exists():
         text = worker_contract.read_text(encoding="utf-8")
         section = extract_section(text, "## Allowed results per Mode")
         if not section:
             issues.append("Worker Contract: Missing 'Allowed results per Mode' section")
         else:
-            modes_found = set()
             for line in section.splitlines():
-                if line.startswith("|") and "|" in line[1:]:
-                    cols = [c.strip() for c in line.split("|")]
-                    if len(cols) >= 3 and cols[1] in expected_returns:
-                        mode = cols[1]
-                        modes_found.add(mode)
-                        returns_str = cols[2]
-                        # Parse actual returns from the table
-                        actual = set()
-                        for token in returns_str.replace(",", "").split():
-                            token = token.strip()
-                            if token.upper() == token and token != "or" and token != "blocker":
-                                actual.add(token)
-                        contract_actual_returns[mode] = actual
-                        expected = expected_returns[mode]
-                        expected_no_blocker = {r for r in expected if r != "blocker"}
-                        # Check for missing returns
-                        for r in expected_no_blocker:
-                            if r not in returns_str:
-                                issues.append(f"Worker Contract: Missing return '{r}' for mode '{mode}' in Allowed results table")
-                        # Check for extra returns
-                        extra = actual - expected_no_blocker
-                        if extra:
-                            issues.append(f"Worker Contract: Mode '{mode}' has unexpected returns: {extra}")
-                        worker_contract_data[mode] = actual
-            # Report missing mode rows
-            for mode in expected_returns:
-                if mode not in modes_found:
-                    issues.append(f"Worker Contract: Missing mode row '{mode}' in Allowed results per Mode table")
+                if not line.startswith("|"):
+                    continue
+                cols = [c.strip() for c in line.split("|")]
+                if len(cols) < 3:
+                    continue
+                mode = cols[1]
+                if mode not in expected_returns:
+                    continue
+                contract_modes_found.add(mode)
+                contract_actual_returns[mode] = parse_return_set(cols[2])
+
+            for mode, expected in expected_returns.items():
+                if mode not in contract_modes_found:
+                    issues.append(f"Worker Contract: Missing mode row '{mode}'")
+                    continue
+                actual = contract_actual_returns[mode]
+                if actual != expected:
+                    missing = expected - actual
+                    extra = actual - expected
+                    if missing:
+                        issues.append(f"Worker Contract: Mode '{mode}' missing returns: {missing}")
+                    if extra:
+                        issues.append(f"Worker Contract: Mode '{mode}' has unexpected returns: {extra}")
 
     # 2. Check Worker Mode Execution Flows
     worker_file = root / ".opencode" / "agents" / "worker.md"
-    worker_flow_data = {}
     worker_flow_actual = {}
+    worker_modes_found = set()
     if worker_file.exists():
         text = worker_file.read_text(encoding="utf-8")
         section = extract_section(text, "## Mode Execution Flows")
         if not section:
             issues.append("Worker: Missing 'Mode Execution Flows' section")
         else:
-            modes_found = set()
-            for mode in expected_returns:
-                if f"### Mode: {mode}" in section:
-                    modes_found.add(mode)
-                    mode_block = section.split(f"### Mode: {mode}")[1]
-                    next_heading = mode_block.find("### Mode: ")
-                    if next_heading > 0:
-                        mode_block = mode_block[:next_heading]
-                    # Parse actual returns from the flow
-                    actual = set()
-                    for r in expected_returns[mode]:
-                        if r in mode_block and r != "blocker":
-                            actual.add(r)
-                    worker_flow_actual[mode] = actual
-                    expected = expected_returns[mode]
-                    expected_no_blocker = {r for r in expected if r != "blocker"}
-                    for r in expected_no_blocker:
-                        if r not in mode_block:
-                            issues.append(f"Worker: Missing return '{r}' in Mode '{mode}' execution flow")
-                    worker_flow_data[mode] = actual
-            # Report missing mode sections
-            for mode in expected_returns:
-                if mode not in modes_found:
-                    issues.append(f"Worker: Missing mode section '### Mode: {mode}' in Mode Execution Flows")
+            for mode, expected in expected_returns.items():
+                heading = f"### Mode: {mode}"
+                if heading not in section:
+                    issues.append(f"Worker: Missing mode section '{heading}'")
+                    continue
+                worker_modes_found.add(mode)
+                mode_block = section.split(heading, 1)[1]
+                next_heading = mode_block.find("### Mode: ")
+                if next_heading >= 0:
+                    mode_block = mode_block[:next_heading]
 
-    # 3. Check Executor Return Routing table — verify both names AND actions
+                actual = parse_allowed_returns(mode_block)
+                if actual is None:
+                    issues.append(f"Worker: Mode '{mode}' is missing 'Allowed return:' line")
+                    continue
+                worker_flow_actual[mode] = actual
+                if actual != expected:
+                    missing = expected - actual
+                    extra = actual - expected
+                    if missing:
+                        issues.append(f"Worker: Mode '{mode}' missing returns: {missing}")
+                    if extra:
+                        issues.append(f"Worker: Mode '{mode}' has unexpected returns: {extra}")
+
+    # 3. Check Executor Return Routing table — parse table rows
     executor_file = root / ".opencode" / "agents" / "executor.md"
+    executor_routes = {}
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
         section = extract_section(text, "## Worker Return Routing")
         if not section:
             issues.append("Executor: Missing 'Worker Return Routing' section")
         else:
-            all_returns = set()
-            for mode_returns in expected_returns.values():
-                all_returns.update(mode_returns)
-            for ret in sorted(all_returns):
-                if ret == "blocker":
+            for line in section.splitlines():
+                if not line.startswith("|"):
                     continue
-                if ret not in section:
-                    issues.append(f"Executor: Missing return '{ret}' in Worker Return Routing table")
-                else:
-                    # Verify the expected action pattern is present
-                    expected_action = expected_executor_actions.get(ret, "")
-                    if expected_action and expected_action not in section:
-                        issues.append(f"Executor: Return '{ret}' present but missing expected action '{expected_action}' in Worker Return Routing")
+                cols = [c.strip() for c in line.split("|")]
+                if len(cols) < 3:
+                    continue
+                return_name = cols[1]
+                action = cols[2]
+                if return_name in expected_executor_actions:
+                    executor_routes[return_name] = action
 
-    # 4. Cross-reference: per-mode exact comparison
-    for mode in expected_returns:
-        expected = expected_returns[mode]
-        expected_no_blocker = {r for r in expected if r != "blocker"}
+            for return_name, required_fragments in expected_executor_actions.items():
+                actual_action = executor_routes.get(return_name)
+                if actual_action is None:
+                    issues.append(f"Executor: Missing return route '{return_name}'")
+                    continue
+                for fragment in required_fragments:
+                    if fragment not in actual_action:
+                        issues.append(f"Executor: Route '{return_name}' is missing required action fragment '{fragment}'")
 
-        contract_returns = contract_actual_returns.get(mode, None)
-        flow_returns = worker_flow_actual.get(mode, None)
+    # 4. Cross-reference: Worker, Contract, Executor三方一致
+    for mode, expected in expected_returns.items():
+        contract_returns = contract_actual_returns.get(mode)
+        worker_returns = worker_flow_actual.get(mode)
 
-        if contract_returns is not None and contract_returns != expected_no_blocker:
-            missing = expected_no_blocker - contract_returns
-            extra = contract_returns - expected_no_blocker
-            parts = []
-            if missing:
-                parts.append(f"missing {missing}")
-            if extra:
-                parts.append(f"extra {extra}")
-            if parts:
-                issues.append(f"Cross-ref: Mode '{mode}' Contract returns mismatch: {'; '.join(parts)}")
+        if contract_returns is not None and worker_returns is not None:
+            if contract_returns != worker_returns:
+                issues.append(f"Cross-ref: Mode '{mode}' Contract returns {contract_returns} != Worker returns {worker_returns}")
 
-        if flow_returns is not None and flow_returns != expected_no_blocker:
-            missing = expected_no_blocker - flow_returns
-            extra = flow_returns - expected_no_blocker
-            parts = []
-            if missing:
-                parts.append(f"missing {missing}")
-            if extra:
-                parts.append(f"extra {extra}")
-            if parts:
-                issues.append(f"Cross-ref: Mode '{mode}' Worker Flow returns mismatch: {'; '.join(parts)}")
+        if contract_returns is not None and contract_returns != expected:
+            issues.append(f"Cross-ref: Mode '{mode}' Contract returns {contract_returns} do not match expected {expected}")
+
+        if worker_returns is not None and worker_returns != expected:
+            issues.append(f"Cross-ref: Mode '{mode}' Worker returns {worker_returns} do not match expected {expected}")
 
     return issues
 
