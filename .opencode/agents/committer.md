@@ -81,7 +81,7 @@ git add <changed files>
 git add delivery/stages/<stage-id>/tasks.md
 git add delivery/stages/<stage-id>/evidence.md
 git commit -m "slice-output: <stage-id>-<slice-id>"
-Return: Boundary closed
+Return: Boundary closed (commit hash: <hash>)
 ```
 
 Scope check: fail if unrelated dirty files are present and cannot be separated.

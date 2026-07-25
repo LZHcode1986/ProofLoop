@@ -179,7 +179,7 @@ REFACTOR:
 
 ## Proof Profile
 
-If the assigned task matches a profile in `.agents/contracts/proof-profiles.md`, record the selected profile and satisfy its minimum evidence.
+If the assigned task matches a profile in `.agents/contracts/shared/proof-profiles.md`, record the selected profile and satisfy its minimum evidence.
 
 If no profile fits, use:
 

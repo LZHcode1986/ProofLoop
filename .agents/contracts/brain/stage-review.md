@@ -23,9 +23,10 @@ ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
 
 ## Stop routing
 
-- GOAL_MISMATCH → Brain evaluates whether to accept deviation or repartition
-- AUTHORITY_VIOLATION → Brain resolves authority inconsistency
-- INCOMPLETE_EVIDENCE → Brain may re-dispatch to Executor for gap fill
+- IMPLEMENTATION_DEFECT → Brain → Executor continuation → original Worker → fresh CV → targeted Stage Review
+- PLAN_GAP → Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority
+- AUTHORITY_GAP → Brain updates authority
+- TECHNICAL_UNKNOWN → Brain routes to Researcher / Prototype
 
 ## Packet
 

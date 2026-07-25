@@ -34,6 +34,7 @@ All Modes include:
 - Observable Outcome
 - Public Seam
 - Authority Excerpts (refs)
+  Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
 - Dependency Output Summaries
 - TDD Proof Plan
   - Primary Seam

@@ -143,7 +143,7 @@ When an action belongs to another Agent, Brain must dispatch that Agent through 
 | `STAGE_SELECTION` | Brain + `codebase-design` | Architecture ready | Stage Goal passes Stage Tests |
 | `STAGE_PLANNING` | Planner | Stage Goal selected | Validator PASS + SPV PLAN_READY |
 | `STAGE_EXECUTION` | Executor | PLAN_READY | All Slices complete and integrated |
-| `STAGE_REVIEW` | Stage Reviewer | Execution complete | ACCEPTED / REPARTITION_REQUIRED / BLOCKED |
+| `STAGE_REVIEW` | Stage Reviewer | Execution complete | ACCEPTED / REJECTED / BLOCKED |
 | `STAGE_CLOSE` | Brain → Committer | ACCEPTED | Stage-close commit complete |
 
 Rules:
@@ -305,7 +305,7 @@ Prototype VALIDATED
 | Signal | Route |
 |---|---|
 | IMPLEMENTATION_DEFECT | Brain → Executor continuation → original Worker → fresh CV → targeted Stage Review |
-| PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If Stage boundary itself is invalid → return to STAGE_SELECTION / REPARTITION_REQUIRED. Otherwise dispatch Planner with specific new information. |
+| PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If Stage boundary itself is invalid → return to STAGE_SELECTION / REJECTED + PLAN_GAP. Otherwise dispatch Planner with specific new information. |
 | TECHNICAL_UNKNOWN | Route to Researcher / Prototype |
 | AUTHORITY_GAP | Brain updates authority |
 | RUNTIME_BLOCKER | Brain blocks Stage, updates progress |

@@ -96,7 +96,9 @@ READY_FOR_CV:
 - On PASS, dispatch fresh CV initial.
 
 CV PASS:
-- READY_TO_INTEGRATE
+- Dispatch Committer (slice-output).
+- Wait for commit hash.
+- Commit hash received → READY_TO_INTEGRATE
 
 CV FAIL #1:
 - Worker repair
@@ -109,10 +111,14 @@ CV FAIL #2:
 CV FAIL #3:
 - UNRESOLVED_IMPLEMENTATION_DEFECT → Brain
 
+CV BLOCKED:
+- Stop integration for current Slice
+- Return blocker and existing evidence to Brain
+
 ### 8. INTEGRATE ONE SLICE
 - Acquire exclusive integration lock.
 - Update Stage branch.
-- Merge Slice.
+- `git merge --no-ff --no-commit <slice-commit>`.
 - Mechanical conflict → original Worker.
    - Worker returns CONFLICT_RESOLVED → continue post-merge scope check
    - Worker returns SEMANTIC_CONFLICT → stop integration → Brain
@@ -120,7 +126,7 @@ CV FAIL #3:
 - Run post-merge scope check.
 - Run necessary regression.
 - fresh CV when implementation or Evidence changed.
-- Dispatch Committer.
+- Integration complete → Slice COMPLETE.
 
 ### 9. DERIVE COMPLETION
 Slice COMPLETE requires:
@@ -160,9 +166,10 @@ Continuation is not a Worker Mode.
 | READY_FOR_CV | Scope PASS, CV dispatched | VERIFYING |
 | VERIFYING | CV FAIL | REPAIRING |
 | REPAIRING | Repair complete | READY_FOR_CV |
-| VERIFYING | CV PASS | READY_TO_INTEGRATE |
+| VERIFYING | CV PASS, Committer dispatched | COMMITTING |
+| COMMITTING | Commit hash received | READY_TO_INTEGRATE |
 | READY_TO_INTEGRATE | Lock acquired | INTEGRATING |
-| INTEGRATING | Merge + gates + commit complete | COMPLETE |
+| INTEGRATING | Merge + gates + integration complete | COMPLETE |
 | Any | Explicit blocker | BLOCKED |
 
 ## Worker Session Rules
@@ -190,6 +197,7 @@ The new Worker must receive the complete current state and must not depend on ol
 | IMPLEMENTATION_DEFECT | Worker Mode: repair |
 | CONFLICT_RESOLVED | post-merge scope check → regression → fresh CV if required |
 | SEMANTIC_CONFLICT | stop integration → Brain |
+| CV BLOCKED | stop integration → Brain |
 | SLICE_CONTEXT_GAP / PLAN_GAP / AUTHORITY_GAP / TECHNICAL_UNKNOWN / RUNTIME_DEPENDENCY_BLOCKER | Brain |
 
 ## Editing Restrictions
@@ -200,6 +208,10 @@ Executor must NOT:
 - substitute CV judgment
 - commit
 - ask the user
+
+## Authority Excerpts Rules
+
+When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewrite synonyms or summarize canonical names.
 
 ## Worker Dispatch Model
 

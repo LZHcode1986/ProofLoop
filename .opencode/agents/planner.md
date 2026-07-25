@@ -100,6 +100,17 @@ For each complete observable behavior:
 
 When boundaries or deep modules are unclear, load `codebase-design`.
 
+## Authority Excerpts Rules
+
+当当前 Slice 涉及已确定的领域名称、代码类型名称、字段名称、状态名称、事件名称或接口名称时，Authority Excerpts 必须包含这些精确名称。
+
+只包含当前 Slice 所需的术语，不复制完整 CONTEXT.md 或 Tech Spec。
+
+Slice Goal 必须写成完整用户行为，而不是抽象技术动作。
+
+错误示例：实现成员状态管理
+正确示例：Workspace 管理员可以暂停成员访问，同时保留该成员的历史活动。
+
 ### 6. BUILD SLICE DAG
 - Define true blocking dependencies only.
 - Verify DAG has no cycles.
@@ -145,6 +156,14 @@ FAIL:
 
 ### 11. SEMANTIC GATE
 - After Validator PASS, dispatch a fresh SPV.
+
+SPV receives:
+- Stage Goal
+- Observable Outcomes
+- tasks.md
+- 相关 PRD / Tech Spec 摘录
+- 相关 Matrix acceptance requirements
+- Blocking Hard Part statuses
 
 PLAN_DEFECT:
 - Return to the corresponding phase based on the finding.

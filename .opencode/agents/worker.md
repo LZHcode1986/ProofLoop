@@ -128,6 +128,14 @@ After all Tasks are complete, overwrite your Evidence section in `evidence.md`:
 
 Do not append repair history. Overwrite the current section in place.
 
+## Authority Excerpts Rules
+
+Use the exact canonical terms, type names, state names, field names, event names, and interface names supplied in Authority Excerpts.
+
+Do not introduce synonyms for an existing canonical name.
+
+If Authority Excerpts conflict with the current codebase, return AUTHORITY_GAP instead of inventing a new name.
+
 ## Stop conditions
 
 Return these if encountered:

@@ -41,7 +41,7 @@ Scope Check Result: PASS
 Scope Check Base Ref: <ref>
 Changed Files: <list>
 Verification Result Reference: <ref>
-Expected Result: Boundary closed | Boundary blocked
+Expected Result: Boundary closed (returns commit hash) | Boundary blocked
 ```
 
 ## Fresh Agent rule

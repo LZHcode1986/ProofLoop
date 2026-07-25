@@ -60,19 +60,12 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 - Are all blocking Hard Parts in VALIDATED status?
 
-### Architecture quality
-
-- Are there any architecture seam issues?
-- Are there duplicate domain rules?
-- Are there shallow wrappers?
-
 ## Output results
 
 ```text
 PLAN_READY — plan is valid
 PLAN_DEFECT — specific plan issue found (return details)
 AUTHORITY_GAP — plan references missing authority
-ARCHITECTURE_SEAM_UNCLEAR — seam definition insufficient
 TECHNICAL_DISCOVERY_REQUIRED — unvalidated Hard Part blocking
 ```
 
