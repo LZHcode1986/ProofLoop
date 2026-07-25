@@ -15,7 +15,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "python .agents/validators/proofloop-validate-stage.py *": allow
+    "python .agents/validators/proofloop-*": allow
   question: deny
   webfetch: deny
   skill:
