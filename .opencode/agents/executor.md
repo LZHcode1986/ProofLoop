@@ -197,8 +197,8 @@ The new Worker must receive the complete current state and must not depend on ol
 |---|---|
 | READY_FOR_CV | scope checker → fresh CV |
 | IMPLEMENTATION_DEFECT | Worker Mode: repair |
-| CONFLICT_RESOLVED | post-merge scope check → regression → fresh CV if required |
-| SEMANTIC_CONFLICT | stop integration → Brain |
+| CONFLICT_RESOLVED | verify Git conflict state → no unmerged files → `git merge --continue` → post-merge scope check → regression → fresh CV if required; unmerged files remain → return to Worker |
+| SEMANTIC_CONFLICT | `git merge --abort` → stop integration → Brain |
 | SLICE_CONTEXT_GAP / PLAN_GAP / AUTHORITY_GAP / TECHNICAL_UNKNOWN / RUNTIME_DEPENDENCY_BLOCKER | Brain |
 
 ## Editing Restrictions
