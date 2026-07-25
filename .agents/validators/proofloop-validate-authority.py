@@ -45,7 +45,13 @@ def is_definition_line(line: str, id_val: str) -> bool:
 def collect_definitions(root: Path) -> dict:
     """Collect IDs that are defined (not just referenced) in authority documents."""
     ids = {}
-    for md_file in root.rglob("*.md"):
+    authority_files = []
+    for p in [root / "CONTEXT.md", root / "PRD.md"]:
+        if p.exists():
+            authority_files.append(p)
+    authority_files.extend((root / "tech-spec").rglob("*.md"))
+    authority_files.extend((root / "delivery" / "stages").rglob("*.md"))
+    for md_file in authority_files:
         if ".git" in md_file.parts:
             continue
         text = md_file.read_text(encoding="utf-8")
@@ -81,7 +87,13 @@ def check_refs(root: Path, defs: dict) -> list:
     issues = []
     defined_ids = set(defs.keys())
 
-    for md_file in root.rglob("*.md"):
+    authority_files = []
+    for p in [root / "CONTEXT.md", root / "PRD.md"]:
+        if p.exists():
+            authority_files.append(p)
+    authority_files.extend((root / "tech-spec").rglob("*.md"))
+    authority_files.extend((root / "delivery" / "stages").rglob("*.md"))
+    for md_file in authority_files:
         if ".git" in md_file.parts:
             continue
         text = md_file.read_text(encoding="utf-8")
@@ -101,7 +113,13 @@ def check_canonical_types(root: Path) -> list:
     type_pattern = re.compile(r"\| (TYPE-\w+) \| .+ \| (\w+) \|")
 
     types_found = {}
-    for md_file in root.rglob("*.md"):
+    authority_files = []
+    for p in [root / "CONTEXT.md", root / "PRD.md"]:
+        if p.exists():
+            authority_files.append(p)
+    authority_files.extend((root / "tech-spec").rglob("*.md"))
+    authority_files.extend((root / "delivery" / "stages").rglob("*.md"))
+    for md_file in authority_files:
         if ".git" in md_file.parts:
             continue
         text = md_file.read_text(encoding="utf-8")

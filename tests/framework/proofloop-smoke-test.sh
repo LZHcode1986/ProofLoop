@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STAGE_ID="S99-smoke-test"
 STAGE_DIR="delivery/stages/${STAGE_ID}"
 VALIDATORS_DIR=".agents/validators"
+FRAMEWORK_DIR="tests/framework"
 PASS=0
 FAIL=0
 ERRORS=()
@@ -298,17 +299,14 @@ run_tool "proofloop-validate-authority.py" \
 echo ""
 echo "--- Step 5: Permission Smoke Test ---"
 run_tool "proofloop-permission-smoke-test.py" \
-  python "${VALIDATORS_DIR}/proofloop-permission-smoke-test.py" \
+  python "${FRAMEWORK_DIR}/proofloop-permission-smoke-test.py" \
     --path "${ROOT_DIR}"
 
 # ──────────────────────────────────────────────
 # Step 6: Status Check
 # ──────────────────────────────────────────────
 echo ""
-echo "--- Step 6: Status Check ---"
-run_tool "proofloop-status.py" \
-  python "${VALIDATORS_DIR}/proofloop-status.py" \
-    --path "${ROOT_DIR}"
+# Step 6: removed — proofloop-status.py deleted
 
 # ──────────────────────────────────────────────
 # Step 7: YAML Frontmatter Check
@@ -316,7 +314,7 @@ run_tool "proofloop-status.py" \
 echo ""
 echo "--- Step 7: YAML Frontmatter Check ---"
 run_tool "proofloop-check-agent-yaml.py" \
-  python "${VALIDATORS_DIR}/proofloop-check-agent-yaml.py" \
+  python "${FRAMEWORK_DIR}/proofloop-check-agent-yaml.py" \
     --path "${ROOT_DIR}"
 
 # ──────────────────────────────────────────────

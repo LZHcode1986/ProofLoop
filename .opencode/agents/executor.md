@@ -21,10 +21,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "python .agents/validators/proofloop-validate-stage.py *": allow
-    "python .agents/validators/proofloop-check-slice-doc-scope.py *": allow
-    "python .agents/validators/proofloop-extract-slice.py *": allow
-    "python .agents/validators/proofloop-merge-slice-docs.py *": allow
+"python .agents/validators/proofloop-check-slice-doc-scope.py *": allow
   skill: deny
   task:
     "*": deny
