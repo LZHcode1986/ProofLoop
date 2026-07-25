@@ -118,11 +118,13 @@ CV BLOCKED:
 ### 8. INTEGRATE ONE SLICE
 - Acquire exclusive integration lock.
 - Update Stage branch.
-- `git merge --no-ff <slice-commit>`.
+- `git merge --no-ff --no-edit <slice-commit>`.
 - Mechanical conflict → original Worker.
-   - Worker returns CONFLICT_RESOLVED → continue post-merge scope check
-   - Worker returns SEMANTIC_CONFLICT → stop integration → Brain
-- Semantic conflict → Brain.
+   - Worker resolves and stages conflict files, returns CONFLICT_RESOLVED
+   - Executor runs `git merge --continue`
+   - Merge commit complete → post-merge scope check
+   - Worker returns SEMANTIC_CONFLICT → `git merge --abort` → stop integration → Brain
+- Semantic conflict → `git merge --abort` → Brain.
 - Run post-merge scope check.
 - Run necessary regression.
 - fresh CV when implementation or Evidence changed.
