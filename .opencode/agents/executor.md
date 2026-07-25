@@ -21,7 +21,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-"python .agents/validators/proofloop-*": allow
+    "python .agents/validators/proofloop-*": allow
   skill: deny
   task:
     "*": deny
