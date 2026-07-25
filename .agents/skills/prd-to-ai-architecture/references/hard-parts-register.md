@@ -8,7 +8,7 @@ Hard parts are implementation risks AI agents may skip, fake, or oversimplify.
 
 | ID | Hard part | Status | Why hard | Forbidden shortcuts | Minimum acceptable implementation | Acceptance evidence | Human confirmation | Deferral approval | Residual risk |
 |---|---|---|---|---|---|---|---|---|---|---|
-| HP-001 |  | VALIDATED |  |  |  |  | required/optional |  |  |
+| HP-001 |  | IDENTIFIED |  |  |  |  | required/optional |  |  |
 
 ## Common Hard Parts
 

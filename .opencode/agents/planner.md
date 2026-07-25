@@ -254,8 +254,7 @@ If migration batches cannot stay independently green, use a shared integration b
 
 ## Task Acceptance Matrix References
 
-- TA-001 — <acceptance requirement>
-- TA-004 — <acceptance requirement>
+- <Matrix-ID> — <acceptance requirement>
 
 ## Authority References
 
@@ -286,8 +285,7 @@ If migration batches cannot stay independently green, use a shared integration b
 
 ### Matrix References
 
-- TA-001
-- TA-004
+- <Matrix-ID>
 
 ### Dependency Outputs
 
