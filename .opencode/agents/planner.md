@@ -277,6 +277,16 @@ If migration batches cannot stay independently green, use a shared integration b
 
 ## Authority References
 
+When exact canonical names matter, include those names inline:
+
+```markdown
+- `tech-spec/contract-state-matrix.md#Workspace member`
+  - Canonical type: `WorkspaceMember`
+  - Status type: `WorkspaceMemberStatus`
+  - Allowed values: `invited | active | suspended`
+  - Forbidden aliases: `ProjectUser`, `inactive`
+```
+
 ## Dependencies
 
 ## Constraints
@@ -301,6 +311,8 @@ If migration batches cannot stay independently green, use a shared integration b
 ### Public Seam
 
 ### Authority References
+
+When exact canonical names matter, include those names inline.
 
 ### Matrix References
 

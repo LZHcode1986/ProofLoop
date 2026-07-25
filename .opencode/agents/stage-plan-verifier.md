@@ -58,7 +58,9 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 ### Hard Part readiness
 
-- Are all blocking Hard Parts in VALIDATED status?
+- Are all blocking Hard Parts either:
+  - VALIDATED; or
+  - explicitly DEFERRED with Brain acceptance and documented residual risk?
 
 ## Output results
 

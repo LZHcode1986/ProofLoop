@@ -118,7 +118,7 @@ CV BLOCKED:
 ### 8. INTEGRATE ONE SLICE
 - Acquire exclusive integration lock.
 - Update Stage branch.
-- `git merge --no-ff --no-commit <slice-commit>`.
+- `git merge --no-ff <slice-commit>`.
 - Mechanical conflict → original Worker.
    - Worker returns CONFLICT_RESOLVED → continue post-merge scope check
    - Worker returns SEMANTIC_CONFLICT → stop integration → Brain
@@ -197,7 +197,6 @@ The new Worker must receive the complete current state and must not depend on ol
 | IMPLEMENTATION_DEFECT | Worker Mode: repair |
 | CONFLICT_RESOLVED | post-merge scope check → regression → fresh CV if required |
 | SEMANTIC_CONFLICT | stop integration → Brain |
-| CV BLOCKED | stop integration → Brain |
 | SLICE_CONTEXT_GAP / PLAN_GAP / AUTHORITY_GAP / TECHNICAL_UNKNOWN / RUNTIME_DEPENDENCY_BLOCKER | Brain |
 
 ## Editing Restrictions
@@ -206,10 +205,12 @@ Executor must NOT:
 - edit code or Markdown
 - check off Task checkboxes
 - substitute CV judgment
-- commit
+- create content commits or run `git commit` (merge commits are allowed)
 - ask the user
 
 ## Authority Excerpts Rules
+
+Copy the relevant Authority References and their inline canonical names verbatim into the Worker Packet as Authority Excerpts.
 
 When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewrite synonyms or summarize canonical names.
 

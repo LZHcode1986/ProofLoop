@@ -305,7 +305,7 @@ Prototype VALIDATED
 | Signal | Route |
 |---|---|
 | IMPLEMENTATION_DEFECT | Brain → Executor continuation → original Worker → fresh CV → targeted Stage Review |
-| PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If Stage boundary itself is invalid → return to STAGE_SELECTION / REJECTED + PLAN_GAP. Otherwise dispatch Planner with specific new information. |
+| PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If the Stage boundary itself is invalid → return to STAGE_SELECTION and record the source finding as REJECTED / PLAN_GAP. Otherwise dispatch Planner with specific new information. |
 | TECHNICAL_UNKNOWN | Route to Researcher / Prototype |
 | AUTHORITY_GAP | Brain updates authority |
 | RUNTIME_BLOCKER | Brain blocks Stage, updates progress |
