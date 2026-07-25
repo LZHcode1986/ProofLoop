@@ -131,10 +131,12 @@ For each Slice:
 
 ### 10. MECHANICAL GATE
 - Run proofloop-validate-stage.py.
-Verify:
-- Contract Matrix IDs appear in Stage-level Matrix References.
-- Each Matrix ID is referenced by at least one Slice.
-- Slice → Stage Closure covers the corresponding Matrix Acceptance.
+Mechanical Gate checks:
+- Matrix IDs exist in task-acceptance-matrix.md
+- Stage/Slice reference closure
+- Referencing Slices appear in Stage Closure
+
+Semantic coverage of Matrix Acceptance requirements is verified by SPV.
 
 FAIL:
 - Return to the corresponding planning phase based on failure type.

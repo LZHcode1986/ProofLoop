@@ -126,28 +126,72 @@ def check_hard_parts(text: str, root: Path) -> list:
         return issues
 
     register_text = register_path.read_text(encoding="utf-8")
-    status_map = {}
+
+    # Find column indices by header names
+    header_line = ""
     for line in register_text.splitlines():
-        if line.startswith("|") and "|" in line[1:]:
-            cols = [c.strip() for c in line.split("|")]
-            if len(cols) >= 4:
-                hp_id = cols[1].strip()
-                status = cols[4].strip()
-                if re.match(r"^HP-\d+$", hp_id):
-                    status_map[hp_id] = status
+        if line.startswith("| ID |"):
+            header_line = line
+            break
+
+    if not header_line:
+        issues.append("hard-parts-register.md: Missing header row starting with '| ID |'")
+        return issues
+
+    headers = [h.strip().lower() for h in header_line.split("|")]
+    try:
+        id_idx = headers.index("id")
+    except ValueError:
+        issues.append("hard-parts-register.md: Missing 'ID' column in header")
+        return issues
+
+    # Find Status column index
+    status_idx = None
+    deferral_idx = None
+    risk_idx = None
+    for i, h in enumerate(headers):
+        if h == "status":
+            status_idx = i
+        if "deferral" in h or "approval" in h:
+            deferral_idx = i
+        if "residual" in h or "risk" in h:
+            risk_idx = i
+
+    status_map = {}
+    deferral_map = {}
+    risk_map = {}
+    for line in register_text.splitlines():
+        if not line.startswith("|") or "|" not in line[1:]:
+            continue
+        cols = [c.strip() for c in line.split("|")]
+        if len(cols) <= id_idx:
+            continue
+        hp_id = cols[id_idx].strip()
+        if not re.match(r"^HP-\d+$", hp_id):
+            continue
+        if status_idx and len(cols) > status_idx:
+            status_map[hp_id] = cols[status_idx].strip()
+        if deferral_idx and len(cols) > deferral_idx:
+            deferral_map[hp_id] = cols[deferral_idx].strip()
+        if risk_idx and len(cols) > risk_idx:
+            risk_map[hp_id] = cols[risk_idx].strip()
 
     for hp_id in hp_ids:
         if hp_id not in status_map:
             issues.append(f"{hp_id}: referenced in Stage but not found in hard-parts-register.md")
-        elif status_map[hp_id] not in ("VALIDATED", "DEFERRED"):
-            issues.append(f"{hp_id}: status is '{status_map[hp_id]}', must be VALIDATED or DEFERRED")
-        elif status_map[hp_id] == "DEFERRED":
-            hp_section = register_text.split(hp_id)[-1].split("|")[0:5] if hp_id in register_text else []
-            hp_text = " ".join(hp_section)
-            if "Brain acceptance" not in hp_text and "accept" not in hp_text.lower():
-                issues.append(f"{hp_id}: DEFERRED but missing Brain acceptance documentation")
-            if "risk" not in hp_text.lower():
-                issues.append(f"{hp_id}: DEFERRED but missing residual risk documentation")
+            continue
+        status = status_map[hp_id]
+        if status not in ("VALIDATED", "DEFERRED"):
+            issues.append(f"{hp_id}: status is '{status}', must be VALIDATED or DEFERRED")
+        elif status == "DEFERRED":
+            deferral = deferral_map.get(hp_id, "")
+            risk = risk_map.get(hp_id, "")
+            if not deferral:
+                issues.append(f"{hp_id}: DEFERRED but missing Deferral approval (Brain acceptance required)")
+            elif "accept" not in deferral.lower():
+                issues.append(f"{hp_id}: DEFERRED but Deferral approval does not mention Brain acceptance")
+            if not risk:
+                issues.append(f"{hp_id}: DEFERRED but missing Residual risk documentation")
 
     return issues
 
@@ -163,50 +207,99 @@ def check_outcome_coverage(text: str) -> list:
     return issues
 
 
-def check_matrix_id_existence(text: str) -> list:
-    """Check that all Matrix IDs in Stage References exist in task-acceptance-matrix.md."""
+def check_matrix_id_existence(text: str, root: Path) -> list:
+    """Check all Matrix IDs in Stage References exist in task-acceptance-matrix.md."""
     issues = []
-    matrix_refs = re.findall(r"TA-\d+", text)
-    if not matrix_refs:
+    matrix_path = root / "tech-spec" / "task-acceptance-matrix.md"
+    if not matrix_path.exists():
+        issues.append(f"task-acceptance-matrix.md not found at {matrix_path}")
         return issues
-    # Check distinct IDs appear in Stage-level references
-    stage_section = text.split("## Task Acceptance Matrix References")[-1].split("##")[0] if "## Task Acceptance Matrix References" in text else ""
-    stage_ids = set(re.findall(r"TA-\d+", stage_section))
-    sliced_ids = set(re.findall(r"TA-\d+", text.split("## Slice ")[-1] if "## Slice " in text else ""))
-    all_ids = stage_ids | sliced_ids
-    for hp_id in sorted(stage_ids):
-        if hp_id not in sliced_ids and not any(hp_id in block for block in re.findall(r"<!-- SLICE:.*?-->(.*?)<!-- SLICE:.*?-->", text, re.DOTALL)):
-            issues.append(f"{hp_id}: defined in Stage references but not referenced by any Slice")
+
+    matrix_text = matrix_path.read_text(encoding="utf-8")
+
+    # Parse actual Task IDs from the Matrix table (first column = Task ID)
+    actual_ids = set()
+    in_matrix = False
+    for line in matrix_text.splitlines():
+        if line.startswith("| Task ID |"):
+            in_matrix = True
+            continue
+        if in_matrix and line.startswith("|---"):
+            continue
+        if in_matrix and line.startswith("|") and "|" in line[1:]:
+            cols = [c.strip() for c in line.split("|")]
+            if len(cols) >= 2 and cols[1]:
+                actual_ids.add(cols[1])
+
+    # Parse Stage Matrix References — accept any ID format
+    stage_section = text.split("## Task Acceptance Matrix References")[-1]
+    if "##" in stage_section:
+        stage_section = stage_section.split("##")[0]
+    stage_ids = set()
+    for line in stage_section.splitlines():
+        if line.strip().startswith("-"):
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                stage_ids.add(parts[1])
+
+    # Verify Stage IDs exist in the architecture matrix
+    for sid in sorted(stage_ids):
+        if sid not in actual_ids:
+            issues.append(f"{sid}: referenced in Stage Matrix References but not found in task-acceptance-matrix.md")
+
+    # Reject empty Matrix References when the architecture matrix has tasks
+    if not stage_ids and actual_ids:
+        issues.append("Stage has no Task Acceptance Matrix References but architecture matrix defines tasks")
+
     return issues
 
 
 def check_matrix_slice_coverage(text: str) -> list:
     """Check each Matrix ID is referenced by at least one Slice."""
     issues = []
-    stage_section = text.split("## Task Acceptance Matrix References")[-1].split("##")[0] if "## Task Acceptance Matrix References" in text else ""
-    stage_ids = set(re.findall(r"TA-\d+", stage_section))
+    # Parse Stage Matrix References — accept any ID format
+    stage_section = text.split("## Task Acceptance Matrix References")[-1]
+    if "##" in stage_section:
+        stage_section = stage_section.split("##")[0]
+    stage_ids = set()
+    for line in stage_section.splitlines():
+        if line.strip().startswith("-"):
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                stage_ids.add(parts[1])
+
     slice_blocks = re.findall(r"<!-- SLICE:(S\d+(?:-\w+)?):BEGIN -->(.*?)<!-- SLICE:\1:END -->", text, re.DOTALL)
     referenced_ids = set()
     for slice_id, block in slice_blocks:
-        refs = re.findall(r"TA-\d+", block)
-        referenced_ids.update(refs)
-    for hid in sorted(stage_ids):
-        if hid not in referenced_ids:
-            issues.append(f"{hid}: defined in Stage Matrix References but not referenced by any Slice")
+        # Find Matrix References section within the slice
+        ref_section = block.split("### Matrix References")[-1]
+        if "###" in ref_section:
+            ref_section = ref_section.split("###")[0]
+        for line in ref_section.splitlines():
+            if line.strip().startswith("-"):
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    referenced_ids.add(parts[1])
+
+    for sid in sorted(stage_ids):
+        if sid not in referenced_ids:
+            issues.append(f"{sid}: defined in Stage Matrix References but not referenced by any Slice")
     return issues
 
 
 def check_matrix_closure_coverage(text: str) -> list:
-    """Check that Matrix Acceptance requirements are covered by Slice→Stage Closure."""
+    """Check that Slices referencing Matrix items appear in Slice→Stage Closure."""
     issues = []
-    # Find all Matrix IDs used in slices
     slice_blocks = re.findall(r"<!-- SLICE:(S\d+(?:-\w+)?):BEGIN -->(.*?)<!-- SLICE:\1:END -->", text, re.DOTALL)
     slice_ids = set()
     for slice_id, block in slice_blocks:
-        refs = re.findall(r"TA-\d+", block)
-        if refs:
+        ref_section = block.split("### Matrix References")[-1]
+        if "###" in ref_section:
+            ref_section = ref_section.split("###")[0]
+        has_ref = any(line.strip().startswith("-") for line in ref_section.splitlines())
+        if has_ref:
             slice_ids.add(slice_id)
-    # Check that Slice→Stage Closure references slices that cover Matrix items
+
     closure = text.split("## Slice → Stage Closure")[-1] if "## Slice → Stage Closure" in text else ""
     for sid in sorted(slice_ids):
         if sid not in closure:
@@ -240,7 +333,7 @@ def main():
     all_issues.extend(check_dag(text))
     all_issues.extend(check_hard_parts(text, root))
     all_issues.extend(check_outcome_coverage(text))
-    all_issues.extend(check_matrix_id_existence(text))
+    all_issues.extend(check_matrix_id_existence(text, root))
     all_issues.extend(check_matrix_slice_coverage(text))
     all_issues.extend(check_matrix_closure_coverage(text))
 

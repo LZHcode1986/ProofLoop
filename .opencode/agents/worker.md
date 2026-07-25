@@ -220,7 +220,7 @@ Required fields:
 
 Flow:
 1. Set Status: repairing.
-2. Fix the specific failure per CV counterexample only.
+2. Fix only the bounded failure described by the supplied reproduction or counterexample.
 3. Do not broaden scope or refactor unrelated code.
 4. Run full Slice TDD suite.
 5. Overwrite Evidence.

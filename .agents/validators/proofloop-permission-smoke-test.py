@@ -516,20 +516,32 @@ def check_worker_mode_consistency(root: Path) -> list:
     issues = []
     expected_modes = {"implement", "finalize", "recover", "repair", "diagnose", "resolve-conflict"}
 
+    def extract_section(text: str, heading: str) -> str:
+        """Extract the section content between a ## heading and the next ## heading."""
+        if heading not in text:
+            return ""
+        start = text.index(heading)
+        rest = text[start + len(heading):]
+        lines = rest.splitlines()
+        end = len(rest)
+        for i, line in enumerate(lines):
+            if line.startswith("## ") and heading not in line:
+                end = len("\n".join(lines[:i]))
+                break
+        return rest[:end]
+
     sources = []
 
     # 1. Worker Contract — parse Modes table
     worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
     if worker_contract.exists():
         text = worker_contract.read_text(encoding="utf-8")
-        # Find modes in the Modes table (between | Mode | When to use | and next section)
-        mode_section = text.split("## Modes")[1].split("##")[0] if "## Modes" in text else ""
+        mode_section = extract_section(text, "## Modes")
         found = set()
         for m in expected_modes:
             if f"`{m}`" in mode_section:
                 found.add(m)
         extra = set()
-        # Check for any unexpected mode in backticks
         for token in mode_section.split():
             if token.startswith("`") and token.endswith("`") and token[1:-1] not in expected_modes:
                 extra.add(token[1:-1])
@@ -541,7 +553,7 @@ def check_worker_mode_consistency(root: Path) -> list:
     executor_file = root / ".opencode" / "agents" / "executor.md"
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
-        mode_section = text.split("## Executor Mode Selection")[1].split("##")[0] if "## Executor Mode Selection" in text else ""
+        mode_section = extract_section(text, "## Executor Mode Selection")
         found = set()
         for m in expected_modes:
             if f"`{m}`" in mode_section:
@@ -558,16 +570,8 @@ def check_worker_mode_consistency(root: Path) -> list:
     worker_file = root / ".opencode" / "agents" / "worker.md"
     if worker_file.exists():
         text = worker_file.read_text(encoding="utf-8")
-        if "## Mode Execution Flows" in text:
-            start = text.index("## Mode Execution Flows")
-            rest = text[start + len("## Mode Execution Flows"):]
-            lines = rest.splitlines()
-            end = len(rest)
-            for i, line in enumerate(lines):
-                if line.startswith("## ") and "Mode Execution Flows" not in line:
-                    end = len("\n".join(lines[:i]))
-                    break
-            mode_section = rest[:end]
+        mode_section = extract_section(text, "## Mode Execution Flows")
+        if mode_section:
             found = set()
             for m in expected_modes:
                 if f"### Mode: {m}" in mode_section:
@@ -698,7 +702,6 @@ def check_return_value_consistency(root: Path) -> list:
     """Verify Worker allowed returns match between Worker, Contract, and Executor."""
     issues = []
 
-    # Expected mapping from the specification
     expected_returns = {
         "implement": {"READY_FOR_CV", "blocker"},
         "finalize": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT"},
@@ -708,67 +711,99 @@ def check_return_value_consistency(root: Path) -> list:
         "resolve-conflict": {"CONFLICT_RESOLVED", "SEMANTIC_CONFLICT"},
     }
 
+    def extract_section(text: str, heading: str) -> str:
+        """Extract the section content between a ## heading and the next ## heading."""
+        if heading not in text:
+            return ""
+        start = text.index(heading)
+        rest = text[start + len(heading):]
+        lines = rest.splitlines()
+        end = len(rest)
+        for i, line in enumerate(lines):
+            if line.startswith("## ") and heading not in line:
+                end = len("\n".join(lines[:i]))
+                break
+        return rest[:end]
+
     # Check Worker Contract Allowed results table
     worker_contract = root / ".agents" / "contracts" / "executor" / "worker.md"
+    worker_contract_data = {}
     if worker_contract.exists():
         text = worker_contract.read_text(encoding="utf-8")
-        if "## Allowed results per Mode" in text:
-            start = text.index("## Allowed results per Mode")
-            rest = text[start + len("## Allowed results per Mode"):]
-            lines = rest.splitlines()
-            end = len(rest)
-            for i, line in enumerate(lines):
-                if line.startswith("## ") and "Allowed results" not in line:
-                    end = len("\n".join(lines[:i]))
-                    break
-            section = rest[:end]
-            for mode, expected in expected_returns.items():
-                for ret in expected:
-                    if ret == "blocker":
-                        continue
-                    if f"`{ret}`" not in section and ret not in section:
-                        issues.append(f"Worker Contract: Missing return '{ret}' for mode '{mode}' in Allowed results table")
-        else:
+        section = extract_section(text, "## Allowed results per Mode")
+        if not section:
             issues.append("Worker Contract: Missing 'Allowed results per Mode' section")
+        else:
+            # Parse per-mode returns from the table
+            for line in section.splitlines():
+                if line.startswith("|") and "|" in line[1:]:
+                    cols = [c.strip() for c in line.split("|")]
+                    if len(cols) >= 3 and cols[1] in expected_returns:
+                        mode = cols[1]
+                        returns_str = cols[2]
+                        found_returns = set()
+                        for r in expected_returns[mode]:
+                            if r in returns_str:
+                                found_returns.add(r)
+                        worker_contract_data[mode] = found_returns
+                        for r in expected_returns[mode]:
+                            if r != "blocker" and r not in returns_str:
+                                issues.append(f"Worker Contract: Missing return '{r}' for mode '{mode}' in Allowed results table")
 
     # Check Worker Mode Execution Flows
     worker_file = root / ".opencode" / "agents" / "worker.md"
+    worker_flow_data = {}
     if worker_file.exists():
         text = worker_file.read_text(encoding="utf-8")
-        if "## Mode Execution Flows" in text:
-            section = text.split("## Mode Execution Flows")[1].split("##")[0]
-            for mode, expected in expected_returns.items():
-                mode_block = section.split(f"### Mode: {mode}")
-                if len(mode_block) > 1:
-                    block = mode_block[1].split("###")[0]
-                    for ret in expected:
-                        if ret not in block:
-                            issues.append(f"Worker: Missing return '{ret}' in Mode '{mode}' execution flow")
-        else:
+        section = extract_section(text, "## Mode Execution Flows")
+        if not section:
             issues.append("Worker: Missing 'Mode Execution Flows' section")
+        else:
+            for mode in expected_returns:
+                if f"### Mode: {mode}" in section:
+                    mode_block = section.split(f"### Mode: {mode}")[1]
+                    next_heading = mode_block.find("### Mode: ")
+                    if next_heading > 0:
+                        mode_block = mode_block[:next_heading]
+                    mode_returns = set()
+                    for r in expected_returns[mode]:
+                        if r in mode_block:
+                            mode_returns.add(r)
+                    worker_flow_data[mode] = mode_returns
+                    for r in expected_returns[mode]:
+                        if r != "blocker" and r not in mode_block:
+                            issues.append(f"Worker: Missing return '{r}' in Mode '{mode}' execution flow")
 
     # Check Executor Return Routing table
     executor_file = root / ".opencode" / "agents" / "executor.md"
+    executor_data = {}
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
-        if "## Worker Return Routing" in text:
-            start = text.index("## Worker Return Routing")
-            rest = text[start + len("## Worker Return Routing"):]
-            lines = rest.splitlines()
-            end = len(rest)
-            for i, line in enumerate(lines):
-                if line.startswith("## ") and "Worker Return Routing" not in line:
-                    end = len("\n".join(lines[:i]))
-                    break
-            section = rest[:end]
+        section = extract_section(text, "## Worker Return Routing")
+        if not section:
+            issues.append("Executor: Missing 'Worker Return Routing' section")
+        else:
             all_returns = set()
             for mode_returns in expected_returns.values():
                 all_returns.update(mode_returns)
-            for ret in all_returns:
+            for ret in sorted(all_returns):
                 if ret != "blocker" and ret not in section:
                     issues.append(f"Executor: Missing return '{ret}' in Worker Return Routing table")
-        else:
-            issues.append("Executor: Missing 'Worker Return Routing' section")
+
+    # Cross-reference: per-mode comparison
+    for mode in expected_returns:
+        contract_returns = worker_contract_data.get(mode, set())
+        flow_returns = worker_flow_data.get(mode, set())
+        expected = expected_returns[mode]
+        expected_no_blocker = {r for r in expected if r != "blocker"}
+        if contract_returns and contract_returns != expected_no_blocker:
+            missing = expected_no_blocker - contract_returns
+            if missing:
+                issues.append(f"Cross-ref: Mode '{mode}' Contract misses: {missing}")
+        if flow_returns and flow_returns != expected_no_blocker:
+            missing = expected_no_blocker - flow_returns
+            if missing:
+                issues.append(f"Cross-ref: Mode '{mode}' Worker Flow misses: {missing}")
 
     return issues
 
