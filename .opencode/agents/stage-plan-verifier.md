@@ -72,6 +72,16 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 - Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
 - When `test-driven-development` is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
 
+### Public Seam validation
+
+1. Public Seam 是否是公共可观察边界。
+2. 是否能够观察 Slice Goal。
+3. 是否避免测试内部实现细节。
+4. 是否足以支持 TDD Proof Plan。
+5. 通过后，Seam Status 才可视为 PRE_AGREED。
+
+Public Seam 不合格时返回 PLAN_DEFECT。
+
 ### Matrix Semantic Coverage
 
 For each Stage-selected Matrix Acceptance requirement:

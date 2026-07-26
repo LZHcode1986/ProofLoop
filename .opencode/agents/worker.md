@@ -31,13 +31,12 @@ You receive a Slice Packet containing:
 - Authority Excerpts (not full PRD/Tech Spec)
 - Dependency Output Summaries
 - TDD Proof Plan
-- Tasks
+- Completed Task IDs
 - Editable tasks.md Region (markers)
 - Editable evidence.md Region (markers)
 - Out of Scope
 - Stop Conditions
 - Required Skills
-- TDD Requirement
 - Current Task ID
 - Current Task Goal
 - Previous Task Result Summary (if continuing)
@@ -64,6 +63,9 @@ Worker one call executes only the Current Task specified by Executor.
 - Worker must check off the current Task checkbox after completing it.
 - Worker must NOT write final Slice Evidence in implement-task mode.
 - Worker must NOT start the next Task.
+- Worker only knows the Current Task supplied by Executor.
+- Worker must not search tasks.md for future Task contents.
+- Worker must not infer, select, or start a future Task.
 
 ### TDD Loading
 
@@ -76,6 +78,21 @@ Worker one call executes only the Current Task specified by Executor.
 7. Must NOT treat RED, GREEN, or REFACTOR as independent ProofLoop Tasks.
 8. Must NOT autonomously broaden Slice scope.
 9. After all Tasks are complete, finalize-slice runs the full Slice verification.
+
+### Pre-agreed Seam
+
+The Public Seam supplied in the Worker Packet has already been agreed upstream.
+
+When:
+- Required Skills includes test-driven-development; and
+- Seam Status is PRE_AGREED;
+
+the Worker must use that Seam directly and must not ask the user to reconfirm it.
+
+异常处理：
+- Public Seam 缺失 → SLICE_CONTEXT_GAP
+- Seam Status 不是 PRE_AGREED → PLAN_GAP
+- Public Seam 明显无法观察目标行为 → PLAN_GAP
 
 ### 1. INTAKE
 - Require Contract Ref, Mode and Slice ID.
@@ -177,14 +194,6 @@ Return these if encountered:
 
 Do not guess. Do not broaden scope. Return the condition clearly.
 
-## TDD Usage
-
-Modes implement-task, finalize-slice, repair and diagnose must use test-driven-development.
-
-recover-task uses test-driven-development for unfinished implementation work.
-
-Diagnose first uses diagnose, then uses test-driven-development for the corrective behavior change.
-
 ## Mode Execution Flows
 
 ### Mode: implement-task
@@ -239,13 +248,14 @@ Flow:
    - return IMPLEMENTATION_DEFECT;
    - include the mismatched Task, missing implementation/proof,
      current diff, and reproduction evidence.
-6. Complete remaining unchecked Tasks.
-7. Run full Slice TDD suite.
-8. Overwrite Evidence.
-9. Set Status: ready-for-cv.
-10. Return READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker.
+6. Execute only the Current Task supplied by Executor.
+7. Run minimum verification required for the current Task.
+8. Check off the current Task checkbox.
+9. Do NOT execute later Tasks.
+10. Do NOT write final Slice Evidence.
+11. Return TASK_COMPLETE.
 
-Allowed return: READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker
+Allowed return: TASK_COMPLETE, IMPLEMENTATION_DEFECT, or blocker
 
 ### Mode: repair
 
@@ -313,7 +323,6 @@ Every path returning READY_FOR_CV must overwrite the current Slice Evidence sect
 
 Evidence update is mandatory after:
 - finalize-slice
-- recover-task
 - repair
 - diagnose
 

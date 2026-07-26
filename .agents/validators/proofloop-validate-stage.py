@@ -36,6 +36,7 @@ def check_required_sections(text: str, stage_id: str) -> list:
         "Slice Graph",
         "Task Acceptance Matrix References",
         "Slice → Stage Closure",
+        "Stage Runtime Proof",
     ]
     missing = [s for s in required if s not in text]
     return [f"Missing section: {s}" for s in missing]
@@ -60,7 +61,7 @@ def check_slice_completeness(text: str) -> list:
         re.DOTALL,
     )
     for slice_id, block in slice_blocks:
-        required = ["Goal", "Observable Outcome", "Public Seam", "TDD Proof Plan", "Tasks", "Matrix References", "Task → Slice Closure"]
+        required = ["Goal", "Observable Outcome", "Public Seam", "Required Skills", "Seam Status", "TDD Proof Plan", "Tasks", "Matrix References", "Task → Slice Closure"]
         for section in required:
             if section not in block:
                 issues.append(f"{slice_id}: Missing section '{section}'")
@@ -325,6 +326,33 @@ def check_matrix_closure_coverage(text: str) -> list:
     return issues
 
 
+def check_required_skills(text: str) -> list:
+    issues = []
+    slice_blocks = re.findall(
+        r"<!-- SLICE:(S\d+(?:-\w+)?):BEGIN -->(.*?)<!-- SLICE:\1:END -->",
+        text,
+        re.DOTALL,
+    )
+    allowed_skills = {"test-driven-development", "None"}
+    for slice_id, block in slice_blocks:
+        skills_section = block.split("### Required Skills")[-1].split("###")[0] if "### Required Skills" in block else ""
+        skills_found = set(re.findall(r"- (\S+)", skills_section))
+        for skill in skills_found:
+            if skill not in allowed_skills:
+                issues.append(f"{slice_id}: Unknown or deprecated skill '{skill}'. Allowed: {', '.join(sorted(allowed_skills))}")
+        # When test-driven-development is used, must have Public Seam, Seam Status, TDD Proof Plan
+        if "test-driven-development" in skills_found:
+            if "Public Seam" not in block:
+                issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing Public Seam")
+            if "Seam Status" not in block:
+                issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing Seam Status")
+            if "PRE_AGREED" not in block:
+                issues.append(f"{slice_id}: Required Skills includes test-driven-development but Seam Status is not PRE_AGREED")
+            if "TDD Proof Plan" not in block:
+                issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing TDD Proof Plan")
+    return issues
+
+
 def main():
     if "--stage" not in sys.argv:
         print("Usage: python proofloop-validate-stage.py --stage <stage-id> [--path <root-path>]")
@@ -354,6 +382,7 @@ def main():
     all_issues.extend(check_matrix_id_existence(text, root))
     all_issues.extend(check_matrix_slice_coverage(text))
     all_issues.extend(check_matrix_closure_coverage(text))
+    all_issues.extend(check_required_skills(text))
 
     if all_issues:
         print(f"Stage {stage_id} validation FAILED:")

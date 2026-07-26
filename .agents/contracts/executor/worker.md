@@ -24,6 +24,9 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 | diagnose | READY_FOR_CV or blocker |
 | resolve-conflict | CONFLICT_RESOLVED or SEMANTIC_CONFLICT |
 
+recover-task only restores execution for the supplied Current Task.
+It must not execute later Tasks or finalize the Slice.
+
 ## Common fields
 
 All Modes include:
@@ -33,8 +36,8 @@ All Modes include:
 - Slice Goal
 - Observable Outcome
 - Public Seam
+- Seam Status
 - Required Skills
-- TDD Requirement
 - TDD Proof Plan
   - Primary Seam
   - Required Success Behaviors
@@ -46,9 +49,10 @@ All Modes include:
 - Authority Excerpts (refs)
   Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
 - Dependency Output Summaries
-- Tasks
 - Completed Task IDs
-- Remaining Task IDs
+- Current Task ID
+- Current Task Goal
+- Current Task Content
 - Editable tasks.md Region
 - Editable evidence.md Region
 - Allowed Scope
@@ -83,7 +87,6 @@ Expected Result: READY_FOR_CV | IMPLEMENTATION_DEFECT
 Additional fields:
 - Current Task ID
 - Checked Tasks
-- Unchecked Tasks
 - Current Diff
 - Current Code State
 - Interruption Description

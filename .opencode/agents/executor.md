@@ -217,11 +217,11 @@ Executor sends the new Mode and new Task through the runtime handle.
 ### Handle unavailable (Session Lost)
 
 1. Read Slice Goal, Public Seam, Required Skills, Proof Plan.
-2. Read completed and remaining Tasks.
+2. Read completed Tasks.
 3. Check current code, tests, and diff.
 4. Find the first unchecked Task.
 5. Create new Worker, Mode: recover-task.
-6. Send complete persisted state and current Task.
+6. Send persisted Slice context, completed Task IDs, and only the current unchecked Task. Do NOT send all remaining Tasks.
 
 If the Slice requires test-driven-development, the recovery Worker must reload that Skill.
 
@@ -296,6 +296,7 @@ When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewr
 Initial dispatch packet must include:
 - Required Skills
 - Public Seam
+- Seam Status: PRE_AGREED
 - TDD Proof Plan
 
 Task continuation packet must preserve:
@@ -309,6 +310,7 @@ Task continuation packet must preserve:
 Session recovery must re-send:
 - Required Skills
 - Public Seam
+- Seam Status: PRE_AGREED
 - TDD Proof Plan
 
 ### Runtime continuation
