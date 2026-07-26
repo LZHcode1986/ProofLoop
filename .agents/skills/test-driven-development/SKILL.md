@@ -1,224 +1,83 @@
 ---
 name: test-driven-development
-description: Implement or repair behavior using a RED, GREEN, REFACTOR loop through the real public seam.
+description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
 ---
 
 # Test-Driven Development
 
-## Core Rule
+TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle — consult them before and during the loop, not after.
 
-No production behavior change before a failing behavior test or proof probe.
+When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
 
-Work one behavior at a time.
+## What a good test is
 
-## Required Context
+Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't. A good test reads like a specification — "user can checkout with valid cart" tells you exactly what capability exists — and survives refactors because it doesn't care about internal structure.
 
-Use only the resolved execution context supplied to the Worker, including when available:
+See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
-- Task Text
-- Task Acceptance Criteria
-- Slice Goal
-- Slice Acceptance Criteria
-- Verification Commands
-- Expected Evidence
-- Allowed / Forbidden File Scope
-- Stop Conditions
-- required source refs
+## Seams — where tests go
+
+A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
+
+**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+
+Ask: "What's the public interface, and which seams should we test?"
+
+## Anti-patterns
+
+- **Implementation-coupled** — mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
+- **Tautological** — the assertion recomputes the expected value the way the code does (`expect(add(a, b)).toBe(a + b)`, a snapshot derived by hand the same way, a constant asserted equal to itself), so it passes by construction and can never disagree with the code. Expected values must come from an independent source of truth — a known-good literal, a worked example, the spec.
+- **Horizontal slicing** — writing all tests first, then all implementation. Bulk tests verify _imagined_ behavior: you test the _shape_ of things rather than user-facing behavior, the tests go insensitive to real changes, and you commit to test structure before understanding the implementation. Work in **vertical slices** instead — one test → one implementation → repeat, each test a **tracer bullet** that responds to what the last cycle taught you.
+
+## Rules of the loop
+
+- **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
+- **One slice at a time.** One seam, one test, one minimal implementation per cycle.
+- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
+
+## ProofLoop Context: Public Seam Adaptation
+
+In ProofLoop v2, the Public Seam is pre-agreed by Planner and validated by SPV. The Worker does not need to ask the user to confirm seams.
+
+### Rules
+
+The Public Seam supplied in the Worker Slice Packet is considered pre-agreed when:
+
+- it was defined by Planner;
+- the Stage plan passed SPV;
+- it is unambiguous for the current Slice and Task.
 
 Do not ask the user.
 
-Do not invent missing behavior.
+If the Public Seam is absent, ambiguous, unsuitable, or cannot observe the required behavior, return SLICE_CONTEXT_GAP or PLAN_GAP.
 
-Return blocked when the resolved execution context does not provide enough information to identify the behavior under test, verification target, expected evidence, or allowed file scope.
-
-Blocked response:
+### Responsibility Chain
 
 ```text
-Implementation blocked: insufficient task context
+Planner: defines Public Seam
+SPV: validates the Seam can observe real behavior
+Executor: passes it verbatim
+Worker: runs test-driven-development through this Seam
 ```
 
-## Optional References
+### Simplified Evidence
 
-Do not load all reference docs by default. Load only the one needed for the current decision:
+ProofLoop does NOT require heavy TDD process audit:
 
-- Read `tests.md` when deciding whether a test observes behavior through a public interface.
-- Read `mocking.md` before adding or relying on mocks.
-- Read `interface-design.md` when the required behavior is hard to test through the current interface.
-- Read `refactoring.md` only during REFACTOR.
-- Read `deep-modules.md` only when refactor work reveals a shallow or over-wide interface.
+```text
+Worker Evidence (NOT required):
+- RED receipt
+- GREEN receipt
+- Round-by-round TDD history
+- REFACTOR receipt
 
-Do not use reference docs to broaden product scope or override the assigned task context.
-
-## Choose Test Level
-
-Choose the smallest test or proof that can verify the required behavior.
-
-| Behavior type | Preferred proof |
-|---|---|
-| Pure logic | Unit test |
-| API, database, file system, or component boundary | Integration test |
-| Page route, user action, or visible UI result | E2E test or runtime proof |
-| Bug fix | Reproduction test that fails before the fix |
-| Behavior not suited to automation | Executable inspection or proof from Verification Commands |
-
-Prefer real code paths over mocks.
-
-Use mocks only when real dependencies are unavailable, slow, nondeterministic, or explicitly allowed by the task context.
-
-## TDD Loop
-
-### 1. RED
-
-Write one failing test or proof probe for one required behavior.
-
-The behavior must come from the Worker resolved execution context:
-
-- Task Text
-- Task Acceptance Criteria
-- Slice Goal
-- Slice Acceptance Criteria
+Worker Evidence (required):
+- Tests Added or Updated
 - Verification Commands
-- Expected Evidence
-- Allowed / Forbidden File Scope
-
-The RED test or proof must:
-
-- map to one behavior required by the assigned Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria;
-- use a public interface or observable behavior;
-- stay within Allowed File Scope;
-- fail before implementation;
-- fail for the expected reason.
-
-Run the narrowest command that executes this test or proof.
-
-If it passes immediately, the RED step is invalid. Replace it with a test or proof that demonstrates the required behavior is currently missing or broken.
-
-If it fails because of typo, import error, invalid setup, or unrelated environment failure, fix the test setup and rerun until the failure proves the target behavior is missing.
-
-If the resolved execution context does not provide enough information to identify the behavior under test, return blocked instead of inferring product intent:
-
-```text
-Implementation blocked: insufficient task context
+- Results
+- Observed Behavior
+- Proof Profiles
+- Limitations
 ```
 
-### 2. VERIFY RED
-
-Record the RED evidence before writing production code:
-
-```text
-RED:
-- behavior:
-- test/probe:
-- command:
-- expected failure:
-- actual failure:
-```
-
-Do not write production code until RED is valid.
-
-### 3. GREEN
-
-Implement the smallest change that makes the RED test or proof pass.
-
-Rules:
-
-- stay within Allowed File Scope;
-- do not add behavior outside the assigned Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria;
-- do not weaken, delete, or skip the RED test;
-- do not refactor unrelated code;
-- do not fix unrelated issues unless required by the current behavior.
-
-Run the same narrow test or proof command used for RED.
-
-### 4. VERIFY GREEN
-
-The GREEN step is valid only when:
-
-- the RED test or proof now passes;
-- required local checks from the task context also pass;
-- no tests were skipped, deleted, or weakened.
-
-Record:
-
-```text
-GREEN:
-- changed files:
-- command:
-- passing result:
-```
-
-### 5. REFACTOR
-
-Refactor only after GREEN is valid.
-
-Allowed:
-
-- remove duplication;
-- improve names;
-- simplify structure;
-- move complexity behind the same public interface.
-
-Forbidden:
-
-- adding behavior;
-- changing acceptance semantics;
-- broadening scope;
-- skipping relevant checks after refactor.
-
-After refactor, rerun the relevant test or proof command.
-
-Record:
-
-```text
-REFACTOR:
-- done: yes/no
-- changed files:
-- command:
-- passing result:
-```
-
-## Proof Profile
-
-If the assigned task matches a profile in `.agents/contracts/shared/proof-profiles.md`, record the selected profile and satisfy its minimum evidence.
-
-If no profile fits, use:
-
-```text
-Proof Profile: None
-```
-
-Do not broaden implementation scope to force a profile match.
-
-## Completion Record
-
-Before marking the task complete, record:
-
-```text
-Proof Profile: <profile-name | None>
-
-TDD Cycle:
-- RED evidence:
-- GREEN evidence:
-- REFACTOR evidence:
-
-Mapping:
-- Task Acceptance Criteria, Slice Goal, or Slice Acceptance Criteria:
-- why this test/proof verifies it:
-
-Residual Risk:
-- untested risk:
-- blocked risk:
-```
-
-## Stop Conditions
-
-Return blocked instead of guessing when:
-
-- behavior under test is ambiguous;
-- verification target is missing;
-- expected evidence is missing;
-- allowed file scope is missing;
-- required runtime dependency is unavailable;
-- implementation requires forbidden files;
-- the required behavior is outside the assigned task or slice context;
-- the only possible proof would rely on unauthorized mocks, secrets, external services, or interactive setup.
+CV verifies current code, tests, and behavior — not whether the Worker recorded the full development process.

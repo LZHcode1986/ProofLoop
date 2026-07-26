@@ -308,6 +308,20 @@ Prototype VALIDATED
 | PLAN_GAP | Brain evaluates: Stage Goal clarification, scope repartition, or architecture authority. If the Stage boundary itself is invalid → return to STAGE_SELECTION and record the source finding as REJECTED / PLAN_GAP. Otherwise dispatch Planner with specific new information. |
 | TECHNICAL_UNKNOWN | Route to Researcher / Prototype |
 | AUTHORITY_GAP | Brain updates authority |
+| INCOMPLETE_EVIDENCE | Brain → Executor to complete execution or verification info |
 | RUNTIME_BLOCKER | Brain blocks Stage, updates progress |
 
 Only product trade-offs are escalated to the user.
+
+### Deleted Enums Mapping
+
+The following enums are deleted and mapped to their replacements:
+
+```text
+GOAL_MISMATCH
+→ Goal not achieved → IMPLEMENTATION_DEFECT or PLAN_GAP
+
+AUTHORITY_VIOLATION
+→ Code violates explicit Tech Spec → IMPLEMENTATION_DEFECT
+→ Tech Spec itself missing or conflicting → AUTHORITY_GAP
+```

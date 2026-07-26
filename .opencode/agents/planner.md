@@ -171,6 +171,19 @@ PLAN_DEFECT:
 - Re-run Validator.
 - Dispatch another fresh SPV.
 
+Planner may submit a structured rebuttal to SPV findings instead of modifying the plan:
+```
+SPV Rebuttal:
+- Finding ID
+- Disputed premise
+- Existing plan evidence
+- Exact Slice references
+- Exact Dependency Output references
+- Exact Proof Plan references
+- Why the alleged gap is already closed
+```
+Rebuttal does not override the SPV Gate. After rebuttal, re-run mechanical validator and dispatch a fresh SPV.
+
 AUTHORITY_GAP / TECHNICAL_DISCOVERY_REQUIRED:
 - Return to Brain.
 
@@ -198,6 +211,7 @@ A qualified Slice must:
 - produce one current Evidence section
 - have explicit Out of Scope
 - NOT pre-write code file paths
+- have one Required Skills field
 
 Good Slice:
 ```text
@@ -221,6 +235,46 @@ Mocks Allowed
 Mocks Forbidden
 Verification Commands
 Proof Profiles
+```
+
+## Planner Rules
+
+1. Planner decides Required Skills at the Slice level.
+2. When a Slice changes observable behavior, Required Skills must include `test-driven-development` by default.
+3. Planner must provide a Public Seam for each Slice.
+4. Planner must provide a TDD Proof Plan capable of guiding the Worker.
+5. Planner must NOT create RED, GREEN, or REFACTOR Tasks.
+6. Planner must NOT split "write all tests" and "write all implementation" into horizontal Tasks.
+7. Tasks must remain goal-type behavior steps.
+
+## Stage Runtime Proof
+
+Each Stage plan must include a Runtime Proof section:
+
+```
+## Stage Runtime Proof
+
+### Environment Preconditions
+
+### Build
+- Command:
+- Expected Result:
+
+### Migration / Setup
+- Command:
+- Expected Result:
+
+### Startup
+- Command:
+- Readiness Signal:
+
+### Smoke Scenarios
+- Scenario:
+- Command / Action:
+- Expected Observation:
+
+### Shutdown / Cleanup
+- Command:
 ```
 
 ## Task Quality Rules (Invariants)
@@ -309,6 +363,10 @@ When exact canonical names matter, include those names inline:
 ### Observable Outcome
 
 ### Public Seam
+
+### Required Skills
+
+- test-driven-development
 
 ### Authority References
 

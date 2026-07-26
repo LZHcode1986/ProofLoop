@@ -44,6 +44,10 @@ Plan blocked with stop condition if unresolved.
     - unresolved technical assumption → Researcher / Prototype
 - AUTHORITY_GAP → Brain updates authority, re-dispatch
 - TECHNICAL_DISCOVERY_REQUIRED → route to Researcher / Prototype
+- SPV PLAN_DEFECT with Finding
+  → Planner modifies plan OR submits structured rebuttal
+  → Re-run mechanical validator
+  → Dispatch fresh SPV
 
 ## Packet
 

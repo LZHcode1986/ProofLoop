@@ -9,11 +9,13 @@ permission:
   glob: allow
   grep: allow
   bash:
-    "*": ask
+    "*": deny
+    "python .agents/validators/proofloop-run-stage.py *": allow
     "git status*": allow
     "git diff*": allow
     "git log*": allow
     "git show*": allow
+    "rg *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
@@ -52,6 +54,9 @@ Check:
 - Can each Observable Outcome be demonstrated?
 - Does the behavior match the PRD acceptance criteria?
 - Are there any gaps between the Goal and the actual implementation?
+- Run the Stage Runtime Proof via proofloop-run-stage.py
+- Check build, migration/setup, startup, smoke scenarios, shutdown
+- Does the Stage actually start and behave as expected?
 
 ## Code Review
 
@@ -84,13 +89,74 @@ Severity: critical | major | minor
 Finding type: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN
 ```
 
-## Output verdict
+## Verdict
 
 ```text
-ACCEPTED — Stage Goal achieved
-REJECTED — Stage Goal not achieved (with findings)
-BLOCKED — Cannot complete review (missing context/runtime)
+ACCEPTED
+REJECTED
+BLOCKED
 ```
+
+## Finding Types (REJECTED only)
+
+```text
+IMPLEMENTATION_DEFECT
+PLAN_GAP
+AUTHORITY_GAP
+TECHNICAL_UNKNOWN
+```
+
+Routing:
+```text
+IMPLEMENTATION_DEFECT → Brain → Executor
+PLAN_GAP → Brain → Planner
+AUTHORITY_GAP → Brain updates authority
+TECHNICAL_UNKNOWN → Brain → Researcher / Prototype
+```
+
+## Blocker Codes (BLOCKED only)
+
+```text
+INCOMPLETE_EVIDENCE
+RUNTIME_BLOCKER
+```
+
+Routing:
+```text
+INCOMPLETE_EVIDENCE → Brain → Executor to complete execution or verification info
+RUNTIME_BLOCKER → Brain records Stage blocked and handles environment
+```
+
+## Unified Output Format
+
+```text
+Verdict: ACCEPTED | REJECTED | BLOCKED
+
+Finding Type:
+- IMPLEMENTATION_DEFECT
+- PLAN_GAP
+- AUTHORITY_GAP
+- TECHNICAL_UNKNOWN
+- none
+
+Blocker Code:
+- INCOMPLETE_EVIDENCE
+- RUNTIME_BLOCKER
+- none
+
+Affected Stage Outcome:
+Observed Behavior:
+Expected Behavior:
+Code / Runtime Evidence:
+Likely Affected Slice:
+Recommended Route:
+```
+
+Rules:
+- ACCEPTED: Finding Type and Blocker Code are both none.
+- REJECTED: Must have Finding Type.
+- BLOCKED: Must have Blocker Code.
+- Must NOT fill both Finding Type and Blocker Code.
 
 ## Routing
 
@@ -103,4 +169,8 @@ All findings return to Brain. Stage Reviewer does NOT:
 - recalculate CV verdicts
 - rerun blind refutation
 
-Stage Reviewer may run test and build commands (via `bash: ask`) to verify Stage behavior, but does NOT edit project files.
+Stage Reviewer runs the Stage Runtime Proof via proofloop-run-stage.py and reviews Stage Goal, Observable Outcomes, and code quality. Sub-agents must NOT trigger user approval prompts.
+
+Deleted (no longer used):
+- GOAL_MISMATCH → use IMPLEMENTATION_DEFECT or PLAN_GAP
+- AUTHORITY_VIOLATION → use IMPLEMENTATION_DEFECT or AUTHORITY_GAP

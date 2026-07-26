@@ -62,13 +62,75 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
   - VALIDATED; or
   - explicitly DEFERRED with Brain acceptance and documented residual risk?
 
+### TDD alignment
+
+- Does each observable-behavior-changing Slice require `test-driven-development`?
+- Is the Skill name the unified `test-driven-development`?
+- Is the Public Seam explicit and capable of observing real behavior?
+- Does the TDD Proof Plan cover the Slice Goal, success paths, and necessary failure paths?
+- Are RED, GREEN, or REFACTOR incorrectly split into different Tasks?
+- Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
+- When `test-driven-development` is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
+
+### Matrix Semantic Coverage
+
+For each Stage-selected Matrix Acceptance requirement:
+1. Which Slice Outcome or Slice composition covers it?
+2. Which Public Seam makes it observable?
+3. Which Proof Plan assertion verifies the behavior?
+4. Is the coverage semantic, or just an ID reference?
+
+Return PLAN_DEFECT when only an ID reference exists without planned semantics.
+
+### Composition Closure
+
+Check that all Slices completed independently PLUS:
+- Slice dependency outputs are correctly composed
+- Necessary wiring, integration, bootstrap, and migration are planned
+- Stage Observable Outcomes can truly be achieved
+
+Specific checks:
+1. Is the Dependency Output explicitly produced by an upstream Slice?
+2. Does the downstream Slice explicitly consume that output?
+3. Are Slice interfaces, states, and canonical names compatible?
+4. Is any integration action missing?
+5. Is any startup, migration, route, registration, configuration, or wiring missing?
+6. Does a complete Stage user path or system path exist?
+7. Could all Slices be complete but the Stage still not runnable?
+
+### Runtime Proof
+
+Check the Stage Runtime Proof:
+- Does it contain build, migration/setup, startup, smoke scenarios, and shutdown?
+- Can the Runtime Proof verify the Stage Observable Outcomes?
+- Are the commands consistent with the project's real toolchain?
+
 ## Output results
 
 ```text
 PLAN_READY — plan is valid
-PLAN_DEFECT — specific plan issue found (return details)
+PLAN_DEFECT — specific plan issue found (return details with full Finding below)
 AUTHORITY_GAP — plan references missing authority
 TECHNICAL_DISCOVERY_REQUIRED — unvalidated Hard Part blocking
+```
+
+## Finding output format
+
+Each PLAN_DEFECT finding must include:
+
+```text
+Finding ID
+Failed Stage Outcome
+Composition Counterexample
+Relevant Slices
+Missing Dependency / Integration
+Why current closure is insufficient
+Required correction direction
+```
+
+Do NOT return only:
+```text
+PLAN_DEFECT: Slices do not add up to Stage
 ```
 
 ## Rules

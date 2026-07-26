@@ -47,6 +47,7 @@ Verification Method: <goal-first review>
 Expected Evidence: <review verdict>
 Authoritative Inputs: <tasks.md, evidence.md, code, tests, tech-spec/*>
 Constraints: <read-only, goal-first, no implementation>
-Stop Conditions: <GOAL_MISMATCH, AUTHORITY_VIOLATION, INCOMPLETE_EVIDENCE>
+Stop Conditions: <IMPLEMENTATION_DEFECT, PLAN_GAP, AUTHORITY_GAP, TECHNICAL_UNKNOWN, INCOMPLETE_EVIDENCE, RUNTIME_BLOCKER>
 Expected Result: <ACCEPTED | REJECTED | BLOCKED>
+Runtime Proof: <Stage Runtime Proof from Stage plan>
 ```

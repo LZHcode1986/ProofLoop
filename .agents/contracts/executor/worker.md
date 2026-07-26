@@ -6,9 +6,9 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 
 | Mode | When to use |
 |---|---|
-| `implement` | New Slice ready for initial implementation |
-| `finalize` | All Tasks checked but Evidence incomplete |
-| `recover` | Worker context lost, need to verify and continue |
+| `implement-task` | New Slice ready for first Task, or continuation to next Task |
+| `recover-task` | Worker context lost, need to verify and continue from unchecked Task |
+| `finalize-slice` | All Tasks checked but Evidence incomplete or stale |
 | `repair` | First CV FAIL, fix specific failure |
 | `diagnose` | Second CV FAIL, root-cause diagnosis and fix |
 | `resolve-conflict` | Merge conflict during integration |
@@ -17,9 +17,9 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 
 | Mode | Allowed results |
 |---|---|
-| implement | READY_FOR_CV or blocker |
-| finalize | READY_FOR_CV or IMPLEMENTATION_DEFECT |
-| recover | READY_FOR_CV, IMPLEMENTATION_DEFECT, or blocker |
+| implement-task | TASK_COMPLETE or blocker |
+| recover-task | TASK_COMPLETE, IMPLEMENTATION_DEFECT, or blocker |
+| finalize-slice | READY_FOR_CV or IMPLEMENTATION_DEFECT |
 | repair | READY_FOR_CV or blocker |
 | diagnose | READY_FOR_CV or blocker |
 | resolve-conflict | CONFLICT_RESOLVED or SEMANTIC_CONFLICT |
@@ -33,9 +33,8 @@ All Modes include:
 - Slice Goal
 - Observable Outcome
 - Public Seam
-- Authority Excerpts (refs)
-  Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
-- Dependency Output Summaries
+- Required Skills
+- TDD Requirement
 - TDD Proof Plan
   - Primary Seam
   - Required Success Behaviors
@@ -44,7 +43,12 @@ All Modes include:
   - Mocks Allowed / Forbidden
   - Verification Commands
   - Proof Profiles
+- Authority Excerpts (refs)
+  Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
+- Dependency Output Summaries
 - Tasks
+- Completed Task IDs
+- Remaining Task IDs
 - Editable tasks.md Region
 - Editable evidence.md Region
 - Allowed Scope
@@ -54,31 +58,44 @@ All Modes include:
 
 ## Mode-specific fields
 
-### implement
-
-No additional fields beyond common.
-
-### finalize
+### implement-task
 
 Additional fields:
-- Current Slice Packet (original)
-- Current evidence.md Region
+- Current Task ID
+- Current Task Goal
+- Previous Task Result Summary
 
-### recover
+Expected Result: TASK_COMPLETE | blocker
+
+### finalize-slice
 
 Additional fields:
-- Current Slice Packet (original)
+- All Completed Tasks
+- Full Slice Verification Commands
+- Required Proof Profiles
 - Current tasks.md Region
 - Current evidence.md Region
+
+Expected Result: READY_FOR_CV | IMPLEMENTATION_DEFECT
+
+### recover-task
+
+Additional fields:
+- Current Task ID
 - Checked Tasks
 - Unchecked Tasks
-- Recent Diff
+- Current Diff
+- Current Code State
 - Interruption Description
+- Current tasks.md Region
+- Current evidence.md Region
+
+Expected Result: TASK_COMPLETE | IMPLEMENTATION_DEFECT | blocker
 
 ### repair
 
 Additional fields:
-- Failure Source: CV | finalize | recover
+- Failure Source: CV | finalize-slice | recover-task
 - Failed Criterion
 - Concrete Reproduction or Counterexample
 - Failure Signature
@@ -109,8 +126,9 @@ All Modes share this envelope:
 ```
 Target Agent: worker
 Contract Ref: .agents/contracts/executor/worker.md
-Mode: <implement | finalize | recover | repair | diagnose | resolve-conflict>
+Mode: <implement-task | recover-task | finalize-slice | repair | diagnose | resolve-conflict>
 Slice ID: <same>
+[Common fields as specified above]
 [Mode-specific fields as specified above]
 Expected Result: <per Mode allowed results>
 ```
@@ -120,6 +138,7 @@ Expected Result: <per Mode allowed results>
 Runtime session continuity is owned by Executor.
 
 - If a usable Worker handle exists for the same Slice, Executor continues that Worker session.
+- Continuation sends the new Mode and new Task through the runtime handle.
 - If no handle exists, Executor creates a fresh Worker with the complete persisted state required by the selected Mode.
 - Runtime handles are not Contract fields and must not be persisted.
 - Worker never creates or selects its own continuation handle.
