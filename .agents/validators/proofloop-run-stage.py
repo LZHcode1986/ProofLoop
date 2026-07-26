@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument("--stage", required=True, help="Stage ID (e.g. S01)")
     parser.add_argument("--path", default=".", help="Repository root path")
     parser.add_argument("--branch", help="Stage branch (optional)")
+    parser.add_argument("--validate-only", action="store_true",
+                        help="Validate structure only, do not execute commands")
     return parser.parse_args()
 
 
@@ -207,11 +209,15 @@ def execute_build_step(content, cwd):
     command = fields.get("Command", "").strip()
     step = {"name": "Build"}
     if not command:
-        step["status"] = "skipped"
-        step["reason"] = "no Command field"
+        if _check_not_applicable(content):
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
+            return step
+        step["status"] = "failed"
+        step["reason"] = "no Command and not marked Not Applicable"
         return step
     if command.lower() == "not applicable":
-        step["status"] = "skipped"
+        step["status"] = "not-applicable"
         step["reason"] = "declared Not Applicable"
         return step
     result = run_command(command, cwd)
@@ -232,11 +238,15 @@ def execute_migration_step(content, cwd):
     command = fields.get("Command", "").strip()
     step = {"name": "Migration"}
     if not command:
-        step["status"] = "skipped"
-        step["reason"] = "no Command field"
+        if _check_not_applicable(content):
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
+            return step
+        step["status"] = "failed"
+        step["reason"] = "no Command and not marked Not Applicable"
         return step
     if command.lower() == "not applicable":
-        step["status"] = "skipped"
+        step["status"] = "not-applicable"
         step["reason"] = "declared Not Applicable"
         return step
     result = run_command(command, cwd)
@@ -259,14 +269,29 @@ def execute_startup_step(content, cwd):
     otherwise ``None``.
     """
     fields = extract_fields(content)
-    command = fields.get("Command", "")
-    readiness = fields.get("Readiness Signal", "")
+    command = fields.get("Command", "").strip()
+    readiness = fields.get("Readiness Signal", "").strip()
 
     step = {"name": "Startup"}
 
     if not command:
-        step["status"] = "skipped"
-        step["reason"] = "no Command field"
+        if _check_not_applicable(content):
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
+            return step, None
+        step["status"] = "failed"
+        step["reason"] = "no Command and not marked Not Applicable"
+        return step, None
+
+    if command.lower() == "not applicable":
+        step["status"] = "not-applicable"
+        step["reason"] = "declared Not Applicable"
+        return step, None
+
+    # Readiness Signal is mandatory when a real Startup command is configured
+    if not readiness:
+        step["status"] = "failed"
+        step["reason"] = "Startup command requires Readiness Signal but none provided"
         return step, None
 
     # Security check (same patterns as ``run_command``)
@@ -313,23 +338,20 @@ def execute_startup_step(content, cwd):
         step["reason"] = "process exited prematurely"
         return step, None
 
-    # Poll readiness signal if one is declared
-    if readiness:
-        readiness_result = wait_for_readiness(readiness, cwd)
-        if readiness_result["status"] != "completed":
-            # Service didn't become ready — kill it
-            try:
-                process.kill()
-                process.wait(timeout=10)
-            except Exception:
-                pass
-            step["status"] = "failed"
-            step["readiness_attempts"] = readiness_result.get("attempts", "0")
-            step["reason"] = readiness_result.get("reason", "readiness check failed")
-            return step, None
-        step["readiness"] = readiness_result.get("readiness", "")
-    else:
-        print("[WARNING] No Readiness Signal declared \u2014 skipping readiness check", file=sys.stderr)
+    # Poll readiness signal
+    readiness_result = wait_for_readiness(readiness, cwd)
+    if readiness_result["status"] != "completed":
+        # Service didn't become ready — kill it
+        try:
+            process.kill()
+            process.wait(timeout=10)
+        except Exception:
+            pass
+        step["status"] = "failed"
+        step["readiness_attempts"] = readiness_result.get("attempts", "0")
+        step["reason"] = readiness_result.get("reason", "readiness check failed")
+        return step, None
+    step["readiness"] = readiness_result.get("readiness", "")
 
     step["status"] = "completed"
     return step, process
@@ -340,19 +362,33 @@ def execute_smoke_scenarios_step(content, cwd):
 
     Returns a list of step result dicts (one per scenario).
     """
+    # If the entire phase is Not Applicable, return a single not-applicable step
+    if _check_not_applicable(content):
+        return [{"name": "Smoke Scenarios", "status": "not-applicable", "reason": "declared Not Applicable"}]
+
     scenarios = parse_smoke_scenarios(content)
+
+    # Require at least one executable scenario
+    has_executable = any(
+        s.get("Command / Action", "").strip()
+        and s.get("Command / Action", "").strip().lower() != "not applicable"
+        for s in scenarios
+    )
+    if not scenarios or not has_executable:
+        return [{"name": "Smoke Scenarios", "status": "failed", "reason": "no executable smoke scenarios"}]
+
     steps = []
     for i, scenario in enumerate(scenarios, 1):
         scenario_name = scenario.get("Scenario", f"Scenario {i}")
         command = scenario.get("Command / Action", "").strip()
         step = {"name": f"Smoke Scenario {i}: {scenario_name}"}
         if not command:
-            step["status"] = "skipped"
-            step["reason"] = "no Command / Action field"
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
             steps.append(step)
             continue
         if command.lower() == "not applicable":
-            step["status"] = "skipped"
+            step["status"] = "not-applicable"
             step["reason"] = "declared Not Applicable"
             steps.append(step)
             continue
@@ -379,8 +415,18 @@ def execute_shutdown_step(content, cwd, startup_process=None):
 
     if content:
         fields = extract_fields(content)
-        command = fields.get("Command", "")
-        if command:
+        command = fields.get("Command", "").strip()
+        if not command:
+            if _check_not_applicable(content):
+                step["status"] = "not-applicable"
+                step["reason"] = "declared Not Applicable"
+                return step
+            # No command and not NA: fall through to process-kill fallback
+        elif command.lower() == "not applicable":
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
+            return step
+        else:
             result = run_command(command, cwd)
             step.update(result)
             return step
@@ -461,8 +507,13 @@ def check_expected_result(expected, result_dict):
             return False, f"Expected output to match pattern '{pattern}'"
         return True, None
 
-    # Unknown format \u2014 warn but do not fail
-    return True, None
+    # Unknown format \u2014 fail closed
+    return False, "Unrecognized Expected Result format"
+
+
+def _check_not_applicable(content):
+    """Check if a phase or scenario declares ``Not Applicable`` via content."""
+    return "not applicable" in content.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +581,7 @@ def main():
     startup_process = None
 
     # ---- Validate required phases ----
-    REQUIRED_PHASES = ["Build", "Startup", "Shutdown / Cleanup"]
+    REQUIRED_PHASES = ["Build", "Migration / Setup", "Startup", "Smoke Scenarios", "Shutdown / Cleanup"]
     missing_required = [p for p in REQUIRED_PHASES if p not in subsections]
     if missing_required:
         output = {
@@ -542,42 +593,75 @@ def main():
         print(json.dumps(output, indent=2))
         sys.exit(1)
 
-    # ---- Validate non-empty Command ----
+    # ---- Validate non-empty Command / Not Applicable ----
     for phase_name in ["Build", "Migration / Setup", "Startup", "Shutdown / Cleanup"]:
-        if phase_name in subsections:
+        pfields = extract_fields(subsections[phase_name])
+        pcmd = pfields.get("Command", "").strip()
+        if not pcmd:
+            if not _check_not_applicable(subsections[phase_name]):
+                output = {
+                    "stage": stage_id,
+                    "status": "FAIL",
+                    "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' if intentional)",
+                    "results": [],
+                }
+                print(json.dumps(output, indent=2))
+                sys.exit(1)
+
+    # Smoke Scenarios: at least one executable scenario or Not Applicable
+    if not _check_not_applicable(subsections["Smoke Scenarios"]):
+        scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
+        if not scenarios or not any(
+            s.get("Command / Action", "").strip()
+            and s.get("Command / Action", "").strip().lower() != "not applicable"
+            for s in scenarios
+        ):
+            output = {
+                "stage": stage_id,
+                "status": "FAIL",
+                "reason": "Smoke Scenarios has no executable scenarios (declare 'Not Applicable' if intentional)",
+                "results": [],
+            }
+            print(json.dumps(output, indent=2))
+            sys.exit(1)
+
+    # ---- Validate-only mode ----
+    if args.validate_only:
+        # Check Expected Result format for each phase with a command
+        for phase_name in REQUIRED_PHASES:
+            if phase_name == "Smoke Scenarios":
+                continue  # smoke scenarios use Expected Observation, checked at execution
             pfields = extract_fields(subsections[phase_name])
             pcmd = pfields.get("Command", "").strip()
-            if not pcmd:
-                is_na = "not applicable" in subsections[phase_name].lower()
-                if not is_na:
-                    output = {
-                        "stage": stage_id,
-                        "status": "FAIL",
-                        "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' if intentional)",
-                        "results": [],
-                    }
-                    print(json.dumps(output, indent=2))
-                    sys.exit(1)
-
-    if "Smoke Scenarios" in subsections:
-        scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
-        for i, scenario in enumerate(scenarios, 1):
-            scmd = scenario.get("Command / Action", "").strip()
-            if not scmd:
-                sname = scenario.get("Scenario", f"Scenario {i}")
-                is_na = any(
-                    "not applicable" in str(v).lower()
-                    for v in scenario.values()
-                )
-                if not is_na:
-                    output = {
-                        "stage": stage_id,
-                        "status": "FAIL",
-                        "reason": f"Smoke Scenario '{sname}' has empty Command / Action (declare 'Not Applicable' if intentional)",
-                        "results": [],
-                    }
-                    print(json.dumps(output, indent=2))
-                    sys.exit(1)
+            if pcmd and pcmd.lower() != "not applicable" and not _check_not_applicable(subsections[phase_name]):
+                expected = pfields.get("Expected Result", "").strip()
+                if expected:
+                    # Check format recognition without running commands
+                    if re.match(r'^exit code:\s*\d+$', expected, re.IGNORECASE):
+                        pass  # valid format
+                    elif re.match(r'^output contains:\s*.+$', expected, re.IGNORECASE | re.DOTALL):
+                        pass  # valid format
+                    elif re.match(r'^output matches:\s*.+$', expected, re.IGNORECASE | re.DOTALL):
+                        pass  # valid format
+                    else:
+                        output = {
+                            "stage": stage_id,
+                            "branch": args.branch,
+                            "status": "BLOCKED",
+                            "reason": f"Phase '{phase_name}' has unrecognized Expected Result format",
+                            "results": [],
+                        }
+                        print(json.dumps(output, indent=2))
+                        sys.exit(1)
+        output = {
+            "stage": stage_id,
+            "branch": args.branch,
+            "status": "PASS",
+            "reason": "Runtime Proof structure validated successfully",
+            "results": [],
+        }
+        print(json.dumps(output, indent=2))
+        sys.exit(0)
 
     # ---- Step 1: Build ----
     if "Build" in subsections:
@@ -608,23 +692,9 @@ def main():
     steps.append(step)
 
     # ---- Determine overall status ----
-    # Check if any required phases are missing
-    if any(phase not in subsections for phase in REQUIRED_PHASES):
-        missing = [p for p in REQUIRED_PHASES if p not in subsections]
-        overall_status = "FAIL"
-        output = {
-            "stage": stage_id,
-            "branch": args.branch,
-            "status": overall_status,
-            "reason": f"Missing required phases: {', '.join(missing)}",
-            "steps": steps,
-        }
-        print(json.dumps(output, indent=2))
-        sys.exit(1)
-
-    # Check steps status
-    all_pass = all(s.get("status") == "completed" for s in steps)
-    any_blocker = any(s.get("status") in ("blocked", "rejected") for s in steps)
+    # completed / not-applicable → pass; skipped / failed / timeout / rejected → fail
+    all_pass = all(s.get("status") in ("completed", "not-applicable") for s in steps)
+    any_blocker = any(s.get("status") == "blocked" for s in steps)
 
     if not steps:
         overall_status = "FAIL"

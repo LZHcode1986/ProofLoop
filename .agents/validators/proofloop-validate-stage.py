@@ -65,7 +65,7 @@ def check_slice_completeness(text: str) -> list:
         # Conditionally require TDD Proof Plan or Verification Plan
         has_tdd = "test-driven-development" in block
         if has_tdd:
-            required.append("TDD Proof Plan")
+            required.append("Proof Plan")
         else:
             required.append("Proof Plan")  # Verification Plan for non-TDD slices
         for section in required:
@@ -346,7 +346,7 @@ def check_required_skills(text: str) -> list:
         for skill in skills_found:
             if skill not in allowed_skills:
                 issues.append(f"{slice_id}: Unknown or deprecated skill '{skill}'. Allowed: {', '.join(sorted(allowed_skills))}")
-        # When test-driven-development is used, must have Public Seam, Seam Status, TDD Proof Plan
+        # When test-driven-development is used, must have Public Seam, Seam Status, Proof Plan
         if "test-driven-development" in skills_found:
             if "Public Seam" not in block:
                 issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing Public Seam")
@@ -354,8 +354,8 @@ def check_required_skills(text: str) -> list:
                 issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing Seam Status")
             if "PRE_AGREED" not in block:
                 issues.append(f"{slice_id}: Required Skills includes test-driven-development but Seam Status is not PRE_AGREED")
-            if "TDD Proof Plan" not in block:
-                issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing TDD Proof Plan")
+            if "Proof Plan" not in block:
+                issues.append(f"{slice_id}: Required Skills includes test-driven-development but missing Proof Plan")
     return issues
 
 

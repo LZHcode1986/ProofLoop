@@ -31,7 +31,7 @@ You receive a Slice Packet containing:
 - Seam Status
 - Authority Excerpts (not full PRD/Tech Spec)
 - Dependency Output Summaries
-- TDD Proof Plan
+- Proof Plan
 - Completed Task IDs
 - Editable tasks.md Region (markers)
 - Editable evidence.md Region (markers)
@@ -247,21 +247,19 @@ Entry:
 
 Flow:
 1. Set Status: executing.
-2. Read current tasks.md, evidence.md, and code diff.
+2. Read only:
+   - Current Task line and checkbox;
+   - Worker Status;
+   - current Slice Evidence;
+   - current code and diff;
+   - Completed Task IDs supplied by Executor.
 3. If Required Skills includes test-driven-development, reload that Skill.
-4. Verify checked Tasks against actual code state.
-5. If a checked Task is not supported by current code or proof:
-   - do not uncheck it;
-   - do not silently redo it under recover-task Mode;
-   - return IMPLEMENTATION_DEFECT;
-   - include the mismatched Task, missing implementation/proof,
-     current diff, and reproduction evidence.
-6. Execute only the Current Task supplied by Executor.
-7. Run minimum verification required for the current Task.
-8. Check off the current Task checkbox.
-9. Do NOT execute later Tasks.
-10. Do NOT write final Slice Evidence.
-11. Return TASK_COMPLETE.
+4. Execute only the Current Task supplied by Executor.
+5. Run minimum verification required for the current Task.
+6. Check off the current Task checkbox.
+7. Do NOT execute later Tasks.
+8. Do NOT write final Slice Evidence.
+9. Return TASK_COMPLETE.
 
 Allowed return: TASK_COMPLETE, IMPLEMENTATION_DEFECT, or blocker
 

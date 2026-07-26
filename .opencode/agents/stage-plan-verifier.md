@@ -38,7 +38,7 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 - Is the Slice vertical (not a horizontal technical layer)?
 - Is the Public Seam clearly defined?
-- Is the TDD Proof Plan capable of observing real behavior?
+- Is the Proof Plan capable of observing real behavior?
 
 ### Dependency quality
 
@@ -67,7 +67,7 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 - Does each observable-behavior-changing Slice require `test-driven-development`?
 - Is the Skill name the unified `test-driven-development`?
 - Is the Public Seam explicit and capable of observing real behavior?
-- Does the TDD Proof Plan cover the Slice Goal, success paths, and necessary failure paths?
+- Does the Proof Plan cover the Slice Goal, success paths, and necessary failure paths?
 - Are RED, GREEN, or REFACTOR incorrectly split into different Tasks?
 - Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
 - When `test-driven-development` is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
@@ -77,7 +77,7 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 1. Public Seam 是否是公共可观察边界。
 2. 是否能够观察 Slice Goal。
 3. 是否避免测试内部实现细节。
-4. 是否足以支持 TDD Proof Plan。
+4. 是否足以支持 Proof Plan。
 5. 通过后，Seam Status 才可视为 PRE_AGREED。
 
 Public Seam 不合格时返回 PLAN_DEFECT。

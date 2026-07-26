@@ -53,7 +53,7 @@ Packet receives:
 - Slice ID
 - Slice Contract
 - Covered Tasks
-- TDD Proof Plan
+- Proof Plan
 - Actual Diff
 - Changed Code / Tests
 - Verification Commands

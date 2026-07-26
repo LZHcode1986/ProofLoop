@@ -16,7 +16,7 @@ Dispatches adversarial verification to Code Verifier — two-phase: initial-refu
 - Slice ID
 - Slice Contract
 - Covered Tasks
-- TDD Proof Plan
+- Proof Plan
 - Actual Diff
 - Changed Code/Tests
 - Verification Commands
@@ -62,7 +62,7 @@ Mode: initial-refutation
 Slice ID: <same>
 Slice Contract: <refs>
 Covered Tasks: <list>
-TDD Proof Plan: <plan>
+Proof Plan: <plan>
 Actual Diff: <diff>
 Changed Code/Tests: <paths>
 Verification Commands: <commands>

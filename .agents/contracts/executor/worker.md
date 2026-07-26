@@ -38,7 +38,7 @@ All Modes include:
 - Public Seam
 - Seam Status
 - Required Skills
-- TDD Proof Plan
+- Proof Plan
   - Primary Seam
   - Required Success Behaviors
   - Required Failure Behaviors

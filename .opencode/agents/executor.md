@@ -232,7 +232,7 @@ If the Slice requires test-driven-development, the recovery Worker must reload t
 Dispatch a fresh CV with Mode: initial-refutation.
 Packet includes:
 - Slice ID, Slice Contract, Covered Tasks
-- TDD Proof Plan, Actual Diff, Changed Code/Tests
+- Proof Plan, Actual Diff, Changed Code/Tests
 - Verification Commands, Authority Excerpts
 - Out of Scope, Evidence Location, Evidence Region Marker
 - Expected Result: REFUTATION_COMPLETE | Verification blocked
@@ -297,7 +297,7 @@ Initial dispatch packet must include:
 - Required Skills
 - Public Seam
 - Seam Status: PRE_AGREED
-- TDD Proof Plan
+- Proof Plan
 - Current Task ID
 - Current Task Goal
 - Current Task Content
@@ -315,7 +315,7 @@ Session recovery must re-send:
 - Required Skills
 - Public Seam
 - Seam Status: PRE_AGREED
-- TDD Proof Plan
+- Proof Plan
 - Current Task ID
 - Current Task Goal
 - Current Task Content
