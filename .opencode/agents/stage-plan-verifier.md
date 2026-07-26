@@ -34,7 +34,7 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 ## Verification checks
 
-### 1. Slice and Proof Validity
+### 1. Slice, Task and Proof Validity
 
 - Is the Slice vertical (not a horizontal technical layer)?
 - Is the Public Seam clearly defined and capable of observing real behavior?
@@ -46,14 +46,13 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 - Are RED, GREEN, or REFACTOR incorrectly split into different Tasks?
 - Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
 - When test-driven-development is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
+- Is each Task a goal-type (not a file operation list)?
 
 ### 2. Dependency Validity
 
 - Are Slice dependencies truly blocking?
 - Is the DAG acyclic?
 - Are IDs and refs valid?
-- Is each Task a goal-type (not a file operation list)?
-- Is the Public Seam explicit and capable of observing real behavior? (also in Slice and Proof Validity)
 
 ### 3. Matrix Semantic Coverage
 

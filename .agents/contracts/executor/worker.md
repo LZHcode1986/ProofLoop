@@ -70,6 +70,8 @@ Otherwise:
 - Current Task ID
 - Current Task Goal
 - Current Task Content
+- Completed Task IDs
+- Previous Task Result Summary (optional)
 
 ### Finalize Context (finalize-slice only)
 
@@ -79,12 +81,19 @@ Otherwise:
 - Current tasks.md Region
 - Current evidence.md Region
 
-### Failure Context (repair and diagnose only)
+### Repair Context (repair only)
 
-- Previous Failed Criterion
+- Failure Source: CV | finalize-slice | recover-task
+- Failed Criterion
 - Concrete Reproduction or Counterexample
 - Failure Signature
-- Repair Diff
+- Original Slice Packet
+
+### Diagnose Context (diagnose only)
+
+- Previous CV Failures
+- Previous Repair Attempts
+- Failure Signature
 - Original Slice Packet
 
 ### Conflict Context (resolve-conflict only)

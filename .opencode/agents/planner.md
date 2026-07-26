@@ -142,39 +142,24 @@ Good example: Workspace admin can suspend member access while retaining the memb
 - Verify Slices can be executed or verified independently.
 
 ### 7. DEFINE PROOF PLANS
-For each Slice:
+
+Proof Plan has two forms, chosen based on Required Skills:
+
+When Required Skills includes `test-driven-development`:
 - Primary Seam
-- Success Behaviors
-- Failure Behaviors
+- Required Success Behaviors
+- Required Failure Behaviors
 - State Assertions
-- Persistence/Integration Assertions
-- Mock policy
+- Persistence / Integration Assertions
+- Mocks Allowed
+- Mocks Forbidden
 - Verification Commands
 - Proof Profiles
 
-**Proof Plan Structure:**
-
-Proof Plan has two forms, chosen based on whether Required Skills includes `test-driven-development`:
-
-**TDD Proof Plan** (when Required Skills includes test-driven-development):
-```text
-Primary Seam
-Required Success Behaviors
-Required Failure Behaviors
-State Assertions
-Persistence/Integration Assertions
-Mocks Allowed
-Mocks Forbidden
-Verification Commands
-Proof Profiles
-```
-
-**Verification Plan** (when Required Skills does not include test-driven-development):
-```text
-Verification Commands
-Expected Results
-Check Items
-```
+Otherwise:
+- Verification Commands
+- Expected Results
+- Check Items
 
 ### 8. DERIVE STAGE TASKS
 - Decompose Slice into goal-type Tasks.

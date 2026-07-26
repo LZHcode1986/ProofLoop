@@ -16,6 +16,9 @@ A Stage execution is complete and needs goal-first review against the Stage Goal
 - PRD References
 - Tech Spec References
 - Stage branch ref
+- tasks.md path
+- evidence.md path
+- Stage Runtime Proof location
 
 ## Expected results
 

@@ -678,27 +678,9 @@ def main():
 
     # ---- Validate-only mode ----
     if args.validate_only:
-        # Check Expected Result format for each phase with a command
-        for phase_name in REQUIRED_PHASES:
-            if phase_name == "Smoke Scenarios":
-                # Check Expected Observation for each executable scenario
-                if not _check_not_applicable(subsections[phase_name]):
-                    scenarios = parse_smoke_scenarios(subsections[phase_name])
-                    for scenario in scenarios:
-                        cmd = scenario.get("Command / Action", "").strip()
-                        if cmd and cmd.lower() != "not applicable":
-                            expected_obs = scenario.get("Expected Observation", "").strip()
-                            if not expected_obs:
-                                output = {
-                                    "stage": stage_id,
-                                    "branch": args.branch,
-                                    "status": "BLOCKED",
-                                    "reason": f"Smoke scenario '{scenario.get('Scenario', 'unknown')}' has a real command but no Expected Observation",
-                                    "results": [],
-                                }
-                                print(json.dumps(output, indent=2))
-                                sys.exit(1)
-                continue
+        # Check Expected Result format for Build and Migration/Setup only
+        EXPECTED_RESULT_PHASES = ["Build", "Migration / Setup"]
+        for phase_name in EXPECTED_RESULT_PHASES:
             pfields = extract_fields(subsections[phase_name])
             pcmd = pfields.get("Command", "").strip()
             if pcmd and pcmd.lower() != "not applicable" and not _check_not_applicable(subsections[phase_name]):
@@ -728,6 +710,26 @@ def main():
                             "branch": args.branch,
                             "status": "BLOCKED",
                             "reason": f"Phase '{phase_name}' has unrecognized Expected Result format",
+                            "results": [],
+                        }
+                        print(json.dumps(output, indent=2))
+                        sys.exit(1)
+
+        # Check Smoke Scenarios Expected Observation (top-level Status: Not Applicable only)
+        smoke_fields = extract_fields(subsections["Smoke Scenarios"])
+        smoke_na = smoke_fields.get("Status", "").lower() == "not applicable"
+        if not smoke_na:
+            scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
+            for scenario in scenarios:
+                cmd = scenario.get("Command / Action", "").strip()
+                if cmd and cmd.lower() != "not applicable":
+                    expected_obs = scenario.get("Expected Observation", "").strip()
+                    if not expected_obs:
+                        output = {
+                            "stage": stage_id,
+                            "branch": args.branch,
+                            "status": "BLOCKED",
+                            "reason": f"Smoke scenario '{scenario.get('Scenario', 'unknown')}' has a real command but no Expected Observation",
                             "results": [],
                         }
                         print(json.dumps(output, indent=2))
