@@ -489,6 +489,10 @@ def execute_shutdown_step(content, cwd, startup_process=None):
             result = run_command(command, cwd)
             step.update(result)
             return step
+        if _check_not_applicable(content) or (command and command.lower() == "not applicable"):
+            step["status"] = "not-applicable"
+            step["reason"] = "declared Not Applicable"
+            return step
 
     step["status"] = "skipped"
     step["reason"] = "no startup process and no shutdown command"
@@ -677,11 +681,39 @@ def main():
         # Check Expected Result format for each phase with a command
         for phase_name in REQUIRED_PHASES:
             if phase_name == "Smoke Scenarios":
-                continue  # smoke scenarios use Expected Observation, checked at execution
+                # Check Expected Observation for each executable scenario
+                if not _check_not_applicable(subsections[phase_name]):
+                    scenarios = parse_smoke_scenarios(subsections[phase_name])
+                    for scenario in scenarios:
+                        cmd = scenario.get("Command / Action", "").strip()
+                        if cmd and cmd.lower() != "not applicable":
+                            expected_obs = scenario.get("Expected Observation", "").strip()
+                            if not expected_obs:
+                                output = {
+                                    "stage": stage_id,
+                                    "branch": args.branch,
+                                    "status": "BLOCKED",
+                                    "reason": f"Smoke scenario '{scenario.get('Scenario', 'unknown')}' has a real command but no Expected Observation",
+                                    "results": [],
+                                }
+                                print(json.dumps(output, indent=2))
+                                sys.exit(1)
+                continue
             pfields = extract_fields(subsections[phase_name])
             pcmd = pfields.get("Command", "").strip()
             if pcmd and pcmd.lower() != "not applicable" and not _check_not_applicable(subsections[phase_name]):
                 expected = pfields.get("Expected Result", "").strip()
+                # Expected Result is mandatory when a real command is present
+                if not expected:
+                    output = {
+                        "stage": stage_id,
+                        "branch": args.branch,
+                        "status": "BLOCKED",
+                        "reason": f"Phase '{phase_name}' has a real command but no Expected Result",
+                        "results": [],
+                    }
+                    print(json.dumps(output, indent=2))
+                    sys.exit(1)
                 if expected:
                     # Check format recognition without running commands
                     if re.match(r'^exit code:\s*\d+$', expected, re.IGNORECASE):

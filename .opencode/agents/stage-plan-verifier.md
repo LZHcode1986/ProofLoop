@@ -34,55 +34,28 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 ## Verification checks
 
-### Slice quality
+### 1. Slice and Proof Validity
 
 - Is the Slice vertical (not a horizontal technical layer)?
-- Is the Public Seam clearly defined?
-- Is the Proof Plan capable of observing real behavior?
+- Is the Public Seam clearly defined and capable of observing real behavior?
+- Is the Proof Plan complete (success paths, failure paths, state assertions)?
+- Does the Proof Plan support the required Proof Profiles?
+- Is the Slice Goal achievable within a single continuous Worker Session?
+- Does each observable-behavior-changing Slice require test-driven-development?
+- Is the Skill name the unified test-driven-development?
+- Are RED, GREEN, or REFACTOR incorrectly split into different Tasks?
+- Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
+- When test-driven-development is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
 
-### Dependency quality
+### 2. Dependency Validity
 
 - Are Slice dependencies truly blocking?
 - Is the DAG acyclic?
 - Are IDs and refs valid?
-
-### Task quality
-
 - Is each Task a goal-type (not a file operation list)?
-- Does each Task produce a meaningful intermediate result?
+- Is the Public Seam explicit and capable of observing real behavior? (also in Slice and Proof Validity)
 
-### Closure quality
-
-- Does Task→Slice Closure prove Tasks cover the Slice Goal?
-- Does Slice→Stage Closure prove all Slices cover all Stage Outcomes?
-
-### Hard Part readiness
-
-- Are all blocking Hard Parts either:
-  - VALIDATED; or
-  - explicitly DEFERRED with Brain acceptance and documented residual risk?
-
-### TDD alignment
-
-- Does each observable-behavior-changing Slice require `test-driven-development`?
-- Is the Skill name the unified `test-driven-development`?
-- Is the Public Seam explicit and capable of observing real behavior?
-- Does the Proof Plan cover the Slice Goal, success paths, and necessary failure paths?
-- Are RED, GREEN, or REFACTOR incorrectly split into different Tasks?
-- Are "all tests" and "all implementation" incorrectly split into horizontal Tasks?
-- When `test-driven-development` is not used, is there genuinely no behavior change, and is the alternative verification sufficient?
-
-### Public Seam validation
-
-1. Is the Public Seam a publicly observable boundary?
-2. Can it observe the Slice Goal?
-3. Does it avoid testing internal implementation details?
-4. Is it sufficient to support the Proof Plan?
-5. Only after passing, Seam Status may be considered PRE_AGREED.
-
-Return PLAN_DEFECT when the Public Seam is unqualified.
-
-### Matrix Semantic Coverage
+### 3. Matrix Semantic Coverage
 
 For each Stage-selected Matrix Acceptance requirement:
 1. Which Slice Outcome or Slice composition covers it?
@@ -92,7 +65,7 @@ For each Stage-selected Matrix Acceptance requirement:
 
 Return PLAN_DEFECT when only an ID reference exists without planned semantics.
 
-### Composition Closure
+### 4. Composition Closure
 
 Check that all Slices completed independently PLUS:
 - Slice dependency outputs are correctly composed
@@ -100,20 +73,19 @@ Check that all Slices completed independently PLUS:
 - Stage Observable Outcomes can truly be achieved
 
 Specific checks:
-1. Is the Dependency Output explicitly produced by an upstream Slice?
-2. Does the downstream Slice explicitly consume that output?
-3. Are Slice interfaces, states, and canonical names compatible?
-4. Is any integration action missing?
-5. Is any startup, migration, route, registration, configuration, or wiring missing?
-6. Does a complete Stage user path or system path exist?
-7. Could all Slices be complete but the Stage still not runnable?
+1. Are Slice interfaces, states, and canonical names compatible?
+2. Is any integration action missing?
+3. Is any startup, migration, route, registration, configuration, or wiring missing?
+4. Does a complete Stage user path or system path exist?
+5. Could all Slices be complete but the Stage still not runnable?
 
-### Runtime Proof
+### 5. Runtime Proof Validity
 
 Check the Stage Runtime Proof:
 - Does it contain build, migration/setup, startup, smoke scenarios, and shutdown?
 - Can the Runtime Proof verify the Stage Observable Outcomes?
 - Are the commands consistent with the project's real toolchain?
+- Does the Runtime Proof have Expected Results / Expected Observations for every non-N/A command?
 
 ## Output results
 
@@ -130,17 +102,12 @@ Each PLAN_DEFECT finding must include:
 
 ```text
 Finding ID
-Failed Stage Outcome
-Composition Counterexample
-Relevant Slices
-Missing Dependency / Integration
-Why current closure is insufficient
-Required correction direction
-```
-
-Do NOT return only:
-```text
-PLAN_DEFECT: Slices do not add up to Stage
+Category
+Affected Stage Outcome
+Concrete Counterexample
+Relevant Slice / Task
+Missing or Incorrect Element
+Required Correction
 ```
 
 ## Rules

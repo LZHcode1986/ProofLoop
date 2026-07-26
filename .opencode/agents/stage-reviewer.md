@@ -108,25 +108,11 @@ AUTHORITY_GAP
 TECHNICAL_UNKNOWN
 ```
 
-Routing:
-```text
-IMPLEMENTATION_DEFECT → Brain → Executor
-PLAN_GAP → Brain → Planner
-AUTHORITY_GAP → Brain updates authority
-TECHNICAL_UNKNOWN → Brain → Researcher / Prototype
-```
-
 ## Blocker Codes (BLOCKED only)
 
 ```text
 INCOMPLETE_EVIDENCE
 RUNTIME_BLOCKER
-```
-
-Routing:
-```text
-INCOMPLETE_EVIDENCE → Brain → Executor to complete execution or verification info
-RUNTIME_BLOCKER → Brain records Stage blocked and handles environment
 ```
 
 ## Unified Output Format
@@ -151,7 +137,6 @@ Observed Behavior:
 Expected Behavior:
 Code / Runtime Evidence:
 Likely Affected Slice:
-Recommended Route:
 ```
 
 Rules:
@@ -160,20 +145,3 @@ Rules:
 - BLOCKED: Must have Blocker Code.
 - Must NOT fill both Finding Type and Blocker Code.
 
-## Routing
-
-All findings return to Brain. Stage Reviewer does NOT:
-- dispatch Executor
-- modify code
-- modify Tasks/Evidence
-- modify authority documents
-- commit
-- recalculate CV verdicts
-- rerun blind refutation
-- accept STRUCTURE_VALID as final proof
-
-Stage Reviewer runs the Stage Runtime Proof via proofloop-run-stage.py and reviews Stage Goal, Observable Outcomes, and code quality. Sub-agents must NOT trigger user approval prompts.
-
-Deleted (no longer used):
-- GOAL_MISMATCH → use IMPLEMENTATION_DEFECT or PLAN_GAP
-- AUTHORITY_VIOLATION → use IMPLEMENTATION_DEFECT or AUTHORITY_GAP

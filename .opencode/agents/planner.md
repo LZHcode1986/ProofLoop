@@ -100,6 +100,30 @@ For each complete observable behavior:
 
 When boundaries or deep modules are unclear, load `codebase-design`.
 
+**Slice Quality Rules (Invariants):**
+
+A qualified Slice must:
+- be narrow but complete
+- be independently demonstrable or verifiable
+- span necessary layers (not just one technical layer)
+- be observable through a public seam
+- fit in one continuous Worker Session
+- have one Proof Plan (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan)
+- produce one current Evidence section
+- have explicit Out of Scope
+- NOT pre-write code file paths
+- have one Required Skills field
+
+Good Slice:
+```text
+User saves a draft through the real editor and reopens the same content.
+```
+
+Bad Slice:
+```text
+Create repository, implement backend, make page component.
+```
+
 ## Authority Excerpts Rules
 
 When the current Slice involves established domain names, code type names, field names, state names, event names, or interface names, Authority Excerpts must include these exact names.
@@ -128,12 +152,55 @@ For each Slice:
 - Verification Commands
 - Proof Profiles
 
+**Proof Plan Structure:**
+
+Proof Plan has two forms, chosen based on whether Required Skills includes `test-driven-development`:
+
+**TDD Proof Plan** (when Required Skills includes test-driven-development):
+```text
+Primary Seam
+Required Success Behaviors
+Required Failure Behaviors
+State Assertions
+Persistence/Integration Assertions
+Mocks Allowed
+Mocks Forbidden
+Verification Commands
+Proof Profiles
+```
+
+**Verification Plan** (when Required Skills does not include test-driven-development):
+```text
+Verification Commands
+Expected Results
+Check Items
+```
+
 ### 8. DERIVE STAGE TASKS
 - Decompose Slice into goal-type Tasks.
 - Tasks serve only the current Slice.
 - Write Task → Slice Closure.
 - Write Slice → Stage Closure.
 - Verify Matrix Acceptance is covered by Proof and Closure.
+
+**Task Quality Rules (Invariants):**
+
+A Task is an implementation intermediate goal:
+
+Good Task:
+```text
+Implement draft save domain behavior
+```
+
+Bad Task:
+```text
+Create src/repository/draft.ts, modify line 42
+```
+
+Tasks must NOT have:
+- independent CV
+- independent commit
+- independent Evidence
 
 ### 9. WRITE ARTIFACTS
 - Write complete tasks.md first.
@@ -199,66 +266,7 @@ Only return PLAN_READY when both:
 - SPV is always fresh, never continued.
 - Planner does not depend on session history for recovery.
 
-## Slice Quality Rules (Invariants)
-
-A qualified Slice must:
-- be narrow but complete
-- be independently demonstrable or verifiable
-- span necessary layers (not just one technical layer)
-- be observable through a public seam
-- fit in one continuous Worker Session
-- have one Proof Plan (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan)
-- produce one current Evidence section
-- have explicit Out of Scope
-- NOT pre-write code file paths
-- have one Required Skills field
-
-Good Slice:
-```text
-User saves a draft through the real editor and reopens the same content.
-```
-
-Bad Slice:
-```text
-Create repository, implement backend, make page component.
-```
-
-## Proof Plan Structure
-
-Proof Plan has two forms, chosen based on whether Required Skills includes `test-driven-development`:
-
-**TDD Proof Plan** (when Required Skills includes test-driven-development):
-```text
-Primary Seam
-Required Success Behaviors
-Required Failure Behaviors
-State Assertions
-Persistence/Integration Assertions
-Mocks Allowed
-Mocks Forbidden
-Verification Commands
-Proof Profiles
-```
-
-**Verification Plan** (when Required Skills does not include test-driven-development):
-```text
-Verification Commands
-Expected Results
-Check Items
-```
-
-## Planner Rules
-
-1. Planner decides Required Skills at the Slice level.
-2. When a Slice changes observable behavior, Required Skills must include `test-driven-development` by default.
-3. Planner must provide a Public Seam for each Slice.
-4. Planner must provide a Proof Plan capable of guiding the Worker (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan).
-5. Planner must NOT create RED, GREEN, or REFACTOR Tasks.
-6. Planner must NOT split "write all tests" and "write all implementation" into horizontal Tasks.
-7. Tasks must remain goal-type behavior steps.
-
 ## Stage Runtime Proof
-
 Each Stage plan must include a Runtime Proof section:
 
 ```
@@ -285,26 +293,12 @@ Each Stage plan must include a Runtime Proof section:
 
 ### Shutdown / Cleanup
 - Command:
+
+Expected Result format (for Build and Migration / Setup):
+- exit code: <number>
+- output contains: <text>
+- output matches: <regex>
 ```
-
-## Task Quality Rules (Invariants)
-
-A Task is an implementation intermediate goal:
-
-Good Task:
-```text
-Implement draft save domain behavior
-```
-
-Bad Task:
-```text
-Create src/repository/draft.ts, modify line 42
-```
-
-Tasks must NOT have:
-- independent CV
-- independent commit
-- independent Evidence
 
 ## Wide Refactor Plan
 

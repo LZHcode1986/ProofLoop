@@ -31,28 +31,4 @@ Note: `slice-output` is dispatched by Executor, not Brain, and is not part of th
 
 Boundary closed with commit hash, or Boundary blocked.
 
-## Stop routing
 
-- SCOPE_VIOLATION → Brain re-evaluates boundary scope
-- DIRTY_WORKTREE → Brain requests clean worktree before re-dispatch
-- COMMIT_FAILURE → Brain investigates and retries
-
-## Packet
-
-```text
-Target Agent: committer
-Contract Ref: .agents/contracts/brain/commit-boundary.md
-Objective: <commit objective>
-Boundary Type: <type from enumeration>
-Description: <what changed>
-Changed Files: <list>
-Allowed Scope: <per boundary type>
-Forbidden Scope: <delivery/ (unless stage-plan/stage-close), .opencode/, .agents/>
-Acceptance Criteria: <commit created>
-Verification Method: <git log>
-Expected Evidence: <commit hash>
-Authoritative Inputs: <none>
-Constraints: <per boundary type>
-Stop Conditions: <dirty worktree, scope violation>
-Expected Result: <Boundary closed | Boundary blocked>
-```

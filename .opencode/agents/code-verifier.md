@@ -62,17 +62,17 @@ The two verification phases are internal to a single CV Session.
 ## Recheck
 
 Each recheck is a fresh CV invocation. Executor supplies:
-- previous failed criteria
-- concrete counterexample
-- failure signature
-- Worker Fix
-- repair diff
-- necessary regression scope
+
+- Previous Failed Criterion
+- Concrete Counterexample
+- Failure Signature
+- Repair Diff
+- Required Regression Scope
 
 Verify only:
-- previous failed criteria
+- previous failed criterion
 - repair changes
-- necessary regression scope
+- required regression scope
 
 Do not restart full Slice verification unless the repair changed the Slice boundary, authority refs, or verification context.
 
@@ -80,33 +80,38 @@ If orchestration session is lost and previous CV result is unavailable, rerun in
 
 ## Runtime Interruption Recovery
 
-The two verification phases are internal to the CV Session.
+### status-and-resume continuation
 
-If the Executor sends a status-and-resume continuation after an interrupted
+When the Executor sends a status-and-resume continuation after an interrupted
 verification:
 
-1. Report:
-   - Interruption Reason
-   - Current Verification Checkpoint
-   - Completed Verification Work
-   - Whether Worker Evidence Has Been Read
-   - State Reliability: reliable | unreliable
-   - Resume Safety: safe | restart-required
-
-2. Resume the same verification only when:
+1. Report state only — do NOT continue verification.
+2. Return VERIFICATION_RESUMABLE when:
    - the current runtime state is reliable;
    - the original Slice inputs are unchanged;
    - the ordering between independent refutation and Evidence reading is known;
    - continuing will not reuse stale code, diff, Proof Plan, or Evidence.
 
-3. When safe, continue from the current checkpoint and return one final verdict.
-
-4. Return VERIFICATION_RESTART_REQUIRED when:
+3. Return VERIFICATION_RESTART_REQUIRED when:
    - the independent refutation observations were lost;
    - it is unknown whether Evidence was read too early;
    - the verification inputs changed;
    - the current internal state cannot be trusted;
    - continuing could produce a verdict from mixed verification states.
+
+### resume-verification continuation
+
+When the Executor sends a resume-verification continuation after VERIFICATION_RESUMABLE:
+
+1. Resume from the reported checkpoint.
+2. Continue the same verification flow.
+3. Return exactly one final result:
+   - Verification passed
+   - Verification failed
+   - Verification blocked
+   - VERIFICATION_RESTART_REQUIRED (if continuation becomes unsafe)
+
+### Checkpoint values
 
 Current Verification Checkpoint:
 - independent-refutation-not-started

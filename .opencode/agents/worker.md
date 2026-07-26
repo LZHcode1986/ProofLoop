@@ -22,26 +22,8 @@ You are the  Worker. You implement exactly one Slice.
 
 ## Inputs
 
-You receive a Slice Packet containing:
-
-- Slice ID
-- Slice Goal
-- Observable Outcome
-- Public Seam
-- Seam Status
-- Authority Excerpts (not full PRD/Tech Spec)
-- Dependency Output Summaries
-- Proof Plan
-- Completed Task IDs
-- Editable tasks.md Region (markers)
-- Editable evidence.md Region (markers)
-- Out of Scope
-- Stop Conditions
-- Required Skills
-- Current Task ID
-- Current Task Goal
-- Current Task Content
-- Previous Task Result Summary (if continuing)
+Read the supplied Contract Ref and validate the packet against it.
+Do not infer missing fields.
 
 ## Worker Status
 
@@ -54,20 +36,6 @@ You must update the `Worker Status` field in your Slice's `tasks.md` region:
 - `blocked` — cannot proceed
 
 ## Worker Mode Loop
-
-### Core Execution Rules
-
-Worker one call executes only the Current Task specified by Executor.
-
-- Worker must NOT select the next Task autonomously.
-- Worker must NOT return READY_FOR_CV from implement-task mode.
-- Worker must NOT declare Slice complete when Tasks are not all done.
-- Worker must check off the current Task checkbox after completing it.
-- Worker must NOT write final Slice Evidence in implement-task mode.
-- Worker must NOT start the next Task.
-- Worker only knows the Current Task supplied by Executor.
-- Worker must not search tasks.md for future Task contents.
-- Worker must not infer, select, or start a future Task.
 
 ### TDD Loading
 
@@ -122,23 +90,6 @@ Exception handling:
 - Evidence is updated when required.
 - Worker Status reflects current state.
 - Return only an allowed Mode result.
-
-## Per-Task Checkbox
-
-After completing the current Task implementation and running local verification, check off the checkbox immediately.
-
-```text
-- [ ] S1-T1 Implement draft save behavior
-→ after implementation + local check:
-- [x] S1-T1 Implement draft save behavior
-```
-
-Rules:
-- Checkbox means "Worker completed and verified this step"
-- CV FAIL does NOT uncheck checkbox
-- Never skip a checkbox
-- Never check a box without completing the Task
-- Checkboxes are checked in implement-task mode, one per call
 
 ## Editing restrictions
 
@@ -213,12 +164,12 @@ Entry:
 Flow:
 1. Set Status: executing.
 2. If Required Skills includes test-driven-development, confirm the Skill is loaded.
-3. Implement only the Current Task.
+3. Worker must NOT select the next Task autonomously. Implement only the Current Task.
 4. Run the minimum verification required for the current Task.
-5. Check off the current Task checkbox immediately.
-6. Return TASK_COMPLETE.
-7. Do NOT write final Slice Evidence.
-8. Do NOT start the next Task.
+5. After completing the current Task implementation and running local verification, check off the checkbox immediately. One checkbox per Task. Never skip a checkbox. CV FAIL does not uncheck checkbox.
+6. Worker must NOT return READY_FOR_CV from implement-task mode.
+7. Do NOT write final Slice Evidence. Worker must not search tasks.md for future Task contents.
+8. Return TASK_COMPLETE.
 
 Allowed return: TASK_COMPLETE or blocker
 
@@ -253,13 +204,14 @@ Flow:
    - current Slice Evidence;
    - current code and diff;
    - Completed Task IDs supplied by Executor.
-3. If Required Skills includes test-driven-development, reload that Skill.
-4. Execute only the Current Task supplied by Executor.
-5. Run minimum verification required for the current Task.
-6. Check off the current Task checkbox.
-7. Do NOT execute later Tasks.
-8. Do NOT write final Slice Evidence.
-9. Return TASK_COMPLETE.
+3. Worker must not search tasks.md for future Task contents.
+4. If Required Skills includes test-driven-development, reload that Skill.
+5. Execute only the Current Task supplied by Executor.
+6. Run minimum verification required for the current Task.
+7. Check off the current Task checkbox.
+8. Do NOT execute later Tasks.
+9. Do NOT write final Slice Evidence.
+10. Return TASK_COMPLETE.
 
 Allowed return: TASK_COMPLETE, IMPLEMENTATION_DEFECT, or blocker
 

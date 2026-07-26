@@ -27,9 +27,9 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 recover-task only restores execution for the supplied Current Task.
 It must not execute later Tasks or finalize the Slice.
 
-## Common fields
+## Context Groups
 
-All Modes include:
+### Base Slice Context (all Modes)
 
 - Slice ID
 - Mode
@@ -38,27 +38,9 @@ All Modes include:
 - Public Seam
 - Seam Status
 - Required Skills
-- Proof Plan
-  - When Required Skills includes test-driven-development:
-    - Primary Seam
-    - Required Success Behaviors
-    - Required Failure Behaviors
-    - State Assertions
-    - Persistence / Integration Assertions
-    - Mocks Allowed / Forbidden
-    - Verification Commands
-    - Proof Profiles
-  - Otherwise:
-    - Verification Commands
-    - Expected Results
-    - Check Items
 - Authority Excerpts (refs)
   Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
 - Dependency Output Summaries
-- Completed Task IDs
-- Current Task ID
-- Current Task Goal
-- Current Task Content
 - Editable tasks.md Region
 - Editable evidence.md Region
 - Allowed Scope
@@ -66,62 +48,47 @@ All Modes include:
 - Stop Conditions
 - Expected Result
 
-## Mode-specific fields
+### Proof Plan (all Modes, conditional)
 
-### implement-task
+When Required Skills includes test-driven-development:
+- Primary Seam
+- Required Success Behaviors
+- Required Failure Behaviors
+- State Assertions
+- Persistence / Integration Assertions
+- Mocks Allowed / Forbidden
+- Verification Commands
+- Proof Profiles
 
-Additional fields:
+Otherwise:
+- Verification Commands
+- Expected Results
+- Check Items
+
+### Task Context (implement-task and recover-task only)
+
 - Current Task ID
 - Current Task Goal
-- Previous Task Result Summary
+- Current Task Content
 
-Expected Result: TASK_COMPLETE | blocker
+### Finalize Context (finalize-slice only)
 
-### finalize-slice
-
-Additional fields:
 - All Completed Tasks
 - Full Slice Verification Commands
 - Required Proof Profiles
 - Current tasks.md Region
 - Current evidence.md Region
 
-Expected Result: READY_FOR_CV | IMPLEMENTATION_DEFECT
+### Failure Context (repair and diagnose only)
 
-### recover-task
-
-Additional fields:
-- Current Task ID
-- Checked Tasks
-- Current Diff
-- Current Code State
-- Interruption Description
-- Current tasks.md Region
-- Current evidence.md Region
-
-Expected Result: TASK_COMPLETE | IMPLEMENTATION_DEFECT | blocker
-
-### repair
-
-Additional fields:
-- Failure Source: CV | finalize-slice | recover-task
-- Failed Criterion
+- Previous Failed Criterion
 - Concrete Reproduction or Counterexample
 - Failure Signature
+- Repair Diff
 - Original Slice Packet
 
-### diagnose
+### Conflict Context (resolve-conflict only)
 
-Additional fields:
-- Previous CV failures (initial + recheck #1)
-- Previous repair attempts
-- Failure signature
-- Original Slice Packet
-- Required Skills: `diagnose`
-
-### resolve-conflict
-
-Additional fields:
 - Current Slice Goal
 - Integrated Slice intent summaries
 - Conflict description
@@ -137,8 +104,8 @@ Target Agent: worker
 Contract Ref: .agents/contracts/executor/worker.md
 Mode: <implement-task | recover-task | finalize-slice | repair | diagnose | resolve-conflict>
 Slice ID: <same>
-[Common fields as specified above]
-[Mode-specific fields as specified above]
+[Base Slice Context as specified above]
+[Conditional groups as specified above]
 Expected Result: <per Mode allowed results>
 ```
 

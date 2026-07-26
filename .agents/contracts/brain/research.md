@@ -20,28 +20,4 @@ A technical question requires external facts from official documentation, GitHub
 
 Research findings returned. May resolve a Hard Part or inform a technical decision.
 
-## Stop routing
 
-- TECHNICAL_UNKNOWN → Brain may escalate to user or request broader scope
-- AUTHORITY_IMPACT → Brain updates authority documents
-
-## Packet
-
-```text
-Target Agent: researcher
-Contract Ref: .agents/contracts/brain/research.md
-Objective: <research goal>
-Research Goal: <what to learn>
-Research Question: <specific question>
-Why It Matters: <context>
-Preferred Sources: <official docs, GitHub, etc.>
-Allowed Scope: <research sources>
-Out of Scope: <what not to research>
-Acceptance Criteria: <how to verify>
-Verification Method: <source quality check>
-Expected Evidence: <research findings>
-Authoritative Inputs: <refs>
-Constraints: <limits>
-Stop Conditions: <when to stop>
-Expected Result: <Research complete | Research blocked>
-```

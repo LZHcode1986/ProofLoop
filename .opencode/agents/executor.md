@@ -161,7 +161,7 @@ Slice COMPLETE requires:
 | VERIFYING | CV FAIL #3 | UNRESOLVED |
 | VERIFYING | CV BLOCKED | BLOCKED |
 | VERIFYING | No final CV result (timeout/interruption) | VERIFYING_INTERRUPTED |
-| VERIFYING_INTERRUPTED | Original CV resumes, returns final verdict | COMMITTING / REPAIRING / DIAGNOSING / BLOCKED / UNRESOLVED |
+| VERIFYING_INTERRUPTED | status-and-resume returns VERIFICATION_RESUMABLE, then resume-verification returns final verdict | COMMITTING / REPAIRING / DIAGNOSING / BLOCKED / UNRESOLVED |
 | VERIFYING_INTERRUPTED | VERIFICATION_RESTART_REQUIRED or handle lost | VERIFYING (fresh CV) |
 | COMMITTING | Commit hash received | READY_TO_INTEGRATE |
 | READY_TO_INTEGRATE | Lock acquired | INTEGRATING |
@@ -175,31 +175,23 @@ interruption, tool failure, or incomplete response:
 
 1. Check whether the original CV runtime handle is still available.
 
-2. If the handle is available, continue the same CV Session and request:
-   - the interruption reason;
-   - the current verification checkpoint;
-   - whether the current verification state is reliable;
-   - whether the verification can resume safely.
+2. If the handle is available, send a `status-and-resume` continuation to the
+   same CV Session.
 
-3. If the CV reports that the state is reliable and the verification inputs
-   have not changed, continue the same CV Session until it returns a final
-   verdict.
+3. **If the CV returns VERIFICATION_RESUMABLE:**
+   - Verify the state is reliable and inputs unchanged.
+   - Send a `resume-verification` continuation.
+   - Wait for a final verdict (PASS | FAIL | BLOCKED) or VERIFICATION_RESTART_REQUIRED.
 
-4. Dispatch a fresh CV only when:
-   - the original CV handle is unavailable;
-   - the CV does not respond to the recovery continuation;
-   - the CV reports that its internal verification state is unreliable;
-   - it is unknown whether Worker Evidence was read before independent
-     refutation was fixed;
-   - code, tests, diff, Proof Plan, authority, or Evidence changed after the
-     interrupted verification began.
+4. **If the CV returns VERIFICATION_RESTART_REQUIRED:**
+   - Discard the old handle.
+   - Dispatch a fresh CV.
 
-5. A recovered CV must still return exactly one final verdict:
-   - Verification passed
-   - Verification failed
-   - Verification blocked
+5. **If the handle is unavailable or recovery continuation also fails:**
+   - Discard the old handle.
+   - Dispatch a fresh CV.
 
-CV recovery continuation template:
+CV recovery continuation template (step 1):
 ```
 Contract Ref: .agents/contracts/executor/code-verifier.md
 Continuation Type: status-and-resume
@@ -209,15 +201,22 @@ Required Next Action:
 - report interruption reason;
 - report current verification checkpoint;
 - report whether the current state is reliable;
-- resume verification and return a final verdict when safe;
+- return VERIFICATION_RESUMABLE if resumable;
 - otherwise return VERIFICATION_RESTART_REQUIRED.
 ```
 
-CV returns final verdict → process PASS | FAIL | BLOCKED normally.
+CV recovery continuation template (step 2):
+```
+Contract Ref: .agents/contracts/executor/code-verifier.md
+Continuation Type: resume-verification
+Previous Result: VERIFICATION_RESUMABLE
+Required Next Action:
+- resume verification from the reported checkpoint;
+- return a final verdict (Verification passed | failed | blocked);
+- or VERIFICATION_RESTART_REQUIRED if continuation becomes unsafe.
+```
 
-CV returns VERIFICATION_RESTART_REQUIRED → discard old handle → dispatch fresh CV.
-
-CV recovery continuation also fails or returns no result → discard old handle → dispatch fresh CV.
+CV returns VERIFICATION_RESTART_REQUIRED at any point → discard old handle → dispatch fresh CV.
 
 ## Worker Session Rules
 

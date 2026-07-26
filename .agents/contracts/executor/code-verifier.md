@@ -26,11 +26,11 @@ Dispatches adversarial verification to Code Verifier.
 
 ## Recheck additional fields
 
-- Previous Failed Criterion
+- Previous Failed Criterion (singular, not "criteria")
 - Concrete Counterexample
 - Failure Signature
-- Repair Diff
-- Required Regression Scope
+- Repair Diff (not "repair diff" or "Worker Fix")
+- Required Regression Scope (not "necessary regression scope")
 
 ## Allowed results
 
@@ -42,7 +42,9 @@ Verification blocked
 
 ## Runtime Recovery Continuation
 
-Use only when the original CV Session failed to return a final verdict.
+### Step 1: status-and-resume
+
+Use when the original CV Session failed to return a final verdict.
 
 Required continuation fields:
 
@@ -51,25 +53,39 @@ Required continuation fields:
 - Changed Inputs: none | <list>
 - Required Next Action
 
-The CV must return either:
+The CV must return one of:
 
-1. A final verification result:
-   - Verification passed
-   - Verification failed
-   - Verification blocked
+1. **VERIFICATION_RESUMABLE** — verification state is reliable and can continue
+   - Interruption Reason
+   - Current Verification Checkpoint
+   - Completed Verification Work
+   - State Reliability: reliable
+   - Whether Worker Evidence Was Read
+   - Resume Safety: safe
 
-or:
-
-2. A restart request:
-   - VERIFICATION_RESTART_REQUIRED
-
-VERIFICATION_RESTART_REQUIRED must include:
+2. **VERIFICATION_RESTART_REQUIRED** — cannot safely resume
    - Interruption Reason
    - Current Verification Checkpoint
    - State Reliability: reliable | unreliable
    - Whether Worker Evidence Was Read
    - Why Resume Is Unsafe
 
-VERIFICATION_RESTART_REQUIRED is not a verification verdict.
-It is allowed only as a response to status-and-resume continuation and causes
-Executor to create a fresh CV.
+VERIFICATION_RESUMABLE and VERIFICATION_RESTART_REQUIRED are not verification verdicts.
+They are allowed only as responses to status-and-resume.
+
+### Step 2: resume-verification
+
+Use only after receiving VERIFICATION_RESUMABLE.
+
+Required continuation fields:
+
+- Continuation Type: resume-verification
+- Previous Result: VERIFICATION_RESUMABLE
+- Required Next Action: resume from the reported checkpoint and return a final verdict
+
+The CV must return one of:
+
+1. Verification passed
+2. Verification failed
+3. Verification blocked
+4. VERIFICATION_RESTART_REQUIRED
