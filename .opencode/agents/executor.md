@@ -298,12 +298,16 @@ Initial dispatch packet must include:
 - Public Seam
 - Seam Status: PRE_AGREED
 - TDD Proof Plan
+- Current Task ID
+- Current Task Goal
+- Current Task Content
 
 Task continuation packet must preserve:
 - Contract Ref
 - Slice ID
 - Current Task ID
 - Current Task Goal
+- Current Task Content
 - Required Skills (preserved, not revoked)
 - Required Next Action
 
@@ -312,6 +316,9 @@ Session recovery must re-send:
 - Public Seam
 - Seam Status: PRE_AGREED
 - TDD Proof Plan
+- Current Task ID
+- Current Task Goal
+- Current Task Content
 
 ### Runtime continuation
 - use the existing runtime handle at the tool layer

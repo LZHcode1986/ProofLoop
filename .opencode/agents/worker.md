@@ -28,6 +28,7 @@ You receive a Slice Packet containing:
 - Slice Goal
 - Observable Outcome
 - Public Seam
+- Seam Status
 - Authority Excerpts (not full PRD/Tech Spec)
 - Dependency Output Summaries
 - TDD Proof Plan
@@ -39,6 +40,7 @@ You receive a Slice Packet containing:
 - Required Skills
 - Current Task ID
 - Current Task Goal
+- Current Task Content
 - Previous Task Result Summary (if continuing)
 
 ## Worker Status
@@ -47,7 +49,7 @@ You must update the `Worker Status` field in your Slice's `tasks.md` region:
 
 - `planned` — initial state
 - `executing` — actively working on a Mode
-- `ready-for-cv` — all Tasks done, TDD run, Evidence written
+- `ready-for-cv` — all Tasks done, full Slice verification run, Evidence written
 - `repairing` — CV failed, repairing or diagnosing
 - `blocked` — cannot proceed
 
@@ -99,10 +101,16 @@ the Worker must use that Seam directly and must not ask the user to reconfirm it
 - Read common and mode-specific fields.
 
 ### 2. RECONCILE
-- Read current Slice tasks.md region.
+- Read only:
+  - the exact Current Task line identified by Current Task ID;
+  - the Worker Status field;
+  - the exact checkbox state required for the Current Task.
+- Do NOT load the full Tasks section or future Task lines.
 - Read current Slice evidence.md region.
 - Read code and current diff.
 - Persisted facts override stale packet statements.
+- Executor is the sole reader and scheduler of the complete Task list.
+- Worker must not read any Task content before it is dispatched by Executor.
 
 ### 3. EXECUTE EXACT MODE
 - Do not change Mode autonomously.
@@ -274,10 +282,11 @@ Flow:
 1. Set Status: repairing.
 2. Fix only the bounded failure described by the supplied reproduction or counterexample.
 3. Do not broaden scope or refactor unrelated code.
-4. Run full Slice TDD suite.
-5. Overwrite Evidence.
-6. Set Status: ready-for-cv.
-7. Return READY_FOR_CV or blocker.
+4. If Required Skills includes test-driven-development, use test-driven-development for behavior-changing fixes.
+5. Always run the full Slice Verification Commands.
+6. Overwrite Evidence.
+7. Set Status: ready-for-cv.
+8. Return READY_FOR_CV or blocker.
 
 Allowed return: READY_FOR_CV or blocker
 
@@ -292,11 +301,12 @@ Flow:
 2. Load diagnose skill.
 3. Find root cause of persistent failure.
 4. Fix root cause.
-5. Add regression test.
-6. Run full Slice TDD suite.
-7. Overwrite Evidence.
-8. Set Status: ready-for-cv.
-9. Return READY_FOR_CV or blocker.
+5. Add regression test if behavior change is involved.
+6. If Required Skills includes test-driven-development, use test-driven-development for behavior-changing fixes.
+7. Always run the full Slice Verification Commands.
+8. Overwrite Evidence.
+9. Set Status: ready-for-cv.
+10. Return READY_FOR_CV or blocker.
 
 Allowed return: READY_FOR_CV or blocker
 

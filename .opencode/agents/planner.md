@@ -207,7 +207,7 @@ A qualified Slice must:
 - span necessary layers (not just one technical layer)
 - be observable through a public seam
 - fit in one continuous Worker Session
-- have one TDD Proof Plan
+- have one Proof Plan (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan)
 - produce one current Evidence section
 - have explicit Out of Scope
 - NOT pre-write code file paths
@@ -223,8 +223,11 @@ Bad Slice:
 Create repository, implement backend, make page component.
 ```
 
-## TDD Proof Plan Structure
+## Proof Plan Structure
 
+Proof Plan 有两种形式，根据 Required Skills 是否包含 `test-driven-development` 选择：
+
+**TDD Proof Plan**（Required Skills 包含 test-driven-development 时）：
 ```text
 Primary Seam
 Required Success Behaviors
@@ -237,12 +240,19 @@ Verification Commands
 Proof Profiles
 ```
 
+**Verification Plan**（Required Skills 不包含 test-driven-development 时）：
+```text
+Verification Commands
+Expected Results
+Check Items
+```
+
 ## Planner Rules
 
 1. Planner decides Required Skills at the Slice level.
 2. When a Slice changes observable behavior, Required Skills must include `test-driven-development` by default.
 3. Planner must provide a Public Seam for each Slice.
-4. Planner must provide a TDD Proof Plan capable of guiding the Worker.
+4. Planner must provide a Proof Plan capable of guiding the Worker (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan).
 5. Planner must NOT create RED, GREEN, or REFACTOR Tasks.
 6. Planner must NOT split "write all tests" and "write all implementation" into horizontal Tasks.
 7. Tasks must remain goal-type behavior steps.
@@ -364,6 +374,10 @@ When exact canonical names matter, include those names inline:
 
 ### Public Seam
 
+### Seam Status
+
+PRE_AGREED
+
 ### Required Skills
 
 - test-driven-development
@@ -380,7 +394,13 @@ When exact canonical names matter, include those names inline.
 
 ### Dependencies
 
-### TDD Proof Plan
+### Proof Plan
+
+Required Skills 包含 test-driven-development 时：
+- 按 TDD seam、成功/失败行为组织 Proof Plan
+
+Required Skills 不包含 test-driven-development 时：
+- 使用普通 Verification Plan（命令、预期结果、检查项）
 
 ### Tasks
 

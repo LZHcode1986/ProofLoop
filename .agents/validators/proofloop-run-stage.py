@@ -175,6 +175,7 @@ def wait_for_readiness(readiness_signal, cwd):
     """
     start = time.time()
     attempts = 0
+    last_returncode = None
     while time.time() - start < READINESS_TIMEOUT:
         attempts += 1
         result = run_command(readiness_signal, cwd, timeout=10)
@@ -184,13 +185,14 @@ def wait_for_readiness(readiness_signal, cwd):
                 "readiness": f"{readiness_signal} \u2192 ready",
                 "attempts": str(attempts),
             }
+        last_returncode = result.get("returncode", "unknown")
         time.sleep(READINESS_INTERVAL)
 
     return {
         "status": "failed",
         "reason": (
             f"Readiness signal not received within {READINESS_TIMEOUT}s "
-            f"({attempts} attempts)"
+            f"({attempts} attempts, last return code: {last_returncode})"
         ),
     }
 
@@ -202,28 +204,50 @@ def wait_for_readiness(readiness_signal, cwd):
 def execute_build_step(content, cwd):
     """Run the Build subsection."""
     fields = extract_fields(content)
-    command = fields.get("Command", "")
+    command = fields.get("Command", "").strip()
     step = {"name": "Build"}
-    if command:
-        result = run_command(command, cwd)
-        step.update(result)
-    else:
+    if not command:
         step["status"] = "skipped"
         step["reason"] = "no Command field"
+        return step
+    if command.lower() == "not applicable":
+        step["status"] = "skipped"
+        step["reason"] = "declared Not Applicable"
+        return step
+    result = run_command(command, cwd)
+    step.update(result)
+    # Check Expected Result
+    expected = fields.get("Expected Result", "")
+    if expected:
+        match, reason = check_expected_result(expected, step)
+        if not match:
+            step["status"] = "failed"
+            step["reason"] = reason
     return step
 
 
 def execute_migration_step(content, cwd):
     """Run the Migration / Setup subsection."""
     fields = extract_fields(content)
-    command = fields.get("Command", "")
+    command = fields.get("Command", "").strip()
     step = {"name": "Migration"}
-    if command:
-        result = run_command(command, cwd)
-        step.update(result)
-    else:
+    if not command:
         step["status"] = "skipped"
         step["reason"] = "no Command field"
+        return step
+    if command.lower() == "not applicable":
+        step["status"] = "skipped"
+        step["reason"] = "declared Not Applicable"
+        return step
+    result = run_command(command, cwd)
+    step.update(result)
+    # Check Expected Result
+    expected = fields.get("Expected Result", "")
+    if expected:
+        match, reason = check_expected_result(expected, step)
+        if not match:
+            step["status"] = "failed"
+            step["reason"] = reason
     return step
 
 
@@ -304,6 +328,8 @@ def execute_startup_step(content, cwd):
             step["reason"] = readiness_result.get("reason", "readiness check failed")
             return step, None
         step["readiness"] = readiness_result.get("readiness", "")
+    else:
+        print("[WARNING] No Readiness Signal declared \u2014 skipping readiness check", file=sys.stderr)
 
     step["status"] = "completed"
     return step, process
@@ -318,15 +344,31 @@ def execute_smoke_scenarios_step(content, cwd):
     steps = []
     for i, scenario in enumerate(scenarios, 1):
         scenario_name = scenario.get("Scenario", f"Scenario {i}")
-        command = scenario.get("Command / Action", "")
+        command = scenario.get("Command / Action", "").strip()
         step = {"name": f"Smoke Scenario {i}: {scenario_name}"}
-        if command:
-            # Safety: run_command already rejects dangerous patterns
-            result = run_command(command, cwd)
-            step.update(result)
-        else:
+        if not command:
             step["status"] = "skipped"
             step["reason"] = "no Command / Action field"
+            steps.append(step)
+            continue
+        if command.lower() == "not applicable":
+            step["status"] = "skipped"
+            step["reason"] = "declared Not Applicable"
+            steps.append(step)
+            continue
+        # Safety: run_command already rejects dangerous patterns
+        result = run_command(command, cwd)
+        step.update(result)
+        # Check Expected Observation
+        expected_obs = scenario.get("Expected Observation", "")
+        if expected_obs:
+            stdout = step.get("stdout", "") or ""
+            stderr = step.get("stderr", "") or ""
+            if expected_obs not in stdout and expected_obs not in stderr:
+                step["status"] = "failed"
+                step["reason"] = (
+                    f"Expected Observation '{expected_obs}' not found in output"
+                )
         steps.append(step)
     return steps
 
@@ -372,6 +414,57 @@ def all_skipped(steps):
     return all(s.get("status") in ("skipped",) for s in steps)
 
 
+def check_expected_result(expected, result_dict):
+    """Check if the actual result matches the expected result.
+
+    Expected format:
+      - ``exit code: N``              \u2192 assert returncode == N
+      - ``output contains: TEXT``     \u2192 assert TEXT in stdout or stderr
+      - ``output matches: REGEX``     \u2192 assert regex matches stdout+stderr
+
+    Returns ``(match: bool, reason: str | None)``.
+    """
+    if not expected or not expected.strip():
+        return True, None
+
+    expected = expected.strip()
+
+    # exit code: N
+    m = re.match(r'^exit code:\s*(\d+)$', expected, re.IGNORECASE)
+    if m:
+        expected_code = int(m.group(1))
+        actual_code = result_dict.get("returncode")
+        if actual_code is None:
+            return False, "No return code available to compare"
+        if actual_code != expected_code:
+            return False, f"Expected exit code {expected_code}, got {actual_code}"
+        return True, None
+
+    # output contains: TEXT
+    m = re.match(r'^output contains:\s*(.+)$', expected, re.IGNORECASE | re.DOTALL)
+    if m:
+        text = m.group(1)
+        stdout = result_dict.get("stdout", "") or ""
+        stderr = result_dict.get("stderr", "") or ""
+        if text not in stdout and text not in stderr:
+            return False, f"Expected output to contain '{text}'"
+        return True, None
+
+    # output matches: REGEX
+    m = re.match(r'^output matches:\s*(.+)$', expected, re.IGNORECASE | re.DOTALL)
+    if m:
+        pattern = m.group(1)
+        stdout = result_dict.get("stdout", "") or ""
+        stderr = result_dict.get("stderr", "") or ""
+        combined = stdout + "\n" + stderr
+        if not re.search(pattern, combined):
+            return False, f"Expected output to match pattern '{pattern}'"
+        return True, None
+
+    # Unknown format \u2014 warn but do not fail
+    return True, None
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -409,8 +502,82 @@ def main():
         print(json.dumps(output, indent=2))
         sys.exit(1)
 
+    # ---- Verify Git branch ----
+    if args.branch:
+        try:
+            result = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path, capture_output=True, text=True, timeout=30)
+            current_branch = result.stdout.strip()
+            if current_branch != args.branch:
+                output = {
+                    "stage": stage_id,
+                    "status": "FAIL",
+                    "reason": f"Expected branch '{args.branch}', currently on '{current_branch}'",
+                    "results": [],
+                }
+                print(json.dumps(output, indent=2))
+                sys.exit(1)
+        except Exception as e:
+            output = {
+                "stage": stage_id,
+                "status": "BLOCKED",
+                "reason": f"Failed to check Git branch: {e}",
+                "results": [],
+            }
+            print(json.dumps(output, indent=2))
+            sys.exit(1)
+
     steps = []
     startup_process = None
+
+    # ---- Validate required phases ----
+    REQUIRED_PHASES = ["Build", "Startup", "Shutdown / Cleanup"]
+    missing_required = [p for p in REQUIRED_PHASES if p not in subsections]
+    if missing_required:
+        output = {
+            "stage": stage_id,
+            "status": "BLOCKED",
+            "reason": f"Missing required phases: {', '.join(missing_required)}",
+            "results": [],
+        }
+        print(json.dumps(output, indent=2))
+        sys.exit(1)
+
+    # ---- Validate non-empty Command ----
+    for phase_name in ["Build", "Migration / Setup", "Startup", "Shutdown / Cleanup"]:
+        if phase_name in subsections:
+            pfields = extract_fields(subsections[phase_name])
+            pcmd = pfields.get("Command", "").strip()
+            if not pcmd:
+                is_na = "not applicable" in subsections[phase_name].lower()
+                if not is_na:
+                    output = {
+                        "stage": stage_id,
+                        "status": "FAIL",
+                        "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' if intentional)",
+                        "results": [],
+                    }
+                    print(json.dumps(output, indent=2))
+                    sys.exit(1)
+
+    if "Smoke Scenarios" in subsections:
+        scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
+        for i, scenario in enumerate(scenarios, 1):
+            scmd = scenario.get("Command / Action", "").strip()
+            if not scmd:
+                sname = scenario.get("Scenario", f"Scenario {i}")
+                is_na = any(
+                    "not applicable" in str(v).lower()
+                    for v in scenario.values()
+                )
+                if not is_na:
+                    output = {
+                        "stage": stage_id,
+                        "status": "FAIL",
+                        "reason": f"Smoke Scenario '{sname}' has empty Command / Action (declare 'Not Applicable' if intentional)",
+                        "results": [],
+                    }
+                    print(json.dumps(output, indent=2))
+                    sys.exit(1)
 
     # ---- Step 1: Build ----
     if "Build" in subsections:
@@ -441,47 +608,39 @@ def main():
     steps.append(step)
 
     # ---- Determine overall status ----
-    if not steps:
+    # Check if any required phases are missing
+    if any(phase not in subsections for phase in REQUIRED_PHASES):
+        missing = [p for p in REQUIRED_PHASES if p not in subsections]
         overall_status = "FAIL"
         output = {
             "stage": stage_id,
             "branch": args.branch,
             "status": overall_status,
-            "reason": "no steps executed",
+            "reason": f"Missing required phases: {', '.join(missing)}",
+            "steps": steps,
         }
         print(json.dumps(output, indent=2))
         sys.exit(1)
 
-    # Determine if any step failed
-    any_failure = any(is_failure_status(s.get("status")) for s in steps)
-    everything_skipped = all_skipped(steps)
+    # Check steps status
+    all_pass = all(s.get("status") == "completed" for s in steps)
+    any_blocker = any(s.get("status") in ("blocked", "rejected") for s in steps)
 
-    if everything_skipped:
+    if not steps:
         overall_status = "FAIL"
-        output = {
-            "stage": stage_id,
-            "branch": args.branch,
-            "status": overall_status,
-            "reason": "all steps skipped (no commands configured)",
-            "steps": steps,
-        }
-    elif any_failure:
-        overall_status = "FAIL"
-        output = {
-            "stage": stage_id,
-            "branch": args.branch,
-            "status": overall_status,
-            "steps": steps,
-        }
-    else:
+    elif any_blocker:
+        overall_status = "BLOCKED"
+    elif all_pass:
         overall_status = "PASS"
-        output = {
-            "stage": stage_id,
-            "branch": args.branch,
-            "status": overall_status,
-            "steps": steps,
-        }
+    else:
+        overall_status = "FAIL"
 
+    output = {
+        "stage": stage_id,
+        "branch": args.branch,
+        "status": overall_status,
+        "steps": steps,
+    }
     print(json.dumps(output, indent=2))
     sys.exit(0 if overall_status == "PASS" else 1)
 

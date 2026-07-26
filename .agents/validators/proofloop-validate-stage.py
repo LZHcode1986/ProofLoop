@@ -61,7 +61,13 @@ def check_slice_completeness(text: str) -> list:
         re.DOTALL,
     )
     for slice_id, block in slice_blocks:
-        required = ["Goal", "Observable Outcome", "Public Seam", "Required Skills", "Seam Status", "TDD Proof Plan", "Tasks", "Matrix References", "Task → Slice Closure"]
+        required = ["Goal", "Observable Outcome", "Public Seam", "Required Skills", "Seam Status", "Tasks", "Matrix References", "Task → Slice Closure"]
+        # Conditionally require TDD Proof Plan or Verification Plan
+        has_tdd = "test-driven-development" in block
+        if has_tdd:
+            required.append("TDD Proof Plan")
+        else:
+            required.append("Proof Plan")  # Verification Plan for non-TDD slices
         for section in required:
             if section not in block:
                 issues.append(f"{slice_id}: Missing section '{section}'")
