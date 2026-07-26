@@ -54,7 +54,9 @@ Check:
 - Can each Observable Outcome be demonstrated?
 - Does the behavior match the PRD acceptance criteria?
 - Are there any gaps between the Goal and the actual implementation?
-- Run the Stage Runtime Proof via proofloop-run-stage.py
+- Run the Stage Runtime Proof via proofloop-run-stage.py WITHOUT --validate-only.
+- STRUCTURE_VALID is NOT runtime evidence and cannot support ACCEPTED.
+- The final Runtime Proof must execute real commands, not just validate structure.
 - Check build, migration/setup, startup, smoke scenarios, shutdown
 - Does the Stage actually start and behave as expected?
 
@@ -168,6 +170,7 @@ All findings return to Brain. Stage Reviewer does NOT:
 - commit
 - recalculate CV verdicts
 - rerun blind refutation
+- accept STRUCTURE_VALID as final proof
 
 Stage Reviewer runs the Stage Runtime Proof via proofloop-run-stage.py and reviews Stage Goal, Observable Outcomes, and code quality. Sub-agents must NOT trigger user approval prompts.
 

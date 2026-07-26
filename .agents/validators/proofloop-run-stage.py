@@ -220,15 +220,19 @@ def execute_build_step(content, cwd):
         step["status"] = "not-applicable"
         step["reason"] = "declared Not Applicable"
         return step
+    # Expected Result is required for real commands
+    expected = fields.get("Expected Result", "")
+    if not expected:
+        step["status"] = "failed"
+        step["reason"] = "Expected Result is required but missing"
+        return step
     result = run_command(command, cwd)
     step.update(result)
-    # Check Expected Result
-    expected = fields.get("Expected Result", "")
-    if expected:
-        match, reason = check_expected_result(expected, step)
-        if not match:
-            step["status"] = "failed"
-            step["reason"] = reason
+    # Verify Expected Result against output
+    match, reason = check_expected_result(expected, step)
+    if not match:
+        step["status"] = "failed"
+        step["reason"] = reason
     return step
 
 
@@ -249,15 +253,19 @@ def execute_migration_step(content, cwd):
         step["status"] = "not-applicable"
         step["reason"] = "declared Not Applicable"
         return step
+    # Expected Result is required for real commands
+    expected = fields.get("Expected Result", "")
+    if not expected:
+        step["status"] = "failed"
+        step["reason"] = "Expected Result is required but missing"
+        return step
     result = run_command(command, cwd)
     step.update(result)
-    # Check Expected Result
-    expected = fields.get("Expected Result", "")
-    if expected:
-        match, reason = check_expected_result(expected, step)
-        if not match:
-            step["status"] = "failed"
-            step["reason"] = reason
+    # Verify Expected Result against output
+    match, reason = check_expected_result(expected, step)
+    if not match:
+        step["status"] = "failed"
+        step["reason"] = reason
     return step
 
 
@@ -362,9 +370,11 @@ def execute_smoke_scenarios_step(content, cwd):
 
     Returns a list of step result dicts (one per scenario).
     """
-    # If the entire phase is Not Applicable, return a single not-applicable step
-    if _check_not_applicable(content):
-        return [{"name": "Smoke Scenarios", "status": "not-applicable", "reason": "declared Not Applicable"}]
+    # Check top-level Status field first
+    top_fields = extract_fields(content)
+    if top_fields.get("Status", "").lower() == "not applicable":
+        reason = top_fields.get("Reason", "")
+        return [{"name": "Smoke Scenarios", "status": "not-applicable", "reason": reason or "marked Not Applicable"}]
 
     scenarios = parse_smoke_scenarios(content)
 
@@ -392,59 +402,96 @@ def execute_smoke_scenarios_step(content, cwd):
             step["reason"] = "declared Not Applicable"
             steps.append(step)
             continue
+        # Expected Observation is required for real commands
+        expected_obs = scenario.get("Expected Observation", "")
+        if not expected_obs:
+            step["status"] = "failed"
+            step["reason"] = "Expected Observation is required but missing"
+            steps.append(step)
+            continue
         # Safety: run_command already rejects dangerous patterns
         result = run_command(command, cwd)
         step.update(result)
-        # Check Expected Observation
-        expected_obs = scenario.get("Expected Observation", "")
-        if expected_obs:
-            stdout = step.get("stdout", "") or ""
-            stderr = step.get("stderr", "") or ""
-            if expected_obs not in stdout and expected_obs not in stderr:
-                step["status"] = "failed"
-                step["reason"] = (
-                    f"Expected Observation '{expected_obs}' not found in output"
-                )
+        # Verify Expected Observation against output
+        stdout = step.get("stdout", "") or ""
+        stderr = step.get("stderr", "") or ""
+        if expected_obs not in stdout and expected_obs not in stderr:
+            step["status"] = "failed"
+            step["reason"] = (
+                f"Expected Observation '{expected_obs}' not found in output"
+            )
         steps.append(step)
     return steps
+
+
+def _force_kill(process):
+    """Force-kill a subprocess on Windows."""
+    import signal
+    if os.name == 'nt':
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+    else:
+        process.kill()
 
 
 def execute_shutdown_step(content, cwd, startup_process=None):
     """Run the Shutdown / Cleanup subsection, or kill the startup process."""
     step = {"name": "Shutdown"}
 
+    # If startup process exists, must terminate it
+    if startup_process is not None:
+        # Try shutdown command first if provided and not N/A
+        if content:
+            fields = extract_fields(content)
+            command = fields.get("Command", "")
+            if command and command.lower() != "not applicable":
+                result = run_command(command, cwd)
+                step.update(result)
+                # Even if command succeeded, verify process exited
+                try:
+                    startup_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    # Command didn't terminate process, kill it
+                    _force_kill(startup_process)
+                    step["status"] = "failed"
+                    step["reason"] = "Shutdown command did not terminate process; process was killed"
+                    return step
+                return step
+
+        # No shutdown command or N/A: must kill startup process
+        try:
+            startup_process.terminate()
+            startup_process.wait(timeout=10)
+            if startup_process.poll() is not None:
+                step["status"] = "completed"
+                step["reason"] = "startup process terminated via fallback"
+            else:
+                _force_kill(startup_process)
+                step["status"] = "completed"
+                step["reason"] = "startup process force-killed"
+        except Exception as e:
+            try:
+                _force_kill(startup_process)
+            except Exception:
+                pass
+            if startup_process.poll() is None:
+                step["status"] = "failed"
+                step["reason"] = f"failed to terminate startup process: {e}"
+            else:
+                step["status"] = "completed"
+                step["reason"] = "process exited despite error"
+        return step
+
+    # No startup process
     if content:
         fields = extract_fields(content)
-        command = fields.get("Command", "").strip()
-        if not command:
-            if _check_not_applicable(content):
-                step["status"] = "not-applicable"
-                step["reason"] = "declared Not Applicable"
-                return step
-            # No command and not NA: fall through to process-kill fallback
-        elif command.lower() == "not applicable":
-            step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
-            return step
-        else:
+        command = fields.get("Command", "")
+        if command and command.lower() != "not applicable":
             result = run_command(command, cwd)
             step.update(result)
             return step
 
-    # Fallback: kill the startup process if we have one
-    if startup_process is not None:
-        try:
-            startup_process.kill()
-            startup_process.wait(timeout=10)
-            step["status"] = "completed"
-            step["reason"] = "startup process terminated"
-        except Exception as e:
-            step["status"] = "completed"
-            step["reason"] = f"attempted termination: {e}"
-        return step
-
     step["status"] = "skipped"
-    step["reason"] = "no Command field and no startup process to terminate"
+    step["reason"] = "no startup process and no shutdown command"
     return step
 
 
@@ -653,12 +700,12 @@ def main():
                         }
                         print(json.dumps(output, indent=2))
                         sys.exit(1)
+        # Validate-only mode: check structure, don't execute
         output = {
             "stage": stage_id,
             "branch": args.branch,
-            "status": "PASS",
-            "reason": "Runtime Proof structure validated successfully",
-            "results": [],
+            "status": "STRUCTURE_VALID",
+            "reason": "Runtime Proof structure validated successfully (no commands executed)",
         }
         print(json.dumps(output, indent=2))
         sys.exit(0)

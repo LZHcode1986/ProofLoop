@@ -39,13 +39,19 @@ All Modes include:
 - Seam Status
 - Required Skills
 - Proof Plan
-  - Primary Seam
-  - Required Success Behaviors
-  - Required Failure Behaviors
-  - State Assertions
-  - Mocks Allowed / Forbidden
-  - Verification Commands
-  - Proof Profiles
+  - When Required Skills includes test-driven-development:
+    - Primary Seam
+    - Required Success Behaviors
+    - Required Failure Behaviors
+    - State Assertions
+    - Persistence / Integration Assertions
+    - Mocks Allowed / Forbidden
+    - Verification Commands
+    - Proof Profiles
+  - Otherwise:
+    - Verification Commands
+    - Expected Results
+    - Check Items
 - Authority Excerpts (refs)
   Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
 - Dependency Output Summaries
