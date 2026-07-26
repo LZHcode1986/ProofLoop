@@ -91,10 +91,10 @@ When:
 
 the Worker must use that Seam directly and must not ask the user to reconfirm it.
 
-异常处理：
-- Public Seam 缺失 → SLICE_CONTEXT_GAP
-- Seam Status 不是 PRE_AGREED → PLAN_GAP
-- Public Seam 明显无法观察目标行为 → PLAN_GAP
+Exception handling:
+- Public Seam missing → SLICE_CONTEXT_GAP
+- Seam Status is not PRE_AGREED → PLAN_GAP
+- Public Seam clearly cannot observe the target behavior → PLAN_GAP
 
 ### 1. INTAKE
 - Require Contract Ref, Mode and Slice ID.

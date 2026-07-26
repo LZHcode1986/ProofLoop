@@ -19,8 +19,8 @@ Prototype is blocked by a missing external technical fact that cannot be resolve
 
 ```text
 Prototype → Brain
-→ Brain 派 Researcher
-→ Brain continuation 原 Prototype
+→ Brain dispatches Researcher
+→ Brain continuation with original Prototype
 ```
 
 ## Packet shape

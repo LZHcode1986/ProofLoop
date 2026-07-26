@@ -102,14 +102,14 @@ When boundaries or deep modules are unclear, load `codebase-design`.
 
 ## Authority Excerpts Rules
 
-当当前 Slice 涉及已确定的领域名称、代码类型名称、字段名称、状态名称、事件名称或接口名称时，Authority Excerpts 必须包含这些精确名称。
+When the current Slice involves established domain names, code type names, field names, state names, event names, or interface names, Authority Excerpts must include these exact names.
 
-只包含当前 Slice 所需的术语，不复制完整 CONTEXT.md 或 Tech Spec。
+Include only the terms needed for the current Slice. Do not copy the full CONTEXT.md or Tech Spec.
 
-Slice Goal 必须写成完整用户行为，而不是抽象技术动作。
+Slice Goal must be written as a complete user behavior, not an abstract technical action.
 
-错误示例：实现成员状态管理
-正确示例：Workspace 管理员可以暂停成员访问，同时保留该成员的历史活动。
+Bad example: Implement member status management
+Good example: Workspace admin can suspend member access while retaining the member's historical activity.
 
 ### 6. BUILD SLICE DAG
 - Define true blocking dependencies only.
@@ -161,8 +161,8 @@ SPV receives:
 - Stage Goal
 - Observable Outcomes
 - tasks.md
-- 相关 PRD / Tech Spec 摘录
-- 相关 Matrix acceptance requirements
+- Relevant PRD / Tech Spec excerpts
+- Relevant Matrix acceptance requirements
 - Blocking Hard Part statuses
 
 PLAN_DEFECT:
@@ -225,9 +225,9 @@ Create repository, implement backend, make page component.
 
 ## Proof Plan Structure
 
-Proof Plan 有两种形式，根据 Required Skills 是否包含 `test-driven-development` 选择：
+Proof Plan has two forms, chosen based on whether Required Skills includes `test-driven-development`:
 
-**TDD Proof Plan**（Required Skills 包含 test-driven-development 时）：
+**TDD Proof Plan** (when Required Skills includes test-driven-development):
 ```text
 Primary Seam
 Required Success Behaviors
@@ -240,7 +240,7 @@ Verification Commands
 Proof Profiles
 ```
 
-**Verification Plan**（Required Skills 不包含 test-driven-development 时）：
+**Verification Plan** (when Required Skills does not include test-driven-development):
 ```text
 Verification Commands
 Expected Results
@@ -396,11 +396,11 @@ When exact canonical names matter, include those names inline.
 
 ### Proof Plan
 
-Required Skills 包含 test-driven-development 时：
-- 按 TDD seam、成功/失败行为组织 Proof Plan
+When Required Skills includes test-driven-development:
+- Organize Proof Plan by TDD seams, success/failure behaviors
 
-Required Skills 不包含 test-driven-development 时：
-- 使用普通 Verification Plan（命令、预期结果、检查项）
+When Required Skills does not include test-driven-development:
+- Use a plain Verification Plan (commands, expected results, check items)
 
 ### Tasks
 

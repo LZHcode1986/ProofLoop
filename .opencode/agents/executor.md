@@ -185,14 +185,14 @@ Continuation is not a Worker Mode. The Worker receives the next Task through the
 Executor creates one Worker per Slice. The same Worker session executes all Tasks sequentially.
 
 ```
-Executor 创建一个 Slice Worker
-→ 发送完整 Slice Context + 当前 Task
-→ Worker 完成当前 Task 并返回 TASK_COMPLETE
-→ Executor 重新读取持久化状态
-→ continuation 同一个 Worker，发送下一个 Task
-→ 所有 Tasks 完成
-→ continuation 同一个 Worker，要求 finalize-slice
-→ Worker 运行完整 Slice 验证并写 Evidence
+Executor creates one Slice Worker
+→ sends full Slice Context + current Task
+→ Worker completes current Task and returns TASK_COMPLETE
+→ Executor re-reads persisted state
+→ continuation same Worker, sends next Task
+→ all Tasks done
+→ continuation same Worker, requests finalize-slice
+→ Worker runs full Slice verification and writes Evidence
 → READY_FOR_CV
 ```
 

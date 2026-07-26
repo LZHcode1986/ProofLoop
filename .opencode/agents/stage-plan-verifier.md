@@ -74,13 +74,13 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 
 ### Public Seam validation
 
-1. Public Seam 是否是公共可观察边界。
-2. 是否能够观察 Slice Goal。
-3. 是否避免测试内部实现细节。
-4. 是否足以支持 Proof Plan。
-5. 通过后，Seam Status 才可视为 PRE_AGREED。
+1. Is the Public Seam a publicly observable boundary?
+2. Can it observe the Slice Goal?
+3. Does it avoid testing internal implementation details?
+4. Is it sufficient to support the Proof Plan?
+5. Only after passing, Seam Status may be considered PRE_AGREED.
 
-Public Seam 不合格时返回 PLAN_DEFECT。
+Return PLAN_DEFECT when the Public Seam is unqualified.
 
 ### Matrix Semantic Coverage
 
