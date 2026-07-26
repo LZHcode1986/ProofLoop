@@ -1,92 +1,75 @@
 # Executor Code Verification Dispatch Contract
 
-Dispatches adversarial verification to Code Verifier — two-phase: initial-refutation then evidence-comparison.
+Dispatches adversarial verification to Code Verifier.
 
-## Modes
+## Verification Type
 
-| Mode | When to use |
+| Type | When to use |
 |---|---|
-| `initial-refutation` | Worker has completed a Slice and returned READY_FOR_CV; first phase, no Evidence content |
-| `evidence-comparison` | Continuation of the same CV session after Phase A returns REFUTATION_COMPLETE |
-| `recheck-refutation` | Worker has repaired a Slice after CV FAIL; first phase of fresh recheck |
-| `recheck-evidence-comparison` | Continuation of same recheck CV session after recheck-refutation |
+| `initial` | Worker has completed a Slice and returned READY_FOR_CV |
+| `recheck` | Worker has repaired or diagnosed after CV FAIL |
 
-## initial-refutation specific fields
+## Required fields (all types)
 
 - Slice ID
+- Verification Type
 - Slice Contract
 - Covered Tasks
 - Proof Plan
 - Actual Diff
-- Changed Code/Tests
+- Changed Code / Tests
 - Verification Commands
 - Authority Excerpts
 - Out of Scope
 - Evidence Location
 - Evidence Region Marker
-- Expected Result: REFUTATION_COMPLETE | Verification blocked
 
-Must NOT include:
-- Worker Evidence content
-- Worker Statement
-- Worker interpretation of results
+## Recheck additional fields
 
-## evidence-comparison specific fields
-
-- Phase A Refutation Result
-- Worker Evidence Full Content
-- Worker Proof Profile Declarations
-- Required Profile Evidence
-- Expected Result: Verification passed | Verification failed | Verification blocked
-
-## Recheck modes
-
-Both recheck modes use the same field structure as their initial counterparts.
-
-Executor supplies additionally:
-- Previous Failed Criteria
+- Previous Failed Criterion
 - Concrete Counterexample
 - Failure Signature
-- Worker Fix
 - Repair Diff
-- Necessary Regression Scope
+- Required Regression Scope
 
-## Packet shape templates
-
-### initial-refutation
+## Allowed results
 
 ```
-Target Agent: code-verifier
-Contract Ref: .agents/contracts/executor/code-verifier.md
-Mode: initial-refutation
-Slice ID: <same>
-Slice Contract: <refs>
-Covered Tasks: <list>
-Proof Plan: <plan>
-Actual Diff: <diff>
-Changed Code/Tests: <paths>
-Verification Commands: <commands>
-Authority Excerpts: <refs>
-Out of Scope: <scope>
-Evidence Location: <location>
-Evidence Region Marker: <marker>
-Expected Result: REFUTATION_COMPLETE | Verification blocked
+Verification passed
+Verification failed
+Verification blocked
 ```
 
-### evidence-comparison
+## Runtime Recovery Continuation
 
-```
-Target Agent: code-verifier
-Contract Ref: .agents/contracts/executor/code-verifier.md
-Mode: evidence-comparison
-Slice ID: <same>
-Phase A Refutation Result: <result>
-Worker Evidence Full Content: <evidence>
-Worker Proof Profile Declarations: <profiles>
-Required Profile Evidence: <evidence>
-Expected Result: Verification passed | Verification failed | Verification blocked
-```
+Use only when the original CV Session failed to return a final verdict.
 
-## Fresh Agent rule
+Required continuation fields:
 
-CV Phase A is always fresh. Executor must create a new CV session for every initial-refutation and recheck-refutation dispatch. CV sessions are never continued across different Slice verification cycles. Phase B uses continuation of the same session created in Phase A.
+- Continuation Type: status-and-resume
+- Previous Result: no final verdict due to interruption
+- Changed Inputs: none | <list>
+- Required Next Action
+
+The CV must return either:
+
+1. A final verification result:
+   - Verification passed
+   - Verification failed
+   - Verification blocked
+
+or:
+
+2. A restart request:
+   - VERIFICATION_RESTART_REQUIRED
+
+VERIFICATION_RESTART_REQUIRED must include:
+   - Interruption Reason
+   - Current Verification Checkpoint
+   - State Reliability: reliable | unreliable
+   - Whether Worker Evidence Was Read
+   - Why Resume Is Unsafe
+
+VERIFICATION_RESTART_REQUIRED is not a verification verdict.
+It is allowed only as a response to status-and-resume continuation and causes
+Executor to create a fresh CV.

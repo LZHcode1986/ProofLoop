@@ -84,37 +84,36 @@ If not satisfied:
 - Re-read current Evidence region.
 - Check Worker Status.
 - Do not substitute Worker text for persisted facts.
-- Route by return type per Worker Return Routing table.
+- Route by return type per the Executor State Transition Table.
 TASK_COMPLETE does not trigger CV. Re-read tasks.md, find next Task or finalize-slice.
 - Blockers not listed in the table go to Brain.
 
 ### 7. VERIFY
+
 READY_FOR_CV:
-- Run scope checker.
-- On PASS, dispatch fresh CV Phase A (initial-refutation).
+1. Run the Slice scope check.
+2. On PASS, dispatch one fresh Code Verifier using the Code Verifier Contract.
+3. Wait for the final CV result.
 
-CV Phase A REFUTATION_COMPLETE:
-- Continuation same CV session with Phase B (evidence-comparison).
-
-CV Phase B PASS:
+CV PASS:
 - Dispatch Committer (slice-output).
 - Wait for commit hash.
 - Commit hash received → READY_TO_INTEGRATE
 
-CV Phase B FAIL #1:
-- Worker repair
-- fresh CV recheck (Phase A + Phase B in new session)
+CV FAIL #1:
+- Dispatch the original Worker in repair mode.
+- After repair, dispatch a fresh CV.
 
-CV Phase B FAIL #2:
-- Worker diagnose
-- fresh CV recheck (Phase A + Phase B)
+CV FAIL #2:
+- Dispatch the original Worker in diagnose mode.
+- After diagnosis, dispatch a fresh CV.
 
-CV Phase B FAIL #3:
+CV FAIL #3:
 - UNRESOLVED_IMPLEMENTATION_DEFECT → Brain
 
 CV BLOCKED:
-- Stop integration for current Slice
-- Return blocker and existing evidence to Brain
+- Stop the current Slice.
+- Return the blocker and existing evidence to Brain.
 
 ### 8. INTEGRATE ONE SLICE
 - Acquire exclusive integration lock.
@@ -144,21 +143,6 @@ Slice COMPLETE requires:
 - If any Slice remains incomplete → RECONCILE
 - All Slices COMPLETE → return Execution Handoff
 
-## Executor Mode Selection
-
-| Persisted Fact | Worker Mode |
-|---|---|
-| New runnable Slice, first unchecked Task | `implement-task` |
-| Original Worker handle available and work incomplete | Continue original session, send next Task via continuation |
-| Initial implementation interrupted, handle unavailable | `recover-task` |
-| All Tasks complete but Evidence missing or stale | `finalize-slice` |
-| First CV FAIL | `repair` |
-| Second CV FAIL | `diagnose` |
-| Mechanical merge conflict | `resolve-conflict` |
-| Third CV FAIL | Stop dispatching Worker, return to Brain |
-
-Continuation is not a Worker Mode. The Worker receives the next Task through the same runtime session.
-
 ## Executor State Transition Table
 
 | Current | Condition | Next |
@@ -168,15 +152,72 @@ Continuation is not a Worker Mode. The Worker receives the next Task through the
 | TASK_COMPLETE | Next unchecked Task exists, continue same Worker | TASK_RUNNING |
 | TASK_COMPLETE | All Tasks done, continue same Worker with finalize-slice | SLICE_FINALIZING |
 | SLICE_FINALIZING | Worker returns READY_FOR_CV | READY_FOR_CV |
-| READY_FOR_CV | Scope PASS, CV Phase A dispatched | VERIFYING_A |
-| VERIFYING_A | CV Phase A returns REFUTATION_COMPLETE, continue same CV | VERIFYING_B |
-| VERIFYING_B | CV FAIL | REPAIRING |
+| READY_FOR_CV | Scope PASS, dispatch fresh CV | VERIFYING |
+| VERIFYING | CV PASS, Committer dispatched | COMMITTING |
+| VERIFYING | CV FAIL #1 | REPAIRING |
 | REPAIRING | Repair complete | READY_FOR_CV |
-| VERIFYING_B | CV PASS, Committer dispatched | COMMITTING |
+| VERIFYING | CV FAIL #2 | DIAGNOSING |
+| DIAGNOSING | Diagnosis complete | READY_FOR_CV |
+| VERIFYING | CV FAIL #3 | UNRESOLVED |
+| VERIFYING | CV BLOCKED | BLOCKED |
+| VERIFYING | No final CV result (timeout/interruption) | VERIFYING_INTERRUPTED |
+| VERIFYING_INTERRUPTED | Original CV resumes, returns final verdict | COMMITTING / REPAIRING / DIAGNOSING / BLOCKED / UNRESOLVED |
+| VERIFYING_INTERRUPTED | VERIFICATION_RESTART_REQUIRED or handle lost | VERIFYING (fresh CV) |
 | COMMITTING | Commit hash received | READY_TO_INTEGRATE |
 | READY_TO_INTEGRATE | Lock acquired | INTEGRATING |
 | INTEGRATING | Merge + gates + integration complete | COMPLETE |
 | Any | Explicit blocker | BLOCKED |
+
+## CV Interruption Recovery
+
+When a dispatched CV does not return a final verdict because of timeout,
+interruption, tool failure, or incomplete response:
+
+1. Check whether the original CV runtime handle is still available.
+
+2. If the handle is available, continue the same CV Session and request:
+   - the interruption reason;
+   - the current verification checkpoint;
+   - whether the current verification state is reliable;
+   - whether the verification can resume safely.
+
+3. If the CV reports that the state is reliable and the verification inputs
+   have not changed, continue the same CV Session until it returns a final
+   verdict.
+
+4. Dispatch a fresh CV only when:
+   - the original CV handle is unavailable;
+   - the CV does not respond to the recovery continuation;
+   - the CV reports that its internal verification state is unreliable;
+   - it is unknown whether Worker Evidence was read before independent
+     refutation was fixed;
+   - code, tests, diff, Proof Plan, authority, or Evidence changed after the
+     interrupted verification began.
+
+5. A recovered CV must still return exactly one final verdict:
+   - Verification passed
+   - Verification failed
+   - Verification blocked
+
+CV recovery continuation template:
+```
+Contract Ref: .agents/contracts/executor/code-verifier.md
+Continuation Type: status-and-resume
+Previous Result: no final verdict due to interruption
+Changed Inputs: none | <list>
+Required Next Action:
+- report interruption reason;
+- report current verification checkpoint;
+- report whether the current state is reliable;
+- resume verification and return a final verdict when safe;
+- otherwise return VERIFICATION_RESTART_REQUIRED.
+```
+
+CV returns final verdict → process PASS | FAIL | BLOCKED normally.
+
+CV returns VERIFICATION_RESTART_REQUIRED → discard old handle → dispatch fresh CV.
+
+CV recovery continuation also fails or returns no result → discard old handle → dispatch fresh CV.
 
 ## Worker Session Rules
 
@@ -222,51 +263,14 @@ Executor sends the new Mode and new Task through the runtime handle.
 4. Find the first unchecked Task.
 5. Create new Worker, Mode: recover-task.
 6. Send persisted Slice context, completed Task IDs, and only the current unchecked Task. Do NOT send all remaining Tasks.
-
 If the Slice requires test-driven-development, the recovery Worker must reload that Skill.
 
-## CV Dispatch Rules
+## Worker Packet Rule
 
-### Phase A: initial-refutation
+Build every Worker packet according to .agents/contracts/executor/worker.md.
 
-Dispatch a fresh CV with Mode: initial-refutation.
-Packet includes:
-- Slice ID, Slice Contract, Covered Tasks
-- Proof Plan, Actual Diff, Changed Code/Tests
-- Verification Commands, Authority Excerpts
-- Out of Scope, Evidence Location, Evidence Region Marker
-- Expected Result: REFUTATION_COMPLETE | Verification blocked
-
-Do NOT include:
-- Worker Evidence content
-- Worker Statement
-- Worker interpretation of results
-
-### Phase B: evidence-comparison
-
-After Phase A returns REFUTATION_COMPLETE, continuation the same CV session:
-- Mode: evidence-comparison
-- Phase A Refutation Result
-- Worker Evidence Full Content
-- Worker Proof Profile Declarations
-- Required Profile Evidence
-- Expected Result: Verification passed | Verification failed | Verification blocked
-
-### Recheck
-
-After repair, create a fresh CV Session:
-- Mode: recheck-refutation → recheck-evidence-comparison
-
-## Worker Return Routing
-
-| Worker Return | Executor Action |
-|---|---|
-| READY_FOR_CV | scope checker → fresh CV Phase A (initial-refutation) |
-| TASK_COMPLETE | re-read tasks.md/code state → find next unchecked Task or dispatch finalize-slice |
-| IMPLEMENTATION_DEFECT | Worker Mode: repair |
-| CONFLICT_RESOLVED | verify Git conflict state → no unmerged files → `git merge --continue` → post-merge scope check → regression → fresh CV if required; unmerged files remain → return to Worker |
-| SEMANTIC_CONFLICT | `git merge --abort` → stop integration → Brain |
-| SLICE_CONTEXT_GAP / PLAN_GAP / AUTHORITY_GAP / TECHNICAL_UNKNOWN / RUNTIME_DEPENDENCY_BLOCKER | Brain |
+For implement-task and recover-task, send only the Current Task.
+Do not send future Task contents.
 
 ## Editing Restrictions
 
@@ -282,51 +286,6 @@ Executor must NOT:
 Copy the relevant Authority References and their inline canonical names verbatim into the Worker Packet as Authority Excerpts.
 
 When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewrite synonyms or summarize canonical names.
-
-## Worker Dispatch Model
-
-### Initial or cold-start dispatch
-- Target Agent
-- Contract Ref
-- Mode
-- complete common and mode-specific context
-
-### TDD and Required Skills in Dispatch
-
-Initial dispatch packet must include:
-- Required Skills
-- Public Seam
-- Seam Status: PRE_AGREED
-- Proof Plan
-- Current Task ID
-- Current Task Goal
-- Current Task Content
-
-Task continuation packet must preserve:
-- Contract Ref
-- Slice ID
-- Current Task ID
-- Current Task Goal
-- Current Task Content
-- Required Skills (preserved, not revoked)
-- Required Next Action
-
-Session recovery must re-send:
-- Required Skills
-- Public Seam
-- Seam Status: PRE_AGREED
-- Proof Plan
-- Current Task ID
-- Current Task Goal
-- Current Task Content
-
-### Runtime continuation
-- use the existing runtime handle at the tool layer
-- send Contract Ref
-- send the new Mode
-- send new evidence / changed conditions
-- send required next action
-- do not specify Target Agent again
 
 ## Executor Contract Map
 
