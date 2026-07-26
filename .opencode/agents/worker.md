@@ -69,16 +69,29 @@ Exception handling:
 - Read common and mode-specific fields.
 
 ### 2. RECONCILE
-- Read only:
-  - the exact Current Task line identified by Current Task ID;
-  - the Worker Status field;
-  - the exact checkbox state required for the Current Task.
-- Do NOT load the full Tasks section or future Task lines.
-- Read current Slice evidence.md region.
-- Read code and current diff.
+
+Always:
+- Read Worker Status.
+- Read current Slice Evidence.
+- Read current code and diff.
 - Persisted facts override stale packet statements.
+
+For implement-task and recover-task only:
+- Read the exact Current Task line and checkbox.
+- Do NOT load the full Tasks section or future Task lines.
 - Executor is the sole reader and scheduler of the complete Task list.
 - Worker must not read any Task content before it is dispatched by Executor.
+
+For finalize-slice:
+- Read only the current Slice checkbox states and verification context.
+- Do not require Current Task fields.
+
+For repair and diagnose:
+- Read the supplied failure context, current Evidence, code, and diff.
+- Do not require Current Task fields.
+
+For resolve-conflict:
+- Read only the supplied Conflict Context and conflict files.
 
 ### 3. EXECUTE EXACT MODE
 - Do not change Mode autonomously.

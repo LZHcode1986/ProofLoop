@@ -263,21 +263,47 @@ Each Stage plan must include a Runtime Proof section:
 - Command:
 - Expected Result:
 
+Not Applicable:
+- Command: Not Applicable
+- Reason: <required>
+
 ### Migration / Setup
 - Command:
 - Expected Result:
+
+Not Applicable:
+- Command: Not Applicable
+- Reason: <required>
 
 ### Startup
 - Command:
 - Readiness Signal:
 
+Not Applicable:
+- Command: Not Applicable
+- Reason: <required>
+
 ### Smoke Scenarios
+
+Not Applicable:
+- Status: Not Applicable
+- Reason: <required>
+
+Executable:
 - Scenario:
 - Command / Action:
 - Expected Observation:
 
+Not Applicable per Scenario:
+- Command / Action: Not Applicable
+- Reason: <required>
+
 ### Shutdown / Cleanup
 - Command:
+
+Not Applicable:
+- Command: Not Applicable
+- Reason: <required>
 
 Expected Result format (for Build and Migration / Setup):
 - exit code: <number>

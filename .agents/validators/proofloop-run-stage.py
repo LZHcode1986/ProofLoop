@@ -211,14 +211,14 @@ def execute_build_step(content, cwd):
     if not command:
         if _check_not_applicable(content):
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = fields.get("Reason", "")
             return step
         step["status"] = "failed"
         step["reason"] = "no Command and not marked Not Applicable"
         return step
     if command.lower() == "not applicable":
         step["status"] = "not-applicable"
-        step["reason"] = "declared Not Applicable"
+        step["reason"] = fields.get("Reason", "")
         return step
     # Expected Result is required for real commands
     expected = fields.get("Expected Result", "")
@@ -244,14 +244,14 @@ def execute_migration_step(content, cwd):
     if not command:
         if _check_not_applicable(content):
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = fields.get("Reason", "")
             return step
         step["status"] = "failed"
         step["reason"] = "no Command and not marked Not Applicable"
         return step
     if command.lower() == "not applicable":
         step["status"] = "not-applicable"
-        step["reason"] = "declared Not Applicable"
+        step["reason"] = fields.get("Reason", "")
         return step
     # Expected Result is required for real commands
     expected = fields.get("Expected Result", "")
@@ -285,7 +285,7 @@ def execute_startup_step(content, cwd):
     if not command:
         if _check_not_applicable(content):
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = fields.get("Reason", "")
             return step, None
         step["status"] = "failed"
         step["reason"] = "no Command and not marked Not Applicable"
@@ -293,7 +293,7 @@ def execute_startup_step(content, cwd):
 
     if command.lower() == "not applicable":
         step["status"] = "not-applicable"
-        step["reason"] = "declared Not Applicable"
+        step["reason"] = fields.get("Reason", "")
         return step, None
 
     # Readiness Signal is mandatory when a real Startup command is configured
@@ -394,12 +394,12 @@ def execute_smoke_scenarios_step(content, cwd):
         step = {"name": f"Smoke Scenario {i}: {scenario_name}"}
         if not command:
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = scenario.get("Reason", "")
             steps.append(step)
             continue
         if command.lower() == "not applicable":
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = scenario.get("Reason", "")
             steps.append(step)
             continue
         # Expected Observation is required for real commands
@@ -491,7 +491,7 @@ def execute_shutdown_step(content, cwd, startup_process=None):
             return step
         if _check_not_applicable(content) or (command and command.lower() == "not applicable"):
             step["status"] = "not-applicable"
-            step["reason"] = "declared Not Applicable"
+            step["reason"] = fields.get("Reason", "")
             return step
 
     step["status"] = "skipped"
@@ -653,24 +653,54 @@ def main():
                 output = {
                     "stage": stage_id,
                     "status": "FAIL",
-                    "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' if intentional)",
+                    "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' with Reason if intentional)",
                     "results": [],
                 }
                 print(json.dumps(output, indent=2))
                 sys.exit(1)
 
-    # Smoke Scenarios: at least one executable scenario or Not Applicable
-    if not _check_not_applicable(subsections["Smoke Scenarios"]):
-        scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
-        if not scenarios or not any(
-            s.get("Command / Action", "").strip()
-            and s.get("Command / Action", "").strip().lower() != "not applicable"
-            for s in scenarios
-        ):
+    # Every Not Applicable declaration must have a non-empty Reason
+    for phase_name in ["Build", "Migration / Setup", "Startup", "Shutdown / Cleanup"]:
+        pfields = extract_fields(subsections[phase_name])
+        pcmd = pfields.get("Command", "").strip()
+        if not pcmd or pcmd.lower() == "not applicable" or _check_not_applicable(subsections[phase_name]):
+            reason = pfields.get("Reason", "").strip()
+            if not reason:
+                output = {
+                    "stage": stage_id,
+                    "status": "FAIL",
+                    "reason": f"Phase '{phase_name}' is Not Applicable but has no Reason",
+                    "results": [],
+                }
+                print(json.dumps(output, indent=2))
+                sys.exit(1)
+
+    # Smoke Scenarios: at least one executable scenario or top-level Not Applicable with Reason
+    smoke_fields = extract_fields(subsections["Smoke Scenarios"])
+    smoke_na = smoke_fields.get("Status", "").strip().lower() == "not applicable"
+    if smoke_na:
+        smoke_reason = smoke_fields.get("Reason", "").strip()
+        if not smoke_reason:
             output = {
                 "stage": stage_id,
                 "status": "FAIL",
-                "reason": "Smoke Scenarios has no executable scenarios (declare 'Not Applicable' if intentional)",
+                "reason": "Smoke Scenarios marked Not Applicable but has no Reason",
+                "results": [],
+            }
+            print(json.dumps(output, indent=2))
+            sys.exit(1)
+    else:
+        scenarios = parse_smoke_scenarios(subsections["Smoke Scenarios"])
+        has_executable = any(
+            s.get("Command / Action", "").strip()
+            and s.get("Command / Action", "").strip().lower() != "not applicable"
+            for s in scenarios
+        )
+        if not scenarios or not has_executable:
+            output = {
+                "stage": stage_id,
+                "status": "FAIL",
+                "reason": "Smoke Scenarios has no executable scenarios (declare 'Status: Not Applicable' with Reason if intentional)",
                 "results": [],
             }
             print(json.dumps(output, indent=2))

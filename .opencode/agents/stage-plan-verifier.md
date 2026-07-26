@@ -84,7 +84,11 @@ Check the Stage Runtime Proof:
 - Does it contain build, migration/setup, startup, smoke scenarios, and shutdown?
 - Can the Runtime Proof verify the Stage Observable Outcomes?
 - Are the commands consistent with the project's real toolchain?
-- Does the Runtime Proof have Expected Results / Expected Observations for every non-N/A command?
+- Build and Migration commands have valid Expected Results.
+- Startup commands have a Readiness Signal.
+- Executable Smoke Scenarios have Expected Observations.
+- Shutdown can terminate or clean up the started runtime.
+- Every Not Applicable declaration has a non-empty Reason.
 
 ## Output results
 
