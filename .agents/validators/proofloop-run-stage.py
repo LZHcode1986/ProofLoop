@@ -209,16 +209,17 @@ def execute_build_step(content, cwd):
     command = fields.get("Command", "").strip()
     step = {"name": "Build"}
     if not command:
-        if _check_not_applicable(content):
-            step["status"] = "not-applicable"
-            step["reason"] = fields.get("Reason", "")
-            return step
         step["status"] = "failed"
-        step["reason"] = "no Command and not marked Not Applicable"
+        step["reason"] = "Command is required (declare 'Not Applicable' with Reason if intentional)"
         return step
     if command.lower() == "not applicable":
+        reason = fields.get("Reason", "").strip()
+        if not reason:
+            step["status"] = "failed"
+            step["reason"] = "Not Applicable but has no Reason"
+            return step
         step["status"] = "not-applicable"
-        step["reason"] = fields.get("Reason", "")
+        step["reason"] = reason
         return step
     # Expected Result is required for real commands
     expected = fields.get("Expected Result", "")
@@ -242,16 +243,17 @@ def execute_migration_step(content, cwd):
     command = fields.get("Command", "").strip()
     step = {"name": "Migration"}
     if not command:
-        if _check_not_applicable(content):
-            step["status"] = "not-applicable"
-            step["reason"] = fields.get("Reason", "")
-            return step
         step["status"] = "failed"
-        step["reason"] = "no Command and not marked Not Applicable"
+        step["reason"] = "Command is required (declare 'Not Applicable' with Reason if intentional)"
         return step
     if command.lower() == "not applicable":
+        reason = fields.get("Reason", "").strip()
+        if not reason:
+            step["status"] = "failed"
+            step["reason"] = "Not Applicable but has no Reason"
+            return step
         step["status"] = "not-applicable"
-        step["reason"] = fields.get("Reason", "")
+        step["reason"] = reason
         return step
     # Expected Result is required for real commands
     expected = fields.get("Expected Result", "")
@@ -283,17 +285,18 @@ def execute_startup_step(content, cwd):
     step = {"name": "Startup"}
 
     if not command:
-        if _check_not_applicable(content):
-            step["status"] = "not-applicable"
-            step["reason"] = fields.get("Reason", "")
-            return step, None
         step["status"] = "failed"
-        step["reason"] = "no Command and not marked Not Applicable"
+        step["reason"] = "Command is required (declare 'Not Applicable' with Reason if intentional)"
         return step, None
 
     if command.lower() == "not applicable":
+        reason = fields.get("Reason", "").strip()
+        if not reason:
+            step["status"] = "failed"
+            step["reason"] = "Not Applicable but has no Reason"
+            return step, None
         step["status"] = "not-applicable"
-        step["reason"] = fields.get("Reason", "")
+        step["reason"] = reason
         return step, None
 
     # Readiness Signal is mandatory when a real Startup command is configured
@@ -393,13 +396,19 @@ def execute_smoke_scenarios_step(content, cwd):
         command = scenario.get("Command / Action", "").strip()
         step = {"name": f"Smoke Scenario {i}: {scenario_name}"}
         if not command:
-            step["status"] = "not-applicable"
-            step["reason"] = scenario.get("Reason", "")
+            step["status"] = "failed"
+            step["reason"] = "Command / Action is required (declare 'Not Applicable' with Reason if intentional)"
             steps.append(step)
             continue
         if command.lower() == "not applicable":
+            reason = scenario.get("Reason", "").strip()
+            if not reason:
+                step["status"] = "failed"
+                step["reason"] = "Not Applicable but has no Reason"
+                steps.append(step)
+                continue
             step["status"] = "not-applicable"
-            step["reason"] = scenario.get("Reason", "")
+            step["reason"] = reason
             steps.append(step)
             continue
         # Expected Observation is required for real commands
@@ -489,9 +498,14 @@ def execute_shutdown_step(content, cwd, startup_process=None):
             result = run_command(command, cwd)
             step.update(result)
             return step
-        if _check_not_applicable(content) or (command and command.lower() == "not applicable"):
+        if command and command.lower() == "not applicable":
+            reason = fields.get("Reason", "").strip()
+            if not reason:
+                step["status"] = "failed"
+                step["reason"] = "Not Applicable but has no Reason"
+                return step
             step["status"] = "not-applicable"
-            step["reason"] = fields.get("Reason", "")
+            step["reason"] = reason
             return step
 
     step["status"] = "skipped"
@@ -562,9 +576,7 @@ def check_expected_result(expected, result_dict):
     return False, "Unrecognized Expected Result format"
 
 
-def _check_not_applicable(content):
-    """Check if a phase or scenario declares ``Not Applicable`` via content."""
-    return "not applicable" in content.lower()
+
 
 
 # ---------------------------------------------------------------------------
@@ -644,26 +656,20 @@ def main():
         print(json.dumps(output, indent=2))
         sys.exit(1)
 
-    # ---- Validate non-empty Command / Not Applicable ----
+    # ---- Validate phase commands: must have Command or explicit Not Applicable with Reason ----
     for phase_name in ["Build", "Migration / Setup", "Startup", "Shutdown / Cleanup"]:
         pfields = extract_fields(subsections[phase_name])
         pcmd = pfields.get("Command", "").strip()
         if not pcmd:
-            if not _check_not_applicable(subsections[phase_name]):
-                output = {
-                    "stage": stage_id,
-                    "status": "FAIL",
-                    "reason": f"Phase '{phase_name}' has empty Command (declare 'Not Applicable' with Reason if intentional)",
-                    "results": [],
-                }
-                print(json.dumps(output, indent=2))
-                sys.exit(1)
-
-    # Every Not Applicable declaration must have a non-empty Reason
-    for phase_name in ["Build", "Migration / Setup", "Startup", "Shutdown / Cleanup"]:
-        pfields = extract_fields(subsections[phase_name])
-        pcmd = pfields.get("Command", "").strip()
-        if not pcmd or pcmd.lower() == "not applicable" or _check_not_applicable(subsections[phase_name]):
+            output = {
+                "stage": stage_id,
+                "status": "FAIL",
+                "reason": f"Phase '{phase_name}' has empty Command (declare 'Command: Not Applicable' with Reason if intentional)",
+                "results": [],
+            }
+            print(json.dumps(output, indent=2))
+            sys.exit(1)
+        if pcmd.lower() == "not applicable":
             reason = pfields.get("Reason", "").strip()
             if not reason:
                 output = {
@@ -675,7 +681,7 @@ def main():
                 print(json.dumps(output, indent=2))
                 sys.exit(1)
 
-    # Smoke Scenarios: at least one executable scenario or top-level Not Applicable with Reason
+    # ---- Smoke Scenarios: top-level Not Applicable or at least one executable scenario ----
     smoke_fields = extract_fields(subsections["Smoke Scenarios"])
     smoke_na = smoke_fields.get("Status", "").strip().lower() == "not applicable"
     if smoke_na:
@@ -705,6 +711,29 @@ def main():
             }
             print(json.dumps(output, indent=2))
             sys.exit(1)
+        # Check each individual Smoke Scenario N/A Reason
+        for scenario in scenarios:
+            cmd = scenario.get("Command / Action", "").strip()
+            if not cmd:
+                output = {
+                    "stage": stage_id,
+                    "status": "FAIL",
+                    "reason": f"Smoke scenario '{scenario.get('Scenario', 'unknown')}' has no Command / Action",
+                    "results": [],
+                }
+                print(json.dumps(output, indent=2))
+                sys.exit(1)
+            if cmd.lower() == "not applicable":
+                reason = scenario.get("Reason", "").strip()
+                if not reason:
+                    output = {
+                        "stage": stage_id,
+                        "status": "FAIL",
+                        "reason": f"Smoke scenario '{scenario.get('Scenario', 'unknown')}' is Not Applicable but has no Reason",
+                        "results": [],
+                    }
+                    print(json.dumps(output, indent=2))
+                    sys.exit(1)
 
     # ---- Validate-only mode ----
     if args.validate_only:
@@ -713,7 +742,7 @@ def main():
         for phase_name in EXPECTED_RESULT_PHASES:
             pfields = extract_fields(subsections[phase_name])
             pcmd = pfields.get("Command", "").strip()
-            if pcmd and pcmd.lower() != "not applicable" and not _check_not_applicable(subsections[phase_name]):
+            if pcmd and pcmd.lower() != "not applicable":
                 expected = pfields.get("Expected Result", "").strip()
                 # Expected Result is mandatory when a real command is present
                 if not expected:
