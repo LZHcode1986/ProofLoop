@@ -4,9 +4,7 @@ mode: subagent
 hidden: true
 color: "#bb9af7"
 permission:
-  edit:
-    "*": deny
-    "delivery/stages/**": allow
+  edit: allow
   read: allow
   glob: allow
   grep: allow

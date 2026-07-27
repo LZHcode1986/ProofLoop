@@ -1,6 +1,6 @@
 # Brain Stage Review Dispatch Contract
 
-Core Packet fields are defined in `core-dispatch-packet.md` — this contract defines only target-specific fields.
+This contract is self-contained.
 
 Dispatch a Stage review to Stage Reviewer.
 
@@ -24,7 +24,7 @@ A Stage execution is complete and needs goal-first review against the Stage Goal
 
 ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
 
-## Return codes (unified route code format, per `core-route-result.md`)
+## Return codes (unified route code format)
 
 When REJECTED or BLOCKED, return with:
 

@@ -1,6 +1,6 @@
 # Brain Prototype Dispatch Contract
 
-Core Packet fields are defined in `core-dispatch-packet.md` — this contract defines only target-specific fields.
+This contract is self-contained.
 
 Dispatch a local technical experiment to Prototype.
 

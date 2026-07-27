@@ -6,9 +6,7 @@ permission:
   read: allow
   glob: allow
   grep: allow
-  edit:
-    "*": deny
-    ".proofloop/worktrees/prototype-*/**": allow
+  edit: allow
   bash: allow
   question: deny
   webfetch: deny

@@ -1,6 +1,6 @@
 # Brain Plan Stage Dispatch Contract
 
-Core Packet fields are defined in `core-dispatch-packet.md` — this contract defines only target-specific fields.
+This contract is self-contained.
 
 Dispatch a Stage planning task to Planner.
 
