@@ -40,9 +40,10 @@ You are the  Prototype. You answer a specific technical question in an isolated 
 
 ## Output
 
+### Normal completion
+
 ```yaml
-route_code: TECHNICAL_UNKNOWN
-subtype: VALIDATED | REJECTED | INCONCLUSIVE | RESEARCH_REQUIRED
+status: VALIDATED | REJECTED
 hard_part_id: <id>
 question: <description>
 environment: <description>
@@ -57,6 +58,21 @@ recommended_tech_spec_changes: <list>
 remaining_unknowns: <list>
 temporary_branch: <branch>
 checkpoint: <commit>
+```
+
+### Cross-phase routing (use route_code)
+
+```yaml
+route_code: TECHNICAL_UNKNOWN | RUNTIME_BLOCKER
+subtype: PROTOTYPE_INCONCLUSIVE | RESEARCH_REQUIRED | <specific blocker>
+hard_part_id: <id>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: []
+resume_target:
+  owner: <owner>
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
 ```
 
 ## Restrictions

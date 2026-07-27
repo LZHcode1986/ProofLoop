@@ -29,6 +29,22 @@ Note: `slice-output` is dispatched by Executor, not Brain, and is not part of th
 
 ## Expected results
 
-Boundary closed with commit hash, or Boundary blocked.
+Boundary closed with commit hash, or blocked.
+
+## Return codes
+
+When blocked:
+
+```yaml
+route_code: RUNTIME_BLOCKER
+subtype: COMMIT_BOUNDARY_FAILED
+reason: <description>
+suggested_owner: Brain
+invalidation_scope: []
+resume_target:
+  owner: Committer
+  phase: <phase>
+  stage: <stage-id | none>
+```
 
 

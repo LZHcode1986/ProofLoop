@@ -396,13 +396,7 @@ Do not reopen unrelated completed Stages.
 
 ## Dispatch and Recovery
 
-Every target Contract must be self-contained and define:
-
-- when to dispatch;
-- complete input packet;
-- scope and out-of-scope;
-- normal success result;
-- allowed typed non-success results.
+Every target Contract must define all information required by its target Agent. The representation may be a structured packet or an explicit required-field list. The test is: opening the Contract alone provides enough to dispatch.
 
 Before dispatch:
 

@@ -27,17 +27,31 @@ A technical question requires local validation in an isolated worktree before it
 
 ## Expected results
 
-### Normal results
+### Normal completion (no route_code)
 
 ```yaml
-route_code: TECHNICAL_UNKNOWN
-subtype: VALIDATED | REJECTED | INCONCLUSIVE
+status: VALIDATED | REJECTED
 hard_part_id: <id>
 conclusion: <description>
 validated_constraints: <list>
 rejected_assumptions: <list>
 recommended_tech_spec_changes: <list>
 remaining_unknowns: <list>
+```
+
+### Inconclusive — needs cross-phase routing
+
+```yaml
+route_code: TECHNICAL_UNKNOWN
+subtype: PROTOTYPE_INCONCLUSIVE
+hard_part_id: <id>
+reason: <description>
+suggested_owner: Researcher | Prototype | User
+invalidation_scope: []
+resume_target:
+  owner: <owner>
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
 ```
 
 ### Research required
@@ -49,6 +63,21 @@ hard_part_id: <id>
 reason: <description>
 research_question: <description>
 suggested_owner: Researcher
+invalidation_scope: []
+resume_target:
+  owner: Prototype
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
+```
+
+### Runtime blocker
+
+```yaml
+route_code: RUNTIME_BLOCKER
+subtype: <specific blocker>
+hard_part_id: <id>
+reason: <description>
+suggested_owner: Brain
 invalidation_scope: []
 resume_target:
   owner: Prototype
