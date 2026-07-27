@@ -38,6 +38,10 @@ validated_constraints: <list>
 rejected_assumptions: <list>
 recommended_tech_spec_changes: <list>
 remaining_unknowns: <list>
+
+> `ASSUMPTION_REJECTED` is a Prototype result status, not a persisted Hard Part Register status.
+> Brain maps it to `VALIDATED` only when the validation question has been conclusively resolved
+> and a viable architecture path remains.
 ```
 
 ### Inconclusive — needs cross-phase routing

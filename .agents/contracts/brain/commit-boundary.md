@@ -34,8 +34,6 @@ Note: `slice-output` is dispatched by Executor, not Brain, and is not part of th
 | `prototype-checkpoint` | `prototype_id`, `worktree_path`, `expected_branch`, `no_push: true`, `no_merge: true` |
 | `stage-plan` | `stage_id` |
 | `stage-close` | `stage_id` |
-| `slice-output` | `stage_id`, `slice_id` |
-
 ## Expected results
 
 Boundary closed with commit hash, or blocked.

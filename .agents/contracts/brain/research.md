@@ -40,10 +40,12 @@ finding_id: <id>
 affected_hard_parts: <list>
 evidence: <description>
 reason: <description>
-invalidation_scope: <list>
+suggested_owner: Researcher | Prototype | User
+invalidation_scope: []
 resume_target:
   owner: <owner>
-  phase: <phase>
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
 ```
 
 

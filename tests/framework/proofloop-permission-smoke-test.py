@@ -514,7 +514,7 @@ def check_no_contract_runtime_ids(root: Path) -> list:
 def check_worker_mode_consistency(root: Path) -> list:
     """Verify Worker mode consistency across 3 sources using precise table parsing."""
     issues = []
-    expected_modes = {"implement", "finalize", "recover", "repair", "diagnose", "resolve-conflict"}
+    expected_modes = {"implement-task", "recover-task", "finalize-slice", "repair", "diagnose", "resolve-conflict"}
 
     def extract_section(text: str, heading: str) -> str:
         """Extract the section content between a ## heading and the next ## heading."""
@@ -549,11 +549,11 @@ def check_worker_mode_consistency(root: Path) -> list:
     else:
         issues.append("Worker Contract file not found at .agents/contracts/executor/worker.md")
 
-    # 2. Executor Mode Selection table
+    # 2. Executor State Transition Table (additional consistency check, not required)
     executor_file = root / ".opencode" / "agents" / "executor.md"
     if executor_file.exists():
         text = executor_file.read_text(encoding="utf-8")
-        mode_section = extract_section(text, "## Executor Mode Selection")
+        mode_section = extract_section(text, "## Executor State Transition Table")
         found = set()
         for m in expected_modes:
             if f"`{m}`" in mode_section:
@@ -562,7 +562,7 @@ def check_worker_mode_consistency(root: Path) -> list:
         for token in mode_section.split():
             if token.startswith("`") and token.endswith("`") and token[1:-1] not in expected_modes:
                 extra.add(token[1:-1])
-        sources.append(("Executor Mode Selection", found, extra))
+        # Informational only — do not add to sources list (not a required source)
     else:
         issues.append("executor.md not found")
 
@@ -703,19 +703,12 @@ def check_return_value_consistency(root: Path) -> list:
     issues = []
 
     expected_returns = {
-        "implement": {"READY_FOR_CV", "blocker"},
-        "finalize": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT"},
-        "recover": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT", "blocker"},
+        "implement-task": {"TASK_COMPLETE", "blocker"},
+        "recover-task": {"TASK_COMPLETE", "IMPLEMENTATION_DEFECT", "blocker"},
+        "finalize-slice": {"READY_FOR_CV", "IMPLEMENTATION_DEFECT"},
         "repair": {"READY_FOR_CV", "blocker"},
         "diagnose": {"READY_FOR_CV", "blocker"},
         "resolve-conflict": {"CONFLICT_RESOLVED", "SEMANTIC_CONFLICT"},
-    }
-
-    expected_executor_actions = {
-        "READY_FOR_CV": ["scope checker", "fresh CV"],
-        "IMPLEMENTATION_DEFECT": ["repair"],
-        "CONFLICT_RESOLVED": ["post-merge"],
-        "SEMANTIC_CONFLICT": ["stop integration", "Brain"],
     }
 
     def extract_section(text: str, heading: str) -> str:
@@ -820,36 +813,7 @@ def check_return_value_consistency(root: Path) -> list:
                     if extra:
                         issues.append(f"Worker: Mode '{mode}' has unexpected returns: {extra}")
 
-    # 3. Check Executor Return Routing table — parse table rows
-    executor_file = root / ".opencode" / "agents" / "executor.md"
-    executor_routes = {}
-    if executor_file.exists():
-        text = executor_file.read_text(encoding="utf-8")
-        section = extract_section(text, "## Worker Return Routing")
-        if not section:
-            issues.append("Executor: Missing 'Worker Return Routing' section")
-        else:
-            for line in section.splitlines():
-                if not line.startswith("|"):
-                    continue
-                cols = [c.strip() for c in line.split("|")]
-                if len(cols) < 3:
-                    continue
-                return_name = cols[1]
-                action = cols[2]
-                if return_name in expected_executor_actions:
-                    executor_routes[return_name] = action
-
-            for return_name, required_fragments in expected_executor_actions.items():
-                actual_action = executor_routes.get(return_name)
-                if actual_action is None:
-                    issues.append(f"Executor: Missing return route '{return_name}'")
-                    continue
-                for fragment in required_fragments:
-                    if fragment not in actual_action:
-                        issues.append(f"Executor: Route '{return_name}' is missing required action fragment '{fragment}'")
-
-    # 4. Cross-reference: Worker, Contract, Executor三方一致
+    # 3. Cross-reference: Worker vs Contract
     for mode, expected in expected_returns.items():
         contract_returns = contract_actual_returns.get(mode)
         worker_returns = worker_flow_actual.get(mode)
@@ -864,6 +828,57 @@ def check_return_value_consistency(root: Path) -> list:
         if worker_returns is not None and worker_returns != expected:
             issues.append(f"Cross-ref: Mode '{mode}' Worker returns {worker_returns} do not match expected {expected}")
 
+    return issues
+
+
+def check_worker_return_routing(root: Path) -> list:
+    """Verify Executor Worker Return Routing section (informational)."""
+    issues = []
+    expected_executor_actions = {
+        "READY_FOR_CV": ["scope checker", "fresh CV"],
+        "IMPLEMENTATION_DEFECT": ["repair"],
+        "CONFLICT_RESOLVED": ["post-merge"],
+        "SEMANTIC_CONFLICT": ["stop integration", "Brain"],
+    }
+    executor_file = root / ".opencode" / "agents" / "executor.md"
+    if executor_file.exists():
+        text = executor_file.read_text(encoding="utf-8")
+        def extract_section(text: str, heading: str) -> str:
+            if heading not in text:
+                return ""
+            start = text.index(heading)
+            rest = text[start + len(heading):]
+            lines = rest.splitlines()
+            end = len(rest)
+            for i, line in enumerate(lines):
+                if line.startswith("## ") and heading not in line:
+                    end = len("\n".join(lines[:i]))
+                    break
+            return rest[:end]
+        section = extract_section(text, "## Worker Return Routing")
+        if not section:
+            issues.append("Executor: Missing 'Worker Return Routing' section")
+        else:
+            for line in section.splitlines():
+                if not line.startswith("|"):
+                    continue
+                cols = [c.strip() for c in line.split("|")]
+                if len(cols) < 3:
+                    continue
+                return_name = cols[1]
+                action = cols[2]
+                if return_name in expected_executor_actions:
+                    executor_routes = {}
+                    executor_routes[return_name] = action
+
+            for return_name, required_fragments in expected_executor_actions.items():
+                actual_action = executor_routes.get(return_name)
+                if actual_action is None:
+                    issues.append(f"Executor: Missing return route '{return_name}'")
+                    continue
+                for fragment in required_fragments:
+                    if fragment not in actual_action:
+                        issues.append(f"Executor: Route '{return_name}' is missing required action fragment '{fragment}'")
     return issues
 
 

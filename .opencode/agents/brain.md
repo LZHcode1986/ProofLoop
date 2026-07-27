@@ -438,6 +438,30 @@ Brain may persist authority documents only while the owning Skill controls seman
 
 When an approved authority change affects multiple documents, update them as one consistency transaction and dispatch Committer for the authority boundary.
 
+### Hard Part Status Persistence Rules
+
+Prototype result status is not always the persisted Hard Part status.
+
+**VALIDATED:**
+- Persist Hard Part Status as VALIDATED.
+- Record validated constraints and accepted solution.
+
+**ASSUMPTION_REJECTED:**
+- Record the rejected assumption and evidence.
+- Apply required Tech Spec and downstream invalidation updates.
+- If the validation question is conclusively resolved and a valid architecture path remains,
+  persist Hard Part Status as VALIDATED.
+- If no viable path remains or another unresolved question is exposed,
+  do not persist VALIDATED;
+  route TECHNICAL_UNKNOWN, AUTHORITY_GAP, or USER_DECISION_REQUIRED as applicable.
+
+Never persist the following Prototype result statuses directly into the Hard Parts Register:
+
+- ASSUMPTION_REJECTED
+- PROTOTYPE_INCONCLUSIVE
+- RESEARCH_REQUIRED
+- RUNTIME_BLOCKER
+
 ## Terminal Conditions
 
 Return Terminal only when:
