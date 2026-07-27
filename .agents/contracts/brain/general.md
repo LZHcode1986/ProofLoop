@@ -1,6 +1,6 @@
 # Brain General Direct Task Dispatch Contract
 
-Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+Core Packet fields are defined in `core-dispatch-packet.md` — this contract defines only target-specific fields.
 
 Dispatch a bounded, non-authority task to General.
 

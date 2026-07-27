@@ -122,51 +122,35 @@ REJECTED
 BLOCKED
 ```
 
-## Finding Types (REJECTED only)
+## Route Codes
 
 ```text
-IMPLEMENTATION_DEFECT
-PLAN_GAP
-AUTHORITY_GAP
-TECHNICAL_UNKNOWN
-EVIDENCE_GAP
-```
-
-## Blocker Codes (BLOCKED only)
-
-```text
-INCOMPLETE_EVIDENCE
-RUNTIME_BLOCKER
+REJECTED → IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP
+BLOCKED  → EVIDENCE_GAP | RUNTIME_BLOCKER
 ```
 
 ## Verdict Output Format
 
-```text
+```yaml
 Verdict: ACCEPTED | REJECTED | BLOCKED
-
-route_code:
-- IMPLEMENTATION_DEFECT
-- PLAN_GAP
-- AUTHORITY_GAP
-- TECHNICAL_UNKNOWN
-- EVIDENCE_GAP
-- none
-
-Blocked Code:
-- INCOMPLETE_EVIDENCE
-- RUNTIME_BLOCKER
-- none
-
-Affected Stage Outcome:
-Observed Behavior:
-Expected Behavior:
-Code / Runtime Evidence:
-Likely Affected Slice:
+route_code: <code> | none
+subtype: <specific subtype>
+finding_id: <id>
+affected_stage: <stage-id>
+affected_outcomes: <list>
+affected_artifacts: <list>
+evidence: <description>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id>
 ```
 
 Rules:
-- ACCEPTED: route_code and Blocked Code are both none.
-- REJECTED: Must have route_code.
-- BLOCKED: Must have Blocked Code.
-- Must NOT fill both route_code and Blocked Code.
+- ACCEPTED: route_code is none.
+- REJECTED: Must have a defect/gap/unknown route_code.
+- BLOCKED: Must have EVIDENCE_GAP or RUNTIME_BLOCKER.
 

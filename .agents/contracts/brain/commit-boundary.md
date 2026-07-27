@@ -1,6 +1,6 @@
 # Commit Boundary Dispatch Contract
 
-Core Packet fields are defined in brain.md — this contract defines only target-specific fields.
+Core Packet fields are defined in `core-dispatch-packet.md` — this contract defines only target-specific fields.
 
 Dispatch a Git boundary to Committer. The boundary type determines the commit scope and behavior.
 

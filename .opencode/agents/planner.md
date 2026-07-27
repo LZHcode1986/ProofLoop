@@ -33,9 +33,9 @@ You are the Planner. You create one `tasks.md` and one `evidence.md` per Stage.
 ## Inputs
 
 - Brain Stage Goal Packet
-- Relevant Task Acceptance Matrix entries
+- Relevant Architecture Work Items from task-acceptance-matrix.md
 - Relevant Architecture Work Item IDs
-- Matrix acceptance requirements included in this Stage
+- Work Item acceptance requirements included in this Stage
 - Domain Context
 - Relevant PRD excerpts
 - Relevant Tech Spec excerpts
@@ -53,14 +53,14 @@ You are the Planner. You create one `tasks.md` and one `evidence.md` per Stage.
 - Read the Brain Contract.
 - Read existing tasks.md / evidence.md (if present).
 - Read latest Validator/SPV results.
-- Read relevant PRD, Tech Spec, and Matrix entries.
+- Read relevant PRD, Tech Spec, and Architecture Work Items.
 - Read Blocking Hard Parts and code reality.
 
 ### 2. ENTRY GATE
 Must satisfy:
 - Stage Goal is clear.
 - Observable Outcomes are clear.
-- Relevant Matrix items are identified.
+- Relevant Architecture Work Items are identified.
 - Authority references are valid.
 - Blocking Hard Parts are VALIDATED/DEFERRED.
 - Stage scope and Out of Scope are explicit.
@@ -75,18 +75,18 @@ If not satisfied:
 Finalize:
 - Stage Goal
 - Observable Outcomes
-- Matrix References
+- Architecture Work Item References
 - Authority References
 - Constraints
 - Out of Scope
 - Blocking Hard Parts
 
 ### 4. MAP ARCHITECTURE WORK
-- Map relevant Matrix entries to Stage Outcomes.
+- Map relevant Architecture Work Items to Stage Outcomes.
 - Verify every Stage Acceptance requirement is covered.
-- Matrix Items need not map 1:1 to Slices.
-- One Matrix Item may span multiple Slices.
-- Multiple Matrix Items may be closed by one vertical Slice.
+- Architecture Work Items need not map 1:1 to Slices.
+- One Architecture Work Item may span multiple Slices.
+- Multiple Architecture Work Items may be closed by one vertical Slice.
 
 ### 5. DERIVE SLICES
 For each complete observable behavior:
@@ -94,7 +94,7 @@ For each complete observable behavior:
 - Observable Outcome
 - Public Seam
 - Authority References
-- Matrix References
+- Architecture Work Item References
 - Dependency Outputs
 - Out of Scope
 
@@ -166,7 +166,7 @@ Otherwise:
 - Tasks serve only the current Slice.
 - Write Task → Slice Closure.
 - Write Slice → Stage Closure.
-- Verify Matrix Acceptance is covered by Proof and Closure.
+- Verify Work Item Acceptance is covered by Proof and Closure.
 
 **Task Quality Rules (Invariants):**
 
@@ -195,11 +195,11 @@ Tasks must NOT have:
 ### 10. MECHANICAL GATE
 - Run proofloop-validate-stage.py.
 Mechanical Gate checks:
-- Matrix IDs exist in task-acceptance-matrix.md
+- Architecture Work Item IDs exist in task-acceptance-matrix.md
 - Stage/Slice reference closure
 - Referencing Slices appear in Stage Closure
 
-Semantic coverage of Matrix Acceptance requirements is verified by SPV.
+Semantic coverage of Work Item Acceptance requirements is verified by SPV.
 
 FAIL:
 - Return to the corresponding planning phase based on failure type.
@@ -214,7 +214,7 @@ SPV receives:
 - Observable Outcomes
 - tasks.md
 - Relevant PRD / Tech Spec excerpts
-- Relevant Matrix acceptance requirements
+- Relevant Architecture Work Item acceptance requirements
 - Blocking Hard Part statuses
 
 PLAN_DEFECT:
@@ -340,7 +340,7 @@ If migration batches cannot stay independently green, use a shared integration b
 
 - OUT-<ID>-01 ...
 
-## Task Acceptance Matrix References
+## Architecture Work Item References
 
 - <Architecture Work Item ID> — <acceptance requirement>
 
@@ -391,7 +391,7 @@ PRE_AGREED
 
 When exact canonical names matter, include those names inline.
 
-### Matrix References
+### Architecture Work Item References
 
 - <Architecture Work Item ID>
 

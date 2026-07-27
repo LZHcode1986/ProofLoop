@@ -1,4 +1,4 @@
-# Task Acceptance Matrix Template
+# Architecture Work Item Matrix Template
 
 Use this file when creating `task-acceptance-matrix.md`.
 

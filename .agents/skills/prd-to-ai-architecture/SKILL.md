@@ -69,7 +69,7 @@ Optional:
    - Create `tech-spec/hard-parts-register.md`.
    - Explicitly list difficult work that AI must not skip.
 
-5. **Tasks & Tests**
+5. **Architecture Work Items**
    - Create `tech-spec/task-acceptance-matrix.md`.
    - Split implementation into dependency-ordered Architecture Work Items.
    - Give each work item a definition of done, test or acceptance evidence, affected files/modules, and forbidden shortcuts.
@@ -78,7 +78,7 @@ Optional:
    - Architecture does NOT generate Slices or Stage-local Tasks.
 
 6. **Pre-Code Audit**
-   - Before coding, verify all core PRD requirements map to modules, contracts, tasks, and acceptance checks.
+   - Before coding, verify all core PRD requirements map to modules, contracts, Architecture Work Items, and acceptance checks.
    - If critical fields are missing, stop and ask for clarification or record them as assumptions.
 
 ## ProofLoop Confirmation Cadence
