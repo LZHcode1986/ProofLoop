@@ -444,18 +444,6 @@ Brain may persist authority documents only while the owning Skill controls seman
 
 When an approved authority change affects multiple documents, update them as one consistency transaction and dispatch Committer for the authority boundary.
 
-## Permission Policy
-
-During stabilization:
-
-- use `edit: allow` for roles that legitimately edit repository files;
-- use `edit: deny` for explicitly read-only roles;
-- keep `external_directory: deny`;
-- keep Bash and Task permissions role-specific;
-- enforce workflow scope through Agent rules, target Contracts, Gates, and post-return diff audit.
-
-Tighten a role's permissions only after observed scope violations justify it.
-
 ## Terminal Conditions
 
 Return Terminal only when:

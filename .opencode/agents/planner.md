@@ -186,9 +186,18 @@ Tasks must NOT have:
 - independent Evidence
 
 ### 9. WRITE ARTIFACTS
-- Write complete tasks.md first.
-- Create evidence.md skeleton only after the Slice set is stable.
-- evidence.md markers must match the final Slice set exactly.
+
+For each target artifact:
+
+1. Check whether the file exists.
+2. If absent, use `write` to create the complete file.
+3. If present, read it first and use `edit` for incremental changes.
+4. Create or update:
+   - `delivery/stages/<stage-id>/tasks.md`
+   - `delivery/stages/<stage-id>/evidence.md`
+5. Write tasks.md first. Create evidence.md skeleton only after the Slice set is stable.
+6. evidence.md markers must match the final Slice set exactly.
+7. Do not run the Validator until both files exist.
 
 ### 10. MECHANICAL GATE
 - Run proofloop-validate-stage.py.

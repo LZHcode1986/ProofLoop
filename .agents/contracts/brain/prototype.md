@@ -1,14 +1,12 @@
 # Brain Prototype Dispatch Contract
 
-This contract is self-contained.
-
 Dispatch a local technical experiment to Prototype.
 
 ## Use when
 
 A technical question requires local validation in an isolated worktree before it can be accepted into Tech Spec.
 
-## Target-specific required fields
+## Required fields
 
 - Hard Part ID
 - Prototype ID: <proto-xxx>
@@ -29,8 +27,33 @@ A technical question requires local validation in an isolated worktree before it
 
 ## Expected results
 
-VALIDATED, REJECTED, INCONCLUSIVE, or RESEARCH_REQUIRED.
+### Normal results
 
-When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates result, then continues the original Prototype session.
+```yaml
+route_code: TECHNICAL_UNKNOWN
+subtype: VALIDATED | REJECTED | INCONCLUSIVE
+hard_part_id: <id>
+conclusion: <description>
+validated_constraints: <list>
+rejected_assumptions: <list>
+recommended_tech_spec_changes: <list>
+remaining_unknowns: <list>
+```
 
+### Research required
 
+```yaml
+route_code: TECHNICAL_UNKNOWN
+subtype: RESEARCH_REQUIRED
+hard_part_id: <id>
+reason: <description>
+research_question: <description>
+suggested_owner: Researcher
+invalidation_scope: []
+resume_target:
+  owner: Prototype
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
+```
+
+When RESEARCH_REQUIRED is returned, Brain dispatches Researcher, validates the result, then continues the original Prototype session.

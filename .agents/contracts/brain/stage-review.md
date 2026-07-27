@@ -1,14 +1,12 @@
 # Brain Stage Review Dispatch Contract
 
-This contract is self-contained.
-
 Dispatch a Stage review to Stage Reviewer.
 
 ## Use when
 
 A Stage execution is complete and needs goal-first review against the Stage Goal, Observable Outcomes, and authority documents.
 
-## Target-specific required fields
+## Required fields
 
 - Stage ID
 - Stage Goal
@@ -24,13 +22,13 @@ A Stage execution is complete and needs goal-first review against the Stage Goal
 
 ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
 
-## Return codes (unified route code format)
+## Return codes
 
-When REJECTED or BLOCKED, return with:
+### REJECTED
 
 ```yaml
-Verdict: REJECTED | BLOCKED
-route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP | RUNTIME_BLOCKER
+Verdict: REJECTED
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP
 subtype: <specific subtype>
 finding_id: <id>
 affected_stage: <stage-id>
@@ -46,4 +44,19 @@ resume_target:
   stage: <stage-id>
 ```
 
+### BLOCKED
 
+```yaml
+Verdict: BLOCKED
+route_code: RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP
+subtype: <specific subtype>
+finding_id: <id | none>
+affected_stage: <stage-id>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id | none>
+```
