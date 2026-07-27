@@ -88,7 +88,30 @@ Actual code evidence
 Likely affected Slice(s)
 Relevant Evidence statement
 Severity: critical | major | minor
-Finding type: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN
+Finding type: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP
+```
+
+## Unified Output Format
+
+Each finding must include the full structure for cross-phase fallback:
+
+```yaml
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP | RUNTIME_BLOCKER
+subtype: <specific subtype>
+finding_id: <id>
+affected_stage: <stage-id>
+affected_outcomes: <list>
+affected_artifacts: <list>
+affected_work_items: <list>
+affected_hard_parts: <list>
+evidence: <description>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id>
 ```
 
 ## Verdict
@@ -106,6 +129,7 @@ IMPLEMENTATION_DEFECT
 PLAN_GAP
 AUTHORITY_GAP
 TECHNICAL_UNKNOWN
+EVIDENCE_GAP
 ```
 
 ## Blocker Codes (BLOCKED only)
@@ -115,19 +139,20 @@ INCOMPLETE_EVIDENCE
 RUNTIME_BLOCKER
 ```
 
-## Unified Output Format
+## Verdict Output Format
 
 ```text
 Verdict: ACCEPTED | REJECTED | BLOCKED
 
-Finding Type:
+route_code:
 - IMPLEMENTATION_DEFECT
 - PLAN_GAP
 - AUTHORITY_GAP
 - TECHNICAL_UNKNOWN
+- EVIDENCE_GAP
 - none
 
-Blocker Code:
+Blocked Code:
 - INCOMPLETE_EVIDENCE
 - RUNTIME_BLOCKER
 - none
@@ -140,8 +165,8 @@ Likely Affected Slice:
 ```
 
 Rules:
-- ACCEPTED: Finding Type and Blocker Code are both none.
-- REJECTED: Must have Finding Type.
-- BLOCKED: Must have Blocker Code.
-- Must NOT fill both Finding Type and Blocker Code.
+- ACCEPTED: route_code and Blocked Code are both none.
+- REJECTED: Must have route_code.
+- BLOCKED: Must have Blocked Code.
+- Must NOT fill both route_code and Blocked Code.
 

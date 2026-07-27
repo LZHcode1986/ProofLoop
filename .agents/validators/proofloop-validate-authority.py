@@ -25,6 +25,7 @@ ID_PATTERNS = {
     "HP-\\d+": "hard part",
     "TYPE-\\w+": "canonical type",
     "OUT-\\w+-\\d+": "observable outcome",
+    "AWI-\\d+": "architecture work item",
 }
 
 

@@ -43,3 +43,32 @@ Return to Brain if:
 - `AUTHORITY_IMPACT` — task requires authority document changes
 - `STAGE_OWNED_DEFECT` — defect belongs to Active Stage
 - `TECHNICAL_UNKNOWN` — cannot determine correct approach
+
+## Unified return codes
+
+When returning to Brain, use the following route_code + subtype format:
+
+```yaml
+route_code: OWNER_MISMATCH
+subtype: GENERAL_SCOPE_EXCEEDED
+```
+
+```yaml
+route_code: AUTHORITY_GAP
+subtype: GENERAL_AUTHORITY_IMPACT
+```
+
+```yaml
+route_code: IMPLEMENTATION_DEFECT
+subtype: STAGE_OWNED_DEFECT
+```
+
+```yaml
+route_code: TECHNICAL_UNKNOWN
+subtype: GENERAL_TECHNICAL_UNKNOWN
+```
+
+Each return must include:
+- `reason`
+- `affected_artifacts` (if any)
+- `suggested_owner`

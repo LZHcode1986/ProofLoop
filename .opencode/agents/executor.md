@@ -48,10 +48,10 @@ Must confirm:
 - Current Stage branch and base ref are known.
 
 If not satisfied:
-- PLAN_GAP
-- AUTHORITY_GAP
-- TECHNICAL_UNKNOWN
-→ Return to Brain
+- `PLAN_GAP` with subtype and affected scope
+- `AUTHORITY_GAP` with subtype and affected scope
+- `TECHNICAL_UNKNOWN` with subtype and affected scope
+→ Return to Brain with full affected_artifacts, affected_work_items, reason, invalidation_scope, and resume_target
 
 ### 2. RECONCILE
 - Re-read tasks.md and evidence.md.
@@ -110,6 +110,7 @@ CV FAIL #2:
 
 CV FAIL #3:
 - UNRESOLVED_IMPLEMENTATION_DEFECT → Brain
+- Return with route_code: IMPLEMENTATION_DEFECT, subtype: UNRESOLVED_CV_FAILURE, full affected scope and resume target
 
 CV BLOCKED:
 - Stop the current Slice.
@@ -306,3 +307,22 @@ Slice commits: <refs>
 CV results: <summary>
 Residual risks: <list>
 ```
+
+When returning a non-completion status, use unified route code format:
+
+```
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP | RUNTIME_BLOCKER
+subtype: <specific subtype>
+affected_stage: <stage-id>
+affected_outcomes: <list>
+affected_artifacts: <list>
+affected_work_items: <list>
+affected_hard_parts: <list>
+evidence: <summary>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <affected artifacts>
+resume_target: <owner/phase/stage>
+```
+
+Executor must NOT directly modify authority documents (PRD.md, tech-spec/*, CONTEXT.md). Authority changes must go through Brain.

@@ -5,22 +5,22 @@ Use this file when creating `task-acceptance-matrix.md`.
 ## Dependency Groups
 
 1. Setup
-2. Foundational blocking tasks
+2. Foundational blocking work items
 3. User-visible feature slices
 4. Integration and polish
 5. Final verification
 
-Do not start user-visible feature slices until foundational blocking tasks are complete.
+Do not start user-visible feature slices until foundational blocking work items are complete.
 
 ## Matrix
 
-| Task ID | Task | Depends on | Files/modules | Definition of done | Test/acceptance evidence | Forbidden shortcuts |
+| Work Item ID | Architecture Work Item | Depends on | Files/modules | Definition of done | Test/acceptance evidence | Forbidden shortcuts |
 |---|---|---|---|---|---|---|
-| T001 |  |  |  |  |  |  |
+| AWI-001 |  |  |  |  |  |  |
 
 ## Traceability
 
-| PRD requirement | Architecture section | Contract/state row | Task IDs | Acceptance evidence |
+| PRD requirement | Architecture section | Contract/state row | Work Item IDs | Acceptance evidence |
 |---|---|---|---|---|
 
 ## Testing Guidance
@@ -35,8 +35,8 @@ Use the lightest evidence that genuinely proves completion:
 
 ## Gate
 
-- [ ] Every must-have PRD requirement maps to at least one task.
-- [ ] Every task has a definition of done.
-- [ ] Every task has acceptance evidence.
-- [ ] Foundational tasks are not mixed with feature polish.
-- [ ] No task says only "implement X" without files/modules and acceptance checks.
+- [ ] Every must-have PRD requirement maps to at least one work item.
+- [ ] Every work item has a definition of done.
+- [ ] Every work item has acceptance evidence.
+- [ ] Foundational work items are not mixed with feature polish.
+- [ ] No work item says only "implement X" without files/modules and acceptance checks.

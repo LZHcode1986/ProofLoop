@@ -66,10 +66,10 @@ Must satisfy:
 - Stage scope and Out of Scope are explicit.
 
 If not satisfied:
-- AUTHORITY_GAP
-- TECHNICAL_DISCOVERY_REQUIRED
-- PLAN_GAP
-→ Return to Brain
+- `AUTHORITY_GAP` with subtype
+- `TECHNICAL_UNKNOWN` with subtype `UNVALIDATED_HARD_PART_BLOCKING`
+- `PLAN_GAP` with subtype
+→ Return to Brain with full affected scope and resume target
 
 ### 3. DEFINE STAGE CONTRACT
 Finalize:
@@ -236,8 +236,8 @@ SPV Rebuttal:
 ```
 Rebuttal does not override the SPV Gate. After rebuttal, re-run mechanical validator and dispatch a fresh SPV.
 
-AUTHORITY_GAP / TECHNICAL_DISCOVERY_REQUIRED:
-- Return to Brain.
+AUTHORITY_GAP / TECHNICAL_UNKNOWN (subtype: UNVALIDATED_HARD_PART_BLOCKING):
+- Return to Brain with full affected scope and resume target.
 
 ### 12. RETURN
 Only return PLAN_READY when both:
@@ -342,7 +342,7 @@ If migration batches cannot stay independently green, use a shared integration b
 
 ## Task Acceptance Matrix References
 
-- <Matrix-ID> — <acceptance requirement>
+- <Architecture Work Item ID> — <acceptance requirement>
 
 ## Authority References
 
@@ -393,7 +393,7 @@ When exact canonical names matter, include those names inline.
 
 ### Matrix References
 
-- <Matrix-ID>
+- <Architecture Work Item ID>
 
 ### Dependency Outputs
 
@@ -453,11 +453,21 @@ None
 
 ## Stop Conditions
 
-Return these to Brain if encountered:
+Return these to Brain if encountered, using unified route code format:
 
 - `PLAN_GAP` — cannot decompose Stage into coherent Slices
+  - subtype: `STAGE_NOT_DECOMPOSABLE`
 - `AUTHORITY_GAP` — missing authority information needed for planning
-- `TECHNICAL_DISCOVERY_REQUIRED` — plan depends on unvalidated Hard Part
+  - subtype: `MISSING_AUTHORITY_FOR_PLANNING`
+- `TECHNICAL_UNKNOWN` — plan depends on unvalidated Hard Part
+  - subtype: `UNVALIDATED_HARD_PART_BLOCKING`
+
+Each return must include:
+- `affected_artifacts`
+- `affected_work_items`
+- `reason`
+- `invalidation_scope`
+- `resume_target`
 
 ## Editing Restrictions
 

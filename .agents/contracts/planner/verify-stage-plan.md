@@ -47,7 +47,7 @@ If Stage Validator PASSED, dispatch `stage-plan-verifier` with the Stage ID.
 SPV checks:
 1. Slice and Proof Validity — vertical slice, public seam, Proof Plan completeness, TDD alignment
 2. Dependency Validity — blocking dependencies, acyclic DAG, valid refs
-3. Matrix Semantic Coverage — each Matrix acceptance covered by Slice semantics, not ID-only
+3. Architecture Work Item Semantic Coverage — each Architecture Work Item acceptance covered by Slice semantics, not ID-only
 4. Composition Closure — all Slices together produce Stage Outcomes
 5. Runtime Proof Validity — build, migration, startup, smoke, shutdown with expected results
 
@@ -58,7 +58,9 @@ SPV checks:
 | `PLAN_READY` | Plan is valid — proceed to Brain |
 | `PLAN_DEFECT` | Specific plan issue found — return details to Planner |
 | `AUTHORITY_GAP` | Plan references missing authority |
-| `TECHNICAL_DISCOVERY_REQUIRED` | Unvalidated Hard Part blocking |
+| `TECHNICAL_UNKNOWN` | Unvalidated Hard Part blocking (subtype: UNVALIDATED_HARD_PART_BLOCKING) |
+
+Each non-READY return must include: finding_id, affected_stage, affected_outcomes, affected_artifacts, evidence, reason, suggested_owner, invalidation_scope, resume_target.
 
 ## Planner return rule
 
@@ -80,5 +82,5 @@ tasks.md: <path>
 evidence.md: <path>
 Authority References: <refs>
 Blocking Hard Parts: <VALIDATED list>
-Expected Result: PLAN_READY | PLAN_DEFECT | AUTHORITY_GAP | TECHNICAL_DISCOVERY_REQUIRED
+Expected Result: PLAN_READY | PLAN_DEFECT | AUTHORITY_GAP | TECHNICAL_UNKNOWN
 ```

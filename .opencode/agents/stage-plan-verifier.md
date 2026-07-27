@@ -54,9 +54,9 @@ Stage Outcomes ⇒ still compliant with PRD/Tech Spec?
 - Is the DAG acyclic?
 - Are IDs and refs valid?
 
-### 3. Matrix Semantic Coverage
+### 3. Architecture Work Item Semantic Coverage
 
-For each Stage-selected Matrix Acceptance requirement:
+For each Stage-selected Architecture Work Item acceptance requirement:
 1. Which Slice Outcome or Slice composition covers it?
 2. Which Public Seam makes it observable?
 3. Which Proof Plan assertion verifies the behavior?
@@ -90,14 +90,25 @@ Check the Stage Runtime Proof:
 - Shutdown can terminate or clean up the started runtime.
 - Every Not Applicable declaration has a non-empty Reason.
 
-## Output results
+## Output results (unified route code format)
 
 ```text
 PLAN_READY — plan is valid
 PLAN_DEFECT — specific plan issue found (return details with full Finding below)
 AUTHORITY_GAP — plan references missing authority
-TECHNICAL_DISCOVERY_REQUIRED — unvalidated Hard Part blocking
+TECHNICAL_UNKNOWN — unvalidated Hard Part blocking (subtype: UNVALIDATED_HARD_PART_BLOCKING)
 ```
+
+Each non-READY return must include:
+- `finding_id`
+- `affected_stage`
+- `affected_outcomes`
+- `affected_artifacts`
+- `evidence`
+- `reason`
+- `suggested_owner`
+- `invalidation_scope`
+- `resume_target`
 
 ## Finding output format
 

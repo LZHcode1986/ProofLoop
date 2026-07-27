@@ -71,8 +71,11 @@ Optional:
 
 5. **Tasks & Tests**
    - Create `tech-spec/task-acceptance-matrix.md`.
-   - Split implementation into dependency-ordered tasks.
-   - Give each task a definition of done, test or acceptance evidence, affected files/modules, and forbidden shortcuts.
+   - Split implementation into dependency-ordered Architecture Work Items.
+   - Give each work item a definition of done, test or acceptance evidence, affected files/modules, and forbidden shortcuts.
+   - Architecture Work Items use ID format `AWI-*` (not `T*`).
+   - Architecture Work Items are project-level units. They are NOT Stage Tasks or Worker Tasks.
+   - Architecture does NOT generate Slices or Stage-local Tasks.
 
 6. **Pre-Code Audit**
    - Before coding, verify all core PRD requirements map to modules, contracts, tasks, and acceptance checks.

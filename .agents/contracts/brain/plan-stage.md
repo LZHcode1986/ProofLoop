@@ -17,9 +17,9 @@ A Stage Goal is selected and needs to be decomposed into Slices and Tasks.
 - Expected Public Seam
 - PRD References
 - Tech Spec References
-- Relevant Task Acceptance Matrix Items
-- Matrix Item IDs
-- Matrix Acceptance Requirements
+- Relevant Architecture Work Items
+- Architecture Work Item IDs
+- Work Item Acceptance Requirements
 - Dependencies
 - Constraints
 - Out of Scope
@@ -33,5 +33,22 @@ A Stage Goal is selected and needs to be decomposed into Slices and Tasks.
 
 PLAN_READY — Stage decomposed into Slices with tasks.md and evidence.md.
 Plan blocked with stop condition if unresolved.
+
+## Return codes (unified route code format)
+
+When plan is blocked, return with:
+
+```yaml
+route_code: PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN
+subtype: <specific subtype>
+affected_artifacts: <list>
+affected_work_items: <list>
+reason: <description>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id>
+```
 
 

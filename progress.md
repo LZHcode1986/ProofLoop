@@ -9,28 +9,43 @@
 
 ## Current Status
 
-- Active Stage:
-- Overall Status:
-- Last Reviewed Stage:
-- Last Updated:
-
-## Workflow Checkpoint
-
-- Current Phase:
+- Workflow State:
+- Primary Next Action:
+- Accountable Owner:
 - Active Skill or Agent:
-- Completed Artifacts:
+- Active Stage:
 - Current Artifact:
 - Last Passed Gate:
-- Latest Finding or Blocker:
+- Current Finding or Blocker:
 - Pending Transition:
+
+## Artifact Status
+
+| Artifact | Type | Status | Gate | Owner | Updated By |
+|---|---|---|---|---|---|
+
+## Invalidated Artifacts
+
+| Artifact | Previous Status | Current Status | Caused By | Reason |
+|---|---|---|---|---|
+
+## Resume Target
+
+- Owner:
+- Phase:
+- Stage:
+- Artifact:
+- Continuation Handle:
+- Preconditions:
+
+## Completed Artifacts
+
+- ...
 
 ## Stage Roadmap
 
-| Stage | Goal | Dependencies | Status | Result |
+| Stage | Goal | Status | Work Item Coverage | Last Gate |
 |---|---|---|---|---|
-| S01 | [Stage goal] | — | planned | — |
-| S02 | [Stage goal] | S01 | planned | — |
-| S03 | [Stage goal] | S01, S02 | planned | — |
 
 ## Stage Details
 

@@ -20,4 +20,21 @@ A technical question requires external facts from official documentation, GitHub
 
 Research findings returned. May resolve a Hard Part or inform a technical decision.
 
+## Return codes (unified route code format)
+
+When returning a finding that requires cross-phase action:
+
+```yaml
+route_code: TECHNICAL_UNKNOWN
+subtype: RESEARCH_INCONCLUSIVE | RESEARCH_REQUIRES_PROTOTYPE
+finding_id: <id>
+affected_hard_parts: <list>
+evidence: <description>
+reason: <description>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+```
+
 

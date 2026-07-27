@@ -38,6 +38,8 @@ Use the smallest mode that fits the request:
 - Keep language accessible to non-programmers. If a term such as login, permission, data saving, import/export, deployment, or integration is necessary, explain it in one sentence.
 - Include product facts that affect implementation, such as login, data persistence, roles, permissions, uploads, integrations, mobile use, privacy, payment, content safety, and admin needs.
 - Do not choose frameworks, databases, API design, schema, architecture, deployment, or task breakdown inside the PRD.
+- When the user is missing a product decision that blocks progress, return `USER_DECISION_REQUIRED`.
+- When a product authority gap is identified (e.g., scope, behavior, or acceptance criteria is unclear), return `AUTHORITY_GAP` with a descriptive subtype.
 
 ## Standard workflow
 

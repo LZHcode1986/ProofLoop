@@ -34,10 +34,14 @@ def check_required_sections(text: str, stage_id: str) -> list:
         "Out of Scope",
         "Blocking Hard Parts",
         "Slice Graph",
-        "Task Acceptance Matrix References",
         "Slice → Stage Closure",
         "Stage Runtime Proof",
     ]
+    # Accept both old and new section header formats
+    matrix_ref_headers = ["Task Acceptance Matrix References", "Architecture Work Item References"]
+    has_matrix_ref = any(h in text for h in matrix_ref_headers)
+    if not has_matrix_ref:
+        required.append("Task Acceptance Matrix References")
     missing = [s for s in required if s not in text]
     return [f"Missing section: {s}" for s in missing]
 
@@ -61,7 +65,12 @@ def check_slice_completeness(text: str) -> list:
         re.DOTALL,
     )
     for slice_id, block in slice_blocks:
-        required = ["Goal", "Observable Outcome", "Public Seam", "Required Skills", "Seam Status", "Tasks", "Matrix References", "Task → Slice Closure"]
+        required = ["Goal", "Observable Outcome", "Public Seam", "Required Skills", "Seam Status", "Tasks", "Task → Slice Closure"]
+        # Accept both old and new Matrix References header names
+        matrix_refs_headers = ["Matrix References", "Architecture Work Item References"]
+        has_matrix_refs = any(h in block for h in matrix_refs_headers)
+        if not has_matrix_refs:
+            required.append("Matrix References")
         # Conditionally require TDD Proof Plan or Verification Plan
         has_tdd = "test-driven-development" in block
         if has_tdd:
@@ -215,7 +224,7 @@ def check_outcome_coverage(text: str) -> list:
 
 
 def check_matrix_id_existence(text: str, root: Path) -> list:
-    """Check all Matrix IDs in Stage References exist in task-acceptance-matrix.md."""
+    """Check all Matrix/Work Item IDs in Stage References exist in task-acceptance-matrix.md."""
     issues = []
     matrix_path = root / "tech-spec" / "task-acceptance-matrix.md"
     if not matrix_path.exists():
@@ -224,7 +233,7 @@ def check_matrix_id_existence(text: str, root: Path) -> list:
 
     matrix_text = matrix_path.read_text(encoding="utf-8")
 
-    # Parse actual Task IDs from the ## Matrix section only
+    # Parse actual IDs from the ## Matrix section only (accept both old and new header formats)
     actual_ids = set()
     if "## Matrix" in matrix_text:
         start = matrix_text.index("## Matrix")
@@ -238,7 +247,7 @@ def check_matrix_id_existence(text: str, root: Path) -> list:
         matrix_section = rest[:end]
         in_table = False
         for line in matrix_section.splitlines():
-            if line.startswith("| Task ID |"):
+            if line.startswith("| Task ID |") or line.startswith("| Work Item ID |"):
                 in_table = True
                 continue
             if in_table and line.startswith("|---"):
@@ -248,8 +257,12 @@ def check_matrix_id_existence(text: str, root: Path) -> list:
                 if len(cols) >= 2 and cols[1]:
                     actual_ids.add(cols[1])
 
-    # Parse Stage Matrix References
-    stage_section = text.split("## Task Acceptance Matrix References")[-1]
+    # Parse Stage References (accept both old and new section header names)
+    stage_section = ""
+    for header in ["## Architecture Work Item References", "## Task Acceptance Matrix References"]:
+        if header in text:
+            stage_section = text.split(header)[-1]
+            break
     if "##" in stage_section:
         stage_section = stage_section.split("##")[0]
     stage_ids = set()
@@ -260,14 +273,12 @@ def check_matrix_id_existence(text: str, root: Path) -> list:
                 stage_ids.add(parts[1])
 
     # Bidirectional set constraints:
-    # 1. Stage IDs must be non-empty (if architecture has tasks)
     if not stage_ids and actual_ids:
-        issues.append("Stage has no Task Acceptance Matrix References but architecture matrix defines tasks")
+        issues.append("Stage has no Matrix/Work Item References but architecture matrix defines items")
 
-    # 2. stage_ids ⊆ actual_ids  (Stage cannot reference non-existent architecture tasks)
     for sid in sorted(stage_ids):
         if sid not in actual_ids:
-            issues.append(f"{sid}: referenced in Stage Matrix References but not found in task-acceptance-matrix.md")
+            issues.append(f"{sid}: referenced in Stage References but not found in task-acceptance-matrix.md")
 
     return issues
 
@@ -275,8 +286,12 @@ def check_matrix_id_existence(text: str, root: Path) -> list:
 def check_matrix_slice_coverage(text: str) -> list:
     """Enforce bidirectional set constraints: slice_ids ⊆ stage_ids and stage_ids ⊆ slice_ids."""
     issues = []
-    # Parse Stage Matrix References
-    stage_section = text.split("## Task Acceptance Matrix References")[-1]
+    # Parse Stage References (accept both old and new header names)
+    stage_section = ""
+    for header in ["## Architecture Work Item References", "## Task Acceptance Matrix References"]:
+        if header in text:
+            stage_section = text.split(header)[-1]
+            break
     if "##" in stage_section:
         stage_section = stage_section.split("##")[0]
     stage_ids = set()
@@ -286,11 +301,15 @@ def check_matrix_slice_coverage(text: str) -> list:
             if len(parts) >= 2:
                 stage_ids.add(parts[1])
 
-    # Parse all Slice Matrix References
+    # Parse all Slice Matrix References (accept both old and new header names)
     slice_blocks = re.findall(r"<!-- SLICE:(S\d+(?:-\w+)?):BEGIN -->(.*?)<!-- SLICE:\1:END -->", text, re.DOTALL)
     slice_ids = set()
     for slice_id, block in slice_blocks:
-        ref_section = block.split("### Matrix References")[-1]
+        ref_section = ""
+        for header in ["### Architecture Work Item References", "### Matrix References"]:
+            if header in block:
+                ref_section = block.split(header)[-1]
+                break
         if "###" in ref_section:
             ref_section = ref_section.split("###")[0]
         for line in ref_section.splitlines():
@@ -299,26 +318,30 @@ def check_matrix_slice_coverage(text: str) -> list:
                 if len(parts) >= 2:
                     slice_ids.add(parts[1])
 
-    # slice_ids ⊆ stage_ids:  Slice cannot reference tasks not in Stage
+    # slice_ids ⊆ stage_ids:  Slice cannot reference items not in Stage
     for sid in sorted(slice_ids):
         if sid not in stage_ids:
-            issues.append(f"{sid}: referenced in Slice Matrix References but not in Stage Matrix References")
+            issues.append(f"{sid}: referenced in Slice References but not in Stage References")
 
-    # stage_ids ⊆ slice_ids:  Every Stage task must be covered by at least one Slice
+    # stage_ids ⊆ slice_ids:  Every Stage item must be covered by at least one Slice
     for sid in sorted(stage_ids):
         if sid not in slice_ids:
-            issues.append(f"{sid}: defined in Stage Matrix References but not referenced by any Slice")
+            issues.append(f"{sid}: defined in Stage References but not referenced by any Slice")
 
     return issues
 
 
 def check_matrix_closure_coverage(text: str) -> list:
-    """Check that Slices referencing Matrix items appear in Slice→Stage Closure."""
+    """Check that Slices referencing Matrix/Work Item items appear in Slice→Stage Closure."""
     issues = []
     slice_blocks = re.findall(r"<!-- SLICE:(S\d+(?:-\w+)?):BEGIN -->(.*?)<!-- SLICE:\1:END -->", text, re.DOTALL)
     slice_ids = set()
     for slice_id, block in slice_blocks:
-        ref_section = block.split("### Matrix References")[-1]
+        ref_section = ""
+        for header in ["### Architecture Work Item References", "### Matrix References"]:
+            if header in block:
+                ref_section = block.split(header)[-1]
+                break
         if "###" in ref_section:
             ref_section = ref_section.split("###")[0]
         has_ref = any(line.strip().startswith("-") for line in ref_section.splitlines())
@@ -328,7 +351,7 @@ def check_matrix_closure_coverage(text: str) -> list:
     closure = text.split("## Slice → Stage Closure")[-1] if "## Slice → Stage Closure" in text else ""
     for sid in sorted(slice_ids):
         if sid not in closure:
-            issues.append(f"{sid}: references Matrix items but not covered in Slice → Stage Closure")
+            issues.append(f"{sid}: references Matrix/Work Item items but not covered in Slice → Stage Closure")
     return issues
 
 
