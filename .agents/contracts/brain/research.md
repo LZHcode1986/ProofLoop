@@ -18,11 +18,20 @@ A technical question requires external facts from official documentation, GitHub
 
 ## Expected results
 
-Research findings returned. May resolve a Hard Part or inform a technical decision.
+### Normal completion — Hard Part resolved
 
-## Return codes (unified route code format)
+```yaml
+result: HARD_PART_RESULT_READY
+findings: <description>
+sources: <list>
+conclusion: <description>
+affected_hard_parts: <list>
+recommended_actions: <list>
+```
 
-When returning a finding that requires cross-phase action:
+### Cross-phase routing
+
+When returning a finding that requires further action:
 
 ```yaml
 route_code: TECHNICAL_UNKNOWN

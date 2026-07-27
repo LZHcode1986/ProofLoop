@@ -21,11 +21,20 @@ Any authoritative document change requires a Git boundary. The Committer creates
 
 Note: `slice-output` is dispatched by Executor, not Brain, and is not part of this contract.
 
-## Target-specific required fields
+## Required fields
 
 - Boundary Type
 - Description
 - Changed Files
+
+## Conditional fields by boundary type
+
+| Boundary Type | Required additions |
+|---|---|
+| `prototype-checkpoint` | `prototype_id`, `worktree_path`, `expected_branch`, `no_push: true`, `no_merge: true` |
+| `stage-plan` | `stage_id` |
+| `stage-close` | `stage_id` |
+| `slice-output` | `stage_id`, `slice_id` |
 
 ## Expected results
 

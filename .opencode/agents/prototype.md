@@ -43,7 +43,8 @@ You are the  Prototype. You answer a specific technical question in an isolated 
 ### Normal completion
 
 ```yaml
-status: VALIDATED | REJECTED
+result: HARD_PART_RESULT_READY
+status: VALIDATED | ASSUMPTION_REJECTED
 hard_part_id: <id>
 question: <description>
 environment: <description>
@@ -60,11 +61,11 @@ temporary_branch: <branch>
 checkpoint: <commit>
 ```
 
-### Cross-phase routing (use route_code)
+### Technical unknown — needs cross-phase routing
 
 ```yaml
-route_code: TECHNICAL_UNKNOWN | RUNTIME_BLOCKER
-subtype: PROTOTYPE_INCONCLUSIVE | RESEARCH_REQUIRED | <specific blocker>
+route_code: TECHNICAL_UNKNOWN
+subtype: PROTOTYPE_INCONCLUSIVE | RESEARCH_REQUIRED
 hard_part_id: <id>
 reason: <description>
 suggested_owner: <owner>
@@ -75,11 +76,26 @@ resume_target:
   stage: <stage-id | none>
 ```
 
+### Runtime blocker
+
+```yaml
+route_code: RUNTIME_BLOCKER
+subtype: <specific blocker>
+hard_part_id: <id>
+reason: <description>
+suggested_owner: Brain
+invalidation_scope: []
+resume_target:
+  owner: Prototype
+  phase: HARD_PART_VALIDATION
+  stage: <stage-id | none>
+```
+
 ## Restrictions
 
 - Prototype code stays in temporary worktree/branch: `prototype/<hard-part-id>`
 - Prototype code NEVER enters production branches
-- Only VALIDATED conclusions enter Tech Spec (via Brain)
+- Only evidence-backed normal completions (`VALIDATED` or `ASSUMPTION_REJECTED`) may update the Tech Spec through Brain. `INCONCLUSIVE`, `RESEARCH_REQUIRED`, and `RUNTIME_BLOCKER` must not update authority semantics.
 - Prototype does NOT write production code
 - Prototype does NOT modify authority documents
 - Prototype does NOT directly merge into Stage

@@ -30,7 +30,8 @@ A technical question requires local validation in an isolated worktree before it
 ### Normal completion (no route_code)
 
 ```yaml
-status: VALIDATED | REJECTED
+result: HARD_PART_RESULT_READY
+status: VALIDATED | ASSUMPTION_REJECTED
 hard_part_id: <id>
 conclusion: <description>
 validated_constraints: <list>

@@ -48,7 +48,7 @@ prototype-checkpoint — reproducible Prototype checkpoint (Prototype)
 ## Inbound forms
 
 1. **Executor Dispatch Envelope**: for `slice-output`. Read only the supplied Contract Ref.
-2. **Brain Commit Boundary Packet**: for `baseline-authority`, `stage-plan`, `authority-update`, `stage-close`, `direct-fix`. Must contain complete Brain Dispatch Core Packet fields.
+2. **Brain Commit Boundary Packet**: for `baseline-authority`, `stage-plan`, `authority-update`, `stage-close`, `direct-fix`, `prototype-checkpoint`. Must conform to `.agents/contracts/brain/commit-boundary.md`.
 
 ## Boundary behavior
 
