@@ -162,20 +162,54 @@ describe('CLI Integration Tests', () => {
     test('compile-project-acceptance generates a valid manifest', () => {
       const dir = tmpDir();
       try {
+        const inputPath = join(dir, 'input.json');
         const manifestPath = join(dir, 'project-acceptance.json');
-        const e2eSteps = JSON.stringify([{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }]);
+        const input = {
+          project_id: 'test-project',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_review_receipts: ['receipts/S01-review.json'],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        };
+        writeJSON(inputPath, input);
 
-        const { stdout, stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, manifestPath, process.cwd(), e2eSteps);
+        const { stdout, stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
 
         expect(status).toBe(0);
         expect(stderr).toBe('');
 
         const content = readFileSync(manifestPath, 'utf-8');
         const manifest = JSON.parse(content);
+        expect(manifest.project_id).toBe('test-project');
         expect(manifest.expected_snapshot).toMatch(/^[a-f0-9]{16}$/);
+        expect(manifest.prd_goals).toEqual(['Goal 1']);
+        expect(manifest.acceptance_criteria).toEqual(['Criterion 1']);
+        expect(manifest.stage_review_receipts).toEqual(['receipts/S01-review.json']);
         expect(manifest.e2e_steps).toHaveLength(1);
-        expect(manifest.prd_goals.length).toBeGreaterThan(0);
         expect(stdout).toContain('Project Acceptance Manifest written');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('compile-project-acceptance rejects empty stage_review_receipts', () => {
+      const dir = tmpDir();
+      try {
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'project-acceptance.json');
+        writeJSON(inputPath, {
+          project_id: 'test',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_review_receipts: [],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+
+        const { stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/Schema validation/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -184,27 +218,20 @@ describe('CLI Integration Tests', () => {
     test('compile-project-acceptance rejects invalid project root', () => {
       const dir = tmpDir();
       try {
+        const inputPath = join(dir, 'input.json');
         const manifestPath = join(dir, 'project-acceptance.json');
-        const e2eSteps = JSON.stringify([{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }]);
+        writeJSON(inputPath, {
+          project_id: 'test',
+          project_root: '/nonexistent/path',
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_review_receipts: ['r.json'],
+          e2e_steps: [],
+        });
 
-        const { stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, manifestPath, 'C:\\nonexistent-path', e2eSteps);
-
+        const { stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
         expect(status).toBe(1);
-        expect(stderr).toMatch(/project root not found/i);
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    }, 30000);
-
-    test('compile-project-acceptance rejects invalid JSON', () => {
-      const dir = tmpDir();
-      try {
-        const manifestPath = join(dir, 'project-acceptance.json');
-
-        const { stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, manifestPath, process.cwd(), 'not-json');
-
-        expect(status).toBe(1);
-        expect(stderr).toMatch(/E2E steps JSON is invalid/i);
+        expect(stderr).toMatch(/not found/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

@@ -1,35 +1,54 @@
 #!/usr/bin/env node
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ProjectAcceptanceManifestSchema } from './schemas.js';
 import { computeSnapshot } from './receipt-writer.js';
-const [outputPath, projectRoot, e2eStepsJson] = process.argv.slice(2);
-if (!outputPath || !projectRoot || !e2eStepsJson) {
-    console.error('Usage: node compile-project-acceptance.js <output-path> <project-root> <e2e-steps-json>');
+const [inputPath, outputPath] = process.argv.slice(2);
+if (!inputPath || !outputPath) {
+    console.error('Usage: node compile-project-acceptance.js <input-json-path> <output-manifest-path>');
     process.exit(1);
 }
-if (!existsSync(projectRoot)) {
-    console.error(`Project root not found: ${projectRoot}`);
+if (!existsSync(inputPath)) {
+    console.error(`Input file not found: ${inputPath}`);
     process.exit(1);
 }
-let e2eSteps;
+let input;
 try {
-    e2eSteps = JSON.parse(e2eStepsJson);
+    input = JSON.parse(readFileSync(inputPath, 'utf-8'));
 }
-catch {
-    console.error('E2E steps JSON is invalid');
+catch (err) {
+    console.error(`Invalid input JSON: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
 }
-const snapshot = computeSnapshot(resolve(projectRoot)).slice(0, 16);
+if (!input.project_root) {
+    console.error('Input must contain "project_root" field');
+    process.exit(1);
+}
+if (!existsSync(input.project_root)) {
+    console.error(`Project root not found: ${input.project_root}`);
+    process.exit(1);
+}
+const expected_snapshot = computeSnapshot(resolve(input.project_root)).slice(0, 16);
 const manifest = {
-    project_id: 'project-1',
-    expected_snapshot: snapshot,
-    prd_goals: ['Complete the ProofLoop v2 restructuring'],
-    acceptance_criteria: ['All P0 issues resolved', 'CI passes on all platforms'],
-    stage_review_receipts: [],
-    e2e_steps: e2eSteps,
+    project_id: input.project_id ?? 'unknown',
+    expected_snapshot,
+    prd_goals: input.prd_goals ?? [],
+    acceptance_criteria: input.acceptance_criteria ?? [],
+    stage_review_receipts: input.stage_review_receipts ?? [],
+    e2e_steps: input.e2e_steps ?? [],
     compiled_at: new Date().toISOString(),
 };
+try {
+    ProjectAcceptanceManifestSchema.parse(manifest);
+}
+catch (err) {
+    console.error('Generated manifest failed Schema validation:');
+    if (err instanceof Error) {
+        console.error(err.message);
+    }
+    process.exit(1);
+}
 writeFileSync(outputPath, JSON.stringify(manifest, null, 2), 'utf-8');
 console.log(`Project Acceptance Manifest written to ${outputPath}`);
-console.log(`Expected snapshot: ${snapshot}`);
+console.log(`Expected snapshot: ${expected_snapshot}`);
 //# sourceMappingURL=compile-project-acceptance.js.map
