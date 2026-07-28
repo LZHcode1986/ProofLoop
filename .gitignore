@@ -3,3 +3,8 @@ docs/
 
 __pycache__/
 *.pyc
+
+# Node.js
+node_modules/
+.agents/runtime/node_modules/
+.agents/runtime/dist/
