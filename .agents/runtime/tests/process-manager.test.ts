@@ -1,17 +1,59 @@
-import {
-  runProcess,
-  spawnService,
-  registerService,
-  stopRegisteredService,
-  waitForReadiness,
-  cleanupServices,
-  validateSpawnOptions,
-} from '../src/process-manager.js';
+import { jest } from '@jest/globals';
+import { execSync } from 'node:child_process';
 
 // Small helper to wait
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ── Mock for stopService kill-failure test ──
+// Use a mutable variable so the mock factory captures a reference,
+// while tests can mutate it per-scenario.
+let mockIsProcessAliveImpl: (...args: number[]) => boolean = () => false;
+
+jest.unstable_mockModule('../src/platform-adapter.js', () => {
+  // Inline real-ish implementations (can't use jest.requireActual for ESM).
+  // We only need isProcessAlive to be controllable; everything else real.
+  const SHELL_EXECUTABLES = new Set([
+    'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish',
+    'cmd', 'cmd.exe', 'powershell', 'pwsh', 'pwsh.exe',
+  ]);
+
+  return {
+    getPlatformInfo: () => {
+      const p = process.platform as 'win32' | 'linux' | 'darwin';
+      return { platform: p, isWindows: p === 'win32', isPosix: p === 'linux' || p === 'darwin' };
+    },
+    isProcessAlive: (...args: number[]) => mockIsProcessAliveImpl(...args),
+    killProcessTree: (pid: number) => {
+      try {
+        execSync(`taskkill /PID ${pid} /T /F 2>nul`, { stdio: 'ignore' });
+      } catch { /* already dead */ }
+    },
+    isShellExecutable: (executable: string) => {
+      const base = executable.toLowerCase().replace(/\.(exe|bat|cmd)$/, '');
+      return SHELL_EXECUTABLES.has(base) || SHELL_EXECUTABLES.has(executable.toLowerCase());
+    },
+    containsShellOperator: (arg: string) => /[|><&;`$]/.test(arg),
+    isPortInUse: () => false,
+    normalizePath: (p: string) => p.replace(/\\/g, '/'),
+    resolvePath: (...segments: string[]) => segments.join('/'),
+  };
+});
+
+// Dynamic import after mock is set up — all tests use this
+const pm: typeof import('../src/process-manager.js') = await import('../src/process-manager.js');
+const {
+  runProcess,
+  spawnService,
+  registerService,
+  stopRegisteredService,
+  stopService,
+  getRegisteredService,
+  waitForReadiness,
+  cleanupServices,
+  validateSpawnOptions,
+} = pm;
 
 describe('process-manager', () => {
   afterEach(async () => {
@@ -137,5 +179,56 @@ describe('process-manager', () => {
       const result = await cleanupServices();
       expect(result.cleaned).toHaveLength(0);
     }, 15000);
+  });
+
+  describe('stopService 正常流程', () => {
+    test('stopService → kill → wait → confirm death, service removed from registry', async () => {
+      // 启动并注册一个服务
+      const handle = await spawnService({
+        executable: 'node',
+        args: ['-e', 'setInterval(() => {}, 60000)'],
+        timeoutMs: 5000,
+      });
+      const serviceName = 'stop-normal-test';
+      registerService(serviceName, handle);
+
+      // 确认服务已注册
+      expect(getRegisteredService(serviceName)).toBeDefined();
+
+      // 停止服务
+      const stopped = await stopRegisteredService(serviceName);
+      expect(stopped).toBe(true);
+
+      // 验证 Registry 中服务已被移除
+      expect(getRegisteredService(serviceName)).toBeUndefined();
+    }, 15000);
+  });
+
+  describe('stopService SIGKILL 失败处理', () => {
+    beforeEach(() => {
+      // 让 isProcessAlive 持续返回 true，模拟进程在 SIGKILL 后仍存活
+      mockIsProcessAliveImpl = () => true;
+    });
+
+    afterEach(async () => {
+      // 恢复 mock 并清理遗留注册
+      mockIsProcessAliveImpl = () => false;
+      await cleanupServices();
+    });
+
+    test('进程在 SIGTERM+SIGKILL 后仍存活时 stopService 抛出 Error', async () => {
+      const handle = await spawnService({
+        executable: 'node',
+        args: ['-e', 'setInterval(() => {}, 60000)'],
+        timeoutMs: 5000,
+      });
+      const serviceName = 'kill-fail-test';
+      registerService(serviceName, handle);
+
+      // stopService 内部 isProcessAlive 始终返回 true → 超时 → 抛错
+      await expect(stopRegisteredService(serviceName)).rejects.toThrow(
+        /remained alive after SIGTERM \+ SIGKILL/,
+      );
+    }, 20000);
   });
 });

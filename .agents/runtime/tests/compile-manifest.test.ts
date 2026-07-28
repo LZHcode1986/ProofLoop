@@ -469,7 +469,7 @@ steps:
 `;
     const md = minimalTasksMdWithYamlSteps(yaml);
     const tasksPath = writeFixture('tasks.md', md);
-    expect(() => compileManifest(tasksPath)).toThrow(/Duplicate Runtime Proof step ID/);
+    expect(() => compileManifest(tasksPath)).toThrow(/Duplicate step ID/);
   });
 
   test('service_start without matching service_stop throws error', () => {

@@ -326,27 +326,42 @@ export function getRegisteredService(name: string): ServiceHandle | undefined {
  * After stopping, the service is removed from the registry.
  */
 export async function stopService(pid: number, graceMs: number = 5000): Promise<void> {
-  // Remove from registry first (prevent double-stop from another code path)
-  for (const [name, entry] of serviceRegistry) {
-    if (entry.pid === pid) {
-      serviceRegistry.delete(name);
-      break;
-    }
-  }
-
   // Send SIGTERM
   killProcessTree(pid, 'SIGTERM');
 
   // Wait for graceful shutdown
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) return;
+    if (!isProcessAlive(pid)) {
+      removeServiceFromRegistry(pid);
+      return;
+    }
     await sleep(100);
   }
 
   // Timeout — force kill
   if (isProcessAlive(pid)) {
     killProcessTree(pid, 'SIGKILL');
+    // Wait for the kill to take effect
+    const killDeadline = Date.now() + 2000;
+    while (Date.now() < killDeadline) {
+      if (!isProcessAlive(pid)) {
+        removeServiceFromRegistry(pid);
+        return;
+      }
+      await sleep(100);
+    }
+    // Process refused to die
+    throw new Error(`Process ${pid} remained alive after SIGTERM + SIGKILL`);
+  }
+}
+
+function removeServiceFromRegistry(pid: number): void {
+  for (const [name, entry] of serviceRegistry) {
+    if (entry.pid === pid) {
+      serviceRegistry.delete(name);
+      return;
+    }
   }
 }
 

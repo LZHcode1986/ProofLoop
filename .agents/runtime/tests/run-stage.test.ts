@@ -134,6 +134,13 @@ describe('runStageFromManifest', () => {
             readiness_signal: 'ready',
             timeout_ms: 3000,
           },
+          {
+            id: 'fail-stop',
+            type: 'service_stop',
+            executable: 'node',
+            args: [],
+            service_ref: 'fail-start',
+          },
         ],
       };
 
@@ -148,7 +155,7 @@ describe('runStageFromManifest', () => {
       expect(
         result.errors.some((e) => e.includes('process exited') || e.includes('readiness')),
       ).toBe(true);
-      expect(result.stepCount).toBe(1);
+      expect(result.stepCount).toBe(2);
       expect(result.receiptPath).toBeDefined();
 
       const receipt = readReceipt(result.receiptPath!);
@@ -157,7 +164,7 @@ describe('runStageFromManifest', () => {
   });
 
   describe('负向路径 2 — service_ref 不存在', () => {
-    test('service_stop 引用不存在的 service id, verdict FAIL', async () => {
+    test('service_stop 引用不存在的 service id, 拓扑校验拦截, verdict FAIL', async () => {
       const manifest = {
         ...BASE_MANIFEST,
         stage_id: 'S99-FAIL2',
@@ -180,11 +187,8 @@ describe('runStageFromManifest', () => {
 
       expect(result.success).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.errors.some((e) => e.includes('no registered service'))).toBe(true);
-      expect(result.stepCount).toBe(1);
-
-      const receipt = readReceipt(result.receiptPath!);
-      expect(receipt.verdict).toBe('FAIL');
+      expect(result.errors.some((e) => e.includes('STOP_REF_MISSING'))).toBe(true);
+      expect(result.stepCount).toBe(0);
     }, 15000);
   });
 
@@ -219,12 +223,11 @@ describe('runStageFromManifest', () => {
     }, 15000);
   });
 
-  describe('负向路径 4 — cleanup 阶段处理残留服务', () => {
-    test('service_start 后没有 service_stop, cleanup 自动清理, 验证流程不崩溃', async () => {
-      // 启动一个服务但不添加 service_stop 步骤，让 runStageFromManifest
-      // 末尾的 cleanupServices() 自动清理。
-      // 如果清理成功（进程被终止），则 success 为 true；
-      // 如果清理失败（进程残留），则 verdict 为 FAIL。
+  describe('负向路径 4 — service_start 缺少 service_stop', () => {
+    test('service_start 没有匹配的 service_stop, 拓扑校验拦截, verdict FAIL', async () => {
+      // 设计约束：每个 service_start 必须有匹配的 service_stop。
+      // 缺少 service_stop 时，入口处的拓扑校验直接返回 FAIL，
+      // 不会启动任何进程。
       const manifest = {
         ...BASE_MANIFEST,
         stage_id: 'S99-CLEANUP',
@@ -249,18 +252,11 @@ describe('runStageFromManifest', () => {
         outputDir: tmpDir,
       });
 
-      // 验证: 步骤正常执行
-      expect(result.stepCount).toBe(1);
-      expect(result.receiptPath).toBeDefined();
-      expect(result.errors).toHaveLength(0);
-
-      // 当前实现中 cleanupServices() 通过 killProcessTree (taskkill /F /T)
-      // 终止残留进程，清理成功后 finalExitCode 不变，verdict 保持 PASS。
-      // 如果平台无法成功终止进程，remainingPids > 0 则会触发 FAIL。
-      expect(result.success).toBe(true);
-
-      const receipt = readReceipt(result.receiptPath!);
-      expect(receipt.verdict).toBe('PASS');
+      // 拓扑校验失败，不会执行步骤
+      expect(result.success).toBe(false);
+      expect(result.stepCount).toBe(0);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors.some((e) => e.includes('SERVICE_START_WITHOUT_STOP'))).toBe(true);
     }, 15000);
   });
 

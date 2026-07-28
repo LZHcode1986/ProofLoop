@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Manifest as ManifestSchema } from './schemas.js';
 import type { Manifest, RuntimeProofStep, StepType } from './schemas.js';
+import { validateRuntimeProofTopology } from './validate-topology.js';
 import {
   runProcess,
   spawnService,
@@ -66,6 +67,16 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
     return {
       success: false,
       errors: [`Failed to parse manifest: ${err}`],
+      stepCount: 0,
+    };
+  }
+
+  // ── Validate Runtime Proof topology ──
+  const topologyErrors = validateRuntimeProofTopology(manifest.runtime_proof ?? []);
+  if (topologyErrors.length > 0) {
+    return {
+      success: false,
+      errors: topologyErrors.map(e => `[${e.type}] ${e.message}`),
       stepCount: 0,
     };
   }
