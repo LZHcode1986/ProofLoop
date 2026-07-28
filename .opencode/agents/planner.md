@@ -1,6 +1,8 @@
 ---
 description: Planner — creates Stage→Slice→Task decomposition and TDD Proof Plans.
 mode: subagent
+model: openai/gpt-5.6-terra
+variant: xhigh
 hidden: true
 color: "#bb9af7"
 permission:
@@ -14,6 +16,7 @@ permission:
     "Get-ChildItem *": allow
     "Test-Path *": allow
     "python .agents/validators/proofloop-*": allow
+    "node .agents/runtime/dist/*": allow
   question: deny
   webfetch: deny
   skill:
@@ -78,6 +81,7 @@ Finalize:
 - Constraints
 - Out of Scope
 - Blocking Hard Parts
+- Stage Risk Facts (aggregated from Slice Risk Facts)
 
 ### 4. MAP ARCHITECTURE WORK
 - Map relevant Architecture Work Items to Stage Outcomes.
@@ -93,8 +97,10 @@ For each complete observable behavior:
 - Public Seam
 - Authority References
 - Architecture Work Item References
+- Dependencies
 - Dependency Outputs
 - Out of Scope
+- Risk Facts
 
 When boundaries or deep modules are unclear, load `codebase-design`.
 
@@ -106,11 +112,13 @@ A qualified Slice must:
 - span necessary layers (not just one technical layer)
 - be observable through a public seam
 - fit in one continuous Worker Session
-- have one Proof Plan (TDD Proof Plan when test-driven-development is required, otherwise a Verification Plan)
+- have one Proof Plan (PO mapping table linking POs to tests)
 - produce one current Evidence section
 - have explicit Out of Scope
 - NOT pre-write code file paths
 - have one Required Skills field
+- have complete Proof Obligations covering every behavioral requirement
+- declare Risk Facts (Planner does not select SCV level)
 
 Good Slice:
 ```text
@@ -139,25 +147,29 @@ Good example: Workspace admin can suspend member access while retaining the memb
 - Verify each Dependency Output is consumable.
 - Verify Slices can be executed or verified independently.
 
-### 7. DEFINE PROOF PLANS
+### 7. DEFINE PROOF OBLIGATIONS & PROOF PLAN
 
-Proof Plan has two forms, chosen based on Required Skills:
+For each Slice, derive Proof Obligations (POs) first, then map them to tests in the Proof Plan.
+
+**Proof Obligation derivation rules:**
+- Every behavioral requirement in the Slice Goal must have at least one PO.
+- Each PO must be observable through a real Public Seam.
+- Each PO must reference an independent Oracle (not the implementation code).
+- Success/Failure must be clearly defined.
+- All POs passing together must be sufficient to infer the Slice Goal.
+- RED/GREEN/REFACTOR are Proof Methodology, not a PO — do not use them as POs.
+
+**Proof Plan (PO mapping table):**
+| PO ID | Test Level | Seam | Required Test | Forbidden Shortcut | Verification Command |
 
 When Required Skills includes `test-driven-development`:
-- Primary Seam
-- Required Success Behaviors
-- Required Failure Behaviors
-- State Assertions
-- Persistence / Integration Assertions
-- Mocks Allowed
-- Mocks Forbidden
-- Verification Commands
-- Proof Profiles
+- Map each PO to a TDD test at the appropriate seam.
+- Forbidden Shortcut column prevents internal-mock substitution for the public seam.
+- Verification command must be a single runnable command.
 
-Otherwise:
-- Verification Commands
-- Expected Results
-- Check Items
+Otherwise (verification-only slice):
+- Map POs to verification commands instead of tests.
+- The Required Test column becomes the verification action.
 
 ### 8. DERIVE STAGE TASKS
 - Decompose Slice into goal-type Tasks.
@@ -259,85 +271,72 @@ Only return PLAN_READY when both:
 - Planner does not depend on session history for recovery.
 
 ## Stage Runtime Proof
-Each Stage plan must include a Runtime Proof section:
 
-```
-## Stage Runtime Proof
+Each Stage plan must include a structured Runtime Proof section with YAML-format steps:
 
-### Environment Preconditions
+```yaml
+### Stage Runtime Proof
 
-### Build
-- Command:
-- Expected Result:
+steps:
+  - id: build
+    executable: <command>
+    args: [<arg1>, <arg2>]
+    cwd: .
+    timeout_ms: 300000
+    expected:
+      exit_code: 0
+      output_contains: <text | null>
+      output_matches: <regex | null>
 
-Not Applicable:
-- Command: Not Applicable
-- Reason: <required>
+  - id: migration_or_setup
+    executable: <command>
+    args: []
+    cwd: .
+    timeout_ms: 300000
+    expected:
+      exit_code: 0
+    not_applicable:
+      reason: <required if not applicable>
 
-### Migration / Setup
-- Command:
-- Expected Result:
+  - id: startup
+    executable: <command>
+    args: []
+    cwd: .
+    readiness_signal: <log line or port check>
+    timeout_ms: 300000
+    not_applicable:
+      reason: <required if not applicable>
 
-Not Applicable:
-- Command: Not Applicable
-- Reason: <required>
+  - id: smoke_scenario
+    scenario: <description>
+    executable: <command>
+    args: []
+    cwd: .
+    expected_observation: <what to observe>
+    timeout_ms: 300000
+    not_applicable:
+      reason: <required if not applicable per scenario>
 
-### Startup
-- Command:
-- Readiness Signal:
-
-Not Applicable:
-- Command: Not Applicable
-- Reason: <required>
-
-### Smoke Scenarios
-
-Not Applicable:
-- Status: Not Applicable
-- Reason: <required>
-
-Executable:
-- Scenario:
-- Command / Action:
-- Expected Observation:
-
-Not Applicable per Scenario:
-- Command / Action: Not Applicable
-- Reason: <required>
-
-### Shutdown / Cleanup
-- Command:
-
-Not Applicable:
-- Command: Not Applicable
-- Reason: <required>
-
-Expected Result format (for Build and Migration / Setup):
-- exit code: <number>
-- output contains: <text>
-- output matches: <regex>
+  - id: shutdown
+    executable: <command>
+    args: []
+    cwd: .
+    timeout_ms: 300000
+    not_applicable:
+      reason: <required if not applicable>
 ```
 
-## Wide Refactor Plan
+## Wide Refactor Strategy
 
-For broad mechanical migrations that cannot stay green per Slice:
-
-```text
-EXPAND → MIGRATE BATCHES → CONTRACT
-```
-
-1. Add new Type/interface alongside old form
-2. Migrate callers by package/directory
-3. Delete old form after all callers migrated
-
-If migration batches cannot stay independently green, use a shared integration branch with a final integrate-and-verify Slice.
+Wide refactor planning follows the shared Contract at `contracts/shared/wide-refactor-strategy.md`.
+Refer to that Contract when the Stage requires broad structural migration across multiple modules.
 
 ## Document Structure
 
 ### tasks.md
 
 ```markdown
-# Stage <ID> — <Name>
+# Stage S01 — <Name>
 
 ## Stage Goal
 
@@ -346,10 +345,6 @@ If migration batches cannot stay independently green, use a shared integration b
 ## Observable Outcomes
 
 - OUT-<ID>-01 ...
-
-## Architecture Work Item References
-
-- <Architecture Work Item ID> — <acceptance requirement>
 
 ## Authority References
 
@@ -363,6 +358,10 @@ When exact canonical names matter, include those names inline:
   - Forbidden aliases: `ProjectUser`, `inactive`
 ```
 
+## Architecture Work Item References
+
+- <Architecture Work Item ID> — <acceptance requirement>
+
 ## Dependencies
 
 ## Constraints
@@ -371,14 +370,26 @@ When exact canonical names matter, include those names inline:
 
 ## Blocking Hard Parts
 
+## Stage Risk Facts
+
+- public_api_change:
+- persistent_state:
+- authorization:
+- migration:
+- concurrency:
+- external_side_effect:
+- irreversible_operation:
+- cross_process_behavior:
+- core_state_machine:
+
 ---
 
 ## Slice Graph
 
 ---
 
-## Slice S1 — <Name>
-<!-- SLICE:S1:BEGIN -->
+## Slice S01-A — <Name>
+<!-- SLICE:S01-A:BEGIN -->
 
 ### Goal
 
@@ -402,60 +413,158 @@ When exact canonical names matter, include those names inline.
 
 - <Architecture Work Item ID>
 
+### Dependencies
+
 ### Dependency Outputs
 
-### Dependencies
+### Out of Scope
+
+### Proof Obligations
+
+- PO-S01-A-01
+  - Behavior:
+  - Public Seam:
+  - Oracle Source:
+  - Success / Failure:
+  - Required Observation:
+  - Applicable Risk Facts:
+
+Rules:
+- Each behavioral requirement must have at least one PO.
+- Every PO must be observable through a real Public Seam.
+- Every PO must reference an independent Oracle (not the implementation).
+- Do not use RED / GREEN / REFACTOR as a PO.
+- All POs passing must be sufficient to infer the Slice Goal.
 
 ### Proof Plan
 
-When Required Skills includes test-driven-development:
-- Organize Proof Plan by TDD seams, success/failure behaviors
+| PO ID | Test Level | Seam | Required Test | Forbidden Shortcut | Verification Command |
+|---|---|---|---|---|---|
 
-When Required Skills does not include test-driven-development:
-- Use a plain Verification Plan (commands, expected results, check items)
+### Risk Facts
+
+- public_api_change:
+- persistent_state:
+- authorization:
+- migration:
+- concurrency:
+- external_side_effect:
+- irreversible_operation:
+- cross_process_behavior:
+- core_state_machine:
+
+Planner declares Risk Facts; does not select SCV level.
+
+### SCV Minimum Level
+
+(Reserved — filled by Validator tooling)
 
 ### Tasks
 
-- [ ] S1-T1 ...
-- [ ] S1-T2 ...
+- [ ] S01-A-T01 ...
+- [ ] S01-A-T02 ...
 
 ### Task → Slice Closure
 
 ### Worker Status
 
-- Status: planned
+### Current Snapshot
 
-<!-- SLICE:S1:END -->
+### Latest SCV Receipt
+
+<!-- SLICE:S01-A:END -->
 
 ---
 
 ## Slice → Stage Closure
+
+## Stage Runtime Proof
+
+```yaml
+steps:
+  - id: build
+    executable:
+    args:
+    cwd: .
+    timeout_ms: 300000
+    expected:
+      exit_code: 0
+
+  - id: migration_or_setup
+    executable:
+    args:
+    cwd: .
+    timeout_ms: 300000
+    expected:
+      exit_code: 0
+    not_applicable:
+      reason:
+
+  - id: startup
+    executable:
+    args:
+    cwd: .
+    readiness_signal:
+    timeout_ms: 300000
+    not_applicable:
+      reason:
+
+  - id: smoke_scenario
+    scenario:
+    executable:
+    args:
+    cwd: .
+    expected_observation:
+    timeout_ms: 300000
+    not_applicable:
+      reason:
+
+  - id: shutdown
+    executable:
+    args:
+    cwd: .
+    timeout_ms: 300000
+    not_applicable:
+      reason:
+```
 ```
 
 ### evidence.md
 
 ```markdown
-# Stage <ID> Evidence
+# Stage S01 Evidence
 
-## Slice S1 — <Name>
-<!-- EVIDENCE:S1:BEGIN -->
+## Slice S01-A
+<!-- EVIDENCE:S01-A:BEGIN -->
 
-### Worker Statement
+### Snapshot
+- Commit / Tree:
+- Manifest Digest:
 
-### Implementation
+### Proof Obligation Coverage
 
-### Verification
+| PO ID | Test ID | RED Receipt | GREEN Receipt | Current Result |
+|---|---|---|---|---|
 
-- Commands:
-- Results:
-- Observed Behavior:
-- Proof Profiles:
+### Changed Files
+
+### Verification Commands
+
+### Actual Observations
 
 ### Limitations
 
-None
+### Latest SCV Receipt
+- Path:
+- Verdict:
 
-<!-- EVIDENCE:S1:END -->
+<!-- EVIDENCE:S01-A:END -->
+
+## Stage Gate
+- Receipt:
+
+## Stage Review
+- Receipt:
 ```
 
 ## Stop Conditions

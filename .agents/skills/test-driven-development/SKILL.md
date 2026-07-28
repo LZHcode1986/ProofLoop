@@ -15,13 +15,64 @@ Tests verify behavior through public interfaces, not implementation details. Cod
 
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
+## PO Binding
+
+Every behavior test must cite one or more PO IDs from the Slice's Proof Obligations.
+
+A passing test without a valid PO mapping does not close Slice proof.
+
+```text
+# Example: test file header or docstring
+# PO: PO-S01-A-01, PO-S01-A-02
+```
+
+The PO-to-test mapping is recorded in the Proof Plan table and later in the Evidence section.
+
 ## Seams — where tests go
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
 
-**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+### ProofLoop Flow (with upstream Contract)
+
+When used within the ProofLoop pipeline and the Worker Packet contains a **Seam Status**:
+
+- **PRE_AGREED** — The Seam has already been confirmed by Planner and SPV. The Worker must **not** re-negotiate or ask the user for confirmation. Write tests at the agreed seam.
+- **TO_CONFIRM** — The Seam is proposed but not yet confirmed. Confirm with the user before proceeding.
+
+If Seam Status is present in the Worker Packet, that status governs seam selection.
+
+### Independent Use (no upstream Contract)
+
+When using the TDD Skill independently — without a ProofLoop Worker Packet or upstream Planner/SPV Contract — the current Agent determines the seams and confirms them with the user before writing tests.
 
 Ask: "What's the public interface, and which seams should we test?"
+
+## RED Receipt
+
+Every RED step (failing test before implementation) must produce a minimal receipt:
+
+```text
+- test identifier: <test file + test name>
+- command: <command used to run the test>
+- failure reason: <the exact failure message>
+- expected failure: <what was expected to fail>
+- source snapshot: <the test code or key excerpt>
+```
+
+The RED Receipt proves that the test was written first and correctly detects the absence of the behavior. It is recorded in the Evidence section's Proof Obligation Coverage table.
+
+## GREEN Receipt
+
+Every GREEN step (passing test after implementation) must produce a minimal receipt:
+
+```text
+- same PO: <PO ID(s) this test covers>
+- command: <command used to run the test>
+- pass result: <output summary or "all tests passed">
+- implementation snapshot: <the implementation code or key excerpt>
+```
+
+The GREEN Receipt proves that the implementation satisfies the PO. It is recorded alongside the RED Receipt in the Evidence section.
 
 ## Anti-patterns
 
@@ -33,4 +84,11 @@ Ask: "What's the public interface, and which seams should we test?"
 
 - **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
-- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
+- **PO binding.** Every test must be traceable to at least one PO ID.
+
+## Refactoring
+
+- **Minor internal cleanup** (rename local variable, extract small helper, inline dead code) may be performed during the loop as long as behavior does not change and all existing tests stay green.
+- **Structural refactoring** (rename public API, extract module, change type signatures, migrate callers) is **not** part of the TDD loop. It belongs to:
+  - A code review pass (see `code-review` skill), or
+  - A separate Task/Slice dedicated to the refactor.

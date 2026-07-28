@@ -8,6 +8,9 @@ Validates authority document mechanical facts:
 - Hard Part ref validity
 
 Usage: python proofloop-validate-authority.py [--path <root-path>]
+
+DEPRECATED: This Python validator will be removed after TypeScript equivalence is verified.
+See .agents/runtime/ for the TypeScript replacement.
 """
 
 import re

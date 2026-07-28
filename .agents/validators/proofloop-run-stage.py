@@ -11,6 +11,9 @@ polling), Smoke Scenarios, Shutdown/Cleanup.
 
 Outputs a JSON summary with PASS | FAIL | BLOCKED status.
 Does NOT modify project content.
+
+DEPRECATED: This Python validator will be removed after TypeScript equivalence is verified.
+See .agents/runtime/ for the TypeScript replacement.
 """
 
 import argparse

@@ -6,6 +6,12 @@ Dispatch a Stage review to Stage Reviewer.
 
 A Stage execution is complete and needs goal-first review against the Stage Goal, Observable Outcomes, and authority documents.
 
+## Review method
+
+`independent-goal-challenge`
+
+The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer independently challenges whether the implementation satisfies the Stage Goal using evidence, integrated code, and authority documents.
+
 ## Required fields
 
 - Stage ID
@@ -16,7 +22,12 @@ A Stage execution is complete and needs goal-first review against the Stage Goal
 - Stage branch ref
 - tasks.md path
 - evidence.md path
-- Stage Runtime Proof location
+- Integrated snapshot (commit or tree ref)
+- Manifest digest
+- Stage Gate Receipt ref
+- SCV Receipt refs (one per Slice)
+- Stage risk level (low / medium / high / critical)
+- Clean-room requirement (yes / no)
 
 ## Expected results
 

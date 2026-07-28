@@ -9,8 +9,8 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 | `implement-task` | New Slice ready for first Task, or continuation to next Task |
 | `recover-task` | Worker context lost, need to verify and continue from unchecked Task |
 | `finalize-slice` | All Tasks checked but Evidence incomplete or stale |
-| `repair` | First CV FAIL, fix specific failure |
-| `diagnose` | Second CV FAIL, root-cause diagnosis and fix |
+| `repair` | First SCV FAIL, fix specific failure |
+| `diagnose` | Second SCV FAIL, root-cause diagnosis and fix |
 | `resolve-conflict` | Merge conflict during integration |
 
 ## Allowed results per Mode
@@ -19,9 +19,9 @@ Dispatches a Worker to implement, finalize, recover, repair, diagnose, or resolv
 |---|---|
 | implement-task | TASK_COMPLETE or blocker |
 | recover-task | TASK_COMPLETE, IMPLEMENTATION_DEFECT, or blocker |
-| finalize-slice | READY_FOR_CV or IMPLEMENTATION_DEFECT |
-| repair | READY_FOR_CV or blocker |
-| diagnose | READY_FOR_CV or blocker |
+| finalize-slice | READY_FOR_SCV or IMPLEMENTATION_DEFECT |
+| repair | READY_FOR_SCV or blocker |
+| diagnose | READY_FOR_SCV or blocker |
 | resolve-conflict | CONFLICT_RESOLVED or SEMANTIC_CONFLICT |
 
 recover-task only restores execution for the supplied Current Task.
@@ -41,9 +41,16 @@ It must not execute later Tasks or finalize the Slice.
 - Authority Excerpts (refs)
   Note: Authority Excerpts contain exact canonical type names, field names, state names, event names, and interface names. Executor must preserve these verbatim in the Worker Packet. Do not rewrite synonyms.
 - Dependency Output Summaries
+- Manifest Digest
+- Proof Obligations (PO list)
+- PO → Test Requirements
+- Risk Facts
+- Mandatory Proof Profiles
+- Minimum SCV Level
+- Source Snapshot
 - Editable tasks.md Region
 - Editable evidence.md Region
-- Allowed Scope
+- Allowed Code Scope
 - Forbidden Scope
 - Stop Conditions
 - Expected Result
@@ -72,26 +79,32 @@ Otherwise:
 - Current Task Content
 - Completed Task IDs
 - Previous Task Result Summary (optional)
+- Relevant PO IDs
+- Required RED/GREEN closure for this Task
 
 ### Finalize Context (finalize-slice only)
 
-- All Completed Tasks
-- Full Slice Verification Commands
-- Required Proof Profiles
-- Current tasks.md Region
-- Current evidence.md Region
+- PO coverage matrix
+- Actual test identifiers
+- RED/GREEN receipts
+- Full Slice verification
+- Current tree SHA
 
 ### Repair Context (repair only)
 
-- Failure Source: CV | finalize-slice | recover-task
+- Failure Source: SCV | finalize-slice | recover-task
 - Failed Criterion
 - Concrete Reproduction or Counterexample
 - Failure Signature
 - Original Slice Packet
+- Failed PO
+- SCV receipt
+- Whether Contract changed
+- Whether fresh Worker is required
 
 ### Diagnose Context (diagnose only)
 
-- Previous CV Failures
+- Previous SCV Failures
 - Previous Repair Attempts
 - Failure Signature
 - Original Slice Packet

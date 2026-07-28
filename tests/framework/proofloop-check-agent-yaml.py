@@ -5,6 +5,9 @@ Parses all agent .md files in .opencode/agents/ and validates YAML frontmatter.
 Checks that 'permission', 'bash', 'edit', 'task' sections exist and are well-formed.
 
 Usage: python proofloop-check-agent-yaml.py [--path <root-path>]
+
+DEPRECATED: This Python validator will be removed after TypeScript equivalence is verified.
+See .agents/runtime/ for the TypeScript replacement.
 """
 
 import os

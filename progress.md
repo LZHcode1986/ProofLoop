@@ -1,7 +1,9 @@
-# Project Progress (Template)
+> Human-readable project status snapshot.
+> This file is not an authoritative workflow state.
+> Before resuming, verify Git state, active Stage artifacts,
+> Manifest, Gate Receipts, Evidence, and unresolved Findings.
 
-> Copy this file to your project root. Maintained by Brain.
-> Records Stage Roadmap and project-level progress.
+# Project Progress
 
 ## Project Goal
 
@@ -9,34 +11,31 @@
 
 ## Current Status
 
-- Workflow State:
-- Primary Next Action:
-- Accountable Owner:
-- Active Skill or Agent:
-- Active Stage:
-- Current Artifact:
-- Last Passed Gate:
-- Current Finding or Blocker:
-- Pending Transition:
+This section references, rather than duplicates, authoritative sources.
+
+- Active Stage Plan: `<reference: tasks.md path>`
+- Active Manifest: `<reference: manifest path>`
+- Last Gate Receipt: `<reference: receipt path>`
+- Current Finding: `<finding ID or none>`
+- Recommended Continuation Role: `<role name>`
+
+## Resume Target
+
+- Preferred Agent Role:
+- Preferred Task Name:
+- Continuation Preference:
+- Reason / Finding ID:
+- Resume Preconditions:
 
 ## Artifact Status
 
-| Artifact | Type | Status | Gate | Owner | Updated By |
-|---|---|---|---|---|---|
+| Artifact | Human Status | Authoritative Reference | Last Verified |
+|---|---|---|---|
 
 ## Invalidated Artifacts
 
 | Artifact | Previous Status | Current Status | Caused By | Reason |
 |---|---|---|---|---|
-
-## Resume Target
-
-- Owner:
-- Phase:
-- Stage:
-- Artifact:
-- Continuation Handle:
-- Preconditions:
 
 ## Completed Artifacts
 

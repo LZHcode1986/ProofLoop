@@ -1,0 +1,24 @@
+name: ProofLoop Framework Tests
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+    branches: [main, v2]
+
+jobs:
+  framework-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: YAML frontmatter check
+        run: python tests/framework/proofloop-check-agent-yaml.py --path ${{ github.workspace }}
+      - name: Permission smoke test
+        run: python tests/framework/proofloop-permission-smoke-test.py --path ${{ github.workspace }}
+      - name: Smoke test
+        run: bash tests/framework/proofloop-smoke-test.sh

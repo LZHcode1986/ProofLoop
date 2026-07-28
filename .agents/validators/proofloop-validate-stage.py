@@ -10,6 +10,9 @@ Validates Stage plan mechanical facts:
 - Slice→Stage Closure covers all Outcomes
 
 Usage: python proofloop-validate-stage.py --stage <stage-id> [--path <root-path>]
+
+DEPRECATED: This Python validator will be removed after TypeScript equivalence is verified.
+See .agents/runtime/ for the TypeScript replacement.
 """
 
 import re

@@ -5,6 +5,9 @@ Checks that the current branch only modified its own SLICE/EVIDENCE markers.
 Ensures markers are unique, properly ordered, and non-slice regions unchanged.
 
 Usage: python proofloop-check-slice-doc-scope.py --stage <stage-id> --slice <slice-id> --base <base-ref>
+
+DEPRECATED: This Python validator will be removed after TypeScript equivalence is verified.
+See .agents/runtime/ for the TypeScript replacement.
 """
 
 import re

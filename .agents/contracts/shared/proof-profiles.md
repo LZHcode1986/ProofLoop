@@ -3,20 +3,52 @@
 > Proof Profiles are a Contract reference, not a Skill, and not a persistent verification history.
 > Each profile defines both Worker minimum evidence and Code Verifier refutation templates.
 
-Proof Profiles define both Worker minimum evidence and Code Verifier refutation templates.
+## Distinction: Proof Obligation vs Proof Profile
+
+| Concept | Definition | Who Defines |
+|---|---|---|
+| **Proof Obligation (PO)** | A specific, observable claim that must be proven for a Slice. "The API returns 403 when an unauthenticated user calls DELETE /resource." | Planner (per Slice) |
+| **Proof Profile** | A category of risk that defines how evidence of that class is typically gathered and refuted. "permission-boundary" | Referenced by Planner, computed by Validator, audited by SPV |
+
+Proof Obligations are per-Slice specifics. Proof Profiles are reusable templates for evidence strategy.
+
+## Profile selection responsibility
+
+```text
+Planner  → declares Risk Facts and candidate Profiles per Slice
+Validator → computes required Profiles from Risk Facts and Slice behavior
+SPV      → audits whether required Profiles are complete and correctly applied
+Worker   → executes evidence per declared Profiles (may not lower requirements)
+SCV      → may require additional Profiles based on observed risk
+```
+
+- **Planner** does not hand-select SCV level; it declares Risk Facts.
+- **Validator** maps Risk Facts to required Profiles.
+- **SPV** checks completeness against Risk Facts.
+- **Worker** cannot reduce or skip a declared Profile.
+- **SCV (Code Verifier)** can demand additional Profiles if evidence is insufficient.
+
+## Profile structure
 
 Each profile specifies:
 - **Applies to**: what kind of behavior this profile covers
+- **Minimum SCV level**: the lowest SCV tier that satisfies this profile
+- **Applicable Risk Facts**: which Risk Facts trigger this profile
+- **Required PO types**: what kinds of POs are needed
+- **Forbidden mocks**: what must NOT be mocked/substituted
+- **Minimum real boundary**: the minimum real integration surface
 - **Worker evidence**: minimum evidence the Worker must produce
 - **Verifier refutation**: adversarial refutation the CV must attempt
 
+---
+
 ## 1. api-shape
 
-Applies to:
-
-```text
-Frontend/backend response shape, schema, fixture, fetcher parsing path.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** public_api_change
+- **Required PO types:** response shape, status codes, error shape
+- **Forbidden mocks:** none
+- **Minimum real boundary:** HTTP request/response or equivalent
 
 Worker evidence:
 
@@ -37,11 +69,11 @@ Verifier refutation:
 
 ## 2. route-default
 
-Applies to:
-
-```text
-Omitted parameters, default/latest/current/default behavior.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** public_api_change
+- **Required PO types:** explicit vs default behavior comparison
+- **Forbidden mocks:** none
+- **Minimum real boundary:** HTTP request/response or equivalent
 
 Worker evidence:
 
@@ -60,11 +92,11 @@ Verifier refutation:
 
 ## 3. ui-cardinality
 
-Applies to:
-
-```text
-Per-item / all / each / per-item UI requirements.
-```
+- **Minimum SCV level:** 1 (unit/component)
+- **Applicable Risk Facts:** none specific
+- **Required PO types:** element count, item binding
+- **Forbidden mocks:** none
+- **Minimum real boundary:** rendered UI output
 
 Worker evidence:
 
@@ -84,11 +116,11 @@ Verifier refutation:
 
 ## 4. empty-state
 
-Applies to:
-
-```text
-Per-section empty state, partial empty state, combined empty state.
-```
+- **Minimum SCV level:** 1 (unit/component)
+- **Applicable Risk Facts:** none specific
+- **Required PO types:** state combinations
+- **Forbidden mocks:** none
+- **Minimum real boundary:** rendered UI output
 
 Worker evidence:
 
@@ -109,11 +141,11 @@ Verifier refutation:
 
 ## 5. integration-path
 
-Applies to:
-
-```text
-Real user path across page, API, component, and state management.
-```
+- **Minimum SCV level:** 3 (real environment)
+- **Applicable Risk Facts:** external_side_effect, cross_process_behavior
+- **Required PO types:** full-path behavior, end-to-end observable outcome
+- **Forbidden mocks:** all external collaborators must be real
+- **Minimum real boundary:** full system integration surface
 
 Worker evidence:
 
@@ -133,11 +165,11 @@ Verifier refutation:
 
 ## 6. state-transition
 
-Applies to:
-
-```text
-State machine transitions, legal and illegal transitions.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** core_state_machine
+- **Required PO types:** legal transition, illegal rejection, state invariance
+- **Forbidden mocks:** state store must be real
+- **Minimum real boundary:** state machine or domain logic boundary
 
 Worker evidence:
 
@@ -159,11 +191,11 @@ Verifier refutation:
 
 ## 7. persistence-roundtrip
 
-Applies to:
-
-```text
-Save and reload behavior, data integrity across sessions.
-```
+- **Minimum SCV level:** 3 (real environment)
+- **Applicable Risk Facts:** persistent_state
+- **Required PO types:** save, reload, modify, delete
+- **Forbidden mocks:** database/persistence layer must be real
+- **Minimum real boundary:** database or persistent store
 
 Worker evidence:
 
@@ -185,11 +217,11 @@ Verifier refutation:
 
 ## 8. permission-boundary
 
-Applies to:
-
-```text
-Access control, authorization checks, data isolation.
-```
+- **Minimum SCV level:** 3 (real environment)
+- **Applicable Risk Facts:** authorization
+- **Required PO types:** access granted, access denied, unauthenticated rejection, privilege escalation
+- **Forbidden mocks:** auth system must be real
+- **Minimum real boundary:** real authentication/authorization system
 
 Worker evidence:
 
@@ -211,11 +243,11 @@ Verifier refutation:
 
 ## 9. error-recovery
 
-Applies to:
-
-```text
-Error handling, retry, cancel, resource cleanup.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** irreversible_operation, external_side_effect
+- **Required PO types:** error response, recovery state, resource cleanup
+- **Forbidden mocks:** error triggers must be real or realistically simulated
+- **Minimum real boundary:** error boundary of the component
 
 Worker evidence:
 
@@ -237,11 +269,11 @@ Verifier refutation:
 
 ## 10. idempotency
 
-Applies to:
-
-```text
-Repeated identical operations produce the same result.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** concurrency, irreversible_operation
+- **Required PO types:** repeatable operation, side effect idempotence
+- **Forbidden mocks:** operation under test must be real
+- **Minimum real boundary:** operation boundary
 
 Worker evidence:
 
@@ -261,11 +293,11 @@ Verifier refutation:
 
 ## 11. frontend-backend-contract
 
-Applies to:
-
-```text
-API contract compliance between frontend and backend.
-```
+- **Minimum SCV level:** 2 (isolated service)
+- **Applicable Risk Facts:** public_api_change
+- **Required PO types:** request shape, response shape, error shape, status codes
+- **Forbidden mocks:** both sides must be real or contract-tested
+- **Minimum real boundary:** API contract surface
 
 Worker evidence:
 
@@ -286,11 +318,11 @@ Verifier refutation:
 
 ## 12. stream-lifecycle
 
-Applies to:
-
-```text
-Streaming data, WebSocket, SSE, long-lived connections.
-```
+- **Minimum SCV level:** 3 (real environment)
+- **Applicable Risk Facts:** cross_process_behavior, external_side_effect
+- **Required PO types:** connection, data flow, clean close, error handling, cancel handling
+- **Forbidden mocks:** stream infrastructure must be real
+- **Minimum real boundary:** real transport (WebSocket, SSE, etc.)
 
 Worker evidence:
 
@@ -313,11 +345,11 @@ Verifier refutation:
 
 ## 13. concurrency-conflict
 
-Applies to:
-
-```text
-Concurrent access, race conditions, optimistic locking.
-```
+- **Minimum SCV level:** 3 (real environment)
+- **Applicable Risk Facts:** concurrency
+- **Required PO types:** concurrent access, conflict detection, conflict resolution, data integrity
+- **Forbidden mocks:** shared resource must be real
+- **Minimum real boundary:** real shared resource (database, file, etc.)
 
 Worker evidence:
 
@@ -337,8 +369,18 @@ Verifier refutation:
 - fail if silent data loss occurs
 ```
 
-## Profile selection
+## Profile selection reference
 
-Worker selects the relevant profile(s) based on the Slice behavior. CV uses the declared profile for profile-specific refutation after completing independent refutation.
+| Risk Fact | Default Profile(s) |
+|---|---|
+| public_api_change | api-shape, route-default, frontend-backend-contract |
+| persistent_state | persistence-roundtrip |
+| authorization | permission-boundary |
+| migration | persistence-roundtrip (if data), api-shape (if schema) |
+| concurrency | concurrency-conflict, idempotency |
+| external_side_effect | integration-path, error-recovery |
+| irreversible_operation | error-recovery, idempotency |
+| cross_process_behavior | stream-lifecycle, integration-path |
+| core_state_machine | state-transition |
 
 Use `None` only when no listed profile fits the actual Slice behavior.

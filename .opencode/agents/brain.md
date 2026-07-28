@@ -77,18 +77,20 @@ Route directly to General only when all are true:
 - no material semantic impact;
 - bounded objective and verification.
 
-### Persistence First
+### Persistence First — Layered Reading
 
-After any Skill or Agent returns, re-read persisted facts before advancing state:
+After any Skill or Agent returns, re-read persisted facts in priority order before advancing state:
 
-- `CONTEXT.md`
-- `PRD.md`
-- `tech-spec/*`
-- Hard Parts Register
-- `progress.md`
-- Active Stage artifacts
-- Gate results
-- Git status and diff
+1. Git and current working tree
+2. Authority artifacts (`CONTEXT.md`, `PRD.md`, `tech-spec/*`)
+3. Active Stage `tasks.md` and `evidence.md`
+4. Manifest and Gate Receipts
+5. Unresolved Findings
+6. `progress.md` — for quick orientation only
+7. Agent narrative — lowest priority
+
+> `progress.md` is a human-readable snapshot.
+> It must never independently authorize a transition or completion verdict.
 
 Do not advance from conversation memory or Agent narrative alone.
 
@@ -178,6 +180,7 @@ Technical Clarification is optional. When unnecessary, go directly from confirme
 STAGE_SELECTION
 → STAGE_PLANNING
 → STAGE_EXECUTION
+→ STAGE_GATE
 → STAGE_REVIEW
 → STAGE_CLOSE
 → RECOMPUTE_REMAINING_WORK
@@ -186,6 +189,8 @@ STAGE_SELECTION
 ```
 
 `STAGE_PLANNING` includes Planner's internal Validator and SPV Gates. SPV is not a Brain phase.
+
+`STAGE_GATE` is internal to the Executor. Brain does not directly dispatch a Gate phase.
 
 ### Cross-Loop Routing
 
@@ -212,8 +217,8 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `HARD_PART_VALIDATION` | Blocking Hard Part unresolved | Agent | `brain/research.md` or `brain/prototype.md` | `HARD_PART_RESULT_READY` | Recompute authority readiness |
 | `STAGE_SELECTION` | Work Items exist and blocking Hard Parts resolved or deferred | Brain | `codebase-design` when needed | `STAGE_GOAL_SELECTED` | `STAGE_PLANNING` |
 | `STAGE_PLANNING` | Stage Goal and Work Items selected | Planner | `brain/plan-stage.md` | `PLAN_READY` | `STAGE_EXECUTION` |
-| `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `EXECUTION_HANDOFF_READY` | `STAGE_REVIEW` |
-| `STAGE_REVIEW` | Execution handoff complete | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
+| `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
+| `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
@@ -378,7 +383,7 @@ stage_plan:
   spv: PLAN_READY
 ```
 
-`progress.md` stores global invalidation and resume summaries. Each affected artifact stores its own status and reason.
+`progress.md` stores human-readable invalidation summaries and resume orientation. Each affected artifact stores its own authoritative status and reason.
 
 Only invalidate actual dependants:
 
@@ -412,16 +417,25 @@ After return:
 - reject unexplained out-of-scope changes;
 - rehydrate before routing.
 
-Session handling:
+### Continuation Rules
 
-```text
-Safe handle available and inputs unchanged
-→ continue original Agent.
+Brain only maintains semantic continuation rules. The programming Agent environment (Host Adapter) is responsible for locating and resuming the original session.
 
-Handle lost or authoritative inputs changed
-→ create fresh Agent;
-→ rebuild from persisted artifacts and Gates.
-```
+Priority for resuming roles:
+1. Planner — plan correction prefers the original Planner
+2. Worker — consecutive tasks on the same Slice prefer the original Worker
+3. SCV — pure execution interruption with unchanged input may continue; code, test, or Contract changes require a fresh SCV
+4. Stage Reviewer — pure execution interruption with unchanged Stage may continue; substantive Stage changes require a fresh Reviewer
+
+Continuation must not bypass Validator, SPV, SCV, or Stage Gate.
+
+Session recovery when the continuation handle is lost:
+- Read current Contract
+- Read current code and diff
+- Read current Finding
+- Read related Receipts
+- Create a recovery Agent
+- Do not resend unrelated full project context
 
 ## Authority Persistence Boundary
 
@@ -461,6 +475,28 @@ Never persist the following Prototype result statuses directly into the Hard Par
 - PROTOTYPE_INCONCLUSIVE
 - RESEARCH_REQUIRED
 - RUNTIME_BLOCKER
+
+## Final Acceptance — PROJECT_ACCEPTANCE
+
+A PROJECT_ACCEPTANCE phase evaluates whether the entire project is complete.
+
+Project Review is dispatched through the `brain/project-review.md` contract.
+
+### Trigger conditions
+
+- All Architecture Work Items are closed
+- All Stages are ACCEPTED
+- The original PRD is still the current valid version
+
+### Results
+
+| Result | Meaning |
+|---|---|
+| `PROJECT_ACCEPTED` | Project satisfies the PRD. Terminal reached. |
+| `PROJECT_REJECTED` | Project fails acceptance criteria. Route to appropriate authority loop. |
+| `PROJECT_BLOCKED` | Acceptance cannot be completed due to external blocker or unresolved finding. |
+
+PROJECT_ACCEPTANCE is evaluated by Brain as an authority action. It is not dispatched to an Agent.
 
 ## Terminal Conditions
 

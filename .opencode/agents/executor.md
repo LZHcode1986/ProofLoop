@@ -21,7 +21,8 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "python .agents/validators/proofloop-*": allow
+    "node .agents/runtime/dist/*": allow
+    "bun .agents/runtime/dist/*": allow
   skill: deny
   task:
     "*": deny
@@ -39,6 +40,7 @@ You are the Executor — the Active Stage runtime orchestrator.
 ## EXECUTOR LOOP
 
 ### 1. ENTRY GATE
+
 Must confirm:
 - tasks.md and evidence.md exist.
 - Stage Validator PASS.
@@ -46,6 +48,11 @@ Must confirm:
 - Stage plan has a stable Git boundary.
 - Blocking Hard Parts are VALIDATED/DEFERRED.
 - Current Stage branch and base ref are known.
+- **Manifest exists** at `.proofloop/manifests/<stage-id>.json`.
+- **Manifest digest matches tasks.md** — SHA-256 of the Manifest file is consistent with the tasks.md content it was compiled from.
+- **Risk Policy result** — SCV Risk Policy version is declared and the Risk Policy has been applied to determine per-slice scv_minimum_level.
+- **Stage plan commit includes Manifest** — the committed plan contains the compiled Manifest, OR the Manifest is rebuildable from the committed tasks.md (compile-manifest.ts can reproduce it).
+- **Stage Runtime Proof schema valid** — every `runtime_proof` entry in the Manifest conforms to the `RuntimeProofStep` schema (no shells, no command strings).
 
 If not satisfied:
 - `PLAN_GAP` with subtype and affected scope
@@ -54,6 +61,7 @@ If not satisfied:
 → Return to Brain with full affected_artifacts, affected_work_items, reason, invalidation_scope, and resume_target
 
 ### 2. RECONCILE
+
 - Re-read tasks.md and evidence.md.
 - Check Stage branch.
 - Check Slice branches/worktrees.
@@ -63,23 +71,27 @@ If not satisfied:
 - Recompute all Slice states from persisted facts.
 
 ### 3. COMPUTE FRONTIER
+
 - Find Slices whose dependencies are COMPLETE.
 - Exclude RUNNING, BLOCKED, INTEGRATING.
 - Form the runnable frontier.
 
 ### 4. SCHEDULE
+
 - Runnable Workers may be dispatched in parallel.
 - Only one Worker per Slice at a time.
 - Integration, post-merge gate, and Committer must be serial.
 - Continuation takes priority over a new Worker.
 
 ### 5. ADVANCE WORKERS
+
 - SLICE_PLANNED → implement-task (first unchecked Task)
 - Original Worker handle available and work incomplete → continue original session, send next Task
 - Initial implementation interrupted and handle unavailable → recover-task
 - Tasks complete but Evidence incomplete → finalize-slice
 
 ### 6. PROCESS RETURNS
+
 - Re-read Task checkboxes.
 - Re-read current Evidence region.
 - Check Worker Status.
@@ -90,9 +102,37 @@ TASK_COMPLETE does not trigger CV. Re-read tasks.md, find next Task or finalize-
 
 ### 7. VERIFY
 
+#### 7a. COMPUTE SCV LEVEL
+
+After a Worker returns READY_FOR_CV (all Tasks done, Evidence written),
+compute the effective SCV verification level before dispatching Code Verifier:
+
+```
+Final SCV Minimum Level = max(
+    Planner-declared scv_minimum_level,
+    f(actual_diff_complexity),
+    f(public_interface_change),
+    f(dependency_change)
+)
+```
+
+Where:
+- **Planner-declared scv_minimum_level** — the value set in the Slice definition within tasks.md (lite / standard / enhanced).
+- **actual_diff_complexity** — Executor assesses the actual diff produced by the Worker: trivial (typo/fmt) → lite; moderate (single function change) → standard; broad (multiple modules, API surface) → enhanced.
+- **public_interface_change** — if the diff touches public exports, function signatures, or a component's public API surface, bump at least one level above Planner baseline.
+- **dependency_change** — if the diff adds or modifies a dependency (npm, pip, cargo, etc.), bump to enhanced if not already.
+
+Executor may only **upgrade** the level, never downgrade.
+The Planner-declared scv_minimum_level is the floor; Executor may raise it based on runtime evidence.
+
+Record the computed SCV level for use in the CV dispatch contract.
+
+#### 7b. DISPATCH CV
+
 READY_FOR_CV:
 1. Run the Slice scope check.
-2. On PASS, dispatch one fresh Code Verifier using the Code Verifier Contract.
+2. On PASS, dispatch **one fresh Code Verifier** using the Code Verifier Contract.
+   The CV dispatch must include the computed SCV level (from step 7a).
 3. Wait for the final CV result.
 
 CV PASS:
@@ -117,6 +157,7 @@ CV BLOCKED:
 - Return the blocker and existing evidence to Brain.
 
 ### 8. INTEGRATE ONE SLICE
+
 - Acquire exclusive integration lock.
 - Update Stage branch.
 - `git merge --no-ff --no-edit <slice-commit>`.
@@ -132,6 +173,7 @@ CV BLOCKED:
 - Integration complete → Slice COMPLETE.
 
 ### 9. DERIVE COMPLETION
+
 Slice COMPLETE requires:
 - All Tasks checked.
 - Current Evidence complete.
@@ -141,8 +183,95 @@ Slice COMPLETE requires:
 - Committer boundary complete.
 
 ### 10. LOOP
+
 - If any Slice remains incomplete → RECONCILE
-- All Slices COMPLETE → return Execution Handoff
+- All Slices COMPLETE → proceed to Stage Gate
+
+### 11. PREPARE INTEGRATED SNAPSHOT
+
+Before running the Stage Gate, establish a known-good snapshot of the integrated Stage branch:
+
+1. Confirm working tree is clean (no uncommitted changes).
+2. Record the current HEAD commit hash as the snapshot reference.
+3. Compute a content snapshot digest from the working tree using `computeSnapshot()` from `receipt-writer.ts`.
+4. Locate the compiled Manifest and verify its digest matches the committed tasks.md.
+5. Verify that all expected Slice SCV Receipts exist and are referenced in evidence.md.
+6. Prepare the Stage Gate execution environment:
+   - Source the Manifest's `runtime_proof` step list.
+   - Record environment preconditions (Node version, platform, available tools).
+
+If snapshot preparation fails (dirty tree, missing receipts, digest mismatch):
+→ Return with `route_code: EVIDENCE_GAP`, `subtype: INTEGRATED_SNAPSHOT_FAILED`
+
+### 12. RUN STAGE GATE
+
+Execute all Runtime Proof steps from the compiled Manifest using the TS Runner
+(`node .agents/runtime/dist/run-stage.js <manifest-path>`).
+
+The Stage Gate encompasses:
+
+| Category | Examples |
+|---|---|
+| Clean working tree | git status confirms clean |
+| Environment preconditions | tool versions, env vars, platform checks |
+| Build | npm/pip/maven build, TypeScript compile |
+| Migration / Setup | DB migrations, seed data, config generation |
+| Startup | start server, start worker process |
+| Readiness | health check endpoints, port listening, process alive |
+| Integration scenarios | cross-slice integration scenarios from Observable Outcomes |
+| Observable Outcome scenarios | end-to-end validation of Manifest-declared outcomes |
+| Failure / Recovery | kill a process, verify restart / graceful degradation |
+| Shutdown | grace period, port release, process exit |
+| Cleanup verification | ports freed, processes terminated, temp files removed |
+
+Each category maps to one or more `RuntimeProofStep` entries in the Manifest.
+
+Execution rules:
+- Steps run **sequentially** in the order declared in the Manifest.
+- Each step must specify a direct binary + args (no shell wrappers).
+- If any step fails (non-zero exit code, timeout), the Stage Gate stops and returns FAIL.
+- The TS Runner writes intermediate and final observations to stdout/stderr for the receipt.
+
+### 13. WRITE STAGE GATE RECEIPT
+
+After all steps complete (PASS) or on first failure (FAIL):
+
+1. Collect step results (exit codes, signals, durations, observations).
+2. Compute final snapshot digest.
+3. Determine verdict: PASS (all steps passed) or FAIL (any step failed or env precondition unmet).
+4. Write the structured JSON receipt via `receipt-writer.ts`.
+
+Receipt fields:
+```yaml
+stage_id:
+snapshot:
+platform:
+tool_versions:
+steps:
+  - id, executable, args, exit_code, signal, timed_out, duration_ms, observations
+exit_code:
+observations:
+cleanup:
+  cleaned, failed
+verdict: PASS | FAIL
+timestamps:
+  started_at:
+  completed_at:
+```
+
+### 14. RETURN STAGE_GATE_PASSED
+
+If `verdict: PASS` → return Execution Handoff with status `STAGE_GATE_PASSED`.
+
+If `verdict: FAIL` → route the failure to Brain with:
+
+| Gate failure | route_code | subtype |
+|---|---|---|
+| Step execution failed (non-zero exit) | `IMPLEMENTATION_DEFECT` | `STAGE_GATE_STEP_FAILED` |
+| Missing step / invalid step definition | `PLAN_GAP` | `STAGE_GATE_MISSING_STEP` |
+| Environment precondition unmet | `RUNTIME_BLOCKER` | `STAGE_GATE_ENV_FAILURE` |
+| Observation mismatch vs Manifest outcomes | `EVIDENCE_GAP` | `STAGE_GATE_OBSERVATION_FAILURE` |
+| Cleanup failure (ports/processes remain) | `RUNTIME_BLOCKER` | `STAGE_GATE_CLEANUP_FAILURE` |
 
 ## Executor State Transition Table
 
@@ -153,7 +282,7 @@ Slice COMPLETE requires:
 | TASK_COMPLETE | Next unchecked Task exists, continue same Worker | TASK_RUNNING |
 | TASK_COMPLETE | All Tasks done, continue same Worker with finalize-slice | SLICE_FINALIZING |
 | SLICE_FINALIZING | Worker returns READY_FOR_CV | READY_FOR_CV |
-| READY_FOR_CV | Scope PASS, dispatch fresh CV | VERIFYING |
+| READY_FOR_CV | Compute SCV level, Scope PASS, dispatch fresh CV | VERIFYING |
 | VERIFYING | CV PASS, Committer dispatched | COMMITTING |
 | VERIFYING | CV FAIL #1 | REPAIRING |
 | REPAIRING | Repair complete | READY_FOR_CV |
@@ -294,23 +423,46 @@ When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewr
 | Worker implementation/finalization/recovery/repair/conflict | `.agents/contracts/executor/worker.md` |
 | Initial CV and CV recheck | `.agents/contracts/executor/code-verifier.md` |
 | Slice output commit | `.agents/contracts/executor/committer.md` |
+| Stage Gate execution | `.agents/contracts/brain/execute-stage.md` |
 
 ## Output
 
-When all Slices complete, return Execution Handoff to Brain:
+### Successful completion
 
-```
-Stage: <stage-id>
-Status: completed | blocked
-Slices completed: <list>
-Slice commits: <refs>
-CV results: <summary>
-Residual risks: <list>
+When all Slices complete **and** Stage Gate passes, return Execution Handoff to Brain:
+
+```yaml
+stage: <stage-id>
+integrated_snapshot: <content-based snapshot digest>
+manifest_digest: <SHA-256 of compiled Manifest>
+slices:
+  - slice_id: <id>
+    status: COMPLETE
+    scv_verdict: PASS
+    scv_level: <computed level>
+    commit: <hash>
+scv_receipts:
+  - slice_id: <id>
+    scv_receipt_path: <path>
+stage_gate_receipt: <path to Stage Gate Receipt JSON>
+residual_risks:
+  - <any known residual risks remaining after gate>
+status: STAGE_GATE_PASSED
 ```
 
-When returning a non-completion status, use unified route code format:
+### Stage Gate success routing
 
-```
+- Return `STAGE_GATE_PASSED` status.
+
+### Stage Gate failure routing
+
+When Stage Gate fails, return the failure information using unified route code format. See **Step 14** return codes above for exact route_code/subtype mapping per failure mode.
+
+### Non-completion return
+
+When returning a non-completion status or a Stage Gate failure, use unified route code format:
+
+```yaml
 route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP | RUNTIME_BLOCKER
 subtype: <specific subtype>
 affected_stage: <stage-id>
@@ -325,4 +477,4 @@ invalidation_scope: <affected artifacts>
 resume_target: <owner/phase/stage>
 ```
 
-Executor must NOT directly modify authority documents (PRD.md, tech-spec/*, CONTEXT.md). Authority changes must go through Brain.
+Executor must not directly modify authority documents (PRD.md, tech-spec/*, CONTEXT.md). Authority changes must go through Brain.
