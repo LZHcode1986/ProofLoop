@@ -29,9 +29,9 @@ jobs:
         run: npm ci
         working-directory: .agents/runtime
       - name: YAML frontmatter check
-        run: python tests/framework/proofloop-check-agent-yaml.py --path ${{ github.workspace }}
+        run: python tests/framework/proofloop-check-agent-yaml.py
       - name: Permission smoke test
-        run: python tests/framework/proofloop-permission-smoke-test.py --path ${{ github.workspace }}
+        run: python tests/framework/proofloop-permission-smoke-test.py
       - name: TypeScript typecheck
         run: npx tsc --noEmit
         working-directory: .agents/runtime
