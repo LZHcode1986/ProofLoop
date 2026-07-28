@@ -75,6 +75,10 @@ None
 
 None
 
+### Risk Facts
+
+- none
+
 ### Proof Plan
 
 Expected to fail validation due to missing observable outcome.

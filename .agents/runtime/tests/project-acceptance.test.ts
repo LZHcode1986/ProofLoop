@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runProjectAcceptance } from '../src/run-stage.js';
+import { computeSnapshot } from '../src/receipt-writer.js';
 import type { ProjectAcceptanceManifest } from '../src/schemas.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -10,7 +11,7 @@ let tmpDir: string;
 
 const BASE_MANIFEST: ProjectAcceptanceManifest = {
   project_id: 'test-project',
-  source_digest: 'abc123',
+  expected_snapshot: computeSnapshot(process.cwd()),
   prd_goals: ['Implement core feature X'],
   acceptance_criteria: ['AC-01: Feature X works'],
   stage_review_receipts: ['stage-review-S01.json'],

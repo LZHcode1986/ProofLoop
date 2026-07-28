@@ -80,6 +80,10 @@ None
 
 None
 
+### Risk Facts
+
+- none
+
 ### Proof Plan
 
 Check all tasks are checked off.
@@ -139,6 +143,10 @@ S1: Completed tasks
 ### Dependencies
 
 - S1
+
+### Risk Facts
+
+- none
 
 ### Proof Plan
 

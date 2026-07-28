@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { getPlatformInfo } from './platform-adapter.js';
 // ── Snapshot computation ───────────────────────────────────────────────────────
 /**
@@ -174,15 +175,49 @@ export function writeProjectReviewReceipt(options) {
 }
 // ── CLI entry point ─────────────────────────────────────────────────────────────
 /**
- * CLI usage: `node dist/receipt-writer.js <json-input>`
+ * Determine whether this module is being run as a script (CLI entry point).
  *
- * Parses the JSON input and calls writeStageReviewReceipt(), outputting
+ * Compares the resolved file path against the current module URL to handle
+ * cross-platform differences (Windows backslashes vs forward slashes).
+ */
+function isScriptEntry() {
+    const scriptPath = process.argv[1];
+    if (!scriptPath)
+        return false;
+    try {
+        const resolved = path.resolve(scriptPath);
+        const currentFile = fileURLToPath(import.meta.url);
+        return resolved === currentFile;
+    }
+    catch {
+        // Fallback: check basename
+        const base = path.basename(scriptPath);
+        return base === 'receipt-writer.js' || base === 'receipt-writer.ts';
+    }
+}
+/**
+ * CLI usage:
+ *   `node dist/receipt-writer.js stage-review <json-input>`
+ *   `node dist/receipt-writer.js project-review <json-input>`
+ *
+ * Parses the JSON input and calls the appropriate receipt writer, outputting
  * the resulting receipt path as JSON to stdout.
  */
-if (import.meta.url === `file://${process.argv[1]}`) {
-    const input = JSON.parse(process.argv[2]);
-    const result = writeStageReviewReceipt(input);
-    console.log(JSON.stringify(result));
+if (isScriptEntry()) {
+    const mode = process.argv[2]; // 'stage-review' or 'project-review'
+    const input = JSON.parse(process.argv[3]);
+    if (mode === 'stage-review') {
+        const result = writeStageReviewReceipt(input);
+        console.log(JSON.stringify(result));
+    }
+    else if (mode === 'project-review') {
+        const result = writeProjectReviewReceipt(input);
+        console.log(JSON.stringify(result));
+    }
+    else {
+        console.error('Usage: node receipt-writer.js <stage-review|project-review> <json-input>');
+        process.exit(1);
+    }
 }
 export function validateReceipt(receiptPath) {
     try {

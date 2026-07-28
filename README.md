@@ -88,7 +88,6 @@ Before resuming work, always verify:
 ### Prerequisites
 
 - **Node.js** 18+ (for TypeScript runtime — authoritative Gate tooling)
-- **Python** 3.10+ (transitional fallback only — see Legacy Python validators below)
 - **npm** (for TypeScript runtime dependencies)
 
 ### TypeScript Runtime
@@ -108,7 +107,7 @@ Available scripts:
 | `npm run build` | Compile TypeScript |
 | `npm test` | Run unit tests |
 | `npm run typecheck` | TypeScript type checking |
-| `npm run validate-stage` | Validate Stage plan structure (TS equivalent) |
+| `npm run validate-stage` | Validate Stage plan structure |
 | `npm run compile-manifest` | Compile Manifest JSON from tasks.md |
 | `npm run run-stage` | Execute Stage Runtime Proof |
 
@@ -129,12 +128,12 @@ node .agents/runtime/dist/run-stage.js --stage S01 --path .
 
 Stage plan validation uses two levels of gate:
 
-1. **Mechanical Gate** — runs `npm run validate-stage` (TypeScript). This is the authoritative gate. The legacy Python equivalent `proofloop-validate-stage.py` exists as a transitional fallback only and will be removed after full TS equivalence is confirmed.
+1. **Mechanical Gate** — runs `npm run validate-stage` (TypeScript). This is the authoritative gate.
 2. **Semantic Gate** — run by SPV (Stage Proof Verifier), a separate agent dispatched by the Planner.
 
-### Legacy Python validators
+### Validator implementation
 
-Python validators in `.agents/validators/` are **deprecated** and serve only as a transitional fallback. The authoritative Gate is TypeScript (`npm run validate-stage`). Do not add new features to Python validators.
+All validators are implemented in TypeScript under `.agents/runtime/`. The authoritative Gate is `npm run validate-stage` (TypeScript).
 
 ---
 
@@ -174,7 +173,6 @@ If a continuation handle is lost:
   contracts/           Agent dispatch contracts (Brain, Executor, Planner, etc.)
   runtime/             TypeScript framework tools (validator, compiler, runner)
   skills/              Agent skills (TDD, code review, diagnose)
-  validators/          Legacy Python validators (deprecated)
 
 delivery/stages/       Stage artifacts (tasks.md, evidence.md)
 tech-spec/             Technical specifications, architecture, hard parts register

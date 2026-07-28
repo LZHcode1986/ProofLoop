@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from 'node:fs';
 import { ProjectAcceptanceManifestSchema } from './schemas.js';
+import type { ProjectAcceptanceManifest } from './schemas.js';
 import { runProjectAcceptance } from './run-stage.js';
 
 const [manifestPath, outputDir] = process.argv.slice(2);
@@ -15,8 +16,21 @@ if (!existsSync(manifestPath)) {
   process.exit(1);
 }
 
-const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-const manifest = ProjectAcceptanceManifestSchema.parse(parsed);
+let parsed: unknown;
+try {
+  parsed = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+} catch (err) {
+  console.error(`Failed to parse manifest JSON: ${err}`);
+  process.exit(1);
+}
+
+let manifest: ProjectAcceptanceManifest;
+try {
+  manifest = ProjectAcceptanceManifestSchema.parse(parsed) as ProjectAcceptanceManifest;
+} catch (err) {
+  console.error(`Manifest schema validation failed:\n${err}`);
+  process.exit(1);
+}
 
 const result = await runProjectAcceptance(manifest, outputDir);
 

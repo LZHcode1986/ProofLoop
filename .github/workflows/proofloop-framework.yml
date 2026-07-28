@@ -43,3 +43,40 @@ jobs:
         working-directory: .agents/runtime
       - name: Check dist/ is up-to-date
         run: git diff --exit-code -- .agents/runtime/dist/
+      - name: Check no untracked dist/ files
+        run: |
+          untracked=$(git status --porcelain --untracked-files=all .agents/runtime/dist/ | wc -l)
+          if [ "$untracked" -ne 0 ]; then
+            echo "Found $untracked untracked file(s) in dist/. Run npm run build and commit them."
+            git status --porcelain --untracked-files=all .agents/runtime/dist/
+            exit 1
+          fi
+
+  flow-fixtures:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+        working-directory: .agents/runtime
+      - name: Build TypeScript
+        run: npm run build
+        working-directory: .agents/runtime
+      - name: Validate positive fixture
+        run: node scripts/fixture-check.mjs ../../tests/fixtures/positive/tasks.md
+        working-directory: .agents/runtime
+      - name: Validate SCV fixture
+        run: node scripts/fixture-check.mjs ../../tests/fixtures/scv/tasks.md
+        working-directory: .agents/runtime
+      - name: Validate Stage Gate fixture
+        run: node scripts/fixture-check.mjs ../../tests/fixtures/stage-gate/tasks.md
+        working-directory: .agents/runtime
+      - name: Validate Continuation fixture
+        run: node scripts/fixture-check.mjs ../../tests/fixtures/continuation/tasks.md
+        working-directory: .agents/runtime

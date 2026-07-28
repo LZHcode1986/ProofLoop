@@ -54,6 +54,10 @@ Must confirm:
 - **Stage plan commit includes Manifest** — the committed plan contains the compiled Manifest, OR the Manifest is rebuildable from the committed tasks.md (compile-manifest.ts can reproduce it).
 - **Stage Runtime Proof schema valid** — every `runtime_proof` entry in the Manifest conforms to the `RuntimeProofStep` schema (no shells, no command strings).
 
+> **Note:** The Entry Gate conditions above apply only to Active Stage execution.
+> Project Acceptance mode does NOT use Executor. Brain handles PROJECT_ACCEPTANCE
+> directly via `.agents/contracts/brain/execute-project-acceptance.md`.
+
 If not satisfied:
 - `PLAN_GAP` with subtype and affected scope
 - `AUTHORITY_GAP` with subtype and affected scope
@@ -424,6 +428,17 @@ When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewr
 | Initial SCV and SCV recheck | `.agents/contracts/executor/code-verifier.md` |
 | Slice output commit | `.agents/contracts/executor/committer.md` |
 | Stage Gate execution | `.agents/contracts/brain/execute-stage.md` |
+
+## Project Acceptance Manifest
+
+Project Acceptance Manifest generation and Project E2E execution are **NOT** Executor
+responsibilities. Brain handles the entire PROJECT_ACCEPTANCE phase directly:
+
+- Manifest generation: Brain calls `compile-project-acceptance` tool
+- E2E execution: Brain calls `node .agents/runtime/dist/run-project-acceptance.js`
+- Review: Brain dispatches Stage Reviewer with `review_scope: project`
+
+See `.agents/contracts/brain/execute-project-acceptance.md` for the full contract.
 
 ## Output
 

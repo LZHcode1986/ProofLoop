@@ -95,10 +95,10 @@ export type ScvReceipt = z.infer<typeof ScvReceipt>;
 
 export const ProjectAcceptanceManifestSchema = z.object({
   project_id: z.string(),
-  source_digest: z.string(),
-  prd_goals: z.array(z.string()),
-  acceptance_criteria: z.array(z.string()),
-  stage_review_receipts: z.array(z.string()),
+  expected_snapshot: z.string(),
+  prd_goals: z.array(z.string().min(1)).min(1),
+  acceptance_criteria: z.array(z.string().min(1)).min(1),
+  stage_review_receipts: z.array(z.string().min(1)).min(1),
   e2e_steps: z.array(RuntimeProofStep),
   compiled_at: z.string().optional(),
 });
@@ -110,6 +110,8 @@ export const ProjectE2EReceiptSchema = z.object({
   snapshot: z.string(),
   manifest_digest: z.string().optional(),
   source_snapshot: z.string().optional(),
+  expected_snapshot: z.string().optional(),
+  executed_snapshot: z.string().optional(),
   steps: z.array(z.object({
     step_id: z.string(),
     exit_code: z.number().int().nullable(),

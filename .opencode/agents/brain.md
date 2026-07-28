@@ -20,6 +20,7 @@ permission:
     "Get-ChildItem *": allow
     "node .agents/runtime/dist/receipt-writer.js *": allow
     "node .agents/runtime/dist/run-stage.js *": allow
+    "node .agents/runtime/dist/run-project-acceptance.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny
@@ -238,7 +239,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
 | `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
-| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Executor → Runner → Stage Reviewer (via Brain dispatch) | Executor generates ProjectAcceptanceManifest; Runner executes via `runProjectAcceptance()`; Reviewer via `brain/stage-review.md` with `review_scope: project` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
+| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain (via `brain/execute-project-acceptance.md`) | Brain calls `compile-project-acceptance` tool to generate Manifest; Brain calls `run-project-acceptance` CLI to execute E2E; Stage Reviewer via `brain/stage-review.md` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
 
@@ -514,14 +515,15 @@ Brain dispatches the following sequence:
 ```text
 PROJECT_ACCEPTANCE
 1. MANIFEST GENERATION
-   → Brain or Executor generates ProjectAcceptanceManifest
-      (.proofloop/manifests/project-acceptance.json)
+   → Brain directly calls compile-project-acceptance tool to generate
+      ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
    → Contains: project_id, source_digest, prd_goals, acceptance_criteria,
      stage_review_receipts, e2e_steps (compiled from PRD user flows)
+   → This is NOT Executor responsibility. See .agents/contracts/brain/execute-project-acceptance.md
 
 2. E2E EXECUTION
-   → Brain dispatches Runner (node .agents/runtime/dist/run-stage.js
-     or direct call to runProjectAcceptance())
+   → Brain directly calls run-project-acceptance CLI:
+      node .agents/runtime/dist/run-project-acceptance.js <manifest-path> [output-dir]
    → Runner executes E2E steps, writes Project E2E Gate Receipt
       (.proofloop/receipts/project-e2e-<attempt>.json)
    → Receipt contains: project_id, verdict (PROJECT_ACCEPTED / PROJECT_REJECTED / PROJECT_BLOCKED),

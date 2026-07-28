@@ -15,7 +15,6 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "python .agents/validators/proofloop-*": allow
     "node .agents/runtime/dist/*": allow
   question: deny
   webfetch: deny
@@ -212,7 +211,7 @@ For each target artifact:
 7. Do not run the Validator until both files exist.
 
 ### 10. MECHANICAL GATE
-- Run validate-stage (TS; fallback: proofloop-validate-stage.py).
+- Run validate-stage (TS).
 Mechanical Gate checks:
 - Architecture Work Item IDs exist in task-acceptance-matrix.md
 - Stage/Slice reference closure

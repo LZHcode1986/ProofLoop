@@ -604,6 +604,18 @@ export async function runProjectAcceptance(
     };
   }
 
+  // ── 1b. Snapshot comparison ──
+  const executedSnapshot = computeSnapshot(process.cwd());
+
+  if (manifest.expected_snapshot && manifest.expected_snapshot !== executedSnapshot) {
+    return {
+      success: false,
+      errors: [
+        `PROJECT_SOURCE_STALE: expected snapshot "${manifest.expected_snapshot}" does not match executed "${executedSnapshot}"`,
+      ],
+    };
+  }
+
   // ── 2. Execute E2E steps ──
   const execResult = await executeRuntimeProof(manifest.e2e_steps);
 
@@ -636,6 +648,8 @@ export async function runProjectAcceptance(
     snapshot: computeSnapshot(process.cwd()),
     manifest_digest: manifestDigest,
     source_snapshot: computeSnapshot(process.cwd()),
+    expected_snapshot: manifest.expected_snapshot,
+    executed_snapshot: executedSnapshot,
     steps: e2eSteps,
     service_cleanup: execResult.serviceCleanup.cleaned.length > 0 || execResult.serviceCleanup.failed.length > 0
       ? execResult.serviceCleanup
@@ -653,6 +667,8 @@ export async function runProjectAcceptance(
       snapshot: receipt.snapshot,
       manifest_digest: manifestDigest,
       source_snapshot: receipt.source_snapshot,
+      expected_snapshot: receipt.expected_snapshot,
+      executed_snapshot: receipt.executed_snapshot,
       steps: e2eSteps,
       service_cleanup: receipt.service_cleanup,
       created_at: receipt.created_at,

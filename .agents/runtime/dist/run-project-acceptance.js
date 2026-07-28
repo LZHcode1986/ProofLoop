@@ -11,8 +11,22 @@ if (!existsSync(manifestPath)) {
     console.error(`Manifest not found: ${manifestPath}`);
     process.exit(1);
 }
-const parsed = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-const manifest = ProjectAcceptanceManifestSchema.parse(parsed);
+let parsed;
+try {
+    parsed = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+}
+catch (err) {
+    console.error(`Failed to parse manifest JSON: ${err}`);
+    process.exit(1);
+}
+let manifest;
+try {
+    manifest = ProjectAcceptanceManifestSchema.parse(parsed);
+}
+catch (err) {
+    console.error(`Manifest schema validation failed:\n${err}`);
+    process.exit(1);
+}
 const result = await runProjectAcceptance(manifest, outputDir);
 if (!result.success) {
     console.error(JSON.stringify(result, null, 2));

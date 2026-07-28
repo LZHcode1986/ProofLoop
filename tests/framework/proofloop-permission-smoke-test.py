@@ -239,17 +239,14 @@ def check_planner_can_dispatch_spv(root: Path) -> list:
 
 
 def check_planner_can_run_stage_validator(root: Path) -> list:
-    """Planner's bash must have python .agents/validators/proofloop-validate-stage.py."""
+    """Planner must have a bash section (Python validators removed, TS replacement handles validation)."""
     issues = []
     file = root / ".opencode" / "agents" / "planner.md"
     if not file.exists():
         return issues
     text = file.read_text(encoding="utf-8")
     bash_section = get_yaml_section(text, "  bash")
-    if bash_section:
-        if not any("proofloop" in l for l in bash_section.splitlines()):
-            issues.append("Planner: bash must include 'python .agents/validators/proofloop-*'")
-    else:
+    if not bash_section:
         issues.append("Planner: Missing bash section")
     return issues
 
@@ -618,7 +615,8 @@ def check_brain_bash_deny(root: Path) -> list:
             "git branch --show-current", "rg *", "Select-String *",
             "Get-Content *", "Get-ChildItem *", "Test-Path *",
             "node .agents/runtime/dist/receipt-writer.js *",
-            "node .agents/runtime/dist/run-stage.js *"
+            "node .agents/runtime/dist/run-stage.js *",
+            "node .agents/runtime/dist/run-project-acceptance.js *"
         }
         
         allowed = {k for k in bash_config if k != "*"}
