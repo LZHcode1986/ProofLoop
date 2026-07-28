@@ -18,6 +18,7 @@ permission:
     "Select-String *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
+    "node .agents/runtime/dist/receipt-writer.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny

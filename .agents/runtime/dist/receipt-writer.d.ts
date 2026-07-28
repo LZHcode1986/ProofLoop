@@ -1,3 +1,4 @@
+import type { RuntimeProofStep } from './schemas.js';
 export interface StepResult {
     id: string;
     executable: string;
@@ -70,6 +71,32 @@ export interface WriteStageReviewReceiptOptions {
  * Returns the absolute path of the written receipt file.
  */
 export declare function writeStageReviewReceipt(options: WriteStageReviewReceiptOptions): string;
+export interface ProjectAcceptanceManifest {
+    project_id: string;
+    steps: RuntimeProofStep[];
+    compiled_at: string;
+}
+export interface ProjectReviewReceipt {
+    project_id: string;
+    verdict: 'PROJECT_ACCEPTED' | 'PROJECT_REJECTED' | 'PROJECT_BLOCKED';
+    findings?: Array<{
+        category: string;
+        description: string;
+    }>;
+    snapshot: string;
+    reviewed_at: string;
+    reviewer: string;
+}
+export interface WriteProjectReviewReceiptOptions {
+    outputDir: string;
+    data: ProjectReviewReceipt;
+}
+/**
+ * Write a structured JSON Project Review Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
+ */
+export declare function writeProjectReviewReceipt(options: WriteProjectReviewReceiptOptions): string;
 export declare function validateReceipt(receiptPath: string): {
     valid: boolean;
     error?: string;

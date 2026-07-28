@@ -124,6 +124,39 @@ export function writeStageReviewReceipt(options) {
     fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
     return path.resolve(filePath);
 }
+/**
+ * Write a structured JSON Project Review Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
+ */
+export function writeProjectReviewReceipt(options) {
+    const { outputDir, data } = options;
+    // Ensure output directory exists
+    fs.mkdirSync(outputDir, { recursive: true });
+    const receipt = {
+        project_id: data.project_id,
+        verdict: data.verdict,
+        findings: data.findings,
+        snapshot: data.snapshot,
+        reviewed_at: data.reviewed_at ?? new Date().toISOString(),
+        reviewer: data.reviewer ?? 'brain',
+    };
+    const filePath = path.join(outputDir, 'project-review.json');
+    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    return path.resolve(filePath);
+}
+// ── CLI entry point ─────────────────────────────────────────────────────────────
+/**
+ * CLI usage: `node dist/receipt-writer.js <json-input>`
+ *
+ * Parses the JSON input and calls writeStageReviewReceipt(), outputting
+ * the resulting receipt path as JSON to stdout.
+ */
+if (import.meta.url === `file://${process.argv[1]}`) {
+    const input = JSON.parse(process.argv[2]);
+    const result = writeStageReviewReceipt(input);
+    console.log(JSON.stringify(result));
+}
 export function validateReceipt(receiptPath) {
     try {
         if (!fs.existsSync(receiptPath)) {

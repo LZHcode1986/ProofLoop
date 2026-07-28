@@ -4,14 +4,18 @@ export const StageId = z.string().regex(/^S\d{2,}(-[A-Z0-9]+)?$/);
 export const SliceId = z.string().regex(/^S\d{2,}-[A-Z]$/);
 export const TaskId = z.string().regex(/^S\d{2,}-[A-Z]-T\d+$/);
 export const PoId = z.string().regex(/^PO-S\d{2,}-[A-Z]-\d{2}$/);
+// === Step type enum ===
+export const StepType = z.enum(['command', 'service_start', 'service_stop', 'probe']);
 // === Runtime Proof Step ===
 export const RuntimeProofStep = z.object({
     id: z.string(),
+    type: StepType.optional().default('command'),
     executable: z.string(),
     args: z.array(z.string()),
     cwd: z.string().optional().default('.'),
     timeout_ms: z.number().int().positive().optional().default(300000),
     readiness_signal: z.string().optional(),
+    service_ref: z.string().optional(),
     expected_observation: z.string().optional(),
     not_applicable: z.object({
         reason: z.string(),
@@ -20,7 +24,7 @@ export const RuntimeProofStep = z.object({
         exit_code: z.number().int().optional(),
         output_contains: z.string().optional(),
         output_matches: z.string().optional(),
-    }).optional().default({ exit_code: 0 }),
+    }).optional(),
 });
 // === Proof Obligation ===
 export const ProofObligation = z.object({

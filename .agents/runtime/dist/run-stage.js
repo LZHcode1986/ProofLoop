@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { runProcess, validateSpawnOptions } from './process-manager.js';
+import { Manifest as ManifestSchema } from './schemas.js';
+import { runProcess, spawnService, registerService, getRegisteredService, stopRegisteredService, waitForReadiness, cleanupServices, validateSpawnOptions, } from './process-manager.js';
 import { writeReceipt, computeSnapshot } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
 // ── Main orchestrator ──────────────────────────────────────────────────────────
@@ -29,7 +30,8 @@ export async function runStageFromManifest(options) {
     let manifest;
     try {
         const content = readFileSync(manifestPath, 'utf-8');
-        manifest = JSON.parse(content);
+        const parsed = JSON.parse(content);
+        manifest = ManifestSchema.parse(parsed);
     }
     catch (err) {
         return {
@@ -65,8 +67,9 @@ export async function runStageFromManifest(options) {
             stepCount: steps.length,
         };
     }
-    // ── Trivial pass: no steps → gate passes ──
+    // ── Trivial fail: no steps → gate fails (proof without evidence) ──
     if (steps.length === 0) {
+        errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
         const receiptPath = writeReceipt({
             outputDir: resolvedOutputDir,
             data: {
@@ -75,59 +78,262 @@ export async function runStageFromManifest(options) {
                 platform: platformInfo.platform,
                 tool_versions: {},
                 steps: [],
-                exit_code: 0,
-                verdict: 'PASS',
+                exit_code: 1,
+                verdict: 'FAIL',
                 timestamps: {
                     started_at: startedAt.toISOString(),
                     completed_at: new Date().toISOString(),
                 },
             },
         });
-        return { success: true, receiptPath, errors: [], stepCount: 0 };
+        return { success: false, receiptPath, errors, stepCount: 0 };
     }
     // ── 3. Execute each step sequentially ──
     for (const step of steps) {
-        const result = await runProcess({
-            executable: step.executable,
-            args: step.args,
-            cwd: step.cwd,
-            timeoutMs: step.timeout_ms,
-        });
-        // Capture observations from stderr (first 2000 chars) if present
-        const observations = result.stderr && result.stderr.length > 0
-            ? result.stderr.slice(0, 2000)
-            : undefined;
-        const stepResult = {
-            id: step.id,
-            executable: step.executable,
-            args: step.args,
-            exit_code: result.exitCode,
-            signal: result.signal,
-            timed_out: result.timedOut,
-            duration_ms: result.durationMs,
-            observations,
-        };
-        stepResults.push(stepResult);
-        // ── 4. Check expected exit code ──
-        const expected = step.expected?.exit_code ?? 0;
-        if (result.exitCode !== expected) {
-            const detail = [
-                `Step "${step.id}" exited with code ${result.exitCode} (expected ${expected}).`,
-                result.signal ? `Signal: ${result.signal}.` : '',
-                result.timedOut ? 'Timed out.' : '',
-                result.stderr ? `Stderr (first 500 chars): ${result.stderr.slice(0, 500)}` : '',
+        // Skip steps marked as not_applicable
+        if (step.not_applicable?.reason) {
+            stepResults.push({
+                id: step.id,
+                executable: step.executable,
+                args: step.args,
+                exit_code: 0,
+                signal: null,
+                timed_out: false,
+                duration_ms: 0,
+                observations: `Skipped: ${step.not_applicable.reason}`,
+            });
+            continue;
+        }
+        const stepType = step.type ?? 'command';
+        if (stepType === 'service_start') {
+            // ── service_start: spawn, register, wait for readiness ──
+            const startTime = Date.now();
+            try {
+                const handle = await spawnService({
+                    executable: step.executable,
+                    args: step.args,
+                    cwd: step.cwd,
+                    timeoutMs: step.timeout_ms,
+                });
+                registerService(step.id, handle);
+                let readinessWaitMs = 0;
+                if (step.readiness_signal) {
+                    const readinessTimeout = step.timeout_ms;
+                    const readyStart = Date.now();
+                    const readiness = await waitForReadiness(handle, step.readiness_signal, readinessTimeout);
+                    readinessWaitMs = Date.now() - readyStart;
+                    if (!readiness.ready) {
+                        if (readiness.exited) {
+                            errors.push(`Step "${step.id}" (service_start) process exited (code ${readiness.exitCode}) before readiness signal "${step.readiness_signal}" was found. ` +
+                                `Stdout: ${handle.getStdout().slice(0, 500)}`);
+                        }
+                        else {
+                            errors.push(`Step "${step.id}" (service_start) readiness signal "${step.readiness_signal}" not found within ${step.timeout_ms}ms. ` +
+                                `Stdout: ${handle.getStdout().slice(0, 500)}`);
+                        }
+                        finalExitCode = finalExitCode || 2;
+                        break;
+                    }
+                }
+                const durationMs = Date.now() - startTime;
+                const observations = [
+                    `Service started, PID ${handle.pid}`,
+                    step.readiness_signal ? `Readiness signal found after ${readinessWaitMs}ms` : '',
+                ]
+                    .filter(Boolean)
+                    .join(' | ');
+                stepResults.push({
+                    id: step.id,
+                    executable: step.executable,
+                    args: step.args,
+                    exit_code: 0,
+                    signal: null,
+                    timed_out: false,
+                    duration_ms: durationMs,
+                    observations,
+                });
+            }
+            catch (err) {
+                const durationMs = Date.now() - startTime;
+                errors.push(`Step "${step.id}" (service_start) failed: ${err instanceof Error ? err.message : String(err)}`);
+                finalExitCode = finalExitCode || 1;
+                stepResults.push({
+                    id: step.id,
+                    executable: step.executable,
+                    args: step.args,
+                    exit_code: -1,
+                    signal: null,
+                    timed_out: false,
+                    duration_ms: durationMs,
+                    observations: `Error: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                break;
+            }
+        }
+        else if (stepType === 'service_stop') {
+            // ── service_stop: look up registered service by service_ref (or step.id) and terminate ──
+            const startTime = Date.now();
+            const ref = step.service_ref || step.id;
+            const service = getRegisteredService(ref);
+            if (!service) {
+                errors.push(`Step "${step.id}" (service_stop): no registered service found for ref "${ref}". ` +
+                    `Ensure the corresponding service_start step ran successfully.`);
+                finalExitCode = finalExitCode || 1;
+                stepResults.push({
+                    id: step.id,
+                    executable: step.executable,
+                    args: step.args,
+                    exit_code: -1,
+                    signal: null,
+                    timed_out: false,
+                    duration_ms: Date.now() - startTime,
+                    observations: `Error: no registered service "${ref}"`,
+                });
+                break;
+            }
+            try {
+                await stopRegisteredService(step.id);
+                const durationMs = Date.now() - startTime;
+                stepResults.push({
+                    id: step.id,
+                    executable: step.executable,
+                    args: step.args,
+                    exit_code: 0,
+                    signal: null,
+                    timed_out: false,
+                    duration_ms: durationMs,
+                    observations: `Service stopped (PID ${service.pid})`,
+                });
+            }
+            catch (err) {
+                const durationMs = Date.now() - startTime;
+                errors.push(`Step "${step.id}" (service_stop) failed: ${err instanceof Error ? err.message : String(err)}`);
+                finalExitCode = finalExitCode || 1;
+                stepResults.push({
+                    id: step.id,
+                    executable: step.executable,
+                    args: step.args,
+                    exit_code: -1,
+                    signal: null,
+                    timed_out: false,
+                    duration_ms: durationMs,
+                    observations: `Error: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                break;
+            }
+        }
+        else {
+            // ── command / probe: existing runProcess behavior ──
+            const result = await runProcess({
+                executable: step.executable,
+                args: step.args,
+                cwd: step.cwd,
+                timeoutMs: step.timeout_ms,
+            });
+            // Capture observations (first 2000 chars)
+            const observations = [
+                result.stdout?.length > 0 ? `stdout: ${result.stdout.slice(0, 1000)}` : '',
+                result.stderr?.length > 0 ? `stderr: ${result.stderr.slice(0, 1000)}` : '',
             ]
                 .filter(Boolean)
-                .join(' ');
-            errors.push(detail);
-            finalExitCode = result.exitCode ?? -1;
-            break; // Stop on first failure (fail-fast)
+                .join(' | ')
+                .slice(0, 2000) || undefined;
+            const stepResult = {
+                id: step.id,
+                executable: step.executable,
+                args: step.args,
+                exit_code: result.exitCode,
+                signal: result.signal,
+                timed_out: result.timedOut,
+                duration_ms: result.durationMs,
+                observations,
+            };
+            stepResults.push(stepResult);
+            // ── 4. Check oracle expectations ──
+            const expected = step.expected;
+            // 4a. Check exit_code
+            const expectedExitCode = expected?.exit_code ?? 0;
+            if (result.exitCode !== expectedExitCode) {
+                const detail = [
+                    `Step "${step.id}" exited with code ${result.exitCode} (expected ${expectedExitCode}).`,
+                    result.signal ? `Signal: ${result.signal}.` : '',
+                    result.timedOut ? 'Timed out.' : '',
+                    result.stderr ? `Stderr: ${result.stderr.slice(0, 500)}` : '',
+                ]
+                    .filter(Boolean)
+                    .join(' ');
+                errors.push(detail);
+                finalExitCode = result.exitCode ?? -1;
+                break;
+            }
+            // 4b. Check output_contains (stdout must contain the expected text)
+            if (expected?.output_contains) {
+                if (!result.stdout.includes(expected.output_contains)) {
+                    errors.push(`Step "${step.id}" stdout does not contain expected text "${expected.output_contains}". ` +
+                        `Stdout: ${result.stdout.slice(0, 500)}`);
+                    finalExitCode = finalExitCode || 2;
+                    break;
+                }
+            }
+            // 4c. Check output_matches (stdout must match the expected regex)
+            if (expected?.output_matches) {
+                try {
+                    const regex = new RegExp(expected.output_matches);
+                    if (!regex.test(result.stdout)) {
+                        errors.push(`Step "${step.id}" stdout does not match expected regex /${expected.output_matches}/. ` +
+                            `Stdout: ${result.stdout.slice(0, 500)}`);
+                        finalExitCode = finalExitCode || 2;
+                        break;
+                    }
+                }
+                catch (regexErr) {
+                    errors.push(`Step "${step.id}" has invalid output_matches regex: ${regexErr}`);
+                    finalExitCode = finalExitCode || 2;
+                    break;
+                }
+            }
+            // 4d. Check readiness_signal (merged stdout+stderr must contain signal)
+            if (step.readiness_signal) {
+                const combined = result.stdout + result.stderr;
+                if (!combined.includes(step.readiness_signal)) {
+                    errors.push(`Step "${step.id}" readiness signal "${step.readiness_signal}" not found in output. ` +
+                        `Stdout: ${result.stdout.slice(0, 500)}`);
+                    finalExitCode = finalExitCode || 2;
+                    break;
+                }
+            }
+            // 4e. Check expected_observation (merged stdout+stderr must contain observation)
+            if (step.expected_observation) {
+                const combined = result.stdout + result.stderr;
+                if (!combined.includes(step.expected_observation)) {
+                    errors.push(`Step "${step.id}" expected observation "${step.expected_observation}" not found. ` +
+                        `Stdout: ${result.stdout.slice(0, 500)}`);
+                    finalExitCode = finalExitCode || 2;
+                    break;
+                }
+            }
         }
     }
     // ── 5. Cleanup ──
     const knownPids = options.knownPids ?? [];
     const knownPorts = options.knownPorts ?? [];
     let cleanupResult;
+    // Clean up any registered services first
+    const serviceCleanup = await cleanupServices();
+    if (serviceCleanup.failed.length > 0) {
+        const details = serviceCleanup.failed
+            .map(f => `${f.service} (PID ${f.pid}): ${f.reason}`)
+            .join('; ');
+        errors.push(`Service cleanup failures: ${details}`);
+        if (finalExitCode === 0)
+            finalExitCode = -1;
+    }
+    if (serviceCleanup.remainingPids.length > 0) {
+        errors.push(`Services still running after cleanup: PIDs ${serviceCleanup.remainingPids.join(', ')}. ` +
+            `Cleanup failure counts as Gate FAIL.`);
+        if (finalExitCode === 0)
+            finalExitCode = -1;
+    }
     if (knownPids.length > 0) {
         const { cleanupProcesses } = await import('./process-manager.js');
         cleanupResult = await cleanupProcesses(knownPids);

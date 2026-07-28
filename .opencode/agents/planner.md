@@ -272,13 +272,22 @@ Only return PLAN_READY when both:
 
 ## Stage Runtime Proof
 
-Each Stage plan must include a structured Runtime Proof section with YAML-format steps:
+Each Stage plan must include a structured Runtime Proof section with YAML-format steps.
+Each step must include a `type` field to indicate its execution mode:
+
+| `type` | Purpose |
+|---|---|
+| `command` | Run a process and wait for completion (default) |
+| `service_start` | Spawn a long-running service and wait for readiness |
+| `probe` | Run a verification probe with exit-code check |
+| `service_stop` | Stop a previously started service by reference |
 
 ```yaml
 ### Stage Runtime Proof
 
 steps:
   - id: build
+    type: command
     executable: <command>
     args: [<arg1>, <arg2>]
     cwd: .
@@ -288,17 +297,8 @@ steps:
       output_contains: <text | null>
       output_matches: <regex | null>
 
-  - id: migration_or_setup
-    executable: <command>
-    args: []
-    cwd: .
-    timeout_ms: 300000
-    expected:
-      exit_code: 0
-    not_applicable:
-      reason: <required if not applicable>
-
-  - id: startup
+  - id: app-start
+    type: service_start
     executable: <command>
     args: []
     cwd: .
@@ -307,21 +307,19 @@ steps:
     not_applicable:
       reason: <required if not applicable>
 
-  - id: smoke_scenario
-    scenario: <description>
+  - id: smoke
+    type: probe
     executable: <command>
     args: []
     cwd: .
-    expected_observation: <what to observe>
-    timeout_ms: 300000
+    expected:
+      exit_code: 0
     not_applicable:
-      reason: <required if not applicable per scenario>
+      reason: <required if not applicable>
 
-  - id: shutdown
-    executable: <command>
-    args: []
-    cwd: .
-    timeout_ms: 300000
+  - id: app-stop
+    type: service_stop
+    service_ref: app-start
     not_applicable:
       reason: <required if not applicable>
 ```
@@ -483,6 +481,7 @@ Planner declares Risk Facts; does not select SCV level.
 ```yaml
 steps:
   - id: build
+    type: command
     executable:
     args:
     cwd: .
@@ -490,17 +489,8 @@ steps:
     expected:
       exit_code: 0
 
-  - id: migration_or_setup
-    executable:
-    args:
-    cwd: .
-    timeout_ms: 300000
-    expected:
-      exit_code: 0
-    not_applicable:
-      reason:
-
-  - id: startup
+  - id: app-start
+    type: service_start
     executable:
     args:
     cwd: .
@@ -509,21 +499,19 @@ steps:
     not_applicable:
       reason:
 
-  - id: smoke_scenario
-    scenario:
+  - id: smoke
+    type: probe
     executable:
     args:
     cwd: .
-    expected_observation:
-    timeout_ms: 300000
+    expected:
+      exit_code: 0
     not_applicable:
       reason:
 
-  - id: shutdown
-    executable:
-    args:
-    cwd: .
-    timeout_ms: 300000
+  - id: app-stop
+    type: service_stop
+    service_ref: app-start
     not_applicable:
       reason:
 ```

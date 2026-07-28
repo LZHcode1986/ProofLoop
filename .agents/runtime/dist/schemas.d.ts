@@ -3,13 +3,17 @@ export declare const StageId: z.ZodString;
 export declare const SliceId: z.ZodString;
 export declare const TaskId: z.ZodString;
 export declare const PoId: z.ZodString;
+export declare const StepType: z.ZodEnum<["command", "service_start", "service_stop", "probe"]>;
+export type StepType = z.infer<typeof StepType>;
 export declare const RuntimeProofStep: z.ZodObject<{
     id: z.ZodString;
+    type: z.ZodDefault<z.ZodOptional<z.ZodEnum<["command", "service_start", "service_stop", "probe"]>>>;
     executable: z.ZodString;
     args: z.ZodArray<z.ZodString, "many">;
     cwd: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     timeout_ms: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
     readiness_signal: z.ZodOptional<z.ZodString>;
+    service_ref: z.ZodOptional<z.ZodString>;
     expected_observation: z.ZodOptional<z.ZodString>;
     not_applicable: z.ZodOptional<z.ZodObject<{
         reason: z.ZodString;
@@ -18,7 +22,7 @@ export declare const RuntimeProofStep: z.ZodObject<{
     }, {
         reason: string;
     }>>;
-    expected: z.ZodDefault<z.ZodOptional<z.ZodObject<{
+    expected: z.ZodOptional<z.ZodObject<{
         exit_code: z.ZodOptional<z.ZodNumber>;
         output_contains: z.ZodOptional<z.ZodString>;
         output_matches: z.ZodOptional<z.ZodString>;
@@ -30,19 +34,21 @@ export declare const RuntimeProofStep: z.ZodObject<{
         exit_code?: number | undefined;
         output_contains?: string | undefined;
         output_matches?: string | undefined;
-    }>>>;
+    }>>;
 }, "strip", z.ZodTypeAny, {
+    type: "command" | "service_start" | "service_stop" | "probe";
     id: string;
     executable: string;
     args: string[];
-    expected: {
+    cwd: string;
+    timeout_ms: number;
+    expected?: {
         exit_code?: number | undefined;
         output_contains?: string | undefined;
         output_matches?: string | undefined;
-    };
-    cwd: string;
-    timeout_ms: number;
+    } | undefined;
     readiness_signal?: string | undefined;
+    service_ref?: string | undefined;
     expected_observation?: string | undefined;
     not_applicable?: {
         reason: string;
@@ -56,9 +62,11 @@ export declare const RuntimeProofStep: z.ZodObject<{
         output_contains?: string | undefined;
         output_matches?: string | undefined;
     } | undefined;
+    type?: "command" | "service_start" | "service_stop" | "probe" | undefined;
     cwd?: string | undefined;
     timeout_ms?: number | undefined;
     readiness_signal?: string | undefined;
+    service_ref?: string | undefined;
     expected_observation?: string | undefined;
     not_applicable?: {
         reason: string;
@@ -257,11 +265,13 @@ export declare const Manifest: z.ZodObject<{
     risk_facts: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodString, "many">>>;
     runtime_proof: z.ZodDefault<z.ZodOptional<z.ZodArray<z.ZodObject<{
         id: z.ZodString;
+        type: z.ZodDefault<z.ZodOptional<z.ZodEnum<["command", "service_start", "service_stop", "probe"]>>>;
         executable: z.ZodString;
         args: z.ZodArray<z.ZodString, "many">;
         cwd: z.ZodDefault<z.ZodOptional<z.ZodString>>;
         timeout_ms: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
         readiness_signal: z.ZodOptional<z.ZodString>;
+        service_ref: z.ZodOptional<z.ZodString>;
         expected_observation: z.ZodOptional<z.ZodString>;
         not_applicable: z.ZodOptional<z.ZodObject<{
             reason: z.ZodString;
@@ -270,7 +280,7 @@ export declare const Manifest: z.ZodObject<{
         }, {
             reason: string;
         }>>;
-        expected: z.ZodDefault<z.ZodOptional<z.ZodObject<{
+        expected: z.ZodOptional<z.ZodObject<{
             exit_code: z.ZodOptional<z.ZodNumber>;
             output_contains: z.ZodOptional<z.ZodString>;
             output_matches: z.ZodOptional<z.ZodString>;
@@ -282,19 +292,21 @@ export declare const Manifest: z.ZodObject<{
             exit_code?: number | undefined;
             output_contains?: string | undefined;
             output_matches?: string | undefined;
-        }>>>;
+        }>>;
     }, "strip", z.ZodTypeAny, {
+        type: "command" | "service_start" | "service_stop" | "probe";
         id: string;
         executable: string;
         args: string[];
-        expected: {
+        cwd: string;
+        timeout_ms: number;
+        expected?: {
             exit_code?: number | undefined;
             output_contains?: string | undefined;
             output_matches?: string | undefined;
-        };
-        cwd: string;
-        timeout_ms: number;
+        } | undefined;
         readiness_signal?: string | undefined;
+        service_ref?: string | undefined;
         expected_observation?: string | undefined;
         not_applicable?: {
             reason: string;
@@ -308,9 +320,11 @@ export declare const Manifest: z.ZodObject<{
             output_contains?: string | undefined;
             output_matches?: string | undefined;
         } | undefined;
+        type?: "command" | "service_start" | "service_stop" | "probe" | undefined;
         cwd?: string | undefined;
         timeout_ms?: number | undefined;
         readiness_signal?: string | undefined;
+        service_ref?: string | undefined;
         expected_observation?: string | undefined;
         not_applicable?: {
             reason: string;
@@ -347,17 +361,19 @@ export declare const Manifest: z.ZodObject<{
         scv_minimum_level: "lite" | "standard" | "enhanced";
     }[];
     runtime_proof: {
+        type: "command" | "service_start" | "service_stop" | "probe";
         id: string;
         executable: string;
         args: string[];
-        expected: {
+        cwd: string;
+        timeout_ms: number;
+        expected?: {
             exit_code?: number | undefined;
             output_contains?: string | undefined;
             output_matches?: string | undefined;
-        };
-        cwd: string;
-        timeout_ms: number;
+        } | undefined;
         readiness_signal?: string | undefined;
+        service_ref?: string | undefined;
         expected_observation?: string | undefined;
         not_applicable?: {
             reason: string;
@@ -402,9 +418,11 @@ export declare const Manifest: z.ZodObject<{
             output_contains?: string | undefined;
             output_matches?: string | undefined;
         } | undefined;
+        type?: "command" | "service_start" | "service_stop" | "probe" | undefined;
         cwd?: string | undefined;
         timeout_ms?: number | undefined;
         readiness_signal?: string | undefined;
+        service_ref?: string | undefined;
         expected_observation?: string | undefined;
         not_applicable?: {
             reason: string;

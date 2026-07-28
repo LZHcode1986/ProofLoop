@@ -612,15 +612,16 @@ def check_brain_bash_deny(root: Path) -> list:
             issues.append("Brain: First bash rule must be '\"*\": deny'")
             return issues
         
-        # Verify allowlist contains only read-only commands
-        allowed_read_only = {
+        # Verify allowlist contains expected Brain commands
+        allowed_brain_commands = {
             "git status*", "git log*", "git diff*", "git show*",
             "git branch --show-current", "rg *", "Select-String *",
-            "Get-Content *", "Get-ChildItem *", "Test-Path *"
+            "Get-Content *", "Get-ChildItem *", "Test-Path *",
+            "node .agents/runtime/dist/receipt-writer.js *"
         }
         
         allowed = {k for k in bash_config if k != "*"}
-        unexpected = allowed - allowed_read_only
+        unexpected = allowed - allowed_brain_commands
         if unexpected:
             issues.append(f"Brain bash: unexpected allow entries: {unexpected}")
         

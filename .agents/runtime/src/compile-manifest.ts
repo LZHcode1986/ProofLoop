@@ -23,6 +23,20 @@ function extractSection(lines: string[], heading: string): string {
 }
 
 /**
+ * Extract Stage-level Risk Facts from a `## Stage Risk Facts` heading.
+ * Uses exact heading match (`^## Stage Risk Facts$`) to avoid matching
+ * Slice-level `### Risk Facts` (three hashes).
+ */
+function extractStageRiskFacts(lines: string[]): string[] {
+  const idx = lines.findIndex(l => l.trim() === '## Stage Risk Facts');
+  if (idx === -1) return [];
+  const rest = lines.slice(idx + 1);
+  const endIdx = rest.findIndex(l => /^##\s/.test(l.trim()));
+  const section = endIdx === -1 ? rest.join('\n').trim() : rest.slice(0, endIdx).join('\n').trim();
+  return extractListItems(section);
+}
+
+/**
  * Extract list items (- item) from text.
  */
 function extractListItems(text: string): string[] {
@@ -82,12 +96,8 @@ export function compileManifest(tasksPath: string): Manifest {
   const depsText = extractSection(lines, 'Dependencies');
   const dependencies = extractListItems(depsText);
 
-  // Extract global risk facts (from a section if present)
-  let riskFacts: string[] = [];
-  const riskFactsSection = extractSection(lines, 'Risk Facts');
-  if (riskFactsSection) {
-    riskFacts = extractListItems(riskFactsSection);
-  }
+  // Extract global risk facts from `## Stage Risk Facts` (stage-level only, not slice-level `### Risk Facts`)
+  const riskFacts = extractStageRiskFacts(lines);
 
   // Parse slices
   const parsed = parseStageFile(tasksPath);
@@ -200,7 +210,13 @@ export function compileManifest(tasksPath: string): Manifest {
   //       expected:
   //         exit_code: 0
   function parseYamlSteps(yamlText: string): RuntimeProofStep[] {
-    const parsed = YAML.parse(yamlText);
+    // Strip fenced code block markers (```yaml, ```) if present
+    const cleaned = yamlText
+      .replace(/^```[a-zA-Z]*\n/gm, '')
+      .replace(/```\s*$/gm, '')
+      .trim();
+    if (!cleaned) return [];
+    const parsed = YAML.parse(cleaned);
     if (!parsed || !Array.isArray(parsed.steps)) return [];
     return z.array(RuntimeProofStep).parse(parsed.steps);
   }

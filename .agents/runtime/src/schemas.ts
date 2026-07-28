@@ -19,6 +19,7 @@ export const RuntimeProofStep = z.object({
   cwd: z.string().optional().default('.'),
   timeout_ms: z.number().int().positive().optional().default(300000),
   readiness_signal: z.string().optional(),
+  service_ref: z.string().optional(),
   expected_observation: z.string().optional(),
   not_applicable: z.object({
     reason: z.string(),

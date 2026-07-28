@@ -255,6 +255,12 @@ export async function spawnService(options: SpawnOptions): Promise<ServiceHandle
     shell: false,
   });
 
+  // Suppress unhandled error events (e.g., ENOENT when executable not found)
+  // to prevent Node.js process crashes. The pid check below handles the error.
+  child.on('error', () => {
+    /* swallowed — handled via pid check or caller logic */
+  });
+
   let stdout = '';
   let stderr = '';
 
@@ -355,53 +361,107 @@ export async function stopRegisteredService(name: string, graceMs: number = 5000
   return true;
 }
 
+export interface ReadinessResult {
+  /** Whether the readiness signal was found. */
+  ready: boolean;
+  /** Whether the process exited before readiness was determined. */
+  exited: boolean;
+  /** The process exit code, if the process exited. */
+  exitCode: number | null;
+}
+
 /**
  * Wait for a service's output to contain the readiness signal.
  *
- * Polls accumulated stdout+stderr every 200ms until the signal is found
- * or the timeout expires.
+ * Polls accumulated stdout+stderr every 200ms until the signal is found,
+ * the process exits, or the timeout expires.
  *
- * Returns true if the signal was found, false on timeout.
+ * Returns a structured ReadinessResult.
  */
 export async function waitForReadiness(
   handle: ServiceHandle,
   signal: string,
   timeoutMs: number,
-): Promise<boolean> {
+): Promise<ReadinessResult> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
+    // Check if process has exited
+    if (handle.process.exitCode !== null) {
+      return { ready: false, exited: true, exitCode: handle.process.exitCode };
+    }
+
     const stdout = handle.getStdout();
     const stderr = handle.getStderr();
 
     if (stdout.includes(signal) || stderr.includes(signal)) {
-      return true;
+      return { ready: true, exited: false, exitCode: null };
     }
 
     await sleep(200);
   }
 
   // One last check before giving up
+  if (handle.process.exitCode !== null) {
+    return { ready: false, exited: true, exitCode: handle.process.exitCode };
+  }
+
   const stdout = handle.getStdout();
   const stderr = handle.getStderr();
-  return stdout.includes(signal) || stderr.includes(signal);
+  if (stdout.includes(signal) || stderr.includes(signal)) {
+    return { ready: true, exited: false, exitCode: null };
+  }
+
+  return { ready: false, exited: false, exitCode: null };
+}
+
+export interface ServiceCleanupResult {
+  /** Names of services that were successfully stopped. */
+  cleaned: string[];
+  /** Details of services that failed to stop. */
+  failed: Array<{ service: string; pid: number; reason: string }>;
+  /** PIDs that were still alive after the stop attempt. */
+  remainingPids: number[];
 }
 
 /**
  * Stop and remove all registered services.
  * Each service receives SIGTERM with a 5s grace period before SIGKILL.
+ *
+ * Returns a structured result with success/failure details.
  */
-export async function cleanupServices(): Promise<void> {
+export async function cleanupServices(): Promise<ServiceCleanupResult> {
+  const cleaned: string[] = [];
+  const failed: Array<{ service: string; pid: number; reason: string }> = [];
+  const remainingPids: number[] = [];
+
   const names = Array.from(serviceRegistry.keys());
   for (const name of names) {
     const entry = serviceRegistry.get(name);
     if (!entry) continue;
+
     try {
       await stopService(entry.pid);
+      cleaned.push(name);
+    } catch (err) {
+      failed.push({
+        service: name,
+        pid: entry.pid,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Check if still alive after stop attempt
+    try {
+      if (isProcessAlive(entry.pid)) {
+        remainingPids.push(entry.pid);
+      }
     } catch {
-      // Best-effort cleanup; ignore individual failures
+      // Process gone; good
     }
   }
+
+  return { cleaned, failed, remainingPids };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────

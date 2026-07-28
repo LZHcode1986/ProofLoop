@@ -157,23 +157,29 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
 
         registerService(step.id, handle);
 
-        let readinessFound = true;
         let readinessWaitMs = 0;
 
         if (step.readiness_signal) {
           const readinessTimeout = step.timeout_ms;
           const readyStart = Date.now();
-          readinessFound = await waitForReadiness(handle, step.readiness_signal, readinessTimeout);
+          const readiness = await waitForReadiness(handle, step.readiness_signal, readinessTimeout);
           readinessWaitMs = Date.now() - readyStart;
-        }
 
-        if (!readinessFound) {
-          errors.push(
-            `Step "${step.id}" (service_start) readiness signal "${step.readiness_signal}" not found within ${step.timeout_ms}ms. ` +
-            `Stdout: ${handle.getStdout().slice(0, 500)}`,
-          );
-          finalExitCode = finalExitCode || 2;
-          break;
+          if (!readiness.ready) {
+            if (readiness.exited) {
+              errors.push(
+                `Step "${step.id}" (service_start) process exited (code ${readiness.exitCode}) before readiness signal "${step.readiness_signal}" was found. ` +
+                `Stdout: ${handle.getStdout().slice(0, 500)}`,
+              );
+            } else {
+              errors.push(
+                `Step "${step.id}" (service_start) readiness signal "${step.readiness_signal}" not found within ${step.timeout_ms}ms. ` +
+                `Stdout: ${handle.getStdout().slice(0, 500)}`,
+              );
+            }
+            finalExitCode = finalExitCode || 2;
+            break;
+          }
         }
 
         const durationMs = Date.now() - startTime;
@@ -213,13 +219,14 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         break;
       }
     } else if (stepType === 'service_stop') {
-      // ── service_stop: look up registered service and terminate ──
+      // ── service_stop: look up registered service by service_ref (or step.id) and terminate ──
       const startTime = Date.now();
-      const service = getRegisteredService(step.id);
+      const ref = step.service_ref || step.id;
+      const service = getRegisteredService(ref);
 
       if (!service) {
         errors.push(
-          `Step "${step.id}" (service_stop): no registered service found with id "${step.id}". ` +
+          `Step "${step.id}" (service_stop): no registered service found for ref "${ref}". ` +
           `Ensure the corresponding service_start step ran successfully.`,
         );
         finalExitCode = finalExitCode || 1;
@@ -231,7 +238,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
           signal: null,
           timed_out: false,
           duration_ms: Date.now() - startTime,
-          observations: `Error: no registered service "${step.id}"`,
+          observations: `Error: no registered service "${ref}"`,
         });
         break;
       }
@@ -385,7 +392,21 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   let cleanupResult: { cleaned: number; failed: string[] } | undefined;
 
   // Clean up any registered services first
-  await cleanupServices();
+  const serviceCleanup = await cleanupServices();
+  if (serviceCleanup.failed.length > 0) {
+    const details = serviceCleanup.failed
+      .map(f => `${f.service} (PID ${f.pid}): ${f.reason}`)
+      .join('; ');
+    errors.push(`Service cleanup failures: ${details}`);
+    if (finalExitCode === 0) finalExitCode = -1;
+  }
+  if (serviceCleanup.remainingPids.length > 0) {
+    errors.push(
+      `Services still running after cleanup: PIDs ${serviceCleanup.remainingPids.join(', ')}. ` +
+      `Cleanup failure counts as Gate FAIL.`,
+    );
+    if (finalExitCode === 0) finalExitCode = -1;
+  }
 
   if (knownPids.length > 0) {
     const { cleanupProcesses } = await import('./process-manager.js');

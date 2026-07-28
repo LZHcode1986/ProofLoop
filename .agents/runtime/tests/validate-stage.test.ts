@@ -62,8 +62,8 @@ Test seam
 
 ### Risk Facts
 
-- RF-01 First risk
-- RF-02 Second risk
+- persistent_state
+- external_side_effect
 
 ### Dependencies
 
@@ -117,7 +117,7 @@ Test seam
 
 ### Risk Facts
 
-- RF-03 Third risk
+- none
 
 ### Dependencies
 
@@ -191,7 +191,7 @@ Test seam
 
 ### Risk Facts
 
-- RF-01 Risk fact
+- none
 
 ### Dependencies
 
@@ -257,7 +257,7 @@ Test
 
 ### Risk Facts
 
-- RF-01 Risk
+- none
 
 ### Dependencies
 
@@ -309,7 +309,7 @@ Test
 
 ### Risk Facts
 
-- RF-02 Risk
+- none
 
 ### Dependencies
 
@@ -376,7 +376,7 @@ Test
 
 ### Risk Facts
 
-- RF-01 Risk
+- none
 
 ### Dependencies
 
@@ -430,7 +430,7 @@ Test
 
 ### Risk Facts
 
-- RF-02 Risk
+- none
 
 ### Dependencies
 
@@ -492,7 +492,7 @@ describe('validateStage', () => {
   });
 
   test('detects missing Risk Facts', () => {
-    const md = validTasksMd().replace(/- RF-01 First risk\n- RF-02 Second risk\n/, '');
+    const md = validTasksMd().replace(/- persistent_state\n- external_side_effect\n/, '');
     const tasksPath = writeFixture('tasks.md', md);
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);
@@ -519,5 +519,34 @@ describe('validateStage', () => {
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.type === 'UNCLOSED_SLICE')).toBe(true);
+  });
+
+  // ── Risk Facts format validation ──
+
+  test('rejects unknown (non-canonical) Risk Fact values', () => {
+    const md = validTasksMd().replace('- persistent_state', '- unknown_bogus_risk');
+    const tasksPath = writeFixture('tasks.md', md);
+    const result = validateStage(tasksPath);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'UNKNOWN_RISK_FACT')).toBe(true);
+  });
+
+  test('rejects "none" combined with other Risk Facts', () => {
+    // S01-B has "- none" — add another risk fact alongside it
+    const md = validTasksMd().replace('- none', '- none\n- persistent_state');
+    const tasksPath = writeFixture('tasks.md', md);
+    const result = validateStage(tasksPath);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'RISK_FACT_NONE_WITH_OTHERS')).toBe(true);
+  });
+
+  test('rejects wrong list marker format (asterisk instead of hyphen) as MISSING_RISK_FACTS', () => {
+    // Create a slice using * instead of - for risk facts; extractListItems won't parse them
+    const md = validTasksMd()
+      .replace('- persistent_state\n- external_side_effect', '* persistent_state\n* external_side_effect');
+    const tasksPath = writeFixture('tasks.md', md);
+    const result = validateStage(tasksPath);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'MISSING_RISK_FACTS')).toBe(true);
   });
 });

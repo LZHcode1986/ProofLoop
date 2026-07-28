@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { z } from 'zod';
+import YAML from 'yaml';
 import { parseStageFile } from './parse-stage.js';
+import { computeScvLevel } from './compute-scv-level.js';
+import { RuntimeProofStep } from './schemas.js';
 /**
  * Extract the content of a Markdown section by heading (## or ###).
  */
@@ -15,6 +19,20 @@ function extractSection(lines, heading) {
     const rest = lines.slice(startIdx + 1);
     const endIdx = rest.findIndex(l => /^#{1,3}\s/.test(l.trim()));
     return endIdx === -1 ? rest.join('\n').trim() : rest.slice(0, endIdx).join('\n').trim();
+}
+/**
+ * Extract Stage-level Risk Facts from a `## Stage Risk Facts` heading.
+ * Uses exact heading match (`^## Stage Risk Facts$`) to avoid matching
+ * Slice-level `### Risk Facts` (three hashes).
+ */
+function extractStageRiskFacts(lines) {
+    const idx = lines.findIndex(l => l.trim() === '## Stage Risk Facts');
+    if (idx === -1)
+        return [];
+    const rest = lines.slice(idx + 1);
+    const endIdx = rest.findIndex(l => /^##\s/.test(l.trim()));
+    const section = endIdx === -1 ? rest.join('\n').trim() : rest.slice(0, endIdx).join('\n').trim();
+    return extractListItems(section);
 }
 /**
  * Extract list items (- item) from text.
@@ -67,12 +85,8 @@ export function compileManifest(tasksPath) {
     // Extract global dependencies
     const depsText = extractSection(lines, 'Dependencies');
     const dependencies = extractListItems(depsText);
-    // Extract global risk facts (from a section if present)
-    let riskFacts = [];
-    const riskFactsSection = extractSection(lines, 'Risk Facts');
-    if (riskFactsSection) {
-        riskFacts = extractListItems(riskFactsSection);
-    }
+    // Extract global risk facts from `## Stage Risk Facts` (stage-level only, not slice-level `### Risk Facts`)
+    const riskFacts = extractStageRiskFacts(lines);
     // Parse slices
     const parsed = parseStageFile(tasksPath);
     // Build slices for manifest
@@ -97,7 +111,8 @@ export function compileManifest(tasksPath) {
         const poDefSection = extractSection(slice.lines, 'Proof Obligations');
         if (poDefSection) {
             // Split by PO entries: each PO block starts with "- PO-"
-            const poBlocks = poDefSection.split(/\n\s*-\s*PO-/).slice(1);
+            // NOTE: Must prepend \n so the first PO is not discarded (split delimiter requires preceding \n)
+            const poBlocks = (`\n${poDefSection}`).split(/\n\s*-\s*PO-/).slice(1);
             for (const rawBlock of poBlocks) {
                 const fullBlock = 'PO-' + rawBlock;
                 const poIdMatch = fullBlock.match(/^(PO-S\d{2,}-[A-Z]-\d{2})/);
@@ -138,9 +153,8 @@ export function compileManifest(tasksPath) {
                 });
             }
         }
-        // Determine SCV minimum level
-        const scvLevelMatch = slice.raw.match(/scv_minimum_level["']?\s*:\s*["'](lite|standard|enhanced)["']/);
-        const scvMinimumLevel = (scvLevelMatch?.[1] ?? 'standard');
+        // Determine SCV minimum level from Risk Facts (not from manual scv_minimum_level field)
+        const scvMinimumLevel = computeScvLevel(sliceRiskFacts);
         return {
             slice_id: slice.sliceId,
             goal,
@@ -153,44 +167,35 @@ export function compileManifest(tasksPath) {
             scv_minimum_level: scvMinimumLevel,
         };
     });
+    // ── Helper: parse YAML steps using the yaml library ──
+    // Expected format:
+    //   steps:
+    //     - id: build
+    //       executable: npm
+    //       args: [run, build]
+    //       cwd: .
+    //       timeout_ms: 300000
+    //       expected:
+    //         exit_code: 0
+    function parseYamlSteps(yamlText) {
+        // Strip fenced code block markers (```yaml, ```) if present
+        const cleaned = yamlText
+            .replace(/^```[a-zA-Z]*\n/gm, '')
+            .replace(/```\s*$/gm, '')
+            .trim();
+        if (!cleaned)
+            return [];
+        const parsed = YAML.parse(cleaned);
+        if (!parsed || !Array.isArray(parsed.steps))
+            return [];
+        return z.array(RuntimeProofStep).parse(parsed.steps);
+    }
     // Build runtime proof steps (extract from Stage Runtime Proof section if present)
     const runtimeProofSection = extractSection(lines, 'Stage Runtime Proof');
     const runtimeProof = [];
     if (runtimeProofSection) {
-        // Extract Build, Startup, Smoke commands
-        const buildSection = extractSection(runtimeProofSection.split('\n'), 'Build');
-        const smokeSection = extractSection(runtimeProofSection.split('\n'), 'Smoke Scenarios');
-        if (buildSection && !buildSection.includes('Not Applicable')) {
-            const cmdMatch = buildSection.match(/Command:\s*(.+)/);
-            if (cmdMatch) {
-                const cmd = cmdMatch[1].trim();
-                runtimeProof.push({
-                    id: 'build',
-                    executable: cmd.split(/\s+/)[0],
-                    args: cmd.split(/\s+/).slice(1),
-                    cwd: '.',
-                    timeout_ms: 300000,
-                    expected: { exit_code: 0 },
-                });
-            }
-        }
-        if (smokeSection) {
-            const lines = smokeSection.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-                const cmdMatch = lines[i].match(/Command\s*\/\s*Action:\s*(.+)/);
-                if (cmdMatch && !cmdMatch[1].includes('Not Applicable')) {
-                    const cmd = cmdMatch[1].trim();
-                    runtimeProof.push({
-                        id: `smoke-${runtimeProof.length + 1}`,
-                        executable: cmd.split(/\s+/)[0],
-                        args: cmd.split(/\s+/).slice(1),
-                        cwd: '.',
-                        timeout_ms: 300000,
-                        expected: { exit_code: 0 },
-                    });
-                }
-            }
-        }
+        const parsed = parseYamlSteps(runtimeProofSection);
+        runtimeProof.push(...parsed);
     }
     const manifest = {
         stage_id: stageId,

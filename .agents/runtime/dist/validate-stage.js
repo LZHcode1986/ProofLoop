@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { parseStageFile } from './parse-stage.js';
+import { normalizeRiskFact, ALL_KNOWN_RISK_FACTS } from './compute-scv-level.js';
 /**
  * Extract the content of a Markdown section by heading name (## or ###).
  */
@@ -142,23 +143,48 @@ export function validateStage(tasksPath, evidencePath) {
     // ── 5. Each PO has Oracle Source ──
     for (const slice of parsed.slices) {
         const poDefSection = extractSection(slice.lines, 'Proof Obligations');
-        if (poDefSection) {
+        if (poDefSection && poDefSection.trim().length > 0) {
             const poIdsInSlice = extractIds(poDefSection, /PO-S\d{2,}-[A-Z]-\d{2}/g);
             if (poIdsInSlice.length > 0) {
                 // Split by PO entries: each PO block starts with "- PO-"
-                const poBlocks = poDefSection.split(/\n\s*-\s*PO-/).slice(1);
+                // Since the section content starts with "- PO-", we prepend a marker
+                const rawText = '\n' + poDefSection;
+                const poBlocks = rawText.split(/\n\s*-\s*PO-/).slice(1);
                 for (const rawBlock of poBlocks) {
                     const fullBlock = 'PO-' + rawBlock;
                     const poIdMatch = fullBlock.match(/^(PO-S\d{2,}-[A-Z]-\d{2})/);
                     if (!poIdMatch)
                         continue;
                     const poId = poIdMatch[1];
-                    // Check for Oracle Source field (case-insensitive, may be "Oracle Source" or "oracle_source")
-                    const hasOracleSource = /\boracle\s*source\b/i.test(fullBlock);
-                    if (!hasOracleSource) {
+                    // Check Oracle Source has non-empty value
+                    if (!/oracle\s*source:\s*\S+/i.test(fullBlock)) {
                         errors.push({
-                            type: 'MISSING_ORACLE_SOURCE',
-                            message: `PO ${poId} in slice ${slice.sliceId} is missing Oracle Source field`,
+                            type: 'MISSING_ORACLE_VALUE',
+                            message: `PO ${poId} in slice ${slice.sliceId} is missing Oracle Source or has empty value`,
+                            sliceId: slice.sliceId,
+                        });
+                    }
+                    // Check Behavior has non-empty value
+                    if (!/behavior:\s*\S+/i.test(fullBlock)) {
+                        errors.push({
+                            type: 'MISSING_BEHAVIOR_VALUE',
+                            message: `PO ${poId} in slice ${slice.sliceId} is missing Behavior or has empty value`,
+                            sliceId: slice.sliceId,
+                        });
+                    }
+                    // Check Success / Failure has non-empty value
+                    if (!/success\s*\/\s*failure:\s*\S+/i.test(fullBlock)) {
+                        errors.push({
+                            type: 'MISSING_SUCCESS_FAILURE_VALUE',
+                            message: `PO ${poId} in slice ${slice.sliceId} is missing Success/Failure or has empty value`,
+                            sliceId: slice.sliceId,
+                        });
+                    }
+                    // Check Required Observation has non-empty value (if the field is present)
+                    if (/required\s*observation\b/i.test(fullBlock) && !/required\s*observation:\s*\S+/i.test(fullBlock)) {
+                        errors.push({
+                            type: 'MISSING_REQUIRED_OBSERVATION_VALUE',
+                            message: `PO ${poId} in slice ${slice.sliceId} has Required Observation field but empty value`,
                             sliceId: slice.sliceId,
                         });
                     }
@@ -190,16 +216,52 @@ export function validateStage(tasksPath, evidencePath) {
             });
         }
     }
-    // ── 7. Each Slice has Risk Facts ──
+    // ── 7. Each Slice has Risk Facts (strict validation) ──
     for (const slice of parsed.slices) {
         const riskFactsSection = extractSection(slice.lines, 'Risk Facts');
         const riskItems = extractListItems(riskFactsSection);
+        // 7a. Must have at least one Risk Fact
         if (riskItems.length === 0) {
             errors.push({
                 type: 'MISSING_RISK_FACTS',
                 message: `Slice ${slice.sliceId} has no Risk Facts`,
                 sliceId: slice.sliceId,
             });
+            continue; // skip per-item checks when there are no items
+        }
+        // 7b. Reject empty risk fact values
+        for (const fact of riskItems) {
+            if (fact.trim().length === 0) {
+                errors.push({
+                    type: 'EMPTY_RISK_FACT',
+                    message: `Slice ${slice.sliceId} has an empty Risk Fact entry`,
+                    sliceId: slice.sliceId,
+                });
+            }
+        }
+        // 7c. 'none' cannot be combined with other Risk Facts
+        const normalized = riskItems.map(f => normalizeRiskFact(f));
+        const hasNone = normalized.includes('none');
+        const hasOther = normalized.some(f => f !== 'none' && f.length > 0);
+        if (hasNone && hasOther) {
+            errors.push({
+                type: 'RISK_FACT_NONE_WITH_OTHERS',
+                message: `Slice ${slice.sliceId} has 'none' combined with other Risk Facts`,
+                sliceId: slice.sliceId,
+            });
+        }
+        // 7d. Each Risk Fact must be a known enumeration value
+        for (const fact of riskItems) {
+            const nf = normalizeRiskFact(fact);
+            if (nf.length === 0)
+                continue; // already reported as EMPTY_RISK_FACT
+            if (!ALL_KNOWN_RISK_FACTS.has(nf)) {
+                errors.push({
+                    type: 'UNKNOWN_RISK_FACT',
+                    message: `Slice ${slice.sliceId} has unrecognized Risk Fact: "${fact}" (normalized: "${nf}")`,
+                    sliceId: slice.sliceId,
+                });
+            }
         }
     }
     // ── 8. Evidence markers (if evidencePath provided) ──
