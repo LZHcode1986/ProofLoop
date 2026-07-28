@@ -14,7 +14,7 @@ const BASE_MANIFEST: ProjectAcceptanceManifest = {
   expected_snapshot: computeSnapshot(process.cwd()),
   prd_goals: ['Implement core feature X'],
   acceptance_criteria: ['AC-01: Feature X works'],
-  stage_review_receipts: ['stage-review-S01.json'],
+  stage_receipts: [{ stage_id: 'S01', review_receipt: 'stage-review-S01.json', gate_receipt: 'stage-gate-S01.json' }],
   e2e_steps: [],
 };
 

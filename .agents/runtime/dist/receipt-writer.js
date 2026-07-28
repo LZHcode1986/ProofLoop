@@ -175,8 +175,7 @@ export function writeProjectReviewReceipt(options) {
         reviewer: parsed.reviewer ?? 'brain',
         project_manifest: parsed.project_manifest,
         project_e2e_receipt: parsed.project_e2e_receipt,
-        stage_review_receipts: parsed.stage_review_receipts,
-        stage_gate_receipts: parsed.stage_gate_receipts,
+        stage_receipts: parsed.stage_receipts,
         accepted_deviations: parsed.accepted_deviations,
         criteria_results: parsed.criteria_results,
     };

@@ -29,8 +29,8 @@ if (!existsSync(input.project_root)) {
     process.exit(1);
 }
 const expected_snapshot = computeSnapshot(resolve(input.project_root)).slice(0, 16);
-if (!input.project_id) {
-    console.error('Input must contain "project_id"');
+if (!input.stage_receipts || !Array.isArray(input.stage_receipts) || input.stage_receipts.length === 0) {
+    console.error('Input must contain "stage_receipts" array with at least one entry');
     process.exit(1);
 }
 const manifest = {
@@ -38,7 +38,7 @@ const manifest = {
     expected_snapshot,
     prd_goals: input.prd_goals ?? [],
     acceptance_criteria: input.acceptance_criteria ?? [],
-    stage_review_receipts: input.stage_review_receipts ?? [],
+    stage_receipts: input.stage_receipts,
     e2e_steps: input.e2e_steps ?? [],
     compiled_at: new Date().toISOString(),
 };

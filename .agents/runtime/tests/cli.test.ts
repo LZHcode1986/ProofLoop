@@ -1,9 +1,16 @@
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeSnapshot } from '../src/receipt-writer.js';
+
+// ── Test helpers ──────────────────────────────────────────────────────────────────
+
+function computeFileDigest(filePath: string): string {
+  return crypto.createHash('sha256').update(readFileSync(filePath)).digest('hex').slice(0, 16);
+}
 
 // ── Paths ───────────────────────────────────────────────────────────────────────
 
@@ -47,7 +54,7 @@ const BASE_MANIFEST = {
   expected_snapshot: computeSnapshot(process.cwd()).slice(0, 16),
   prd_goals: ['Implement core feature X'],
   acceptance_criteria: ['AC-01: Feature X works'],
-  stage_review_receipts: ['stage-review-S01.json'],
+  stage_receipts: [{ stage_id: 'S01', review_receipt: 'stage-review-S01.json', gate_receipt: 'stage-gate-S01.json' }],
   e2e_steps: [
     {
       id: 'smoke-1',
@@ -91,7 +98,7 @@ describe('CLI Integration Tests', () => {
           source_digest: 'abc123',
           prd_goals: ['Implement X'],
           acceptance_criteria: ['AC-01'],
-          stage_review_receipts: ['r1.json'],
+          stage_receipts: [{ stage_id: 'S01', review_receipt: 'r1.json', gate_receipt: 'g1.json' }],
           e2e_steps: [],
         });
 
@@ -116,7 +123,7 @@ describe('CLI Integration Tests', () => {
         const { stderr, status } = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir);
 
         expect(status).toBe(1);
-        expect(stderr).toContain('PROJECT_E2E_ZERO_STEPS');
+        expect(stderr).toMatch(/too_small|e2e_steps|E2E.*zero/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -170,7 +177,7 @@ describe('CLI Integration Tests', () => {
           project_root: process.cwd(),
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_review_receipts: ['receipts/S01-review.json'],
+          stage_receipts: [{ stage_id: 'S01', review_receipt: 'receipts/S01-review.json', gate_receipt: 'receipts/S01-gate.json' }],
           e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         };
         writeJSON(inputPath, input);
@@ -186,7 +193,8 @@ describe('CLI Integration Tests', () => {
         expect(manifest.expected_snapshot).toMatch(/^[a-f0-9]{16}$/);
         expect(manifest.prd_goals).toEqual(['Goal 1']);
         expect(manifest.acceptance_criteria).toEqual(['Criterion 1']);
-        expect(manifest.stage_review_receipts).toEqual(['receipts/S01-review.json']);
+        expect(manifest.stage_receipts).toHaveLength(1);
+        expect(manifest.stage_receipts[0].stage_id).toBe('S01');
         expect(manifest.e2e_steps).toHaveLength(1);
         expect(stdout).toContain('Project Acceptance Manifest written');
       } finally {
@@ -194,7 +202,7 @@ describe('CLI Integration Tests', () => {
       }
     }, 30000);
 
-    test('compile-project-acceptance rejects empty stage_review_receipts', () => {
+    test('compile-project-acceptance rejects empty stage_receipts', () => {
       const dir = tmpDir();
       try {
         const inputPath = join(dir, 'input.json');
@@ -204,13 +212,13 @@ describe('CLI Integration Tests', () => {
           project_root: process.cwd(),
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_review_receipts: [],
+          stage_receipts: [],
           e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         });
 
         const { stderr, status } = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
         expect(status).toBe(1);
-        expect(stderr).toMatch(/Schema validation/i);
+        expect(stderr).toMatch(/stage_receipts|Schema validation/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -226,7 +234,7 @@ describe('CLI Integration Tests', () => {
           project_root: '/nonexistent/path',
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_review_receipts: ['r.json'],
+          stage_receipts: [{ stage_id: 'S01', review_receipt: 'r.json', gate_receipt: 'g.json' }],
           e2e_steps: [],
         });
 
@@ -287,8 +295,7 @@ describe('CLI Integration Tests', () => {
             reviewer: 'brain',
             project_manifest: { path: 'manifest.json', digest: 'abc123' },
             project_e2e_receipt: { path: 'e2e-receipt.json', digest: 'def456' },
-            stage_review_receipts: ['stage-S01-review.json'],
-            stage_gate_receipts: ['stage-S01-gate.json'],
+            stage_receipts: [{ stage_id: 'S01', review: { path: 'stage-S01-review.json', digest: 'abc123' }, gate: { path: 'stage-S01-gate.json', digest: 'def456' }, snapshot: 'a1b2c3d4e5f6a7b8' }],
             criteria_results: [
               { criteria: 'All P0 fixed', passed: true },
               { criteria: 'CI passes', passed: true },
@@ -312,8 +319,10 @@ describe('CLI Integration Tests', () => {
         expect(content.reviewer).toBe('brain');
         expect(content.project_manifest.digest).toBe('abc123');
         expect(content.project_e2e_receipt.digest).toBe('def456');
-        expect(content.stage_review_receipts).toHaveLength(1);
-        expect(content.stage_gate_receipts).toHaveLength(1);
+        expect(content.stage_receipts).toHaveLength(1);
+        expect(content.stage_receipts[0].stage_id).toBe('S01');
+        expect(content.stage_receipts[0].review.digest).toBe('abc123');
+        expect(content.stage_receipts[0].gate.digest).toBe('def456');
         expect(content.criteria_results).toHaveLength(2);
         expect(content.criteria_results.every((c: any) => c.passed)).toBe(true);
       } finally {
@@ -350,10 +359,21 @@ describe('CLI Integration Tests', () => {
       const dir = tmpDir();
       try {
         // Create fake stage review/gate receipts
-        const reviewPath = join(dir, 'stage-review-S01.json');
-        writeJSON(reviewPath, { stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8' });
+        // Write gate FIRST so we can compute its actual digest
         const gatePath = join(dir, 'stage-gate-S01.json');
-        writeJSON(gatePath, { stage_id: 'S01', verdict: 'PASS' });
+        writeJSON(gatePath, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          platform: 'test', steps: [{ id: 'build', exit_code: 0 }],
+        });
+        const actualGateDigest = computeFileDigest(gatePath);
+
+        // Now write review with the CORRECT gate digest
+        const reviewPath = join(dir, 'stage-review-S01.json');
+        writeJSON(reviewPath, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'test123',
+          stage_gate_receipt: { path: gatePath, digest: actualGateDigest },
+        });
 
         // Compile manifest
         const inputPath = join(dir, 'input.json');
@@ -363,7 +383,7 @@ describe('CLI Integration Tests', () => {
           project_root: process.cwd(),
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_review_receipts: [reviewPath],
+          stage_receipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
           e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         });
         const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
@@ -383,8 +403,7 @@ describe('CLI Integration Tests', () => {
         writeJSON(finPath, {
           manifestPath,
           e2eReceiptPath,
-          stageReviewReceiptPaths: [reviewPath],
-          stageGateReceiptPaths: [gatePath],
+          stageReceipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
           criteriaResults: [{ criteria: 'Criterion 1', passed: true }],
           outputDir: dir,
         });
@@ -411,8 +430,7 @@ describe('CLI Integration Tests', () => {
         writeJSON(finPath, {
           manifestPath: '/nonexistent/manifest.json',
           e2eReceiptPath: '/nonexistent/e2e.json',
-          stageReviewReceiptPaths: ['/nonexistent/review.json'],
-          stageGateReceiptPaths: ['/nonexistent/gate.json'],
+          stageReceipts: [{ stage_id: 'S01', review_receipt: '/nonexistent/review.json', gate_receipt: '/nonexistent/gate.json' }],
           criteriaResults: [{ criteria: 'X', passed: true }],
           outputDir: dir,
         });
@@ -433,8 +451,7 @@ describe('CLI Integration Tests', () => {
         writeJSON(finPath, {
           manifestPath: 'nonexistent',
           e2eReceiptPath: e2ePath,
-          stageReviewReceiptPaths: [],
-          stageGateReceiptPaths: [],
+          stageReceipts: [],
           criteriaResults: [],
           outputDir: dir,
         });
@@ -450,17 +467,28 @@ describe('CLI Integration Tests', () => {
     test('finalize 拒绝缺失 criteria 覆盖', () => {
       const dir = tmpDir();
       try {
-        const reviewPath = join(dir, 'sr.json');
-        writeJSON(reviewPath, { stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8' });
+        // Write gate FIRST so we can compute its actual digest
         const gatePath = join(dir, 'sg.json');
-        writeJSON(gatePath, { stage_id: 'S01', verdict: 'PASS' });
+        writeJSON(gatePath, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          platform: 'test', steps: [{ id: 'build', exit_code: 0 }],
+        });
+        const actualGateDigest = computeFileDigest(gatePath);
+
+        // Now write review with the CORRECT gate digest
+        const reviewPath = join(dir, 'sr.json');
+        writeJSON(reviewPath, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'test',
+          stage_gate_receipt: { path: gatePath, digest: actualGateDigest },
+        });
 
         const inputPath = join(dir, 'input.json');
         const manifestPath = join(dir, 'manifest.json');
         writeJSON(inputPath, {
           project_id: 't', project_root: process.cwd(),
           prd_goals: ['G1'], acceptance_criteria: ['需要覆盖的Criterion', '另一个Criterion'],
-          stage_review_receipts: [reviewPath],
+          stage_receipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
           e2e_steps: [{ id: 's', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         });
         const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
@@ -475,7 +503,7 @@ describe('CLI Integration Tests', () => {
         const finPath = join(dir, 'fin.json');
         writeJSON(finPath, {
           manifestPath, e2eReceiptPath: e2ePath,
-          stageReviewReceiptPaths: [reviewPath], stageGateReceiptPaths: [gatePath],
+          stageReceipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
           criteriaResults: [{ criteria: '需要覆盖的Criterion', passed: true }],
           outputDir: dir,
         });

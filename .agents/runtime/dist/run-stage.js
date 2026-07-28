@@ -502,10 +502,11 @@ export async function runProjectAcceptance(manifest, outputDir, projectRoot) {
         observations: sr.observations,
         skipped: sr.skipped,
     }));
-    // Compute manifest digest (SHA-256 of the serialized manifest)
+    // Compute manifest digest (SHA-256 of the serialized manifest — must use null, 2
+    // so it matches the file-on-disk format written by compile-project-acceptance.ts)
     const manifestDigest = crypto
         .createHash('sha256')
-        .update(JSON.stringify(manifest))
+        .update(JSON.stringify(manifest, null, 2))
         .digest('hex')
         .slice(0, 16);
     const receipt = {
@@ -513,7 +514,6 @@ export async function runProjectAcceptance(manifest, outputDir, projectRoot) {
         verdict,
         snapshot: computeSnapshot(root),
         manifest_digest: manifestDigest,
-        source_snapshot: computeSnapshot(root),
         expected_snapshot: manifest.expected_snapshot,
         executed_snapshot: executedSnapshot,
         steps: e2eSteps,
@@ -531,7 +531,6 @@ export async function runProjectAcceptance(manifest, outputDir, projectRoot) {
             verdict,
             snapshot: receipt.snapshot,
             manifest_digest: manifestDigest,
-            source_snapshot: receipt.source_snapshot,
             expected_snapshot: receipt.expected_snapshot,
             executed_snapshot: receipt.executed_snapshot,
             steps: e2eSteps,

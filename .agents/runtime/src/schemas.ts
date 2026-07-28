@@ -98,26 +98,29 @@ export const ProjectAcceptanceManifestSchema = z.object({
   expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i, 'expected_snapshot must be a 16-char hex digest'),
   prd_goals: z.array(z.string().min(1)).min(1),
   acceptance_criteria: z.array(z.string().min(1)).min(1),
-  stage_review_receipts: z.array(z.string().min(1)).min(1),
-  e2e_steps: z.array(RuntimeProofStep),
+  stage_receipts: z.array(z.object({
+    stage_id: z.string().min(1),
+    review_receipt: z.string().min(1),
+    gate_receipt: z.string().min(1),
+  })).min(1),
+  e2e_steps: z.array(RuntimeProofStep).min(1),
   compiled_at: z.string().optional(),
 });
 export type ProjectAcceptanceManifest = z.infer<typeof ProjectAcceptanceManifestSchema>;
 
 export const ProjectE2EReceiptSchema = z.object({
-  project_id: z.string(),
+  project_id: z.string().min(1),
   verdict: z.enum(['PASS', 'FAIL', 'BLOCKED']),
   snapshot: z.string(),
-  manifest_digest: z.string().optional(),
-  source_snapshot: z.string().optional(),
-  expected_snapshot: z.string().optional(),
-  executed_snapshot: z.string().optional(),
+  manifest_digest: z.string().min(1),
+  expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  executed_snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
   steps: z.array(z.object({
     step_id: z.string(),
     exit_code: z.number().int().nullable(),
     observations: z.string().optional(),
     skipped: z.boolean().optional(),
-  })),
+  })).min(1),
   service_cleanup: z.object({
     cleaned: z.array(z.string()),
     failed: z.array(z.object({ service: z.string(), pid: z.number(), reason: z.string() })),
@@ -125,6 +128,20 @@ export const ProjectE2EReceiptSchema = z.object({
   }).optional(),
   created_at: z.string(),
 });
+
+export const StageReviewReceiptSchema = z.object({
+  stage_id: z.string().min(1),
+  verdict: z.enum(['ACCEPTED', 'REJECTED', 'BLOCKED']),
+  snapshot: z.string(),
+  manifest_digest: z.string().min(1),
+  stage_gate_receipt: z.object({
+    path: z.string().min(1),
+    digest: z.string().min(1),
+  }),
+  reviewer: z.string().optional(),
+  reviewed_at: z.string().optional(),
+});
+export type StageReviewReceipt = z.infer<typeof StageReviewReceiptSchema>;
 export type ProjectE2EReceipt = z.infer<typeof ProjectE2EReceiptSchema>;
 
 export const StageGateVerdict = z.enum(['PASS', 'FAIL', 'BLOCKED']);
@@ -170,8 +187,12 @@ export const WriteProjectReviewReceiptOptionsSchema = z.object({
     path: z.string().min(1),
     digest: z.string().min(1),
   }).optional(),
-  stage_review_receipts: z.array(z.string().min(1)).optional().default([]),
-  stage_gate_receipts: z.array(z.string().min(1)).optional().default([]),
+  stage_receipts: z.array(z.object({
+    stage_id: z.string().min(1),
+    review: z.object({ path: z.string().min(1), digest: z.string().min(1) }),
+    gate: z.object({ path: z.string().min(1), digest: z.string().min(1) }),
+    snapshot: z.string(),
+  })).optional().default([]),
   accepted_deviations: z.array(z.string()).optional().default([]),
   criteria_results: z.array(z.object({
     criteria: z.string(),
@@ -186,11 +207,8 @@ export const WriteProjectReviewReceiptOptionsSchema = z.object({
     if (!data.project_e2e_receipt) {
       ctx.addIssue({ code: 'custom', path: ['project_e2e_receipt'], message: 'Required when verdict is PROJECT_ACCEPTED' });
     }
-    if (!data.stage_review_receipts || data.stage_review_receipts.length === 0) {
-      ctx.addIssue({ code: 'custom', path: ['stage_review_receipts'], message: 'At least one stage review receipt required when verdict is PROJECT_ACCEPTED' });
-    }
-    if (!data.stage_gate_receipts || data.stage_gate_receipts.length === 0) {
-      ctx.addIssue({ code: 'custom', path: ['stage_gate_receipts'], message: 'At least one stage gate receipt required when verdict is PROJECT_ACCEPTED' });
+    if (!data.stage_receipts || data.stage_receipts.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['stage_receipts'], message: 'At least one stage receipt required when verdict is PROJECT_ACCEPTED' });
     }
     if (!data.criteria_results || data.criteria_results.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['criteria_results'], message: 'At least one criteria result required when verdict is PROJECT_ACCEPTED' });

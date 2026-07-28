@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { getPlatformInfo } from './platform-adapter.js';
 import type { RuntimeProofStep } from './schemas.js';
 import { WriteProjectReviewReceiptOptionsSchema } from './schemas.js';
+import { z } from 'zod';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -288,15 +289,19 @@ export interface ProjectReviewReceipt {
   reviewer?: string;
   project_manifest?: { path: string; digest: string };
   project_e2e_receipt?: { path: string; digest: string };
-  stage_review_receipts?: string[];
-  stage_gate_receipts?: string[];
+  stage_receipts?: Array<{
+    stage_id: string;
+    review: { path: string; digest: string };
+    gate: { path: string; digest: string };
+    snapshot: string;
+  }>;
   accepted_deviations?: string[];
   criteria_results?: Array<{ criteria: string; passed: boolean; notes?: string }>;
 }
 
 export interface WriteProjectReviewReceiptOptions {
   outputDir: string;
-  data: ProjectReviewReceipt;
+  data: z.infer<typeof WriteProjectReviewReceiptOptionsSchema>;
 }
 
 /**
@@ -322,8 +327,7 @@ export function writeProjectReviewReceipt(options: WriteProjectReviewReceiptOpti
     reviewer: parsed.reviewer ?? 'brain',
     project_manifest: parsed.project_manifest,
     project_e2e_receipt: parsed.project_e2e_receipt,
-    stage_review_receipts: parsed.stage_review_receipts,
-    stage_gate_receipts: parsed.stage_gate_receipts,
+    stage_receipts: parsed.stage_receipts,
     accepted_deviations: parsed.accepted_deviations,
     criteria_results: parsed.criteria_results,
   };
