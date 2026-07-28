@@ -43,12 +43,12 @@ jobs:
         working-directory: .agents/runtime
       - name: Check dist/ is up-to-date
         run: git diff --exit-code -- .agents/runtime/dist/
-      - name: Check no untracked dist/ files
+      - name: Check no untracked js files in dist/
         run: |
-          untracked=$(git status --porcelain .agents/runtime/dist/ | wc -l)
+          untracked=$(git ls-files --others --exclude-standard .agents/runtime/dist/ | wc -l)
           if [ "$untracked" -ne 0 ]; then
-            echo "Found $untracked untracked file(s) in dist/."
-            git status --porcelain .agents/runtime/dist/
+            echo "Found $untracked untracked file(s) in dist/:"
+            git ls-files --others --exclude-standard .agents/runtime/dist/
             exit 1
           fi
 
