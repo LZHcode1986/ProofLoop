@@ -284,8 +284,14 @@ export interface ProjectReviewReceipt {
   verdict: 'PROJECT_ACCEPTED' | 'PROJECT_REJECTED' | 'PROJECT_BLOCKED';
   findings?: Array<{ category: string; description: string }>;
   snapshot: string;
-  reviewed_at: string;
-  reviewer: string;
+  reviewed_at?: string;
+  reviewer?: string;
+  project_manifest?: { path: string; digest: string };
+  project_e2e_receipt?: { path: string; digest: string };
+  stage_review_receipts?: string[];
+  stage_gate_receipts?: string[];
+  accepted_deviations?: string[];
+  criteria_results?: Array<{ criteria: string; passed: boolean; notes?: string }>;
 }
 
 export interface WriteProjectReviewReceiptOptions {
@@ -311,6 +317,12 @@ export function writeProjectReviewReceipt(options: WriteProjectReviewReceiptOpti
     snapshot: data.snapshot,
     reviewed_at: data.reviewed_at ?? new Date().toISOString(),
     reviewer: data.reviewer ?? 'brain',
+    project_manifest: data.project_manifest,
+    project_e2e_receipt: data.project_e2e_receipt,
+    stage_review_receipts: data.stage_review_receipts,
+    stage_gate_receipts: data.stage_gate_receipts,
+    accepted_deviations: data.accepted_deviations,
+    criteria_results: data.criteria_results,
   };
 
   const filePath = path.join(outputDir, 'project-review.json');
@@ -358,8 +370,11 @@ if (isScriptEntry()) {
     const result = writeStageReviewReceipt(input);
     console.log(JSON.stringify(result));
   } else if (mode === 'project-review') {
-    WriteProjectReviewReceiptOptionsSchema.parse(input.data);
-    const result = writeProjectReviewReceipt(input);
+    const parsedData = WriteProjectReviewReceiptOptionsSchema.parse(input.data);
+    const result = writeProjectReviewReceipt({
+      outputDir: input.outputDir,
+      data: parsedData,
+    });
     console.log(JSON.stringify(result));
   } else {
     console.error('Usage: node receipt-writer.js <stage-review|project-review> <json-input>');

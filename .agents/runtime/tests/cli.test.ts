@@ -273,7 +273,54 @@ describe('CLI Integration Tests', () => {
       }
     }, 30000);
 
-    test('project-review 合法输入 → 写文件', () => {
+    test('project-review 合法输入(含审计字段) → 写文件', () => {
+      const dir = tmpDir();
+      try {
+        const input = JSON.stringify({
+          outputDir: dir,
+          data: {
+            project_id: 'test-project',
+            verdict: 'PROJECT_ACCEPTED',
+            snapshot: 'a1b2c3d4e5f6a7b8',
+            reviewed_at: new Date().toISOString(),
+            reviewer: 'brain',
+            project_manifest: { path: 'manifest.json', digest: 'abc123' },
+            project_e2e_receipt: { path: 'e2e-receipt.json', digest: 'def456' },
+            stage_review_receipts: ['stage-S01-review.json'],
+            stage_gate_receipts: ['stage-S01-gate.json'],
+            criteria_results: [
+              { criteria: 'All P0 fixed', passed: true },
+              { criteria: 'CI passes', passed: true },
+            ],
+          },
+        });
+
+        const { stdout, stderr, status } = cliRun(RECEIPT_WRITER, 'project-review', input);
+
+        expect(status).toBe(0);
+        expect(stderr).toBe('');
+
+        const receiptPath = JSON.parse(stdout);
+        expect(typeof receiptPath).toBe('string');
+        expect(existsSync(receiptPath)).toBe(true);
+
+        const content = JSON.parse(readFileSync(receiptPath, 'utf-8'));
+        expect(content.project_id).toBe('test-project');
+        expect(content.verdict).toBe('PROJECT_ACCEPTED');
+        expect(content.snapshot).toBe('a1b2c3d4e5f6a7b8');
+        expect(content.reviewer).toBe('brain');
+        expect(content.project_manifest.digest).toBe('abc123');
+        expect(content.project_e2e_receipt.digest).toBe('def456');
+        expect(content.stage_review_receipts).toHaveLength(1);
+        expect(content.stage_gate_receipts).toHaveLength(1);
+        expect(content.criteria_results).toHaveLength(2);
+        expect(content.criteria_results.every((c: any) => c.passed)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('project-review 缺审计字段 → PROJECT_ACCEPTED 被拒绝', () => {
       const dir = tmpDir();
       try {
         const input = JSON.stringify({
@@ -287,22 +334,9 @@ describe('CLI Integration Tests', () => {
           },
         });
 
-        const { stdout, stderr, status } = cliRun(RECEIPT_WRITER, 'project-review', input);
-
-        expect(status).toBe(0);
-        expect(stderr).toBe('');
-
-        // stdout is a JSON string containing the receipt path
-        const receiptPath = JSON.parse(stdout);
-        expect(typeof receiptPath).toBe('string');
-        expect(existsSync(receiptPath)).toBe(true);
-
-        // Verify content
-        const content = JSON.parse(readFileSync(receiptPath, 'utf-8'));
-        expect(content.project_id).toBe('test-project');
-        expect(content.verdict).toBe('PROJECT_ACCEPTED');
-        expect(content.snapshot).toBe('a1b2c3d4e5f6a7b8');
-        expect(content.reviewer).toBe('brain');
+        const { stderr, status } = cliRun(RECEIPT_WRITER, 'project-review', input);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/project_manifest|project_e2e_receipt|Required when verdict/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

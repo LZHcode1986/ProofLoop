@@ -171,6 +171,12 @@ export function writeProjectReviewReceipt(options) {
         snapshot: data.snapshot,
         reviewed_at: data.reviewed_at ?? new Date().toISOString(),
         reviewer: data.reviewer ?? 'brain',
+        project_manifest: data.project_manifest,
+        project_e2e_receipt: data.project_e2e_receipt,
+        stage_review_receipts: data.stage_review_receipts,
+        stage_gate_receipts: data.stage_gate_receipts,
+        accepted_deviations: data.accepted_deviations,
+        criteria_results: data.criteria_results,
     };
     const filePath = path.join(outputDir, 'project-review.json');
     fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
@@ -214,8 +220,11 @@ if (isScriptEntry()) {
         console.log(JSON.stringify(result));
     }
     else if (mode === 'project-review') {
-        WriteProjectReviewReceiptOptionsSchema.parse(input.data);
-        const result = writeProjectReviewReceipt(input);
+        const parsedData = WriteProjectReviewReceiptOptionsSchema.parse(input.data);
+        const result = writeProjectReviewReceipt({
+            outputDir: input.outputDir,
+            data: parsedData,
+        });
         console.log(JSON.stringify(result));
     }
     else {

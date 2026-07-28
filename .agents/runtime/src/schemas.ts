@@ -160,6 +160,7 @@ export const WriteProjectReviewReceiptOptionsSchema = z.object({
     description: z.string().min(1),
   })).optional().default([]),
   snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  reviewed_at: z.string().optional(),
   reviewer: z.string().min(1).optional(),
   project_manifest: z.object({
     path: z.string().min(1),
@@ -177,5 +178,26 @@ export const WriteProjectReviewReceiptOptionsSchema = z.object({
     passed: z.boolean(),
     notes: z.string().optional(),
   })).optional().default([]),
+}).superRefine((data, ctx) => {
+  if (data.verdict === 'PROJECT_ACCEPTED') {
+    if (!data.project_manifest) {
+      ctx.addIssue({ code: 'custom', path: ['project_manifest'], message: 'Required when verdict is PROJECT_ACCEPTED' });
+    }
+    if (!data.project_e2e_receipt) {
+      ctx.addIssue({ code: 'custom', path: ['project_e2e_receipt'], message: 'Required when verdict is PROJECT_ACCEPTED' });
+    }
+    if (!data.stage_review_receipts || data.stage_review_receipts.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['stage_review_receipts'], message: 'At least one stage review receipt required when verdict is PROJECT_ACCEPTED' });
+    }
+    if (!data.stage_gate_receipts || data.stage_gate_receipts.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['stage_gate_receipts'], message: 'At least one stage gate receipt required when verdict is PROJECT_ACCEPTED' });
+    }
+    if (!data.criteria_results || data.criteria_results.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['criteria_results'], message: 'At least one criteria result required when verdict is PROJECT_ACCEPTED' });
+    }
+    if (data.criteria_results && data.criteria_results.some(c => !c.passed)) {
+      ctx.addIssue({ code: 'custom', path: ['criteria_results'], message: 'All criteria must pass when verdict is PROJECT_ACCEPTED' });
+    }
+  }
 });
 export type WriteProjectReviewReceiptOptions = z.infer<typeof WriteProjectReviewReceiptOptionsSchema>;

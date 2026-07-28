@@ -36,8 +36,13 @@ if (!existsSync(input.project_root)) {
 
 const expected_snapshot = computeSnapshot(resolve(input.project_root)).slice(0, 16);
 
-const manifest = {
-  project_id: input.project_id ?? 'unknown',
+  if (!input.project_id) {
+    console.error('Input must contain "project_id"');
+    process.exit(1);
+  }
+
+  const manifest = {
+    project_id: input.project_id,
   expected_snapshot,
   prd_goals: input.prd_goals ?? [],
   acceptance_criteria: input.acceptance_criteria ?? [],
