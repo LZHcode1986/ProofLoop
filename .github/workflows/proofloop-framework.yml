@@ -14,11 +14,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Python dependencies
         run: pip install pyyaml
+      - name: Install Node.js dependencies
+        run: npm ci
+        working-directory: .agents/runtime
       - name: YAML frontmatter check
         run: python tests/framework/proofloop-check-agent-yaml.py --path ${{ github.workspace }}
       - name: Permission smoke test
         run: python tests/framework/proofloop-permission-smoke-test.py --path ${{ github.workspace }}
-      - name: Smoke test
-        run: bash tests/framework/proofloop-smoke-test.sh
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+        working-directory: .agents/runtime
+      - name: TypeScript tests
+        run: npm test
+        working-directory: .agents/runtime
