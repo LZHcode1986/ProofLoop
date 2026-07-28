@@ -307,22 +307,25 @@ export interface WriteProjectReviewReceiptOptions {
 export function writeProjectReviewReceipt(options: WriteProjectReviewReceiptOptions): string {
   const { outputDir, data } = options;
 
+  // Internal Schema validation — fail-closed even if caller bypasses CLI
+  const parsed = WriteProjectReviewReceiptOptionsSchema.parse(data);
+
   // Ensure output directory exists
   fs.mkdirSync(outputDir, { recursive: true });
 
   const receipt: ProjectReviewReceipt = {
-    project_id: data.project_id,
-    verdict: data.verdict,
-    findings: data.findings,
-    snapshot: data.snapshot,
-    reviewed_at: data.reviewed_at ?? new Date().toISOString(),
-    reviewer: data.reviewer ?? 'brain',
-    project_manifest: data.project_manifest,
-    project_e2e_receipt: data.project_e2e_receipt,
-    stage_review_receipts: data.stage_review_receipts,
-    stage_gate_receipts: data.stage_gate_receipts,
-    accepted_deviations: data.accepted_deviations,
-    criteria_results: data.criteria_results,
+    project_id: parsed.project_id,
+    verdict: parsed.verdict,
+    findings: parsed.findings,
+    snapshot: parsed.snapshot,
+    reviewed_at: parsed.reviewed_at ?? new Date().toISOString(),
+    reviewer: parsed.reviewer ?? 'brain',
+    project_manifest: parsed.project_manifest,
+    project_e2e_receipt: parsed.project_e2e_receipt,
+    stage_review_receipts: parsed.stage_review_receipts,
+    stage_gate_receipts: parsed.stage_gate_receipts,
+    accepted_deviations: parsed.accepted_deviations,
+    criteria_results: parsed.criteria_results,
   };
 
   const filePath = path.join(outputDir, 'project-review.json');

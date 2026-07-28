@@ -14,6 +14,7 @@ const DIST_DIR = join(__dirname, '..', 'dist');
 const RUN_PROJECT_ACCEPTANCE = join(DIST_DIR, 'run-project-acceptance.js');
 const COMPILE_PROJECT_ACCEPTANCE = join(DIST_DIR, 'compile-project-acceptance.js');
 const RECEIPT_WRITER = join(DIST_DIR, 'receipt-writer.js');
+const FINALIZE_PROJECT_REVIEW = join(DIST_DIR, 'finalize-project-review.js');
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -337,6 +338,150 @@ describe('CLI Integration Tests', () => {
         const { stderr, status } = cliRun(RECEIPT_WRITER, 'project-review', input);
         expect(status).toBe(1);
         expect(stderr).toMatch(/project_manifest|project_e2e_receipt|Required when verdict/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+  });
+
+  describe('finalize-project-review.js', () => {
+
+    test('完整往返: compile → E2E → finalize → PROJECT_ACCEPTED', () => {
+      const dir = tmpDir();
+      try {
+        // Create fake stage review/gate receipts
+        const reviewPath = join(dir, 'stage-review-S01.json');
+        writeJSON(reviewPath, { stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8' });
+        const gatePath = join(dir, 'stage-gate-S01.json');
+        writeJSON(gatePath, { stage_id: 'S01', verdict: 'PASS' });
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'e2e-test',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_review_receipts: [reviewPath],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Run E2E
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+
+        // Find the E2E receipt (filename has timestamp)
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        expect(files.length).toBeGreaterThan(0);
+        const e2eReceiptPath = join(dir, files[0]);
+
+        // Finalize
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath,
+          e2eReceiptPath,
+          stageReviewReceiptPaths: [reviewPath],
+          stageGateReceiptPaths: [gatePath],
+          criteriaResults: [{ criteria: 'Criterion 1', passed: true }],
+          outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(0);
+
+        // Verify receipt
+        const receiptContent = readFileSync(join(dir, 'project-review.json'), 'utf-8');
+        const receipt = JSON.parse(receiptContent);
+        expect(receipt.verdict).toBe('PROJECT_ACCEPTED');
+        expect(receipt.project_manifest.digest).toBeTruthy();
+        expect(receipt.project_e2e_receipt.digest).toBeTruthy();
+        expect(receipt.criteria_results).toHaveLength(1);
+        expect(receipt.criteria_results[0].passed).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('finalize 拒绝伪造的 stage review 路径', () => {
+      const dir = tmpDir();
+      try {
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath: '/nonexistent/manifest.json',
+          e2eReceiptPath: '/nonexistent/e2e.json',
+          stageReviewReceiptPaths: ['/nonexistent/review.json'],
+          stageGateReceiptPaths: ['/nonexistent/gate.json'],
+          criteriaResults: [{ criteria: 'X', passed: true }],
+          outputDir: dir,
+        });
+        const r = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/not found/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('finalize 拒绝非 PASS 的 E2E Receipt', () => {
+      const dir = tmpDir();
+      try {
+        const e2ePath = join(dir, 'project-e2e-fail.json');
+        writeJSON(e2ePath, { project_id: 'x', verdict: 'FAIL', snapshot: 'a1b2c3d4e5f6a7b8' });
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath: 'nonexistent',
+          e2eReceiptPath: e2ePath,
+          stageReviewReceiptPaths: [],
+          stageGateReceiptPaths: [],
+          criteriaResults: [],
+          outputDir: dir,
+        });
+        const r = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r.status).toBe(1);
+        // Should fail because manifest doesn't exist AND e2e verdict is wrong
+        expect(r.stderr).toMatch(/not found|FAIL/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('finalize 拒绝缺失 criteria 覆盖', () => {
+      const dir = tmpDir();
+      try {
+        const reviewPath = join(dir, 'sr.json');
+        writeJSON(reviewPath, { stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8' });
+        const gatePath = join(dir, 'sg.json');
+        writeJSON(gatePath, { stage_id: 'S01', verdict: 'PASS' });
+
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 't', project_root: process.cwd(),
+          prd_goals: ['G1'], acceptance_criteria: ['需要覆盖的Criterion', '另一个Criterion'],
+          stage_review_receipts: [reviewPath],
+          e2e_steps: [{ id: 's', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        const e2ePath = join(dir, files[0]);
+
+        // Only submit 1 of 2 criteria
+        const finPath = join(dir, 'fin.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath: e2ePath,
+          stageReviewReceiptPaths: [reviewPath], stageGateReceiptPaths: [gatePath],
+          criteriaResults: [{ criteria: '需要覆盖的Criterion', passed: true }],
+          outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(1);
+        expect(r3.stderr).toMatch(/Missing criteria/i);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
