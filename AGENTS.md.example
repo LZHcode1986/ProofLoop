@@ -8,8 +8,6 @@ The local `AGENTS.md` should contain only rules every agent in the project must 
 
 Describe the local development environment:
 
-- OS:
-- shell:
 - package manager:
 - runtime versions:
 - required local services:

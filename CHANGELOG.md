@@ -2,6 +2,14 @@
 
 ProofLoop 更新记录。其他项目可据此判断是否需要同步更新。
 
+## v1.2.8
+
+### 2026-07-28
+
+- **feat**: 新增 `general.md` subagent 定义，明确 General 代理的职责边界与权限
+  - `.opencode/agents/general.md`: 新增 General 代理配置，职责为受限的直接任务、澄清持久化与归档执行
+  - 明确 General 不越权做专家判断、归档决策、commit、派发子代理或加载 PRD/architecture 技能
+
 ## v1.2.7
 
 ### 2026-07-01

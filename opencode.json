@@ -1,7 +1,52 @@
 {
+  "plugin": [
+    "opencode-subagent-control@latest"
+  ],
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "AGENTS.md",
-    ".agents/contracts/*.md"
-  ]
+   "subagent_depth": 2,  
+   "mcp": {
+        "codegraph": {
+            "type": "local",
+            "command": [
+                "codegraph-mcp",
+                "--workspace",
+                "D:/software-dev/proofloop",
+                "--profile",
+                "graph"
+            ],
+            "cwd": "D:/software-dev/proofloop",
+            "enabled": true
+        },
+        "playwright": {
+            "type": "local",
+            "command": [
+                "npx",
+                "@playwright/mcp@latest"
+            ],
+            "enabled": false
+        },
+        "context7": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "@upstash/context7-mcp",
+                "--api-key",
+                "{env:CONTEXT7_API_KEY}"
+            ],
+            "enabled": true
+        },
+        "chrome-devtools": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "chrome-devtools-mcp@latest",
+                "--no-usage-statistics",
+                "--headless", "true"
+            ],
+            "enabled": false
+        }
+    },  
+  "lsp": true 
 }
