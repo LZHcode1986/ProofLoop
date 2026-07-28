@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getPlatformInfo } from './platform-adapter.js';
 import type { RuntimeProofStep } from './schemas.js';
+import { WriteProjectReviewReceiptOptionsSchema } from './schemas.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -262,6 +263,8 @@ export function writeProjectE2EReceipt(options: WriteProjectE2EReceiptOptions): 
     snapshot: data.snapshot,
     manifest_digest: data.manifest_digest,
     source_snapshot: data.source_snapshot,
+    expected_snapshot: data.expected_snapshot,
+    executed_snapshot: data.executed_snapshot,
     steps: data.steps,
     service_cleanup: data.service_cleanup,
     created_at: data.created_at ?? new Date().toISOString(),
@@ -355,6 +358,7 @@ if (isScriptEntry()) {
     const result = writeStageReviewReceipt(input);
     console.log(JSON.stringify(result));
   } else if (mode === 'project-review') {
+    WriteProjectReviewReceiptOptionsSchema.parse(input.data);
     const result = writeProjectReviewReceipt(input);
     console.log(JSON.stringify(result));
   } else {

@@ -575,9 +575,11 @@ export interface RunProjectAcceptanceResult {
 export async function runProjectAcceptance(
   manifest: ProjectAcceptanceManifest,
   outputDir?: string,
+  projectRoot?: string,
 ): Promise<RunProjectAcceptanceResult> {
   const errors: string[] = [];
-  const resolvedOutputDir = outputDir ?? process.cwd();
+  const root = projectRoot ?? process.cwd();
+  const resolvedOutputDir = outputDir ?? root;
 
   // ── 0. Zero-step / all-skipped rejection ──
   if (manifest.e2e_steps.length === 0) {
@@ -605,9 +607,9 @@ export async function runProjectAcceptance(
   }
 
   // ── 1b. Snapshot comparison ──
-  const executedSnapshot = computeSnapshot(process.cwd());
+  const executedSnapshot = computeSnapshot(root);
 
-  if (manifest.expected_snapshot && manifest.expected_snapshot !== executedSnapshot) {
+  if (manifest.expected_snapshot !== executedSnapshot) {
     return {
       success: false,
       errors: [
@@ -645,9 +647,9 @@ export async function runProjectAcceptance(
   const receipt: ProjectE2EReceipt = {
     project_id: manifest.project_id,
     verdict,
-    snapshot: computeSnapshot(process.cwd()),
+    snapshot: computeSnapshot(root),
     manifest_digest: manifestDigest,
-    source_snapshot: computeSnapshot(process.cwd()),
+    source_snapshot: computeSnapshot(root),
     expected_snapshot: manifest.expected_snapshot,
     executed_snapshot: executedSnapshot,
     steps: e2eSteps,

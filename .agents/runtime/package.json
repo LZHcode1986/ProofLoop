@@ -9,7 +9,8 @@
     "validate-stage": "node dist/validate-stage.js",
     "compile-manifest": "node dist/compile-manifest.js",
     "run-stage": "node dist/run-stage.js",
-    "run-project-acceptance": "node dist/run-project-acceptance.js"
+    "run-project-acceptance": "node dist/run-project-acceptance.js",
+    "compile-project-acceptance": "node dist/compile-project-acceptance.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

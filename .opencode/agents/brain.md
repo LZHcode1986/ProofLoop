@@ -21,6 +21,7 @@ permission:
     "node .agents/runtime/dist/receipt-writer.js *": allow
     "node .agents/runtime/dist/run-stage.js *": allow
     "node .agents/runtime/dist/run-project-acceptance.js *": allow
+    "node .agents/runtime/dist/compile-project-acceptance.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny

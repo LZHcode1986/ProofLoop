@@ -148,6 +148,23 @@ describe('runProjectAcceptance', () => {
       expect(result.receipt).toBeUndefined();
     }, 15000);
 
+    test('empty expected_snapshot is rejected', async () => {
+      const badManifest: ProjectAcceptanceManifest = {
+        ...BASE_MANIFEST,
+        expected_snapshot: '',
+        e2e_steps: [
+          {
+            id: 'smoke-1',
+            executable: 'node',
+            args: ['-e', 'console.log("ok")'],
+          },
+        ],
+      };
+      const result = await runProjectAcceptance(badManifest, tmpDir);
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e: string) => e.includes('PROJECT_SOURCE_STALE'))).toBe(true);
+    }, 15000);
+
     test('probe with wrong expected output → FAIL', async () => {
       const manifest: ProjectAcceptanceManifest = {
         ...BASE_MANIFEST,

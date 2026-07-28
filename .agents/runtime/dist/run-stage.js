@@ -451,9 +451,10 @@ export async function runStageFromManifest(options) {
  * 3. Determine verdict (PASS / FAIL / BLOCKED)
  * 4. Write structured E2E receipt with manifest digest and source snapshot
  */
-export async function runProjectAcceptance(manifest, outputDir) {
+export async function runProjectAcceptance(manifest, outputDir, projectRoot) {
     const errors = [];
-    const resolvedOutputDir = outputDir ?? process.cwd();
+    const root = projectRoot ?? process.cwd();
+    const resolvedOutputDir = outputDir ?? root;
     // ── 0. Zero-step / all-skipped rejection ──
     if (manifest.e2e_steps.length === 0) {
         return {
@@ -477,8 +478,8 @@ export async function runProjectAcceptance(manifest, outputDir) {
         };
     }
     // ── 1b. Snapshot comparison ──
-    const executedSnapshot = computeSnapshot(process.cwd());
-    if (manifest.expected_snapshot && manifest.expected_snapshot !== executedSnapshot) {
+    const executedSnapshot = computeSnapshot(root);
+    if (manifest.expected_snapshot !== executedSnapshot) {
         return {
             success: false,
             errors: [
@@ -510,9 +511,9 @@ export async function runProjectAcceptance(manifest, outputDir) {
     const receipt = {
         project_id: manifest.project_id,
         verdict,
-        snapshot: computeSnapshot(process.cwd()),
+        snapshot: computeSnapshot(root),
         manifest_digest: manifestDigest,
-        source_snapshot: computeSnapshot(process.cwd()),
+        source_snapshot: computeSnapshot(root),
         expected_snapshot: manifest.expected_snapshot,
         executed_snapshot: executedSnapshot,
         steps: e2eSteps,

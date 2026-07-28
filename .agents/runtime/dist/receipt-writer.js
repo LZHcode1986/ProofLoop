@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getPlatformInfo } from './platform-adapter.js';
+import { WriteProjectReviewReceiptOptionsSchema } from './schemas.js';
 // ── Snapshot computation ───────────────────────────────────────────────────────
 /**
  * Compute a content-aware snapshot identifier for a directory tree.
@@ -144,6 +145,8 @@ export function writeProjectE2EReceipt(options) {
         snapshot: data.snapshot,
         manifest_digest: data.manifest_digest,
         source_snapshot: data.source_snapshot,
+        expected_snapshot: data.expected_snapshot,
+        executed_snapshot: data.executed_snapshot,
         steps: data.steps,
         service_cleanup: data.service_cleanup,
         created_at: data.created_at ?? new Date().toISOString(),
@@ -211,6 +214,7 @@ if (isScriptEntry()) {
         console.log(JSON.stringify(result));
     }
     else if (mode === 'project-review') {
+        WriteProjectReviewReceiptOptionsSchema.parse(input.data);
         const result = writeProjectReviewReceipt(input);
         console.log(JSON.stringify(result));
     }

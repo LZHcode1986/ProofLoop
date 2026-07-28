@@ -2,9 +2,9 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { ProjectAcceptanceManifestSchema } from './schemas.js';
 import { runProjectAcceptance } from './run-stage.js';
-const [manifestPath, outputDir] = process.argv.slice(2);
+const [manifestPath, outputDir, projectRoot] = process.argv.slice(2);
 if (!manifestPath) {
-    console.error('Usage: node run-project-acceptance.js <manifest-path> [output-dir]');
+    console.error('Usage: node run-project-acceptance.js <manifest-path> [output-dir] [project-root]');
     process.exit(1);
 }
 if (!existsSync(manifestPath)) {
@@ -27,7 +27,7 @@ catch (err) {
     console.error(`Manifest schema validation failed:\n${err}`);
     process.exit(1);
 }
-const result = await runProjectAcceptance(manifest, outputDir);
+const result = await runProjectAcceptance(manifest, outputDir, projectRoot);
 if (!result.success) {
     console.error(JSON.stringify(result, null, 2));
     process.exit(1);

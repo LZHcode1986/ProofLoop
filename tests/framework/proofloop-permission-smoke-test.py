@@ -616,7 +616,8 @@ def check_brain_bash_deny(root: Path) -> list:
             "Get-Content *", "Get-ChildItem *", "Test-Path *",
             "node .agents/runtime/dist/receipt-writer.js *",
             "node .agents/runtime/dist/run-stage.js *",
-            "node .agents/runtime/dist/run-project-acceptance.js *"
+            "node .agents/runtime/dist/run-project-acceptance.js *",
+            "node .agents/runtime/dist/compile-project-acceptance.js *"
         }
         
         allowed = {k for k in bash_config if k != "*"}

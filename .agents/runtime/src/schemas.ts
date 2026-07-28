@@ -95,7 +95,7 @@ export type ScvReceipt = z.infer<typeof ScvReceipt>;
 
 export const ProjectAcceptanceManifestSchema = z.object({
   project_id: z.string(),
-  expected_snapshot: z.string(),
+  expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i, 'expected_snapshot must be a 16-char hex digest'),
   prd_goals: z.array(z.string().min(1)).min(1),
   acceptance_criteria: z.array(z.string().min(1)).min(1),
   stage_review_receipts: z.array(z.string().min(1)).min(1),
@@ -151,3 +151,31 @@ export const StageGateReceipt = z.object({
   timestamp: z.string().optional(),
 });
 export type StageGateReceipt = z.infer<typeof StageGateReceipt>;
+
+export const WriteProjectReviewReceiptOptionsSchema = z.object({
+  project_id: z.string().min(1),
+  verdict: z.enum(['PROJECT_ACCEPTED', 'PROJECT_REJECTED', 'PROJECT_BLOCKED']),
+  findings: z.array(z.object({
+    category: z.string().min(1),
+    description: z.string().min(1),
+  })).optional().default([]),
+  snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  reviewer: z.string().min(1).optional(),
+  project_manifest: z.object({
+    path: z.string().min(1),
+    digest: z.string().min(1),
+  }).optional(),
+  project_e2e_receipt: z.object({
+    path: z.string().min(1),
+    digest: z.string().min(1),
+  }).optional(),
+  stage_review_receipts: z.array(z.string().min(1)).optional().default([]),
+  stage_gate_receipts: z.array(z.string().min(1)).optional().default([]),
+  accepted_deviations: z.array(z.string()).optional().default([]),
+  criteria_results: z.array(z.object({
+    criteria: z.string(),
+    passed: z.boolean(),
+    notes: z.string().optional(),
+  })).optional().default([]),
+});
+export type WriteProjectReviewReceiptOptions = z.infer<typeof WriteProjectReviewReceiptOptionsSchema>;
