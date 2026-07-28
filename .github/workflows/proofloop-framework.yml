@@ -32,9 +32,14 @@ jobs:
         run: python tests/framework/proofloop-check-agent-yaml.py
       - name: Permission smoke test
         run: python tests/framework/proofloop-permission-smoke-test.py
+      - name: Build TypeScript
+        run: npm run build
+        working-directory: .agents/runtime
       - name: TypeScript typecheck
         run: npx tsc --noEmit
         working-directory: .agents/runtime
       - name: TypeScript tests
         run: npm test
         working-directory: .agents/runtime
+      - name: Check dist/ is up-to-date
+        run: git diff --exit-code -- .agents/runtime/dist/

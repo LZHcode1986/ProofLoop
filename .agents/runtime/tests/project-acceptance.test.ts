@@ -30,24 +30,7 @@ afterEach(() => {
 describe('runProjectAcceptance', () => {
 
   describe('正向路径', () => {
-    test('empty e2e_steps → PROJECT_ACCEPTED', async () => {
-      const manifest: ProjectAcceptanceManifest = {
-        ...BASE_MANIFEST,
-        e2e_steps: [],
-      };
-
-      const result = await runProjectAcceptance(manifest, tmpDir);
-
-      expect(result.success).toBe(true);
-      expect(result.errors).toHaveLength(0);
-      expect(result.receipt).toBeDefined();
-      expect(result.receipt!.verdict).toBe('PROJECT_ACCEPTED');
-      expect(result.receipt!.steps).toHaveLength(0);
-      expect(result.receipt!.project_id).toBe('test-project');
-      expect(result.receiptPath).toBeDefined();
-    }, 15000);
-
-    test('all E2E steps pass → PROJECT_ACCEPTED', async () => {
+    test('E2E steps pass → PASS', async () => {
       const manifest: ProjectAcceptanceManifest = {
         ...BASE_MANIFEST,
         e2e_steps: [
@@ -70,7 +53,7 @@ describe('runProjectAcceptance', () => {
       expect(result.success).toBe(true);
       expect(result.errors).toHaveLength(0);
       expect(result.receipt).toBeDefined();
-      expect(result.receipt!.verdict).toBe('PROJECT_ACCEPTED');
+      expect(result.receipt!.verdict).toBe('PASS');
       expect(result.receipt!.steps).toHaveLength(2);
 
       const steps = result.receipt!.steps;
@@ -82,7 +65,42 @@ describe('runProjectAcceptance', () => {
   });
 
   describe('负向路径', () => {
-    test('E2E step fails → PROJECT_REJECTED', async () => {
+    test('empty e2e_steps → PROJECT_E2E_ZERO_STEPS', async () => {
+      const manifest: ProjectAcceptanceManifest = {
+        ...BASE_MANIFEST,
+        e2e_steps: [],
+      };
+
+      const result = await runProjectAcceptance(manifest, tmpDir);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('PROJECT_E2E_ZERO_STEPS');
+      expect(result.receipt).toBeUndefined();
+    }, 15000);
+
+    test('all e2e_steps skipped → PROJECT_E2E_ALL_SKIPPED', async () => {
+      const manifest: ProjectAcceptanceManifest = {
+        ...BASE_MANIFEST,
+        e2e_steps: [
+          {
+            id: 'skipped-1',
+            executable: 'node',
+            args: ['-e', 'console.log("x")'],
+            not_applicable: { reason: 'Not applicable in this context' },
+          },
+        ],
+      };
+
+      const result = await runProjectAcceptance(manifest, tmpDir);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('PROJECT_E2E_ALL_SKIPPED');
+      expect(result.receipt).toBeUndefined();
+    }, 15000);
+
+    test('E2E step fails → FAIL', async () => {
       const manifest: ProjectAcceptanceManifest = {
         ...BASE_MANIFEST,
         e2e_steps: [
@@ -99,12 +117,12 @@ describe('runProjectAcceptance', () => {
       expect(result.success).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.receipt).toBeDefined();
-      expect(result.receipt!.verdict).toBe('PROJECT_REJECTED');
+      expect(result.receipt!.verdict).toBe('FAIL');
       expect(result.receipt!.steps).toHaveLength(1);
       expect(result.receipt!.steps[0].exit_code).toBe(1);
     }, 15000);
 
-    test('topology validation fails → PROJECT_REJECTED', async () => {
+    test('topology validation fails → FAIL', async () => {
       const manifest: ProjectAcceptanceManifest = {
         ...BASE_MANIFEST,
         e2e_steps: [
@@ -129,7 +147,7 @@ describe('runProjectAcceptance', () => {
       expect(result.receipt).toBeUndefined();
     }, 15000);
 
-    test('probe with wrong expected output → PROJECT_REJECTED', async () => {
+    test('probe with wrong expected output → FAIL', async () => {
       const manifest: ProjectAcceptanceManifest = {
         ...BASE_MANIFEST,
         e2e_steps: [
@@ -148,7 +166,7 @@ describe('runProjectAcceptance', () => {
       expect(result.errors.length).toBeGreaterThan(0);
       expect(result.errors.some((e: string) => e.includes('does not contain expected text'))).toBe(true);
       expect(result.receipt).toBeDefined();
-      expect(result.receipt!.verdict).toBe('PROJECT_REJECTED');
+      expect(result.receipt!.verdict).toBe('FAIL');
     }, 15000);
   });
 });

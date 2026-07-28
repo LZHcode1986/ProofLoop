@@ -5,6 +5,7 @@ import YAML from 'yaml';
 import { parseStageFile } from './parse-stage.js';
 import { computeScvLevel } from './compute-scv-level.js';
 import { RuntimeProofStep } from './schemas.js';
+import { validateRuntimeProofTopology } from './validate-topology.js';
 /**
  * Extract the content of a Markdown section by heading (## or ###).
  */
@@ -197,44 +198,10 @@ export function compileManifest(tasksPath) {
         const parsed = parseYamlSteps(runtimeProofSection);
         runtimeProof.push(...parsed);
     }
-    // ── Validate Runtime Proof constraints ──
-    const stepErrors = [];
-    // 1. Step ID uniqueness
-    const seenStepIds = new Set();
-    for (const step of runtimeProof) {
-        if (seenStepIds.has(step.id)) {
-            stepErrors.push(`Duplicate Runtime Proof step ID: "${step.id}"`);
-        }
-        seenStepIds.add(step.id);
-    }
-    // 2. service_start / service_stop matching
-    const serviceStartIds = new Set(runtimeProof.filter(s => s.type === 'service_start').map(s => s.id));
-    const serviceStopInfos = runtimeProof
-        .filter(s => s.type === 'service_stop')
-        .map(s => ({ id: s.id, ref: s.service_ref ?? s.id }));
-    // Each service_start must have a matching service_stop
-    for (const startId of serviceStartIds) {
-        const hasStop = serviceStopInfos.some(s => s.ref === startId);
-        if (!hasStop) {
-            stepErrors.push(`service_start "${startId}" has no matching service_stop step`);
-        }
-    }
-    // Each service_stop must reference an existing service_start
-    // AND must not appear before its matching service_start
-    for (const sInfo of serviceStopInfos) {
-        // Check ref exists
-        if (!serviceStartIds.has(sInfo.ref)) {
-            stepErrors.push(`service_stop "${sInfo.id}" references non-existent service_start "${sInfo.ref}"`);
-        }
-        // Check ordering
-        const stopIdx = runtimeProof.findIndex(s => s.id === sInfo.id);
-        const startIdx = runtimeProof.findIndex(s => s.id === sInfo.ref);
-        if (stopIdx !== -1 && startIdx !== -1 && stopIdx < startIdx) {
-            stepErrors.push(`service_stop "${sInfo.id}" appears before its service_start "${sInfo.ref}"`);
-        }
-    }
-    if (stepErrors.length > 0) {
-        throw new Error(`Runtime Proof validation failed:\n${stepErrors.map(e => `  - ${e}`).join('\n')}`);
+    // ── Validate Runtime Proof topology ──
+    const topologyErrors = validateRuntimeProofTopology(runtimeProof);
+    if (topologyErrors.length > 0) {
+        throw new Error(`Runtime Proof validation failed:\n${topologyErrors.map(e => `  - [${e.type}] ${e.message}`).join('\n')}`);
     }
     const manifest = {
         stage_id: stageId,

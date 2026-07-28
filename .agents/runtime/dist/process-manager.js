@@ -229,26 +229,46 @@ export function getRegisteredService(name) {
  *
  * After stopping, the service is removed from the registry.
  */
-export async function stopService(pid, graceMs = 5000) {
-    // Remove from registry first (prevent double-stop from another code path)
-    for (const [name, entry] of serviceRegistry) {
-        if (entry.pid === pid) {
-            serviceRegistry.delete(name);
-            break;
-        }
-    }
+export async function stopService(pid, graceMs = 5000, platform) {
+    const kill = platform?.killProcessTree ?? killProcessTree;
+    const alive = platform?.isProcessAlive ?? isProcessAlive;
     // Send SIGTERM
-    killProcessTree(pid, 'SIGTERM');
+    kill(pid, 'SIGTERM');
     // Wait for graceful shutdown
     const deadline = Date.now() + graceMs;
     while (Date.now() < deadline) {
-        if (!isProcessAlive(pid))
+        if (!alive(pid)) {
+            removeServiceFromRegistry(pid);
             return;
+        }
         await sleep(100);
     }
-    // Timeout — force kill
-    if (isProcessAlive(pid)) {
-        killProcessTree(pid, 'SIGKILL');
+    // 先检查是否已在等待期间死亡
+    if (!alive(pid)) {
+        removeServiceFromRegistry(pid);
+        return;
+    }
+    // 仍存活 — 强制终止
+    kill(pid, 'SIGKILL');
+    // Wait for the kill to take effect
+    const killDeadline = Date.now() + 2000;
+    while (Date.now() < killDeadline) {
+        if (!alive(pid)) {
+            removeServiceFromRegistry(pid);
+            return;
+        }
+        await sleep(100);
+    }
+    // Process refused to die even after SIGKILL
+    // Keep it in registry (cleanup will report it as remaining)
+    throw new Error(`Process ${pid} remained alive after SIGTERM + SIGKILL`);
+}
+function removeServiceFromRegistry(pid) {
+    for (const [name, entry] of serviceRegistry) {
+        if (entry.pid === pid) {
+            serviceRegistry.delete(name);
+            return;
+        }
     }
 }
 /**

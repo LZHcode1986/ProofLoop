@@ -106,8 +106,10 @@ export type ProjectAcceptanceManifest = z.infer<typeof ProjectAcceptanceManifest
 
 export const ProjectE2EReceiptSchema = z.object({
   project_id: z.string(),
-  verdict: z.enum(['PROJECT_ACCEPTED', 'PROJECT_REJECTED', 'PROJECT_BLOCKED']),
+  verdict: z.enum(['PASS', 'FAIL', 'BLOCKED']),
   snapshot: z.string(),
+  manifest_digest: z.string().optional(),
+  source_snapshot: z.string().optional(),
   steps: z.array(z.object({
     step_id: z.string(),
     exit_code: z.number().int().nullable(),

@@ -1,5 +1,6 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { Manifest as ManifestSchema, ProjectAcceptanceManifestSchema } from './schemas.js';
 import type { Manifest, RuntimeProofStep, StepType, ProjectAcceptanceManifest, ProjectE2EReceipt } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
@@ -565,10 +566,11 @@ export interface RunProjectAcceptanceResult {
  * Execute a Project Acceptance E2E run from a compiled ProjectAcceptanceManifest.
  *
  * Flow:
+ * 0. Check for zero steps or all-skipped (reject empty proofs)
  * 1. Validate E2E step topology
  * 2. Execute each step in sequence via executeRuntimeProof
- * 3. Determine verdict (PROJECT_ACCEPTED / PROJECT_REJECTED)
- * 4. Write structured E2E receipt
+ * 3. Determine verdict (PASS / FAIL / BLOCKED)
+ * 4. Write structured E2E receipt with manifest digest and source snapshot
  */
 export async function runProjectAcceptance(
   manifest: ProjectAcceptanceManifest,
@@ -576,6 +578,22 @@ export async function runProjectAcceptance(
 ): Promise<RunProjectAcceptanceResult> {
   const errors: string[] = [];
   const resolvedOutputDir = outputDir ?? process.cwd();
+
+  // ── 0. Zero-step / all-skipped rejection ──
+  if (manifest.e2e_steps.length === 0) {
+    return {
+      success: false,
+      errors: ['PROJECT_E2E_ZERO_STEPS: Project Acceptance requires at least one E2E step'],
+    };
+  }
+
+  const allSkipped = manifest.e2e_steps.every(s => s.not_applicable?.reason);
+  if (allSkipped) {
+    return {
+      success: false,
+      errors: ['PROJECT_E2E_ALL_SKIPPED: All E2E steps are not_applicable; a proof with no evidence is not valid'],
+    };
+  }
 
   // ── 1. Validate E2E step topology ──
   const topologyErrors = validateRuntimeProofTopology(manifest.e2e_steps);
@@ -595,9 +613,7 @@ export async function runProjectAcceptance(
   }
 
   // ── 3. Determine verdict ──
-  const verdict: ProjectE2EReceipt['verdict'] = execResult.success
-    ? 'PROJECT_ACCEPTED'
-    : 'PROJECT_REJECTED';
+  const verdict: ProjectE2EReceipt['verdict'] = execResult.success ? 'PASS' : 'FAIL';
 
   // ── 4. Build receipt ──
   const e2eSteps = execResult.stepResults.map(sr => ({
@@ -607,10 +623,19 @@ export async function runProjectAcceptance(
     skipped: sr.skipped,
   }));
 
+  // Compute manifest digest (SHA-256 of the serialized manifest)
+  const manifestDigest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(manifest))
+    .digest('hex')
+    .slice(0, 16);
+
   const receipt: ProjectE2EReceipt = {
     project_id: manifest.project_id,
     verdict,
     snapshot: computeSnapshot(process.cwd()),
+    manifest_digest: manifestDigest,
+    source_snapshot: computeSnapshot(process.cwd()),
     steps: e2eSteps,
     service_cleanup: execResult.serviceCleanup.cleaned.length > 0 || execResult.serviceCleanup.failed.length > 0
       ? execResult.serviceCleanup
@@ -626,6 +651,8 @@ export async function runProjectAcceptance(
       project_id: manifest.project_id,
       verdict,
       snapshot: receipt.snapshot,
+      manifest_digest: manifestDigest,
+      source_snapshot: receipt.source_snapshot,
       steps: e2eSteps,
       service_cleanup: receipt.service_cleanup,
       created_at: receipt.created_at,

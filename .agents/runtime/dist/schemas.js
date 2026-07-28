@@ -76,6 +76,35 @@ export const ScvReceipt = z.object({
     scope_violations: z.array(z.string()).optional().default([]),
     timestamp: z.string().optional(),
 });
+// === Project Acceptance Schemas ===
+export const ProjectAcceptanceManifestSchema = z.object({
+    project_id: z.string(),
+    source_digest: z.string(),
+    prd_goals: z.array(z.string()),
+    acceptance_criteria: z.array(z.string()),
+    stage_review_receipts: z.array(z.string()),
+    e2e_steps: z.array(RuntimeProofStep),
+    compiled_at: z.string().optional(),
+});
+export const ProjectE2EReceiptSchema = z.object({
+    project_id: z.string(),
+    verdict: z.enum(['PASS', 'FAIL', 'BLOCKED']),
+    snapshot: z.string(),
+    manifest_digest: z.string().optional(),
+    source_snapshot: z.string().optional(),
+    steps: z.array(z.object({
+        step_id: z.string(),
+        exit_code: z.number().int().nullable(),
+        observations: z.string().optional(),
+        skipped: z.boolean().optional(),
+    })),
+    service_cleanup: z.object({
+        cleaned: z.array(z.string()),
+        failed: z.array(z.object({ service: z.string(), pid: z.number(), reason: z.string() })),
+        remainingPids: z.array(z.number()),
+    }).optional(),
+    created_at: z.string(),
+});
 export const StageGateVerdict = z.enum(['PASS', 'FAIL', 'BLOCKED']);
 export const StageGateReceipt = z.object({
     stage_id: StageId,

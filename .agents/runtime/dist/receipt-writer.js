@@ -129,6 +129,29 @@ export function writeStageReviewReceipt(options) {
     return path.resolve(filePath);
 }
 /**
+ * Write a structured JSON Project E2E Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
+ */
+export function writeProjectE2EReceipt(options) {
+    const { outputDir, data } = options;
+    // Ensure output directory exists
+    fs.mkdirSync(outputDir, { recursive: true });
+    const receipt = {
+        project_id: data.project_id,
+        verdict: data.verdict,
+        snapshot: data.snapshot,
+        manifest_digest: data.manifest_digest,
+        source_snapshot: data.source_snapshot,
+        steps: data.steps,
+        service_cleanup: data.service_cleanup,
+        created_at: data.created_at ?? new Date().toISOString(),
+    };
+    const filePath = path.join(outputDir, `project-e2e-${Date.now()}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    return path.resolve(filePath);
+}
+/**
  * Write a structured JSON Project Review Receipt to disk.
  *
  * Returns the absolute path of the written receipt file.

@@ -7,4 +7,6 @@ __pycache__/
 # Node.js
 node_modules/
 .agents/runtime/node_modules/
-.agents/runtime/dist/
+.agents/runtime/dist/*.d.ts
+.agents/runtime/dist/*.d.cts
+.agents/runtime/dist/*.js.map

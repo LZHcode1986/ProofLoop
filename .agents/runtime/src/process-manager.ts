@@ -355,7 +355,13 @@ export async function stopService(
     await sleep(100);
   }
 
-  // Timeout — force kill (no conditional; always SIGKILL after grace)
+  // 先检查是否已在等待期间死亡
+  if (!alive(pid)) {
+    removeServiceFromRegistry(pid);
+    return;
+  }
+
+  // 仍存活 — 强制终止
   kill(pid, 'SIGKILL');
 
   // Wait for the kill to take effect

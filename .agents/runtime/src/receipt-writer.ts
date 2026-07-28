@@ -219,8 +219,10 @@ export function writeStageReviewReceipt(options: WriteStageReviewReceiptOptions)
 
 export interface ProjectE2EReceiptData {
   project_id: string;
-  verdict: 'PROJECT_ACCEPTED' | 'PROJECT_REJECTED' | 'PROJECT_BLOCKED';
+  verdict: 'PASS' | 'FAIL' | 'BLOCKED';
   snapshot: string;
+  manifest_digest?: string;
+  source_snapshot?: string;
   steps: Array<{
     step_id: string;
     exit_code: number | null;
@@ -255,6 +257,8 @@ export function writeProjectE2EReceipt(options: WriteProjectE2EReceiptOptions): 
     project_id: data.project_id,
     verdict: data.verdict,
     snapshot: data.snapshot,
+    manifest_digest: data.manifest_digest,
+    source_snapshot: data.source_snapshot,
     steps: data.steps,
     service_cleanup: data.service_cleanup,
     created_at: data.created_at ?? new Date().toISOString(),
