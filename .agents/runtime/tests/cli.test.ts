@@ -4,7 +4,9 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSy
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeSnapshot } from '../src/receipt-writer.js';
+import { computeSnapshot, writeGateReceipt, writeStageReviewReceipt, writeProjectE2EReceipt } from '../src/receipt-writer.js';
+import { computeCanonicalJsonDigest } from '../src/canonical-digest.js';
+import { ProjectAcceptanceManifestSchema } from '../src/schemas.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,7 +56,12 @@ const BASE_MANIFEST = {
   expected_snapshot: computeSnapshot(process.cwd()).slice(0, 16),
   prd_goals: ['Implement core feature X'],
   acceptance_criteria: ['AC-01: Feature X works'],
-  stage_receipts: [{ stage_id: 'S01', review_receipt: 'stage-review-S01.json', gate_receipt: 'stage-gate-S01.json' }],
+  stage_receipts: [{
+    stage_id: 'S01',
+    stage_manifest: { path: 'stage-manifest-S01.json', digest: 'a1b2c3d4e5f6a7b8' },
+    review_receipt: { path: 'stage-review-S01.json', digest: 'a1b2c3d4e5f6a7b8' },
+    gate_receipt: { path: 'stage-gate-S01.json', digest: 'a1b2c3d4e5f6a7b8' },
+  }],
   e2e_steps: [
     {
       id: 'smoke-1',
@@ -98,7 +105,12 @@ describe('CLI Integration Tests', () => {
           source_digest: 'abc123',
           prd_goals: ['Implement X'],
           acceptance_criteria: ['AC-01'],
-          stage_receipts: [{ stage_id: 'S01', review_receipt: 'r1.json', gate_receipt: 'g1.json' }],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: 'm1.json', digest: 'a1b2c3d4e5f6a7b8' },
+            review_receipt: { path: 'r1.json', digest: 'a1b2c3d4e5f6a7b8' },
+            gate_receipt: { path: 'g1.json', digest: 'a1b2c3d4e5f6a7b8' },
+          }],
           e2e_steps: [],
         });
 
@@ -177,7 +189,12 @@ describe('CLI Integration Tests', () => {
           project_root: process.cwd(),
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_receipts: [{ stage_id: 'S01', review_receipt: 'receipts/S01-review.json', gate_receipt: 'receipts/S01-gate.json' }],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: 'receipts/S01-manifest.json', digest: 'a1b2c3d4e5f6a7b8' },
+            review_receipt: { path: 'receipts/S01-review.json', digest: 'a1b2c3d4e5f6a7b8' },
+            gate_receipt: { path: 'receipts/S01-gate.json', digest: 'a1b2c3d4e5f6a7b8' },
+          }],
           e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         };
         writeJSON(inputPath, input);
@@ -234,7 +251,12 @@ describe('CLI Integration Tests', () => {
           project_root: '/nonexistent/path',
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_receipts: [{ stage_id: 'S01', review_receipt: 'r.json', gate_receipt: 'g.json' }],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: 'm.json', digest: 'a1b2c3d4e5f6a7b8' },
+            review_receipt: { path: 'r.json', digest: 'a1b2c3d4e5f6a7b8' },
+            gate_receipt: { path: 'g.json', digest: 'a1b2c3d4e5f6a7b8' },
+          }],
           e2e_steps: [],
         });
 
@@ -257,6 +279,10 @@ describe('CLI Integration Tests', () => {
           data: {
             stage_id: 'S01',
             verdict: 'ACCEPTED',
+            snapshot: 'a1b2c3d4e5f6a7b8',
+            manifest_digest: 'a1b2c3d4e5f6a7b8',
+            stage_gate_receipt: { path: 'stage-gate-S01.json', digest: 'a1b2c3d4e5f6a7b8' },
+            findings: [{ category: 'test', description: 'test finding' }],
             reviewed_at: new Date().toISOString(),
             reviewer: 'stage-reviewer',
           },
@@ -358,22 +384,33 @@ describe('CLI Integration Tests', () => {
     test('完整往返: compile → E2E → finalize → PROJECT_ACCEPTED', () => {
       const dir = tmpDir();
       try {
-        // Create fake stage review/gate receipts
-        // Write gate FIRST so we can compute its actual digest
+        // Create proper gate receipt with all required fields
         const gatePath = join(dir, 'stage-gate-S01.json');
         writeJSON(gatePath, {
           stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
           platform: 'test', steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: { started_at: new Date().toISOString(), completed_at: new Date().toISOString() },
         });
         const actualGateDigest = computeFileDigest(gatePath);
 
-        // Now write review with the CORRECT gate digest
+        // Now write review with all required fields
         const reviewPath = join(dir, 'stage-review-S01.json');
         writeJSON(reviewPath, {
           stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
-          manifest_digest: 'test123',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
           stage_gate_receipt: { path: gatePath, digest: actualGateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
         });
+        const actualReviewDigest = computeFileDigest(reviewPath);
+
+        // Create a stage manifest file (needed for finalize verification)
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', dummy: true });
+        const actualStageManifestDigest = computeFileDigest(stageManifestPath);
 
         // Compile manifest
         const inputPath = join(dir, 'input.json');
@@ -383,11 +420,21 @@ describe('CLI Integration Tests', () => {
           project_root: process.cwd(),
           prd_goals: ['Goal 1'],
           acceptance_criteria: ['Criterion 1'],
-          stage_receipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: actualStageManifestDigest },
+            review_receipt: { path: reviewPath, digest: actualReviewDigest },
+            gate_receipt: { path: gatePath, digest: actualGateDigest },
+          }],
           e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         });
         const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
         expect(r1.status).toBe(0);
+
+        // Read the compiled manifest to get actual values
+        const compiledManifestRaw = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifestRaw.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(ProjectAcceptanceManifestSchema, compiledManifestRaw);
 
         // Run E2E
         const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
@@ -397,14 +444,28 @@ describe('CLI Integration Tests', () => {
         const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
         expect(files.length).toBeGreaterThan(0);
         const e2eReceiptPath = join(dir, files[0]);
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
 
-        // Finalize
+        // Create reviewer result file — must use actual digests matching the compiled manifest
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize — new input format with reviewerResultPath
         const finPath = join(dir, 'fin-input.json');
         writeJSON(finPath, {
           manifestPath,
           e2eReceiptPath,
-          stageReceipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
-          criteriaResults: [{ criteria: 'Criterion 1', passed: true }],
+          reviewerResultPath,
           outputDir: dir,
         });
         const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
@@ -430,8 +491,7 @@ describe('CLI Integration Tests', () => {
         writeJSON(finPath, {
           manifestPath: '/nonexistent/manifest.json',
           e2eReceiptPath: '/nonexistent/e2e.json',
-          stageReceipts: [{ stage_id: 'S01', review_receipt: '/nonexistent/review.json', gate_receipt: '/nonexistent/gate.json' }],
-          criteriaResults: [{ criteria: 'X', passed: true }],
+          reviewerResultPath: '/nonexistent/reviewer.json',
           outputDir: dir,
         });
         const r = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
@@ -445,14 +505,23 @@ describe('CLI Integration Tests', () => {
     test('finalize 拒绝非 PASS 的 E2E Receipt', () => {
       const dir = tmpDir();
       try {
+        // Create valid E2E receipt with FAIL verdict (all required fields)
         const e2ePath = join(dir, 'project-e2e-fail.json');
-        writeJSON(e2ePath, { project_id: 'x', verdict: 'FAIL', snapshot: 'a1b2c3d4e5f6a7b8' });
+        writeJSON(e2ePath, {
+          project_id: 'x', verdict: 'FAIL',
+          snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          expected_snapshot: 'a1b2c3d4e5f6a7b8',
+          executed_snapshot: 'a1b2c3d4e5f6a7b8',
+          steps: [{ step_id: 's1', exit_code: 1, observations: 'failed', skipped: false }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          created_at: new Date().toISOString(),
+        });
         const finPath = join(dir, 'fin-input.json');
         writeJSON(finPath, {
           manifestPath: 'nonexistent',
           e2eReceiptPath: e2ePath,
-          stageReceipts: [],
-          criteriaResults: [],
+          reviewerResultPath: 'nonexistent-reviewer.json',
           outputDir: dir,
         });
         const r = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
@@ -467,49 +536,704 @@ describe('CLI Integration Tests', () => {
     test('finalize 拒绝缺失 criteria 覆盖', () => {
       const dir = tmpDir();
       try {
-        // Write gate FIRST so we can compute its actual digest
+        // Write proper gate receipt with all required fields
         const gatePath = join(dir, 'sg.json');
         writeJSON(gatePath, {
           stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
           platform: 'test', steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: { started_at: new Date().toISOString(), completed_at: new Date().toISOString() },
         });
         const actualGateDigest = computeFileDigest(gatePath);
 
-        // Now write review with the CORRECT gate digest
+        // Write proper review receipt with all required fields
         const reviewPath = join(dir, 'sr.json');
         writeJSON(reviewPath, {
           stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
-          manifest_digest: 'test',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
           stage_gate_receipt: { path: gatePath, digest: actualGateDigest },
+          findings: [{ category: 'review', description: 'ok' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
         });
+        const actualReviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'sm.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', dummy: true });
+        const actualStageManifestDigest = computeFileDigest(stageManifestPath);
 
         const inputPath = join(dir, 'input.json');
         const manifestPath = join(dir, 'manifest.json');
         writeJSON(inputPath, {
           project_id: 't', project_root: process.cwd(),
           prd_goals: ['G1'], acceptance_criteria: ['需要覆盖的Criterion', '另一个Criterion'],
-          stage_receipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: actualStageManifestDigest },
+            review_receipt: { path: reviewPath, digest: actualReviewDigest },
+            gate_receipt: { path: gatePath, digest: actualGateDigest },
+          }],
           e2e_steps: [{ id: 's', executable: 'node', args: ['-e', 'console.log("ok")'] }],
         });
         const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
         expect(r1.status).toBe(0);
 
+        // Read compiled manifest to get actual snapshot and digest values
+        const compiledManifestRaw = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifestRaw.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(ProjectAcceptanceManifestSchema, compiledManifestRaw);
+
         const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
         expect(r2.status).toBe(0);
         const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
         const e2ePath = join(dir, files[0]);
+        const e2eDigest = computeFileDigest(e2ePath);
 
-        // Only submit 1 of 2 criteria
+        // Create reviewer result with only 1 of 2 criteria (missing '另一个Criterion')
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2ePath, digest: e2eDigest },
+          criteria_results: [{ criteria: '需要覆盖的Criterion', passed: true }],
+          findings: [],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize — new input format
         const finPath = join(dir, 'fin.json');
         writeJSON(finPath, {
           manifestPath, e2eReceiptPath: e2ePath,
-          stageReceipts: [{ stage_id: 'S01', review_receipt: reviewPath, gate_receipt: gatePath }],
-          criteriaResults: [{ criteria: '需要覆盖的Criterion', passed: true }],
+          reviewerResultPath,
           outputDir: dir,
         });
         const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
         expect(r3.status).toBe(1);
         expect(r3.stderr).toMatch(/Missing criteria/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+  });
+
+  describe('篡改防线 (RC-24)', () => {
+
+    test('摘要篡改：manifest 被修改后 digest 不匹配', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt via Writer
+        const gatePath = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const gateDigest = computeFileDigest(gatePath);
+
+        // Write review receipt via Writer
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePath, digest: gateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t1',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePath, digest: gateDigest },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Run E2E
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+
+        // Find E2E receipt
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        const e2eReceiptPath = join(dir, files[0]);
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Write reviewer result
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // First finalize → should PASS
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(0);
+
+        // Tamper: change manifest content (modify a field value)
+        const manifestObj = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        manifestObj.project_id = 'rc24-t1-tampered';
+        writeFileSync(manifestPath, JSON.stringify(manifestObj, null, 2), 'utf-8');
+
+        // Second finalize → should FAIL (digest mismatch)
+        const r4 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r4.status).toBe(1);
+        expect(r4.stderr).toMatch(/digest/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('摘要篡改：E2E receipt 被修改后 digest 不匹配', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt via Writer
+        const gatePath = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const gateDigest = computeFileDigest(gatePath);
+
+        // Write review receipt via Writer
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePath, digest: gateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t2',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePath, digest: gateDigest },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Run E2E
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+
+        // Find E2E receipt
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        const e2eReceiptPath = join(dir, files[0]);
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Write reviewer result
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // First finalize → should PASS
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(0);
+
+        // Tamper: modify E2E receipt content (add trailing space)
+        const e2eContent = readFileSync(e2eReceiptPath, 'utf-8');
+        writeFileSync(e2eReceiptPath, e2eContent + ' ', 'utf-8');
+
+        // Second finalize → should FAIL (E2E receipt digest mismatch)
+        const r4 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r4.status).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('摘要篡改：stage review receipt 被修改后 digest 不匹配', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt via Writer
+        const gatePath = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const gateDigest = computeFileDigest(gatePath);
+
+        // Write review receipt via Writer
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePath, digest: gateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t3',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePath, digest: gateDigest },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Run E2E
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+
+        // Find E2E receipt
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        const e2eReceiptPath = join(dir, files[0]);
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Tamper: modify review receipt content (add trailing space) BEFORE writing reviewer result
+        const reviewContent = readFileSync(reviewPath, 'utf-8');
+        writeFileSync(reviewPath, reviewContent + ' ', 'utf-8');
+
+        // Write reviewer result (E2E references are still valid)
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize → FAIL (review receipt digest mismatch)
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('Snapshot 篡改：review snapshot != gate snapshot', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt with snapshot 'a1b2c3d4e5f6a7b8'
+        const gatePath = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const gateDigest = computeFileDigest(gatePath);
+
+        // Write review receipt with DIFFERENT snapshot 'ffffffffffffffff'
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'ffffffffffffffff',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePath, digest: gateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t4',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePath, digest: gateDigest },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Write E2E receipt via Writer (no need to actually run E2E)
+        const e2eReceiptPath = writeProjectE2EReceipt(dir, {
+          project_id: 'rc24-t4',
+          verdict: 'PASS',
+          snapshot: expectedSnapshot,
+          manifest_digest: manifestCanonicalDigest,
+          expected_snapshot: expectedSnapshot,
+          executed_snapshot: expectedSnapshot,
+          steps: [{ step_id: 'smoke', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          created_at: new Date().toISOString(),
+        });
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Write reviewer result
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize → FAIL (snapshot mismatch between review and gate)
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r2 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r2.status).toBe(1);
+        expect(r2.stderr).toMatch(/snapshot/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('Verdict 篡改：E2E verdict 改为 FAIL', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt via Writer
+        const gatePath = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const gateDigest = computeFileDigest(gatePath);
+
+        // Write review receipt via Writer
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePath, digest: gateDigest },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t5',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePath, digest: gateDigest },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Run E2E → PASS
+        const r2 = cliRun(RUN_PROJECT_ACCEPTANCE, manifestPath, dir, process.cwd());
+        expect(r2.status).toBe(0);
+
+        // Find E2E receipt
+        const files = readdirSync(dir).filter(f => f.startsWith('project-e2e-'));
+        const e2eReceiptPath = join(dir, files[0]);
+
+        // Tamper: modify E2E receipt verdict to FAIL
+        const e2eReceipt = JSON.parse(readFileSync(e2eReceiptPath, 'utf-8'));
+        e2eReceipt.verdict = 'FAIL';
+        writeFileSync(e2eReceiptPath, JSON.stringify(e2eReceipt, null, 2), 'utf-8');
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Write reviewer result (pointing to modified E2E receipt with updated digest)
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize → FAIL (E2E verdict is FAIL)
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r3 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r3.status).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
+
+    test('Stage 路径替换：manifest 声明 path A，实际文件是 path B 的内容', () => {
+      const dir = tmpDir();
+      try {
+        // Write gate receipt A to main dir (via Writer)
+        const gatePathA = writeGateReceipt(dir, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+
+        // Write DIFFERENT gate receipt B to subdirectory (via Writer)
+        const dirB = join(dir, 'alt');
+        const gatePathB = writeGateReceipt(dirB, {
+          stage_id: 'S01', verdict: 'PASS', snapshot: 'ffffffffffffffff',
+          manifest_digest: 'ffffffffffffffff',
+          platform: 'test',
+          steps: [{ id: 'build', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          timestamps: {
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          },
+        });
+        const digestB = computeFileDigest(gatePathB);
+
+        // Write review receipt pointing to gatePathA
+        const reviewPath = writeStageReviewReceipt(dir, {
+          stage_id: 'S01', verdict: 'ACCEPTED', snapshot: 'a1b2c3d4e5f6a7b8',
+          manifest_digest: 'a1b2c3d4e5f6a7b8',
+          stage_gate_receipt: { path: gatePathA, digest: computeFileDigest(gatePathA) },
+          findings: [{ category: 'review', description: 'all good' }],
+          reviewer: 'test-reviewer',
+          reviewed_at: new Date().toISOString(),
+        });
+        const reviewDigest = computeFileDigest(reviewPath);
+
+        // Create stage manifest file
+        const stageManifestPath = join(dir, 'stage-manifest-S01.json');
+        writeJSON(stageManifestPath, { stage_id: 'S01', test: true });
+        const stageManifestDigest = computeFileDigest(stageManifestPath);
+
+        // Compile manifest: gate_receipt.path = gatePathA, gate_receipt.digest = digestB
+        const inputPath = join(dir, 'input.json');
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(inputPath, {
+          project_id: 'rc24-t6',
+          project_root: process.cwd(),
+          prd_goals: ['Goal 1'],
+          acceptance_criteria: ['Criterion 1'],
+          stage_receipts: [{
+            stage_id: 'S01',
+            stage_manifest: { path: stageManifestPath, digest: stageManifestDigest },
+            review_receipt: { path: reviewPath, digest: reviewDigest },
+            gate_receipt: { path: gatePathA, digest: digestB },
+          }],
+          e2e_steps: [{ id: 'smoke', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+        });
+        const r1 = cliRun(COMPILE_PROJECT_ACCEPTANCE, inputPath, manifestPath);
+        expect(r1.status).toBe(0);
+
+        // Read compiled manifest
+        const compiledManifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        const expectedSnapshot = compiledManifest.expected_snapshot;
+        const manifestCanonicalDigest = computeCanonicalJsonDigest(
+          ProjectAcceptanceManifestSchema, compiledManifest,
+        );
+
+        // Write E2E receipt via Writer
+        const e2eReceiptPath = writeProjectE2EReceipt(dir, {
+          project_id: 'rc24-t6',
+          verdict: 'PASS',
+          snapshot: expectedSnapshot,
+          manifest_digest: manifestCanonicalDigest,
+          expected_snapshot: expectedSnapshot,
+          executed_snapshot: expectedSnapshot,
+          steps: [{ step_id: 'smoke', exit_code: 0 }],
+          service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+          created_at: new Date().toISOString(),
+        });
+        const e2eDigest = computeFileDigest(e2eReceiptPath);
+
+        // Write reviewer result
+        const reviewerResultPath = join(dir, 'reviewer-result.json');
+        writeJSON(reviewerResultPath, {
+          verdict: 'PROJECT_ACCEPTED',
+          reviewer: 'brain',
+          reviewed_snapshot: expectedSnapshot,
+          project_manifest: { path: manifestPath, digest: manifestCanonicalDigest },
+          project_e2e_receipt: { path: e2eReceiptPath, digest: e2eDigest },
+          criteria_results: [{ criteria: 'Criterion 1', passed: true }],
+          findings: [{ category: 'final-review', description: 'accepted' }],
+          accepted_deviations: [],
+          reviewed_at: new Date().toISOString(),
+        });
+
+        // Finalize → FAIL (gate file at path A doesn't match declared digest from path B)
+        const finPath = join(dir, 'fin-input.json');
+        writeJSON(finPath, {
+          manifestPath, e2eReceiptPath, reviewerResultPath, outputDir: dir,
+        });
+        const r2 = cliRun(FINALIZE_PROJECT_REVIEW, finPath);
+        expect(r2.status).toBe(1);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

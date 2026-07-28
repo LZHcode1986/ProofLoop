@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { getPlatformInfo } from './platform-adapter.js';
-import { WriteProjectReviewReceiptOptionsSchema } from './schemas.js';
+import { StageGateReceipt, StageReviewReceiptSchema, ProjectE2EReceiptSchema, WriteProjectReviewReceiptOptionsSchema, } from './schemas.js';
 // ── Snapshot computation ───────────────────────────────────────────────────────
 /**
  * Compute a content-aware snapshot identifier for a directory tree.
@@ -55,132 +54,81 @@ export function computeSnapshot(dir) {
     }
     return hash.digest('hex').slice(0, 16);
 }
-// ── Receipt writer ─────────────────────────────────────────────────────────────
+// ── Gate Receipt writer ────────────────────────────────────────────────────────
 /**
  * Write a structured JSON Stage Gate receipt to disk.
  *
- * Receipt schema matches `.agents/runtime/src/schemas.ts StageGateReceipt`
- * but with extended runtime detail.
+ * Validates data against StageGateReceipt schema before writing.
+ * Output file name: `stage-gate-{stage_id}.json`
  *
  * Returns the absolute path of the written receipt file.
  */
-export function writeReceipt(options) {
-    const { outputDir, data } = options;
+export function writeGateReceipt(outputDir, data) {
+    // Schema validation — fail-closed even if caller bypasses CLI
+    const parsed = StageGateReceipt.parse(data);
     // Ensure output directory exists
     fs.mkdirSync(outputDir, { recursive: true });
-    // Build the complete receipt
-    const receipt = {
-        stage_id: data.stage_id,
-        snapshot: data.snapshot,
-        platform: data.platform,
-        tool_versions: {
-            node: process.version,
-            platform: getPlatformInfo().platform,
-            ...data.tool_versions,
-        },
-        steps: data.steps,
-        exit_code: data.exit_code,
-        observations: data.observations,
-        verdict: data.verdict,
-        timestamps: {
-            started_at: data.timestamps.started_at,
-            completed_at: data.timestamps.completed_at ?? new Date().toISOString(),
-        },
-    };
-    // Include cleanup info if provided
-    if (data.cleanup) {
-        receipt.cleanup = data.cleanup;
-    }
-    // Include service cleanup details if provided
-    if (data.service_cleanup) {
-        receipt.service_cleanup = data.service_cleanup;
-    }
-    // Write to file
-    const safeStageId = data.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const fileName = `stage-gate-receipt-${safeStageId}-${Date.now()}.json`;
+    const safeStageId = parsed.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `stage-gate-${safeStageId}.json`;
     const filePath = path.join(outputDir, fileName);
-    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
     return path.resolve(filePath);
 }
+// ── Stage Review Receipt ────────────────────────────────────────────────────────
 /**
  * Write a structured JSON Stage Review Receipt to disk.
  *
+ * Validates data against StageReviewReceiptSchema before writing.
+ * Output file name: `stage-review-{stage_id}.json`
+ *
  * Returns the absolute path of the written receipt file.
  */
-export function writeStageReviewReceipt(options) {
-    const { outputDir, data } = options;
+export function writeStageReviewReceipt(outputDir, data) {
+    // Schema validation — fail-closed even if caller bypasses CLI
+    const parsed = StageReviewReceiptSchema.parse(data);
     // Ensure output directory exists
     fs.mkdirSync(outputDir, { recursive: true });
-    const receipt = {
-        stage_id: data.stage_id,
-        verdict: data.verdict,
-        finding_id: data.finding_id,
-        route_code: data.route_code,
-        subtype: data.subtype,
-        affected_outcomes: data.affected_outcomes,
-        affected_artifacts: data.affected_artifacts,
-        evidence: data.evidence,
-        reason: data.reason,
-        reviewed_at: data.reviewed_at ?? new Date().toISOString(),
-        reviewer: data.reviewer ?? 'stage-reviewer',
-    };
-    const safeStageId = data.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const fileName = `stage-review-receipt-${safeStageId}.json`;
+    const safeStageId = parsed.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `stage-review-${safeStageId}.json`;
     const filePath = path.join(outputDir, fileName);
-    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
     return path.resolve(filePath);
 }
+// ── Project E2E Receipt ────────────────────────────────────────────────────────
 /**
  * Write a structured JSON Project E2E Receipt to disk.
  *
- * Returns the absolute path of the written receipt file.
- */
-export function writeProjectE2EReceipt(options) {
-    const { outputDir, data } = options;
-    // Ensure output directory exists
-    fs.mkdirSync(outputDir, { recursive: true });
-    const receipt = {
-        project_id: data.project_id,
-        verdict: data.verdict,
-        snapshot: data.snapshot,
-        manifest_digest: data.manifest_digest,
-        source_snapshot: data.source_snapshot,
-        expected_snapshot: data.expected_snapshot,
-        executed_snapshot: data.executed_snapshot,
-        steps: data.steps,
-        service_cleanup: data.service_cleanup,
-        created_at: data.created_at ?? new Date().toISOString(),
-    };
-    const filePath = path.join(outputDir, `project-e2e-${Date.now()}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
-    return path.resolve(filePath);
-}
-/**
- * Write a structured JSON Project Review Receipt to disk.
+ * Validates data against ProjectE2EReceiptSchema before writing.
+ * Output file name: `project-e2e-{project_id}.json`
  *
  * Returns the absolute path of the written receipt file.
  */
-export function writeProjectReviewReceipt(options) {
-    const { outputDir, data } = options;
-    // Internal Schema validation — fail-closed even if caller bypasses CLI
+export function writeProjectE2EReceipt(outputDir, data) {
+    // Schema validation — fail-closed even if caller bypasses CLI
+    const parsed = ProjectE2EReceiptSchema.parse(data);
+    // Ensure output directory exists
+    fs.mkdirSync(outputDir, { recursive: true });
+    const fileName = `project-e2e-${parsed.project_id}.json`;
+    const filePath = path.join(outputDir, fileName);
+    fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
+    return path.resolve(filePath);
+}
+// ── Project Review Receipt ──────────────────────────────────────────────────────
+/**
+ * Write a structured JSON Project Review Receipt to disk.
+ *
+ * Validates data against WriteProjectReviewReceiptOptionsSchema before writing.
+ * Output file name: `project-review.json`
+ *
+ * Returns the absolute path of the written receipt file.
+ */
+export function writeProjectReviewReceipt(outputDir, data) {
+    // Schema validation — fail-closed even if caller bypasses CLI
     const parsed = WriteProjectReviewReceiptOptionsSchema.parse(data);
     // Ensure output directory exists
     fs.mkdirSync(outputDir, { recursive: true });
-    const receipt = {
-        project_id: parsed.project_id,
-        verdict: parsed.verdict,
-        findings: parsed.findings,
-        snapshot: parsed.snapshot,
-        reviewed_at: parsed.reviewed_at ?? new Date().toISOString(),
-        reviewer: parsed.reviewer ?? 'brain',
-        project_manifest: parsed.project_manifest,
-        project_e2e_receipt: parsed.project_e2e_receipt,
-        stage_receipts: parsed.stage_receipts,
-        accepted_deviations: parsed.accepted_deviations,
-        criteria_results: parsed.criteria_results,
-    };
     const filePath = path.join(outputDir, 'project-review.json');
-    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
     return path.resolve(filePath);
 }
 // ── CLI entry point ─────────────────────────────────────────────────────────────
@@ -217,15 +165,11 @@ if (isScriptEntry()) {
     const mode = process.argv[2]; // 'stage-review' or 'project-review'
     const input = JSON.parse(process.argv[3]);
     if (mode === 'stage-review') {
-        const result = writeStageReviewReceipt(input);
+        const result = writeStageReviewReceipt(input.outputDir, input.data);
         console.log(JSON.stringify(result));
     }
     else if (mode === 'project-review') {
-        const parsedData = WriteProjectReviewReceiptOptionsSchema.parse(input.data);
-        const result = writeProjectReviewReceipt({
-            outputDir: input.outputDir,
-            data: parsedData,
-        });
+        const result = writeProjectReviewReceipt(input.outputDir, input.data);
         console.log(JSON.stringify(result));
     }
     else {
@@ -233,6 +177,9 @@ if (isScriptEntry()) {
         process.exit(1);
     }
 }
+/**
+ * Validate a Gate receipt file against the StageGateReceipt schema.
+ */
 export function validateReceipt(receiptPath) {
     try {
         if (!fs.existsSync(receiptPath)) {
@@ -240,21 +187,8 @@ export function validateReceipt(receiptPath) {
         }
         const content = fs.readFileSync(receiptPath, 'utf-8');
         const parsed = JSON.parse(content);
-        // Required top-level fields
-        const requiredFields = ['stage_id', 'snapshot', 'platform', 'steps', 'verdict', 'timestamps'];
-        for (const field of requiredFields) {
-            if (!(field in parsed)) {
-                return { valid: false, error: `Receipt missing required field: ${field}` };
-            }
-        }
-        // Verdict must be valid
-        if (!['PASS', 'FAIL', 'BLOCKED'].includes(parsed.verdict)) {
-            return { valid: false, error: `Receipt has invalid verdict: ${parsed.verdict}` };
-        }
-        // Steps must be an array
-        if (!Array.isArray(parsed.steps)) {
-            return { valid: false, error: 'Receipt steps must be an array' };
-        }
+        // Validate against StageGateReceipt schema
+        StageGateReceipt.parse(parsed);
         return { valid: true };
     }
     catch (err) {

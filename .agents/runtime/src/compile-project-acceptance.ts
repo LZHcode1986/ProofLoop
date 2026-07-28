@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ProjectAcceptanceManifestSchema } from './schemas.js';
 import { computeSnapshot } from './receipt-writer.js';
+import { computeCanonicalJsonDigest } from './canonical-digest.js';
 
 const [inputPath, outputPath] = process.argv.slice(2);
 
@@ -61,6 +62,10 @@ try {
   process.exit(1);
 }
 
+// Compute canonical manifest digest
+const manifestDigest = computeCanonicalJsonDigest(ProjectAcceptanceManifestSchema, manifest);
+
 writeFileSync(outputPath, JSON.stringify(manifest, null, 2), 'utf-8');
 console.log(`Project Acceptance Manifest written to ${outputPath}`);
 console.log(`Expected snapshot: ${expected_snapshot}`);
+console.log(`Manifest digest: ${manifestDigest}`);

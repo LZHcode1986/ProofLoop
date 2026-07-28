@@ -1,6 +1,5 @@
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { Manifest as ManifestSchema, ProjectAcceptanceManifestSchema } from './schemas.js';
 import type { Manifest, RuntimeProofStep, StepType, ProjectAcceptanceManifest, ProjectE2EReceipt } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
@@ -17,8 +16,9 @@ import {
   validateSpawnOptions,
 } from './process-manager.js';
 import type { ServiceCleanupResult } from './process-manager.js';
-import { writeReceipt, writeProjectE2EReceipt, computeSnapshot, type StepResult } from './receipt-writer.js';
+import { writeGateReceipt, writeProjectE2EReceipt, computeSnapshot, type StepResult } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
+import { computeCanonicalJsonDigest } from './canonical-digest.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -493,23 +493,23 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   const platformInfo = getPlatformInfo();
   const startedAt = new Date();
 
+  // Compute canonical manifest digest
+  const manifestDigest = computeCanonicalJsonDigest(ManifestSchema, manifest);
+
   // ── Trivial fail: no steps → gate fails (proof without evidence) ──
   if (steps.length === 0) {
     errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
-    const receiptPath = writeReceipt({
-      outputDir: resolvedOutputDir,
-      data: {
-        stage_id: manifest.stage_id,
-        snapshot: computeSnapshot(process.cwd()),
-        platform: platformInfo.platform,
-        tool_versions: {},
-        steps: [],
-        exit_code: 1,
-        verdict: 'FAIL',
-        timestamps: {
-          started_at: startedAt.toISOString(),
-          completed_at: new Date().toISOString(),
-        },
+    const receiptPath = writeGateReceipt(resolvedOutputDir, {
+      stage_id: manifest.stage_id,
+      snapshot: computeSnapshot(process.cwd()),
+      manifest_digest: manifestDigest,
+      platform: platformInfo.platform,
+      verdict: 'FAIL',
+      steps: [],
+      service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+      timestamps: {
+        started_at: startedAt.toISOString(),
+        completed_at: new Date().toISOString(),
       },
     });
 
@@ -526,22 +526,17 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   const verdict = execResult.errors.length === 0 ? 'PASS' : 'FAIL';
 
   // ── 4. Write receipt ──
-  const receiptPath = writeReceipt({
-    outputDir: resolvedOutputDir,
-    data: {
-      stage_id: manifest.stage_id,
-      snapshot: computeSnapshot(process.cwd()),
-      platform: platformInfo.platform,
-      tool_versions: { node: process.version },
-      steps: execResult.stepResults,
-      exit_code: execResult.errors.length > 0 ? 1 : 0,
-      observations: execResult.errors.length > 0 ? execResult.errors.join('; ') : undefined,
-      service_cleanup: execResult.serviceCleanup,
-      verdict,
-      timestamps: {
-        started_at: startedAt.toISOString(),
-        completed_at: new Date().toISOString(),
-      },
+  const receiptPath = writeGateReceipt(resolvedOutputDir, {
+    stage_id: manifest.stage_id,
+    snapshot: computeSnapshot(process.cwd()),
+    manifest_digest: manifestDigest,
+    platform: platformInfo.platform,
+    verdict,
+    steps: execResult.stepResults,
+    service_cleanup: execResult.serviceCleanup,
+    timestamps: {
+      started_at: startedAt.toISOString(),
+      completed_at: new Date().toISOString(),
     },
   });
 
@@ -637,13 +632,8 @@ export async function runProjectAcceptance(
     skipped: sr.skipped,
   }));
 
-  // Compute manifest digest (SHA-256 of the serialized manifest — must use null, 2
-  // so it matches the file-on-disk format written by compile-project-acceptance.ts)
-  const manifestDigest = crypto
-    .createHash('sha256')
-    .update(JSON.stringify(manifest, null, 2))
-    .digest('hex')
-    .slice(0, 16);
+  // Compute manifest digest using shared canonical function
+  const manifestDigest = computeCanonicalJsonDigest(ProjectAcceptanceManifestSchema, manifest);
 
   const receipt: ProjectE2EReceipt = {
     project_id: manifest.project_id,
@@ -653,27 +643,22 @@ export async function runProjectAcceptance(
     expected_snapshot: manifest.expected_snapshot,
     executed_snapshot: executedSnapshot,
     steps: e2eSteps,
-    service_cleanup: execResult.serviceCleanup.cleaned.length > 0 || execResult.serviceCleanup.failed.length > 0
-      ? execResult.serviceCleanup
-      : undefined,
+    service_cleanup: execResult.serviceCleanup,
     created_at: new Date().toISOString(),
   };
 
   // ── 5. Write receipt ──
   mkdirSync(resolvedOutputDir, { recursive: true });
-  const receiptPath = writeProjectE2EReceipt({
-    outputDir: resolvedOutputDir,
-    data: {
-      project_id: manifest.project_id,
-      verdict,
-      snapshot: receipt.snapshot,
-      manifest_digest: manifestDigest,
-      expected_snapshot: receipt.expected_snapshot,
-      executed_snapshot: receipt.executed_snapshot,
-      steps: e2eSteps,
-      service_cleanup: receipt.service_cleanup,
-      created_at: receipt.created_at,
-    },
+  const receiptPath = writeProjectE2EReceipt(resolvedOutputDir, {
+    project_id: manifest.project_id,
+    verdict,
+    snapshot: receipt.snapshot,
+    manifest_digest: manifestDigest,
+    expected_snapshot: receipt.expected_snapshot,
+    executed_snapshot: executedSnapshot,
+    steps: e2eSteps,
+    service_cleanup: execResult.serviceCleanup,
+    created_at: receipt.created_at,
   });
 
   return {

@@ -100,8 +100,18 @@ export const ProjectAcceptanceManifestSchema = z.object({
   acceptance_criteria: z.array(z.string().min(1)).min(1),
   stage_receipts: z.array(z.object({
     stage_id: z.string().min(1),
-    review_receipt: z.string().min(1),
-    gate_receipt: z.string().min(1),
+    stage_manifest: z.object({
+      path: z.string().min(1),
+      digest: z.string().regex(/^[a-f0-9]{16}$/i),
+    }),
+    review_receipt: z.object({
+      path: z.string().min(1),
+      digest: z.string().regex(/^[a-f0-9]{16}$/i),
+    }),
+    gate_receipt: z.object({
+      path: z.string().min(1),
+      digest: z.string().regex(/^[a-f0-9]{16}$/i),
+    }),
   })).min(1),
   e2e_steps: z.array(RuntimeProofStep).min(1),
   compiled_at: z.string().optional(),
@@ -111,8 +121,8 @@ export type ProjectAcceptanceManifest = z.infer<typeof ProjectAcceptanceManifest
 export const ProjectE2EReceiptSchema = z.object({
   project_id: z.string().min(1),
   verdict: z.enum(['PASS', 'FAIL', 'BLOCKED']),
-  snapshot: z.string(),
-  manifest_digest: z.string().min(1),
+  snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  manifest_digest: z.string().regex(/^[a-f0-9]{16}$/i),
   expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
   executed_snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
   steps: z.array(z.object({
@@ -125,21 +135,43 @@ export const ProjectE2EReceiptSchema = z.object({
     cleaned: z.array(z.string()),
     failed: z.array(z.object({ service: z.string(), pid: z.number(), reason: z.string() })),
     remainingPids: z.array(z.number()),
-  }).optional(),
+  }),
   created_at: z.string(),
+}).superRefine((data, ctx) => {
+  if (data.verdict === 'PASS') {
+    const nonSkipped = data.steps.filter(s => !s.skipped);
+    if (nonSkipped.length === 0) {
+      ctx.addIssue({ code: 'custom', path: ['steps'], message: 'PASS requires at least one non-skipped step' });
+    }
+    for (const step of nonSkipped) {
+      if (step.exit_code !== 0) {
+        ctx.addIssue({ code: 'custom', path: ['steps', step.step_id, 'exit_code'], message: `PASS requires exit_code 0 for step "${step.step_id}", got ${step.exit_code}` });
+      }
+    }
+    if (data.service_cleanup.failed.length > 0) {
+      ctx.addIssue({ code: 'custom', path: ['service_cleanup', 'failed'], message: 'PASS requires no service cleanup failures' });
+    }
+    if (data.service_cleanup.remainingPids.length > 0) {
+      ctx.addIssue({ code: 'custom', path: ['service_cleanup', 'remainingPids'], message: 'PASS requires no remaining PIDs after cleanup' });
+    }
+  }
 });
 
 export const StageReviewReceiptSchema = z.object({
   stage_id: z.string().min(1),
   verdict: z.enum(['ACCEPTED', 'REJECTED', 'BLOCKED']),
-  snapshot: z.string(),
-  manifest_digest: z.string().min(1),
+  snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  manifest_digest: z.string().regex(/^[a-f0-9]{16}$/i),
   stage_gate_receipt: z.object({
     path: z.string().min(1),
-    digest: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{16}$/i),
   }),
-  reviewer: z.string().optional(),
-  reviewed_at: z.string().optional(),
+  findings: z.array(z.object({
+    category: z.string().min(1),
+    description: z.string().min(1),
+  })).optional().default([]),
+  reviewer: z.string().min(1),
+  reviewed_at: z.string(),
 });
 export type StageReviewReceipt = z.infer<typeof StageReviewReceiptSchema>;
 export type ProjectE2EReceipt = z.infer<typeof ProjectE2EReceiptSchema>;
@@ -148,26 +180,53 @@ export const StageGateVerdict = z.enum(['PASS', 'FAIL', 'BLOCKED']);
 
 export const StageGateReceipt = z.object({
   stage_id: StageId,
-  snapshot: z.string(),
+  snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  manifest_digest: z.string().regex(/^[a-f0-9]{16}$/i),
   platform: z.string(),
   verdict: StageGateVerdict,
   steps: z.array(z.object({
     id: z.string(),
-    exit_code: z.number().int(),
+    exit_code: z.number().int().nullable(),
+    skipped: z.boolean().optional(),
     observations: z.string().optional(),
   })),
   service_cleanup: z.object({
     cleaned: z.array(z.string()),
-    failed: z.array(z.object({
-      service: z.string(),
-      pid: z.number(),
-      reason: z.string(),
-    })),
+    failed: z.array(z.object({ service: z.string(), pid: z.number(), reason: z.string() })),
     remainingPids: z.array(z.number()),
-  }).optional(),
-  timestamp: z.string().optional(),
+  }),
+  timestamps: z.object({
+    started_at: z.string(),
+    completed_at: z.string(),
+  }),
 });
 export type StageGateReceipt = z.infer<typeof StageGateReceipt>;
+
+export const ProjectReviewResultSchema = z.object({
+  verdict: z.enum(['PROJECT_ACCEPTED', 'PROJECT_REJECTED', 'PROJECT_BLOCKED']),
+  reviewer: z.string().min(1),
+  reviewed_snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
+  project_manifest: z.object({
+    path: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{16}$/i),
+  }),
+  project_e2e_receipt: z.object({
+    path: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{16}$/i),
+  }),
+  criteria_results: z.array(z.object({
+    criteria: z.string(),
+    passed: z.boolean(),
+    notes: z.string().optional(),
+  })),
+  findings: z.array(z.object({
+    category: z.string().min(1),
+    description: z.string().min(1),
+  })).optional().default([]),
+  accepted_deviations: z.array(z.string()).optional().default([]),
+  reviewed_at: z.string(),
+});
+export type ProjectReviewResult = z.infer<typeof ProjectReviewResultSchema>;
 
 export const WriteProjectReviewReceiptOptionsSchema = z.object({
   project_id: z.string().min(1),

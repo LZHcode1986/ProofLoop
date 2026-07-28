@@ -1,8 +1,6 @@
 # Brain Project Review Dispatch Contract
 
-This contract is self-contained.
-
-Dispatch a Project Acceptance review after all Stages have been completed and accepted.
+This contract describes the independent Project Review that occurs during PROJECT_ACCEPTANCE phase.
 
 ## Use when
 
@@ -11,77 +9,64 @@ All of the following conditions are met:
 - All Stages have been ACCEPTED by Stage Reviewer
 - The original PRD is still the current valid version
 - No blocking Findings remain open
+- ProjectAcceptanceManifest has been compiled
+- Project E2E Gate Receipt has been written (verdict: PASS)
 
 ## Review method
 
 `independent-goal-challenge` (project level)
 
-The Project Reviewer does not re-run Stage Gates or Slice verifications. Instead, the Reviewer independently challenges whether the complete, integrated project satisfies the PRD Goals and Acceptance Criteria, using final snapshot evidence, all Stage Review Receipts, and end-to-end scenarios.
+The Project Reviewer does not re-run Stage Gates or Slice verifications. Instead, the Reviewer independently challenges whether the complete, integrated project satisfies the PRD Goals and Acceptance Criteria, using:
 
-## Required fields
-
-- PRD path (reference to PRD Goals and Acceptance Criteria)
-- Final integrated snapshot (commit or tree ref)
-- Stage Review Receipts (one per Stage, with verdict and path)
-- Stage Gate Receipts (one per Stage, with verdict and path)
+- ProjectAcceptanceManifest (path + digest)
+- Project E2E Gate Receipt (path + digest)
+- All Stage Review Receipts (one per Stage, with verdict and path)
+- All Stage Gate Receipts (one per Stage, with verdict and path)
 - All Architecture Work Item closure status
-- All unresolved deviations (per Stage, if any)
-- ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
-- Project E2E Gate Receipt (.proofloop/receipts/project-e2e-<attempt>.json)
 - Known limitations / deferred work summary
 
-## Expected results
+## Reviewer output format
 
-```yaml
-Verdict: PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED
+The Reviewer produces a structured JSON file conforming to `ProjectReviewResultSchema`:
+
+```jsonc
+{
+  "verdict": "PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED",
+  "reviewer": "string",                        // reviewer identity
+  "reviewed_snapshot": "16-char hex digest",   // must match Manifest.expected_snapshot
+  "project_manifest": {
+    "path": "string",                          // path to manifest file
+    "digest": "16-char hex"                    // must match computed manifest digest
+  },
+  "project_e2e_receipt": {
+    "path": "string",                          // path to E2E receipt file
+    "digest": "16-char hex"                    // must match actual E2E file digest
+  },
+  "criteria_results": [
+    {
+      "criteria": "AC-01",                     // acceptance criterion ID
+      "passed": true,                          // whether this criterion is satisfied
+      "notes": "optional explanation"          // optional notes
+    }
+  ],
+  "findings": [
+    {
+      "category": "string",
+      "description": "string"
+    }
+  ],
+  "accepted_deviations": ["string", "..."],
+  "reviewed_at": "ISO timestamp"
+}
 ```
 
-### PROJECT_ACCEPTED
+### Verdict semantics
 
-All PRD Acceptance Criteria are satisfied in the integrated snapshot. All Stage Review verdicts are ACCEPTED. End-to-end scenarios pass. Unresolved deviations (if any) are explicitly documented and accepted by Brain.
+**PROJECT_ACCEPTED**: All PRD Acceptance Criteria are satisfied in the integrated snapshot. All Stage Review verdicts are ACCEPTED. End-to-end scenarios pass. Unresolved deviations (if any) are explicitly documented.
 
-No `route_code` is returned — the project is complete.
+**PROJECT_REJECTED**: One or more PRD Acceptance Criteria are not satisfied. At least one criteria_result has `passed: false`. The Reviewer must include findings describing the rejection reason.
 
-### PROJECT_REJECTED
-
-One or more PRD Acceptance Criteria are not satisfied in the integrated snapshot. A Stage Review has been REJECTED. An end-to-end scenario fails. Unresolved deviations block project acceptance.
-
-```yaml
-Verdict: PROJECT_REJECTED
-route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | EVIDENCE_GAP
-subtype: <specific subtype>
-finding_id: <id>
-affected_stages: <list>
-affected_criteria: <list>
-affected_artifacts: <list>
-evidence: <description>
-reason: <description>
-suggested_owner: <owner>
-invalidation_scope: <list>
-resume_target:
-  owner: <owner>
-  phase: <phase>
-  stage: <stage-id | none>
-```
-
-### PROJECT_BLOCKED
-
-Project Acceptance cannot proceed due to external blockers, missing prerequisites, or environment issues.
-
-```yaml
-Verdict: PROJECT_BLOCKED
-route_code: RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP
-subtype: <specific subtype>
-finding_id: <id | none>
-affected_stages: <list>
-reason: <description>
-suggested_owner: <owner>
-invalidation_scope: <list>
-resume_target:
-  owner: <owner>
-  phase: <phase>
-  stage: <stage-id | none>
-```
+**PROJECT_BLOCKED**: Project Acceptance cannot proceed due to external blockers, missing prerequisites, or environment issues.
 
 ## Review scope
 
@@ -91,11 +76,12 @@ resume_target:
 - Every PRD Acceptance Criterion (AC-xxx) is verifiable in the integrated snapshot
 - No PRD requirement has been silently narrowed or removed
 
-### Stage Review Receipts audit
+### Stage evidence audit
 
 - Every Stage has a Stage Review Receipt with verdict ACCEPTED
-- Stage Review Receipts reference their corresponding Stage Gate Receipts
-- Receipt digests are consistent with the integrated snapshot
+- Every Stage has a Stage Gate Receipt with verdict PASS
+- Receipt digests are consistent across manifest -> review -> gate (triple-binding)
+- Receipts reference the same snapshot
 
 ### End-to-end scenarios
 
@@ -109,36 +95,14 @@ resume_target:
 - Deferred work is tracked and does not block core user intent
 - Degraded behavior is explicitly listed with mitigation plan
 
-## Verdict persistence
+## Finalization
 
-After the Project Review verdict is determined, Brain dispatches a final `stage-close` boundary (or equivalent project-level commit) to persist the Project Review Receipt.
+After the Reviewer produces the Project Review Result, Brain dispatches `finalize-project-review.js` to:
 
-The Project Review Receipt is written to:
-```
-.proofloop/receipts/project-review.json
-```
+1. Read and validate all three inputs (Manifest, E2E Receipt, Review Result)
+2. Cross-validate all digests and paths
+3. Verify triple-binding of Stage evidence
+4. Verify one-to-one coverage of acceptance criteria
+5. Write final Project Review Receipt to `project-review.json`
 
-## Return codes
-
-When Project Review is blocked or encounters issues before reaching a verdict:
-
-```yaml
-route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP | RUNTIME_BLOCKER
-subtype: <specific subtype>
-finding_id: <id | none>
-reason: <description>
-suggested_owner: <owner>
-invalidation_scope: <list>
-resume_target:
-  owner: <owner>
-  phase: <phase>
-  stage: <stage-id | none>
-```
-
-| Gate failure | route_code | subtype |
-|---|---|---|
-| Missing or incomplete Stage Review Receipts | `IMPLEMENTATION_DEFECT` | `PROJECT_MISSING_STAGE_REVIEW` |
-| End-to-end scenario execution failed | `IMPLEMENTATION_DEFECT` | `PROJECT_E2E_FAILURE` |
-| PRD Acceptance Criterion not satisfiable | `PLAN_GAP` | `PROJECT_CRITERION_GAP` |
-| Unresolved deviation blocks user intent | `EVIDENCE_GAP` | `PROJECT_DEVIATION_BLOCKING` |
-| Environment precondition unmet for e2e | `RUNTIME_BLOCKER` | `PROJECT_ENV_FAILURE` |
+The final receipt path is returned by the finalize script and persisted by Brain.
