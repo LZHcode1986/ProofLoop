@@ -71,3 +71,18 @@ resume_target:
   phase: <phase>
   stage: <stage-id | none>
 ```
+
+## Receipt Persistence Ownership
+
+The Stage Reviewer returns a structured verdict only. The Stage Reviewer does **not** write JSON receipts — its `edit: deny` permission prevents this by design.
+
+**Receipt persistence is Brain's responsibility:**
+
+```
+Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
+→ Brain calls writeStageReviewReceipt() from .agents/runtime/src/receipt-writer.ts
+   Receipt written to .proofloop/receipts/stage-review-<stage-id>.json
+→ Brain routes to STAGE_CLOSE (if ACCEPTED) or typed recovery
+```
+
+The Committer requires the persisted Stage Review Receipt to exist before executing stage-close. The `commit-boundary.md` contract's `stage-close` preconditions reference it by path.

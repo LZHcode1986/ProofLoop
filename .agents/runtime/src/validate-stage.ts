@@ -104,16 +104,23 @@ export function validateStage(tasksPath: string, evidencePath?: string): Validat
   for (const slice of parsed.slices) {
     checkUnique(slice.sliceId, 'Slice');
 
-    // Extract PO IDs from slice content
-    const poIds = extractIds(slice.raw, /PO-S\d{2,}-[A-Z]-\d{2}/g);
-    for (const poId of poIds) {
-      checkUnique(poId, 'Proof Obligation', slice.sliceId);
+    // Only check PO IDs within the Proof Obligations section (definition location)
+    // References in Proof Plan, Tasks, and Closure should not trigger duplicates.
+    const poDefSection = extractSection(slice.lines, 'Proof Obligations');
+    if (poDefSection) {
+      const poIds = extractIds(poDefSection, /PO-S\d{2,}-[A-Z]-\d{2}/g);
+      for (const poId of poIds) {
+        checkUnique(poId, 'Proof Obligation', slice.sliceId);
+      }
     }
 
-    // Extract Task IDs from slice content
-    const taskIds = extractIds(slice.raw, /S\d{2,}-[A-Z]-T\d+/g);
-    for (const taskId of taskIds) {
-      checkUnique(taskId, 'Task', slice.sliceId);
+    // Only check Task IDs within the Tasks section (definition location)
+    const tasksSection = extractSection(slice.lines, 'Tasks');
+    if (tasksSection) {
+      const taskIds = extractIds(tasksSection, /S\d{2,}-[A-Z]-T\d+/g);
+      for (const taskId of taskIds) {
+        checkUnique(taskId, 'Task', slice.sliceId);
+      }
     }
   }
 
@@ -160,23 +167,30 @@ export function validateStage(tasksPath: string, evidencePath?: string): Validat
 
   // ── 5. Each PO has Oracle Source ──
   for (const slice of parsed.slices) {
-    const poIdsInSlice = extractIds(slice.raw, /PO-S\d{2,}-[A-Z]-\d{2}/g);
-    if (poIdsInSlice.length > 0) {
-      const poSection = extractSection(slice.lines, 'Proof Plan');
-      // If PO IDs are declared, the Proof Plan section must have oracle source references
-      if (!poSection || poSection.trim().length === 0) {
-        errors.push({
-          type: 'MISSING_ORACLE_SOURCE',
-          message: `Slice ${slice.sliceId} has Proof Obligations but the Proof Plan section is empty`,
-          sliceId: slice.sliceId,
-        });
-      } else if (!poSection.includes('oracle') && !poSection.includes('Oracle') && !poSection.includes('source')) {
-        // Oracle source is expected but not found in Proof Plan text; warn
-        errors.push({
-          type: 'MISSING_ORACLE_SOURCE',
-          message: `Slice ${slice.sliceId} Proof Plan may be missing oracle_source for POs: ${poIdsInSlice.join(', ')}`,
-          sliceId: slice.sliceId,
-        });
+    const poDefSection = extractSection(slice.lines, 'Proof Obligations');
+    if (poDefSection && poDefSection.trim().length > 0) {
+      const poIdsInSlice = extractIds(poDefSection, /PO-S\d{2,}-[A-Z]-\d{2}/g);
+      if (poIdsInSlice.length > 0) {
+        // Split by PO entries: each PO block starts with "- PO-"
+        // Since the section content starts with "- PO-", we prepend a marker
+        const rawText = '\n' + poDefSection;
+        const poBlocks = rawText.split(/\n\s*-\s*PO-/).slice(1);
+        for (const rawBlock of poBlocks) {
+          const fullBlock = 'PO-' + rawBlock;
+          const poIdMatch = fullBlock.match(/^(PO-S\d{2,}-[A-Z]-\d{2})/);
+          if (!poIdMatch) continue;
+          const poId = poIdMatch[1];
+
+          // Check for Oracle Source field (case-insensitive, may be "Oracle Source" or "oracle_source")
+          const hasOracleSource = /\boracle\s*source\b/i.test(fullBlock);
+          if (!hasOracleSource) {
+            errors.push({
+              type: 'MISSING_ORACLE_SOURCE',
+              message: `PO ${poId} in slice ${slice.sliceId} is missing Oracle Source field`,
+              sliceId: slice.sliceId,
+            });
+          }
+        }
       }
     }
   }

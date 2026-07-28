@@ -11,9 +11,16 @@ export const RuntimeProofStep = z.object({
     args: z.array(z.string()),
     cwd: z.string().optional().default('.'),
     timeout_ms: z.number().int().positive().optional().default(300000),
+    readiness_signal: z.string().optional(),
+    expected_observation: z.string().optional(),
+    not_applicable: z.object({
+        reason: z.string(),
+    }).optional(),
     expected: z.object({
-        exit_code: z.number().int().optional().default(0),
-    }),
+        exit_code: z.number().int().optional(),
+        output_contains: z.string().optional(),
+        output_matches: z.string().optional(),
+    }).optional().default({ exit_code: 0 }),
 });
 // === Proof Obligation ===
 export const ProofObligation = z.object({

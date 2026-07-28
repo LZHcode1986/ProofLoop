@@ -45,8 +45,8 @@ This is a test stage.
 
 ---
 
-## Slice S1 — First Slice
-<!-- SLICE:S1:BEGIN -->
+## Slice S01-A — First Slice
+<!-- SLICE:S01-A:BEGIN -->
 
 ### Goal
 
@@ -67,15 +67,26 @@ Test seam
 
 ### Dependencies
 
+### Proof Obligations
+
+- PO-S01-A-01
+  - Behavior: verified
+  - Public Seam: Test seam
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation:
+  - Applicable Risk Facts:
+
 ### Proof Plan
 
-Oracle source: integration test
-PO-S01-A-01: verify behavior via test oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S01-A-01 | unit | Test seam | verify behavior |
 
 ### Tasks
 
-- [ ] S1-T1 Do the first task
-- [ ] S1-T2 Do the second task
+- [ ] S01-A-T01 Do the first task
+- [ ] S01-A-T02 Do the second task
 
 ### Task → Slice Closure
 
@@ -85,12 +96,12 @@ All tasks complete the slice goal.
 
 - Status: planned
 
-<!-- SLICE:S1:END -->
+<!-- SLICE:S01-A:END -->
 
 ---
 
-## Slice S2 — Second Slice
-<!-- SLICE:S2:BEGIN -->
+## Slice S01-B — Second Slice
+<!-- SLICE:S01-B:BEGIN -->
 
 ### Goal
 
@@ -110,16 +121,27 @@ Test seam
 
 ### Dependencies
 
-- S1
+- S01-A
+
+### Proof Obligations
+
+- PO-S01-B-01
+  - Behavior: verified
+  - Public Seam: Test seam
+  - Oracle Source: snapshot comparison
+  - Success / Failure: exit 0
+  - Required Observation:
+  - Applicable Risk Facts:
 
 ### Proof Plan
 
-Oracle source: snapshot comparison
-PO-S01-A-02: verify behavior via test oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S01-B-01 | integration | Test seam | verify behavior |
 
 ### Tasks
 
-- [ ] S2-T1 Do the third task
+- [ ] S01-B-T01 Do the third task
 
 ### Task → Slice Closure
 
@@ -129,7 +151,7 @@ Task completes the slice goal.
 
 - Status: planned
 
-<!-- SLICE:S2:END -->
+<!-- SLICE:S01-B:END -->
 
 ---
 
@@ -137,12 +159,12 @@ Task completes the slice goal.
 `;
 }
 
-function tasksMdMissingPo(): string {
-  return `# Stage S02 — Missing PO
+function tasksMdMissingOracleSource(): string {
+  return `# Stage S02 — Missing Oracle Source
 
 ## Stage Goal
 
-Stage with a slice that has PO IDs but no Proof Plan section
+Stage with a slice that has PO IDs but no Oracle Source field
 
 ## Observable Outcomes
 
@@ -152,8 +174,8 @@ Stage with a slice that has PO IDs but no Proof Plan section
 
 ---
 
-## Slice S1 — Missing Proof Plan
-<!-- SLICE:S1:BEGIN -->
+## Slice S02-A — Missing Oracle Source
+<!-- SLICE:S02-A:BEGIN -->
 
 ### Goal
 
@@ -173,9 +195,23 @@ Test seam
 
 ### Dependencies
 
+### Proof Obligations
+
+- PO-S02-A-01
+  - Behavior: verified
+  - Public Seam: Test seam
+  - Success / Failure: exit 0
+  - Required Observation:
+
+### Proof Plan
+
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S02-A-01 | unit | Test seam | verify behavior |
+
 ### Tasks
 
-- [ ] S1-T1 Do something (PO-S02-A-01 should be defined but Proof Plan is missing)
+- [ ] S02-A-T01 Do something (PO-S02-A-01 has no Oracle Source)
 
 ### Task → Slice Closure
 
@@ -185,7 +221,7 @@ Done.
 
 - Status: planned
 
-<!-- SLICE:S1:END -->
+<!-- SLICE:S02-A:END -->
 `;
 }
 
@@ -204,8 +240,8 @@ Stage with duplicate slice IDs
 
 ---
 
-## Slice S1 — First
-<!-- SLICE:S1:BEGIN -->
+## Slice S03-A — First
+<!-- SLICE:S03-A:BEGIN -->
 
 ### Goal
 
@@ -225,14 +261,24 @@ Test
 
 ### Dependencies
 
+### Proof Obligations
+
+- PO-S03-A-01
+  - Behavior: verified
+  - Public Seam: Test
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation:
+
 ### Proof Plan
 
-Oracle: system behavior check
-PO-S03-A-01: verify via oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S03-A-01 | unit | Test | verify |
 
 ### Tasks
 
-- [ ] S1-T1 Task
+- [ ] S03-A-T01 Task
 
 ### Task → Slice Closure
 
@@ -242,12 +288,12 @@ Done.
 
 - Status: planned
 
-<!-- SLICE:S1:END -->
+<!-- SLICE:S03-A:END -->
 
 ---
 
-## Slice S1 — Second (duplicate ID)
-<!-- SLICE:S1:BEGIN -->
+## Slice S03-A — Second (duplicate ID)
+<!-- SLICE:S03-A:BEGIN -->
 
 ### Goal
 
@@ -267,14 +313,24 @@ Test
 
 ### Dependencies
 
+### Proof Obligations
+
+- PO-S03-A-02
+  - Behavior: verified
+  - Public Seam: Test
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation:
+
 ### Proof Plan
 
-Oracle: system behavior check
-PO-S03-A-02: verify via oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S03-A-02 | unit | Test | verify |
 
 ### Tasks
 
-- [ ] S1-T2 Another task
+- [ ] S03-A-T02 Another task
 
 ### Task → Slice Closure
 
@@ -284,7 +340,7 @@ Done.
 
 - Status: planned
 
-<!-- SLICE:S1:END -->
+<!-- SLICE:S03-A:END -->
 `;
 }
 
@@ -303,8 +359,8 @@ Stage with cyclic dependencies
 
 ---
 
-## Slice S1 — Depends on S2
-<!-- SLICE:S1:BEGIN -->
+## Slice S04-A — Depends on S04-B
+<!-- SLICE:S04-A:BEGIN -->
 
 ### Goal
 
@@ -324,16 +380,26 @@ Test
 
 ### Dependencies
 
-- S2
+- S04-B
+
+### Proof Obligations
+
+- PO-S04-A-01
+  - Behavior: verified
+  - Public Seam: Test
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation:
 
 ### Proof Plan
 
-Oracle: behavior check
-PO-S04-A-01: verify via oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S04-A-01 | unit | Test | verify |
 
 ### Tasks
 
-- [ ] S1-T1 Task
+- [ ] S04-A-T01 Task
 
 ### Task → Slice Closure
 
@@ -343,12 +409,12 @@ Done.
 
 - Status: planned
 
-<!-- SLICE:S1:END -->
+<!-- SLICE:S04-A:END -->
 
 ---
 
-## Slice S2 — Depends on S1 (cycle)
-<!-- SLICE:S2:BEGIN -->
+## Slice S04-B — Depends on S04-A (cycle)
+<!-- SLICE:S04-B:BEGIN -->
 
 ### Goal
 
@@ -368,16 +434,26 @@ Test
 
 ### Dependencies
 
-- S1
+- S04-A
+
+### Proof Obligations
+
+- PO-S04-B-01
+  - Behavior: verified
+  - Public Seam: Test
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation:
 
 ### Proof Plan
 
-Oracle: behavior check
-PO-S04-A-02: verify via oracle
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S04-B-01 | unit | Test | verify |
 
 ### Tasks
 
-- [ ] S2-T1 Task
+- [ ] S04-B-T01 Task
 
 ### Task → Slice Closure
 
@@ -387,7 +463,7 @@ Done.
 
 - Status: planned
 
-<!-- SLICE:S2:END -->
+<!-- SLICE:S04-B:END -->
 `;
 }
 
@@ -408,8 +484,8 @@ describe('validateStage', () => {
     expect(result.errors.some(e => e.type === 'FILE_ERROR')).toBe(true);
   });
 
-  test('detects missing PO (no Proof Plan section when POs are referenced)', () => {
-    const tasksPath = writeFixture('tasks.md', tasksMdMissingPo());
+  test('detects missing Oracle Source in Proof Obligations section', () => {
+    const tasksPath = writeFixture('tasks.md', tasksMdMissingOracleSource());
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.type === 'MISSING_ORACLE_SOURCE')).toBe(true);
@@ -438,7 +514,7 @@ describe('validateStage', () => {
   });
 
   test('detects unclosed slice markers', () => {
-    const md = validTasksMd().replace('<!-- SLICE:S2:END -->', '');
+    const md = validTasksMd().replace('<!-- SLICE:S01-B:END -->', '');
     const tasksPath = writeFixture('tasks.md', md);
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);

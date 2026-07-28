@@ -212,7 +212,7 @@ For each target artifact:
 7. Do not run the Validator until both files exist.
 
 ### 10. MECHANICAL GATE
-- Run proofloop-validate-stage.py.
+- Run validate-stage (TS; fallback: proofloop-validate-stage.py).
 Mechanical Gate checks:
 - Architecture Work Item IDs exist in task-acceptance-matrix.md
 - Stage/Slice reference closure
@@ -457,7 +457,7 @@ Planner declares Risk Facts; does not select SCV level.
 
 ### SCV Minimum Level
 
-(Reserved — filled by Validator tooling)
+(Reserved — computed by Risk Policy from Planner-declared Risk Facts)
 
 ### Tasks
 

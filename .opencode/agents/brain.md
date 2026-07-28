@@ -185,12 +185,28 @@ STAGE_SELECTION
 → STAGE_CLOSE
 → RECOMPUTE_REMAINING_WORK
    ├─ remaining Architecture Work Items → STAGE_SELECTION
-   └─ no remaining work → TERMINAL
+   └─ all stages done → PROJECT_ACCEPTANCE
+      ├─ PROJECT_ACCEPTED → TERMINAL
+      ├─ PROJECT_REJECTED → appropriate authority loop
+      └─ PROJECT_BLOCKED → BLOCKED (record blocker)
 ```
 
 `STAGE_PLANNING` includes Planner's internal Validator and SPV Gates. SPV is not a Brain phase.
 
 `STAGE_GATE` is internal to the Executor. Brain does not directly dispatch a Gate phase.
+
+### Stage Review Receipt Persistence
+
+After the Stage Reviewer returns a verdict (ACCEPTED / REJECTED / BLOCKED), Brain writes the Stage Review Receipt before routing to the next phase:
+
+```text
+Stage Reviewer returns structured verdict
+→ Brain calls .agents/runtime/src/receipt-writer.ts writeStageReviewReceipt()
+   Receipt written to .proofloop/receipts/stage-review-<stage-id>.json
+→ RECOMPUTE → STAGE_CLOSE (if ACCEPTED) or typed recovery
+```
+
+The Committer requires the Stage Review Receipt to exist before executing stage-close. Brain is the sole owner of receipt persistence. The Stage Reviewer never writes receipts directly — it only returns structured results.
 
 ### Cross-Loop Routing
 
@@ -220,6 +236,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
 | `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
+| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain | `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
 
@@ -502,8 +519,7 @@ PROJECT_ACCEPTANCE is evaluated by Brain as an authority action. It is not dispa
 
 Return Terminal only when:
 
-- the requested goal is complete;
+- PROJECT_ACCEPTANCE returned PROJECT_ACCEPTED (project goal is complete);
 - a user product or authority decision is required;
 - work is `BLOCKED` with a recorded blocker;
-- work is explicitly `DEFERRED`;
-- no Architecture Work Items remain after Stage Close.
+- work is explicitly `DEFERRED`.

@@ -66,7 +66,7 @@ If not satisfied:
 - Check Stage branch.
 - Check Slice branches/worktrees.
 - Check whether a usable Worker runtime handle exists.
-- Check current CV results.
+- Check current SCV results.
 - Check integrated commits.
 - Recompute all Slice states from persisted facts.
 
@@ -97,19 +97,19 @@ If not satisfied:
 - Check Worker Status.
 - Do not substitute Worker text for persisted facts.
 - Route by return type per the Executor State Transition Table.
-TASK_COMPLETE does not trigger CV. Re-read tasks.md, find next Task or finalize-slice.
+TASK_COMPLETE does not trigger SCV. Re-read tasks.md, find next Task or finalize-slice.
 - Blockers not listed in the table go to Brain.
 
 ### 7. VERIFY
 
 #### 7a. COMPUTE SCV LEVEL
 
-After a Worker returns READY_FOR_CV (all Tasks done, Evidence written),
-compute the effective SCV verification level before dispatching Code Verifier:
+After a Worker returns READY_FOR_SCV (all Tasks done, Evidence written),
+compute the effective SCV verification level before dispatching Slice Challenge Verifier:
 
 ```
 Final SCV Minimum Level = max(
-    Planner-declared scv_minimum_level,
+    Risk Policy minimum level,
     f(actual_diff_complexity),
     f(public_interface_change),
     f(dependency_change)
@@ -117,42 +117,42 @@ Final SCV Minimum Level = max(
 ```
 
 Where:
-- **Planner-declared scv_minimum_level** — the value set in the Slice definition within tasks.md (lite / standard / enhanced).
+- **Risk Policy minimum level** — computed from Planner-declared Risk Facts via deterministic policy (lite / standard / enhanced).
 - **actual_diff_complexity** — Executor assesses the actual diff produced by the Worker: trivial (typo/fmt) → lite; moderate (single function change) → standard; broad (multiple modules, API surface) → enhanced.
-- **public_interface_change** — if the diff touches public exports, function signatures, or a component's public API surface, bump at least one level above Planner baseline.
+- **public_interface_change** — if the diff touches public exports, function signatures, or a component's public API surface, bump at least one level above Risk Policy minimum.
 - **dependency_change** — if the diff adds or modifies a dependency (npm, pip, cargo, etc.), bump to enhanced if not already.
 
 Executor may only **upgrade** the level, never downgrade.
-The Planner-declared scv_minimum_level is the floor; Executor may raise it based on runtime evidence.
+The Risk Policy minimum level is the floor; Executor may raise it based on runtime evidence.
 
-Record the computed SCV level for use in the CV dispatch contract.
+Record the computed SCV level for use in the SCV dispatch contract.
 
-#### 7b. DISPATCH CV
+#### 7b. DISPATCH SCV
 
-READY_FOR_CV:
+READY_FOR_SCV:
 1. Run the Slice scope check.
-2. On PASS, dispatch **one fresh Code Verifier** using the Code Verifier Contract.
-   The CV dispatch must include the computed SCV level (from step 7a).
-3. Wait for the final CV result.
+2. On PASS, dispatch **one fresh Slice Challenge Verifier** using the Slice Challenge Verifier Contract.
+   The SCV dispatch must include the computed SCV level (from step 7a).
+3. Wait for the final SCV result.
 
-CV PASS:
+SCV PASS:
 - Dispatch Committer (slice-output).
 - Wait for commit hash.
 - Commit hash received → READY_TO_INTEGRATE
 
-CV FAIL #1:
+SCV FAIL #1:
 - Dispatch the original Worker in repair mode.
-- After repair, dispatch a fresh CV.
+- After repair, dispatch a fresh SCV.
 
-CV FAIL #2:
+SCV FAIL #2:
 - Dispatch the original Worker in diagnose mode.
-- After diagnosis, dispatch a fresh CV.
+- After diagnosis, dispatch a fresh SCV.
 
-CV FAIL #3:
+SCV FAIL #3:
 - UNRESOLVED_IMPLEMENTATION_DEFECT → Brain
-- Return with route_code: IMPLEMENTATION_DEFECT, subtype: UNRESOLVED_CV_FAILURE, full affected scope and resume target
+- Return with route_code: IMPLEMENTATION_DEFECT, subtype: UNRESOLVED_SCV_FAILURE, full affected scope and resume target
 
-CV BLOCKED:
+SCV BLOCKED:
 - Stop the current Slice.
 - Return the blocker and existing evidence to Brain.
 
@@ -169,7 +169,7 @@ CV BLOCKED:
 - Semantic conflict → `git merge --abort` → Brain.
 - Run post-merge scope check.
 - Run necessary regression.
-- fresh CV when implementation or Evidence changed.
+- fresh SCV when implementation or Evidence changed.
 - Integration complete → Slice COMPLETE.
 
 ### 9. DERIVE COMPLETION
@@ -177,7 +177,7 @@ CV BLOCKED:
 Slice COMPLETE requires:
 - All Tasks checked.
 - Current Evidence complete.
-- Current CV PASS.
+- Current SCV PASS.
 - Scope gate PASS.
 - Integrated commit exists.
 - Committer boundary complete.
@@ -281,47 +281,47 @@ If `verdict: FAIL` → route the failure to Brain with:
 | TASK_RUNNING | Worker returns TASK_COMPLETE | TASK_COMPLETE |
 | TASK_COMPLETE | Next unchecked Task exists, continue same Worker | TASK_RUNNING |
 | TASK_COMPLETE | All Tasks done, continue same Worker with finalize-slice | SLICE_FINALIZING |
-| SLICE_FINALIZING | Worker returns READY_FOR_CV | READY_FOR_CV |
-| READY_FOR_CV | Compute SCV level, Scope PASS, dispatch fresh CV | VERIFYING |
-| VERIFYING | CV PASS, Committer dispatched | COMMITTING |
-| VERIFYING | CV FAIL #1 | REPAIRING |
-| REPAIRING | Repair complete | READY_FOR_CV |
-| VERIFYING | CV FAIL #2 | DIAGNOSING |
-| DIAGNOSING | Diagnosis complete | READY_FOR_CV |
-| VERIFYING | CV FAIL #3 | UNRESOLVED |
-| VERIFYING | CV BLOCKED | BLOCKED |
-| VERIFYING | No final CV result (timeout/interruption) | VERIFYING_INTERRUPTED |
+| SLICE_FINALIZING | Worker returns READY_FOR_SCV | READY_FOR_SCV |
+| READY_FOR_SCV | Compute SCV level, Scope PASS, dispatch fresh SCV | VERIFYING |
+| VERIFYING | SCV PASS, Committer dispatched | COMMITTING |
+| VERIFYING | SCV FAIL #1 | REPAIRING |
+| REPAIRING | Repair complete | READY_FOR_SCV |
+| VERIFYING | SCV FAIL #2 | DIAGNOSING |
+| DIAGNOSING | Diagnosis complete | READY_FOR_SCV |
+| VERIFYING | SCV FAIL #3 | UNRESOLVED |
+| VERIFYING | SCV BLOCKED | BLOCKED |
+| VERIFYING | No final SCV result (timeout/interruption) | VERIFYING_INTERRUPTED |
 | VERIFYING_INTERRUPTED | status-and-resume returns VERIFICATION_RESUMABLE, then resume-verification returns final verdict | COMMITTING / REPAIRING / DIAGNOSING / BLOCKED / UNRESOLVED |
-| VERIFYING_INTERRUPTED | VERIFICATION_RESTART_REQUIRED or handle lost | VERIFYING (fresh CV) |
+| VERIFYING_INTERRUPTED | VERIFICATION_RESTART_REQUIRED or handle lost | VERIFYING (fresh SCV) |
 | COMMITTING | Commit hash received | READY_TO_INTEGRATE |
 | READY_TO_INTEGRATE | Lock acquired | INTEGRATING |
 | INTEGRATING | Merge + gates + integration complete | COMPLETE |
 | Any | Explicit blocker | BLOCKED |
 
-## CV Interruption Recovery
+## SCV Interruption Recovery
 
-When a dispatched CV does not return a final verdict because of timeout,
+When a dispatched SCV does not return a final verdict because of timeout,
 interruption, tool failure, or incomplete response:
 
-1. Check whether the original CV runtime handle is still available.
+1. Check whether the original SCV runtime handle is still available.
 
 2. If the handle is available, send a `status-and-resume` continuation to the
-   same CV Session.
+   same SCV Session.
 
-3. **If the CV returns VERIFICATION_RESUMABLE:**
+3. **If the SCV returns VERIFICATION_RESUMABLE:**
    - Verify the state is reliable and inputs unchanged.
    - Send a `resume-verification` continuation.
    - Wait for a final verdict (PASS | FAIL | BLOCKED) or VERIFICATION_RESTART_REQUIRED.
 
-4. **If the CV returns VERIFICATION_RESTART_REQUIRED:**
+4. **If the SCV returns VERIFICATION_RESTART_REQUIRED:**
    - Discard the old handle.
-   - Dispatch a fresh CV.
+   - Dispatch a fresh SCV.
 
 5. **If the handle is unavailable or recovery continuation also fails:**
    - Discard the old handle.
-   - Dispatch a fresh CV.
+   - Dispatch a fresh SCV.
 
-CV recovery continuation template (step 1):
+SCV recovery continuation template (step 1):
 ```
 Contract Ref: .agents/contracts/executor/code-verifier.md
 Continuation Type: status-and-resume
@@ -335,7 +335,7 @@ Required Next Action:
 - otherwise return VERIFICATION_RESTART_REQUIRED.
 ```
 
-CV recovery continuation template (step 2):
+SCV recovery continuation template (step 2):
 ```
 Contract Ref: .agents/contracts/executor/code-verifier.md
 Continuation Type: resume-verification
@@ -346,7 +346,7 @@ Required Next Action:
 - or VERIFICATION_RESTART_REQUIRED if continuation becomes unsafe.
 ```
 
-CV returns VERIFICATION_RESTART_REQUIRED at any point → discard old handle → dispatch fresh CV.
+SCV returns VERIFICATION_RESTART_REQUIRED at any point → discard old handle → dispatch fresh SCV.
 
 ## Worker Session Rules
 
@@ -363,7 +363,7 @@ Executor creates one Slice Worker
 → all Tasks done
 → continuation same Worker, requests finalize-slice
 → Worker runs full Slice verification and writes Evidence
-→ READY_FOR_CV
+→ READY_FOR_SCV
 ```
 
 ### Continuation Rules
@@ -375,7 +375,7 @@ Executor creates one Slice Worker
 5. Use runtime handle to continuation the same Worker.
 6. Worker must NOT select or start the next Task autonomously.
 7. Send finalize-slice only after all Tasks are checked.
-8. READY_FOR_CV may only be returned by finalize-slice.
+8. READY_FOR_SCV may only be returned by finalize-slice.
 
 ### Handle available
 
@@ -406,7 +406,7 @@ Do not send future Task contents.
 Executor must NOT:
 - edit code or Markdown
 - check off Task checkboxes
-- substitute CV judgment
+- substitute SCV judgment
 - create content commits or run `git commit` (merge commits are allowed)
 - ask the user
 
@@ -421,7 +421,7 @@ When assembling Worker Packet, preserve Authority Excerpts verbatim. Do not rewr
 | Dispatch Scenario | Contract Ref |
 |---|---|
 | Worker implementation/finalization/recovery/repair/conflict | `.agents/contracts/executor/worker.md` |
-| Initial CV and CV recheck | `.agents/contracts/executor/code-verifier.md` |
+| Initial SCV and SCV recheck | `.agents/contracts/executor/code-verifier.md` |
 | Slice output commit | `.agents/contracts/executor/committer.md` |
 | Stage Gate execution | `.agents/contracts/brain/execute-stage.md` |
 

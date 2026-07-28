@@ -97,9 +97,33 @@ export function writeReceipt(options) {
     return path.resolve(filePath);
 }
 /**
- * Validate that a receipt file exists and is parseable.
- * Returns true if valid, false with error message if not.
+ * Write a structured JSON Stage Review Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
  */
+export function writeStageReviewReceipt(options) {
+    const { outputDir, data } = options;
+    // Ensure output directory exists
+    fs.mkdirSync(outputDir, { recursive: true });
+    const receipt = {
+        stage_id: data.stage_id,
+        verdict: data.verdict,
+        finding_id: data.finding_id,
+        route_code: data.route_code,
+        subtype: data.subtype,
+        affected_outcomes: data.affected_outcomes,
+        affected_artifacts: data.affected_artifacts,
+        evidence: data.evidence,
+        reason: data.reason,
+        reviewed_at: data.reviewed_at ?? new Date().toISOString(),
+        reviewer: data.reviewer ?? 'stage-reviewer',
+    };
+    const safeStageId = data.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `stage-review-receipt-${safeStageId}.json`;
+    const filePath = path.join(outputDir, fileName);
+    fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+    return path.resolve(filePath);
+}
 export function validateReceipt(receiptPath) {
     try {
         if (!fs.existsSync(receiptPath)) {

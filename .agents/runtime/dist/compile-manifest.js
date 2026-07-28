@@ -92,24 +92,49 @@ export function compileManifest(tasksPath) {
         // Extract tasks
         const tasksText = extractSection(slice.lines, 'Tasks');
         const tasks = extractTaskIds(tasksText);
-        // Extract proof obligations
+        // Extract proof obligations from the Proof Obligations section
         const proofObligations = [];
-        const poSection = extractSection(slice.lines, 'Proof Plan');
-        if (poSection) {
-            // Find PO definitions in the Proof Plan section
-            const poIdMatches = [...slice.raw.matchAll(/PO-S\d{2,}-[A-Z]-\d{2}/g)];
-            const seenPoIds = new Set();
-            for (const poMatch of poIdMatches) {
-                const poId = poMatch[0];
-                if (seenPoIds.has(poId))
+        const poDefSection = extractSection(slice.lines, 'Proof Obligations');
+        if (poDefSection) {
+            // Split by PO entries: each PO block starts with "- PO-"
+            const poBlocks = poDefSection.split(/\n\s*-\s*PO-/).slice(1);
+            for (const rawBlock of poBlocks) {
+                const fullBlock = 'PO-' + rawBlock;
+                const poIdMatch = fullBlock.match(/^(PO-S\d{2,}-[A-Z]-\d{2})/);
+                if (!poIdMatch)
                     continue;
-                seenPoIds.add(poId);
+                const poId = poIdMatch[1];
+                // Extract fields from indented sub-list under the PO
+                // Format:
+                //   - Behavior:
+                //   - Public Seam:
+                //   - Oracle Source:
+                //   - Success / Failure:
+                //   - Required Observation:
+                //   - Applicable Risk Facts:
+                const fieldLines = fullBlock.split('\n')
+                    .map(l => l.trim())
+                    .filter(l => l.startsWith('- '));
+                const fields = new Map();
+                for (const line of fieldLines) {
+                    const match = line.match(/^-\s+(.+?):\s*(.*)$/);
+                    if (match) {
+                        const key = match[1].trim().toLowerCase().replace(/[^a-z0-9_\/]+/g, '_');
+                        const value = match[2].trim();
+                        fields.set(key, value);
+                    }
+                }
                 proofObligations.push({
                     po_id: poId,
-                    behavior: 'verified',
-                    public_seam: publicSeam,
-                    oracle_source: extractFirstParagraph(poSection),
-                    success_criteria: extractFirstParagraph(poSection),
+                    behavior: fields.get('behavior') || 'verified',
+                    public_seam: fields.get('public_seam') || publicSeam,
+                    oracle_source: fields.get('oracle_source') || '',
+                    success_criteria: fields.get('success_/_failure') || fields.get('success_failure') || '',
+                    failure_criteria: undefined,
+                    required_observation: fields.get('required_observation') || undefined,
+                    applicable_risk_facts: fields.has('applicable_risk_facts') && fields.get('applicable_risk_facts')
+                        ? fields.get('applicable_risk_facts').split(',').map(s => s.trim()).filter(Boolean)
+                        : undefined,
                 });
             }
         }

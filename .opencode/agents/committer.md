@@ -66,12 +66,11 @@ Return: Boundary closed
 
 Stage and commit the Planner's Stage plan **plus the compiled Manifest**.
 
-Commit scope includes the delivery directory and the compiled manifest manifest in `.proofloop/manifests/`:
+Commit scope includes the delivery directory and the compiled manifest in `.proofloop/manifests/`:
 
 ```text
 git add delivery/stages/<stage-id>/
 git add .proofloop/manifests/<stage-id>.json
-git add .proofloop/tasks/<stage-id>.md
 git commit -m "stage-plan: <stage-id>"
 Return: Boundary closed (commit hash: <hash>)
 ```

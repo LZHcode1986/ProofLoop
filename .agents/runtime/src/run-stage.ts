@@ -90,8 +90,9 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
     };
   }
 
-  // ── Trivial pass: no steps → gate passes ──
+  // ── Trivial fail: no steps → gate fails (proof without evidence) ──
   if (steps.length === 0) {
+    errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
     const receiptPath = writeReceipt({
       outputDir: resolvedOutputDir,
       data: {
@@ -100,8 +101,8 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         platform: platformInfo.platform,
         tool_versions: {},
         steps: [],
-        exit_code: 0,
-        verdict: 'PASS',
+        exit_code: 1,
+        verdict: 'FAIL',
         timestamps: {
           started_at: startedAt.toISOString(),
           completed_at: new Date().toISOString(),
@@ -109,11 +110,26 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
       },
     });
 
-    return { success: true, receiptPath, errors: [], stepCount: 0 };
+    return { success: false, receiptPath, errors, stepCount: 0 };
   }
 
   // ── 3. Execute each step sequentially ──
   for (const step of steps) {
+    // Skip steps marked as not_applicable
+    if (step.not_applicable?.reason) {
+      stepResults.push({
+        id: step.id,
+        executable: step.executable,
+        args: step.args,
+        exit_code: 0,
+        signal: null,
+        timed_out: false,
+        duration_ms: 0,
+        observations: `Skipped: ${step.not_applicable.reason}`,
+      });
+      continue;
+    }
+
     const result = await runProcess({
       executable: step.executable,
       args: step.args,
@@ -121,10 +137,14 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
       timeoutMs: step.timeout_ms,
     });
 
-    // Capture observations from stderr (first 2000 chars) if present
-    const observations = result.stderr && result.stderr.length > 0
-      ? result.stderr.slice(0, 2000)
-      : undefined;
+    // Capture observations (first 2000 chars)
+    const observations = [
+      result.stdout?.length > 0 ? `stdout: ${result.stdout.slice(0, 1000)}` : '',
+      result.stderr?.length > 0 ? `stderr: ${result.stderr.slice(0, 1000)}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ')
+      .slice(0, 2000) || undefined;
 
     const stepResult: StepResult = {
       id: step.id,
@@ -139,21 +159,81 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
 
     stepResults.push(stepResult);
 
-    // ── 4. Check expected exit code ──
-    const expected = step.expected?.exit_code ?? 0;
-    if (result.exitCode !== expected) {
+    // ── 4. Check oracle expectations ──
+    const expected = step.expected;
+
+    // 4a. Check exit_code
+    const expectedExitCode = expected?.exit_code ?? 0;
+    if (result.exitCode !== expectedExitCode) {
       const detail = [
-        `Step "${step.id}" exited with code ${result.exitCode} (expected ${expected}).`,
+        `Step "${step.id}" exited with code ${result.exitCode} (expected ${expectedExitCode}).`,
         result.signal ? `Signal: ${result.signal}.` : '',
         result.timedOut ? 'Timed out.' : '',
-        result.stderr ? `Stderr (first 500 chars): ${result.stderr.slice(0, 500)}` : '',
+        result.stderr ? `Stderr: ${result.stderr.slice(0, 500)}` : '',
       ]
         .filter(Boolean)
         .join(' ');
 
       errors.push(detail);
       finalExitCode = result.exitCode ?? -1;
-      break; // Stop on first failure (fail-fast)
+      break;
+    }
+
+    // 4b. Check output_contains (stdout must contain the expected text)
+    if (expected?.output_contains) {
+      if (!result.stdout.includes(expected.output_contains)) {
+        errors.push(
+          `Step "${step.id}" stdout does not contain expected text "${expected.output_contains}". ` +
+          `Stdout: ${result.stdout.slice(0, 500)}`,
+        );
+        finalExitCode = finalExitCode || 2;
+        break;
+      }
+    }
+
+    // 4c. Check output_matches (stdout must match the expected regex)
+    if (expected?.output_matches) {
+      try {
+        const regex = new RegExp(expected.output_matches);
+        if (!regex.test(result.stdout)) {
+          errors.push(
+            `Step "${step.id}" stdout does not match expected regex /${expected.output_matches}/. ` +
+            `Stdout: ${result.stdout.slice(0, 500)}`,
+          );
+          finalExitCode = finalExitCode || 2;
+          break;
+        }
+      } catch (regexErr) {
+        errors.push(`Step "${step.id}" has invalid output_matches regex: ${regexErr}`);
+        finalExitCode = finalExitCode || 2;
+        break;
+      }
+    }
+
+    // 4d. Check readiness_signal (merged stdout+stderr must contain signal)
+    if (step.readiness_signal) {
+      const combined = result.stdout + result.stderr;
+      if (!combined.includes(step.readiness_signal)) {
+        errors.push(
+          `Step "${step.id}" readiness signal "${step.readiness_signal}" not found in output. ` +
+          `Stdout: ${result.stdout.slice(0, 500)}`,
+        );
+        finalExitCode = finalExitCode || 2;
+        break;
+      }
+    }
+
+    // 4e. Check expected_observation (merged stdout+stderr must contain observation)
+    if (step.expected_observation) {
+      const combined = result.stdout + result.stderr;
+      if (!combined.includes(step.expected_observation)) {
+        errors.push(
+          `Step "${step.id}" expected observation "${step.expected_observation}" not found. ` +
+          `Stdout: ${result.stdout.slice(0, 500)}`,
+        );
+        finalExitCode = finalExitCode || 2;
+        break;
+      }
     }
   }
 

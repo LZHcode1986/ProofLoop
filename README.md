@@ -39,7 +39,7 @@ Brain selects Stage
 | **Planner** | Stage → Slice → Task decomposition | Does not implement code |
 | **Executor** | Stage runtime orchestration, Worker/SCV dispatch, integration | `edit: deny`, no direct code edits |
 | **Worker** | One Slice implementation at a time | Reads only current Slice context, not full Stage Goal |
-| **SCV** (Code Verifier) | Adversarial verification of Worker claims | `edit: deny`, read-only, refutes before reading evidence |
+| **SCV** (Slice Challenge Verifier) | Adversarial verification of Worker claims | `edit: deny`, read-only, refutes before reading evidence |
 | **Stage Reviewer** | Goal-first independent review of complete Stage | `edit: deny`, no re-running of full Stage Gate |
 | **Committer** | Git boundary ownership | Does not edit content or judge quality |
 | **Researcher** | External technical research | Does not edit repository |
@@ -87,8 +87,8 @@ Before resuming work, always verify:
 
 ### Prerequisites
 
-- **Python** 3.10+ (for legacy validators — see migration note below)
-- **Node.js** 18+ (for TypeScript runtime)
+- **Node.js** 18+ (for TypeScript runtime — authoritative Gate tooling)
+- **Python** 3.10+ (transitional fallback only — see Legacy Python validators below)
 - **npm** (for TypeScript runtime dependencies)
 
 ### TypeScript Runtime
@@ -125,9 +125,16 @@ node .agents/runtime/dist/compile-manifest.js --stage S01 --path .
 node .agents/runtime/dist/run-stage.js --stage S01 --path .
 ```
 
+### CI / Verification
+
+Stage plan validation uses two levels of gate:
+
+1. **Mechanical Gate** — runs `npm run validate-stage` (TypeScript). This is the authoritative gate. The legacy Python equivalent `proofloop-validate-stage.py` exists as a transitional fallback only and will be removed after full TS equivalence is confirmed.
+2. **Semantic Gate** — run by SPV (Stage Proof Verifier), a separate agent dispatched by the Planner.
+
 ### Legacy Python validators
 
-Python validators in `.agents/validators/` are **deprecated** and will be removed after TypeScript equivalence is fully verified. Do not add new features to them.
+Python validators in `.agents/validators/` are **deprecated** and serve only as a transitional fallback. The authoritative Gate is TypeScript (`npm run validate-stage`). Do not add new features to Python validators.
 
 ---
 

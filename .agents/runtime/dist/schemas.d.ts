@@ -9,31 +9,60 @@ export declare const RuntimeProofStep: z.ZodObject<{
     args: z.ZodArray<z.ZodString, "many">;
     cwd: z.ZodDefault<z.ZodOptional<z.ZodString>>;
     timeout_ms: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
-    expected: z.ZodObject<{
-        exit_code: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
+    readiness_signal: z.ZodOptional<z.ZodString>;
+    expected_observation: z.ZodOptional<z.ZodString>;
+    not_applicable: z.ZodOptional<z.ZodObject<{
+        reason: z.ZodString;
     }, "strip", z.ZodTypeAny, {
-        exit_code: number;
+        reason: string;
+    }, {
+        reason: string;
+    }>>;
+    expected: z.ZodDefault<z.ZodOptional<z.ZodObject<{
+        exit_code: z.ZodOptional<z.ZodNumber>;
+        output_contains: z.ZodOptional<z.ZodString>;
+        output_matches: z.ZodOptional<z.ZodString>;
+    }, "strip", z.ZodTypeAny, {
+        exit_code?: number | undefined;
+        output_contains?: string | undefined;
+        output_matches?: string | undefined;
     }, {
         exit_code?: number | undefined;
-    }>;
+        output_contains?: string | undefined;
+        output_matches?: string | undefined;
+    }>>>;
 }, "strip", z.ZodTypeAny, {
     id: string;
     executable: string;
     args: string[];
     expected: {
-        exit_code: number;
+        exit_code?: number | undefined;
+        output_contains?: string | undefined;
+        output_matches?: string | undefined;
     };
     cwd: string;
     timeout_ms: number;
+    readiness_signal?: string | undefined;
+    expected_observation?: string | undefined;
+    not_applicable?: {
+        reason: string;
+    } | undefined;
 }, {
     id: string;
     executable: string;
     args: string[];
-    expected: {
+    expected?: {
         exit_code?: number | undefined;
-    };
+        output_contains?: string | undefined;
+        output_matches?: string | undefined;
+    } | undefined;
     cwd?: string | undefined;
     timeout_ms?: number | undefined;
+    readiness_signal?: string | undefined;
+    expected_observation?: string | undefined;
+    not_applicable?: {
+        reason: string;
+    } | undefined;
 }>;
 export type RuntimeProofStep = z.infer<typeof RuntimeProofStep>;
 export declare const ProofObligation: z.ZodObject<{
@@ -232,31 +261,60 @@ export declare const Manifest: z.ZodObject<{
         args: z.ZodArray<z.ZodString, "many">;
         cwd: z.ZodDefault<z.ZodOptional<z.ZodString>>;
         timeout_ms: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
-        expected: z.ZodObject<{
-            exit_code: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
+        readiness_signal: z.ZodOptional<z.ZodString>;
+        expected_observation: z.ZodOptional<z.ZodString>;
+        not_applicable: z.ZodOptional<z.ZodObject<{
+            reason: z.ZodString;
         }, "strip", z.ZodTypeAny, {
-            exit_code: number;
+            reason: string;
+        }, {
+            reason: string;
+        }>>;
+        expected: z.ZodDefault<z.ZodOptional<z.ZodObject<{
+            exit_code: z.ZodOptional<z.ZodNumber>;
+            output_contains: z.ZodOptional<z.ZodString>;
+            output_matches: z.ZodOptional<z.ZodString>;
+        }, "strip", z.ZodTypeAny, {
+            exit_code?: number | undefined;
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
         }, {
             exit_code?: number | undefined;
-        }>;
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
+        }>>>;
     }, "strip", z.ZodTypeAny, {
         id: string;
         executable: string;
         args: string[];
         expected: {
-            exit_code: number;
+            exit_code?: number | undefined;
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
         };
         cwd: string;
         timeout_ms: number;
+        readiness_signal?: string | undefined;
+        expected_observation?: string | undefined;
+        not_applicable?: {
+            reason: string;
+        } | undefined;
     }, {
         id: string;
         executable: string;
         args: string[];
-        expected: {
+        expected?: {
             exit_code?: number | undefined;
-        };
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
+        } | undefined;
         cwd?: string | undefined;
         timeout_ms?: number | undefined;
+        readiness_signal?: string | undefined;
+        expected_observation?: string | undefined;
+        not_applicable?: {
+            reason: string;
+        } | undefined;
     }>, "many">>>;
     compiled_at: z.ZodOptional<z.ZodString>;
     compiled_by: z.ZodOptional<z.ZodString>;
@@ -293,10 +351,17 @@ export declare const Manifest: z.ZodObject<{
         executable: string;
         args: string[];
         expected: {
-            exit_code: number;
+            exit_code?: number | undefined;
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
         };
         cwd: string;
         timeout_ms: number;
+        readiness_signal?: string | undefined;
+        expected_observation?: string | undefined;
+        not_applicable?: {
+            reason: string;
+        } | undefined;
     }[];
     compiled_at?: string | undefined;
     compiled_by?: string | undefined;
@@ -332,11 +397,18 @@ export declare const Manifest: z.ZodObject<{
         id: string;
         executable: string;
         args: string[];
-        expected: {
+        expected?: {
             exit_code?: number | undefined;
-        };
+            output_contains?: string | undefined;
+            output_matches?: string | undefined;
+        } | undefined;
         cwd?: string | undefined;
         timeout_ms?: number | undefined;
+        readiness_signal?: string | undefined;
+        expected_observation?: string | undefined;
+        not_applicable?: {
+            reason: string;
+        } | undefined;
     }[] | undefined;
     compiled_at?: string | undefined;
     compiled_by?: string | undefined;

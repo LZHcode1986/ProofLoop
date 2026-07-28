@@ -47,10 +47,29 @@ export declare function computeSnapshot(dir: string): string;
  * Returns the absolute path of the written receipt file.
  */
 export declare function writeReceipt(options: WriteReceiptOptions): string;
+export interface StageReviewReceipt {
+    stage_id: string;
+    verdict: 'ACCEPTED' | 'REJECTED' | 'BLOCKED';
+    finding_id?: string;
+    route_code?: string;
+    subtype?: string;
+    affected_outcomes?: string[];
+    affected_artifacts?: string[];
+    evidence?: string;
+    reason?: string;
+    reviewed_at: string;
+    reviewer: string;
+}
+export interface WriteStageReviewReceiptOptions {
+    outputDir: string;
+    data: StageReviewReceipt;
+}
 /**
- * Validate that a receipt file exists and is parseable.
- * Returns true if valid, false with error message if not.
+ * Write a structured JSON Stage Review Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
  */
+export declare function writeStageReviewReceipt(options: WriteStageReviewReceiptOptions): string;
 export declare function validateReceipt(receiptPath: string): {
     valid: boolean;
     error?: string;
