@@ -103,6 +103,15 @@ export const StageGateReceipt = z.object({
     exit_code: z.number().int(),
     observations: z.string().optional(),
   })),
+  service_cleanup: z.object({
+    cleaned: z.array(z.string()),
+    failed: z.array(z.object({
+      service: z.string(),
+      pid: z.number(),
+      reason: z.string(),
+    })),
+    remainingPids: z.array(z.number()),
+  }).optional(),
   timestamp: z.string().optional(),
 });
 export type StageGateReceipt = z.infer<typeof StageGateReceipt>;

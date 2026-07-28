@@ -484,6 +484,39 @@ export declare const StageGateReceipt: z.ZodObject<{
         exit_code: number;
         observations?: string | undefined;
     }>, "many">;
+    service_cleanup: z.ZodOptional<z.ZodObject<{
+        cleaned: z.ZodArray<z.ZodString, "many">;
+        failed: z.ZodArray<z.ZodObject<{
+            service: z.ZodString;
+            pid: z.ZodNumber;
+            reason: z.ZodString;
+        }, "strip", z.ZodTypeAny, {
+            reason: string;
+            service: string;
+            pid: number;
+        }, {
+            reason: string;
+            service: string;
+            pid: number;
+        }>, "many">;
+        remainingPids: z.ZodArray<z.ZodNumber, "many">;
+    }, "strip", z.ZodTypeAny, {
+        cleaned: string[];
+        failed: {
+            reason: string;
+            service: string;
+            pid: number;
+        }[];
+        remainingPids: number[];
+    }, {
+        cleaned: string[];
+        failed: {
+            reason: string;
+            service: string;
+            pid: number;
+        }[];
+        remainingPids: number[];
+    }>>;
     timestamp: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     stage_id: string;
@@ -496,6 +529,15 @@ export declare const StageGateReceipt: z.ZodObject<{
         observations?: string | undefined;
     }[];
     timestamp?: string | undefined;
+    service_cleanup?: {
+        cleaned: string[];
+        failed: {
+            reason: string;
+            service: string;
+            pid: number;
+        }[];
+        remainingPids: number[];
+    } | undefined;
 }, {
     stage_id: string;
     snapshot: string;
@@ -507,5 +549,14 @@ export declare const StageGateReceipt: z.ZodObject<{
         observations?: string | undefined;
     }[];
     timestamp?: string | undefined;
+    service_cleanup?: {
+        cleaned: string[];
+        failed: {
+            reason: string;
+            service: string;
+            pid: number;
+        }[];
+        remainingPids: number[];
+    } | undefined;
 }>;
 export type StageGateReceipt = z.infer<typeof StageGateReceipt>;

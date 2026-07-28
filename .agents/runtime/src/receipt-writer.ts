@@ -29,6 +29,11 @@ export interface ReceiptData {
     cleaned: number;
     failed: string[];
   };
+  service_cleanup?: {
+    cleaned: string[];
+    failed: Array<{ service: string; pid: number; reason: string }>;
+    remainingPids: number[];
+  };
   verdict: 'PASS' | 'FAIL' | 'BLOCKED';
   timestamps: {
     started_at: string;
@@ -137,6 +142,11 @@ export function writeReceipt(options: WriteReceiptOptions): string {
   // Include cleanup info if provided
   if (data.cleanup) {
     receipt.cleanup = data.cleanup;
+  }
+
+  // Include service cleanup details if provided
+  if (data.service_cleanup) {
+    receipt.service_cleanup = data.service_cleanup;
   }
 
   // Write to file

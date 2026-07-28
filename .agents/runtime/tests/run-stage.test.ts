@@ -106,6 +106,17 @@ describe('runStageFromManifest', () => {
       expect(steps[1].exit_code).toBe(0);
       expect(steps[2].id).toBe('app-stop');
       expect(steps[2].exit_code).toBe(0);
+
+      // 验证 service_cleanup: 服务被显式 stop 而非依赖 cleanup 兜底
+      expect(receipt.service_cleanup).toBeDefined();
+      const serviceCleanup = receipt.service_cleanup as {
+        cleaned: string[];
+        failed: Array<{ service: string; pid: number; reason: string }>;
+        remainingPids: number[];
+      };
+      expect(serviceCleanup.cleaned).toHaveLength(0);
+      expect(serviceCleanup.failed).toHaveLength(0);
+      expect(serviceCleanup.remainingPids).toHaveLength(0);
     }, 20000);
   });
 
@@ -250,6 +261,45 @@ describe('runStageFromManifest', () => {
 
       const receipt = readReceipt(result.receiptPath!);
       expect(receipt.verdict).toBe('PASS');
+    }, 15000);
+  });
+
+  describe('负向路径 5 — 全部标记 not_applicable', () => {
+    test('所有步骤都是 not_applicable, verdict FAIL', async () => {
+      const manifest = {
+        ...BASE_MANIFEST,
+        stage_id: 'S99-ALLNA',
+        runtime_proof: [
+          {
+            id: 'step-1',
+            type: 'probe',
+            executable: 'node',
+            args: ['-e', 'console.log("hello")'],
+            not_applicable: { reason: 'Environment does not support this check' },
+          },
+          {
+            id: 'step-2',
+            type: 'probe',
+            executable: 'node',
+            args: ['-e', 'console.log("world")'],
+            not_applicable: { reason: 'Feature not enabled in this configuration' },
+          },
+        ],
+      };
+
+      const manifestPath = writeManifest('all-na.json', manifest);
+      const result = await runStageFromManifest({
+        manifestPath,
+        outputDir: tmpDir,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e) => e.includes('ALL_STEPS_SKIPPED'))).toBe(true);
+      expect(result.stepCount).toBe(2);
+      expect(result.receiptPath).toBeDefined();
+
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('FAIL');
     }, 15000);
   });
 

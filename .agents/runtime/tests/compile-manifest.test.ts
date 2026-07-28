@@ -87,6 +87,83 @@ Done.
 `;
 }
 
+// ── Helpers for Runtime Proof tests ──
+
+function minimalTasksMdWithYamlSteps(yamlSteps: string): string {
+  return `# Stage S10 — Runtime Proof Validation
+
+## Stage Goal
+
+Validate runtime proof constraints.
+
+## Observable Outcomes
+
+- OUT-01 Outcome
+
+## Dependencies
+
+---
+
+## Slice S10-A — Test
+<!-- SLICE:S10-A:BEGIN -->
+
+### Goal
+
+Test.
+
+### Observable Outcome
+
+OUT-01.
+
+### Public Seam
+
+Test.
+
+### Risk Facts
+
+- none
+
+### Dependencies
+
+### Proof Obligations
+
+- PO-S10-A-01
+  - Behavior: verified
+  - Public Seam: Test
+  - Oracle Source: unit test
+  - Success / Failure: exit 0
+  - Required Observation:
+
+### Proof Plan
+
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S10-A-01 | unit | Test | verify |
+
+### Tasks
+
+- [ ] S10-A-T01 Task
+
+### Task → Slice Closure
+
+Done.
+
+### Worker Status
+
+- Status: planned
+
+<!-- SLICE:S10-A:END -->
+
+---
+
+## Stage Runtime Proof
+
+\`\`\`yaml
+${yamlSteps}
+\`\`\`
+`;
+}
+
 // ── Tests ──
 
 describe('compileManifest', () => {
@@ -202,6 +279,7 @@ steps:
     type: service_stop
     executable: node
     args: []
+    service_ref: start-server
     timeout_ms: 5000
 \`\`\`
 `;
@@ -375,5 +453,58 @@ Done.
     // SCV levels derived from slice risk facts
     expect(sliceA.scv_minimum_level).toBe('enhanced');
     expect(sliceB.scv_minimum_level).toBe('standard');
+  });
+
+  // ── Runtime Proof validation ──
+
+  test('duplicate Runtime Proof step IDs throw error', () => {
+    const yaml = `
+steps:
+  - id: step-one
+    executable: echo
+    args: [hello]
+  - id: step-one
+    executable: echo
+    args: [world]
+`;
+    const md = minimalTasksMdWithYamlSteps(yaml);
+    const tasksPath = writeFixture('tasks.md', md);
+    expect(() => compileManifest(tasksPath)).toThrow(/Duplicate Runtime Proof step ID/);
+  });
+
+  test('service_start without matching service_stop throws error', () => {
+    const yaml = `
+steps:
+  - id: start-svc
+    type: service_start
+    executable: node
+    args: ['-e', 'setInterval(()=>{},60000)']
+    timeout_ms: 5000
+  - id: probe
+    type: probe
+    executable: echo
+    args: [ok]
+`;
+    const md = minimalTasksMdWithYamlSteps(yaml);
+    const tasksPath = writeFixture('tasks.md', md);
+    expect(() => compileManifest(tasksPath)).toThrow(
+      /service_start "start-svc" has no matching service_stop/,
+    );
+  });
+
+  test('service_stop referencing non-existent service_start throws error', () => {
+    const yaml = `
+steps:
+  - id: stop-svc
+    type: service_stop
+    executable: node
+    args: []
+    service_ref: no-such-service
+`;
+    const md = minimalTasksMdWithYamlSteps(yaml);
+    const tasksPath = writeFixture('tasks.md', md);
+    expect(() => compileManifest(tasksPath)).toThrow(
+      /service_stop "stop-svc" references non-existent service_start "no-such-service"/,
+    );
   });
 });

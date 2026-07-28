@@ -89,6 +89,8 @@ export async function runStageFromManifest(options) {
         return { success: false, receiptPath, errors, stepCount: 0 };
     }
     // ── 3. Execute each step sequentially ──
+    let executedCount = 0;
+    let skippedCount = 0;
     for (const step of steps) {
         // Skip steps marked as not_applicable
         if (step.not_applicable?.reason) {
@@ -102,8 +104,10 @@ export async function runStageFromManifest(options) {
                 duration_ms: 0,
                 observations: `Skipped: ${step.not_applicable.reason}`,
             });
+            skippedCount++;
             continue;
         }
+        executedCount++;
         const stepType = step.type ?? 'command';
         if (stepType === 'service_start') {
             // ── service_start: spawn, register, wait for readiness ──
@@ -192,7 +196,10 @@ export async function runStageFromManifest(options) {
                 break;
             }
             try {
-                await stopRegisteredService(step.id);
+                const stopped = await stopRegisteredService(ref);
+                if (!stopped) {
+                    throw new Error(`service_stop: registered service "${ref}" not found or already stopped`);
+                }
                 const durationMs = Date.now() - startTime;
                 stepResults.push({
                     id: step.id,
@@ -314,12 +321,31 @@ export async function runStageFromManifest(options) {
             }
         }
     }
+    // ── 4. All steps skipped check ──
+    if (executedCount === 0 && steps.length > 0) {
+        errors.push('ALL_STEPS_SKIPPED: All runtime proof steps were marked not_applicable');
+        finalExitCode = -1;
+    }
     // ── 5. Cleanup ──
     const knownPids = options.knownPids ?? [];
     const knownPorts = options.knownPorts ?? [];
     let cleanupResult;
+    // Determine which services have a declared service_stop in the manifest
+    const serviceStopRefs = new Set((manifest.runtime_proof ?? [])
+        .filter(s => s.type === 'service_stop')
+        .map(s => s.service_ref ?? s.id));
     // Clean up any registered services first
     const serviceCleanup = await cleanupServices();
+    // Check: if cleanup stopped a service that had an explicit service_stop declared,
+    // it means the explicit stop was missed — this is a Gate FAIL.
+    const missedExplicitStops = serviceCleanup.cleaned.filter(name => serviceStopRefs.has(name));
+    for (const name of missedExplicitStops) {
+        errors.push(`Service "${name}" was still running at final cleanup but has a declared ` +
+            `service_stop step. The explicit stop was missed. This is a Gate FAIL.`);
+    }
+    if (missedExplicitStops.length > 0 && finalExitCode === 0) {
+        finalExitCode = -1;
+    }
     if (serviceCleanup.failed.length > 0) {
         const details = serviceCleanup.failed
             .map(f => `${f.service} (PID ${f.pid}): ${f.reason}`)
@@ -364,6 +390,7 @@ export async function runStageFromManifest(options) {
             exit_code: finalExitCode,
             observations: errors.length > 0 ? errors.join('; ') : undefined,
             cleanup: cleanupResult,
+            service_cleanup: serviceCleanup,
             verdict,
             timestamps: {
                 started_at: startedAt.toISOString(),

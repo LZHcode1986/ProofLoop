@@ -89,6 +89,10 @@ export function writeReceipt(options) {
     if (data.cleanup) {
         receipt.cleanup = data.cleanup;
     }
+    // Include service cleanup details if provided
+    if (data.service_cleanup) {
+        receipt.service_cleanup = data.service_cleanup;
+    }
     // Write to file
     const safeStageId = data.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `stage-gate-receipt-${safeStageId}-${Date.now()}.json`;

@@ -230,6 +230,63 @@ export function compileManifest(tasksPath: string): Manifest {
     runtimeProof.push(...parsed);
   }
 
+  // ── Validate Runtime Proof constraints ──
+  const stepErrors: string[] = [];
+
+  // 1. Step ID uniqueness
+  const seenStepIds = new Set<string>();
+  for (const step of runtimeProof) {
+    if (seenStepIds.has(step.id)) {
+      stepErrors.push(`Duplicate Runtime Proof step ID: "${step.id}"`);
+    }
+    seenStepIds.add(step.id);
+  }
+
+  // 2. service_start / service_stop matching
+  const serviceStartIds = new Set(
+    runtimeProof.filter(s => s.type === 'service_start').map(s => s.id),
+  );
+
+  const serviceStopInfos = runtimeProof
+    .filter(s => s.type === 'service_stop')
+    .map(s => ({ id: s.id, ref: s.service_ref ?? s.id }));
+
+  // Each service_start must have a matching service_stop
+  for (const startId of serviceStartIds) {
+    const hasStop = serviceStopInfos.some(s => s.ref === startId);
+    if (!hasStop) {
+      stepErrors.push(
+        `service_start "${startId}" has no matching service_stop step`,
+      );
+    }
+  }
+
+  // Each service_stop must reference an existing service_start
+  // AND must not appear before its matching service_start
+  for (const sInfo of serviceStopInfos) {
+    // Check ref exists
+    if (!serviceStartIds.has(sInfo.ref)) {
+      stepErrors.push(
+        `service_stop "${sInfo.id}" references non-existent service_start "${sInfo.ref}"`,
+      );
+    }
+
+    // Check ordering
+    const stopIdx = runtimeProof.findIndex(s => s.id === sInfo.id);
+    const startIdx = runtimeProof.findIndex(s => s.id === sInfo.ref);
+    if (stopIdx !== -1 && startIdx !== -1 && stopIdx < startIdx) {
+      stepErrors.push(
+        `service_stop "${sInfo.id}" appears before its service_start "${sInfo.ref}"`,
+      );
+    }
+  }
+
+  if (stepErrors.length > 0) {
+    throw new Error(
+      `Runtime Proof validation failed:\n${stepErrors.map(e => `  - ${e}`).join('\n')}`,
+    );
+  }
+
   const manifest: Manifest = {
     stage_id: stageId,
     source_path: tasksPath,

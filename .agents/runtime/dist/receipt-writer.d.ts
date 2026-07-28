@@ -21,6 +21,15 @@ export interface ReceiptData {
         cleaned: number;
         failed: string[];
     };
+    service_cleanup?: {
+        cleaned: string[];
+        failed: Array<{
+            service: string;
+            pid: number;
+            reason: string;
+        }>;
+        remainingPids: number[];
+    };
     verdict: 'PASS' | 'FAIL' | 'BLOCKED';
     timestamps: {
         started_at: string;
