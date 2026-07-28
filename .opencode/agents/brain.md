@@ -236,7 +236,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
 | `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
-| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain | `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
+| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Stage Reviewer (via Brain dispatch) | `brain/stage-review.md` with `review_scope: project` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
 
@@ -497,13 +497,36 @@ Never persist the following Prototype result statuses directly into the Hard Par
 
 A PROJECT_ACCEPTANCE phase evaluates whether the entire project is complete.
 
-Project Review is dispatched through the `brain/project-review.md` contract.
+Project Review is dispatched through the `brain/stage-review.md` contract with `review_scope: project`, and the `brain/project-review.md` contract as supplementary guidance.
 
 ### Trigger conditions
 
 - All Architecture Work Items are closed
 - All Stages are ACCEPTED
 - The original PRD is still the current valid version
+
+### Dispatch
+
+Brain dispatches the Stage Reviewer (existing Agent) with `review_scope: project`:
+
+```text
+PROJECT_ACCEPTANCE
+→ Brain loads brain/stage-review.md contract with review_scope: project
+→ Brain loads brain/project-review.md for supplementary guidance
+→ Brain dispatches Stage Reviewer with:
+    - review_scope: project
+    - PRD path
+    - Final integrated snapshot
+    - All Stage Review Receipts (one per Stage, verdict ACCEPTED)
+    - All Stage Gate Receipts
+    - All Architecture Work Item closure status
+    - Unresolved deviations summary
+    - End-to-end scenario definitions
+    - Known limitations / deferred work
+→ Stage Reviewer returns PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED
+→ Brain writes Project Review Receipt to .proofloop/receipts/project-review.json
+→ Route to TERMINAL or typed recovery
+```
 
 ### Results
 
@@ -512,8 +535,6 @@ Project Review is dispatched through the `brain/project-review.md` contract.
 | `PROJECT_ACCEPTED` | Project satisfies the PRD. Terminal reached. |
 | `PROJECT_REJECTED` | Project fails acceptance criteria. Route to appropriate authority loop. |
 | `PROJECT_BLOCKED` | Acceptance cannot be completed due to external blocker or unresolved finding. |
-
-PROJECT_ACCEPTANCE is evaluated by Brain as an authority action. It is not dispatched to an Agent.
 
 ## Terminal Conditions
 

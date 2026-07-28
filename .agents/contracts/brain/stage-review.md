@@ -6,13 +6,17 @@ Dispatch a Stage review to Stage Reviewer.
 
 A Stage execution is complete and needs goal-first review against the Stage Goal, Observable Outcomes, and authority documents.
 
+When `review_scope: project`, this contract is used during `PROJECT_ACCEPTANCE` to review the complete project against PRD Goals.
+
 ## Review method
 
 `independent-goal-challenge`
 
-The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer independently challenges whether the implementation satisfies the Stage Goal using evidence, integrated code, and authority documents.
+The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer independently challenges whether the implementation satisfies the Stage Goal (or, for `review_scope: project`, the PRD Goals) using evidence, integrated code, and authority documents.
 
 ## Required fields
+
+### review_scope: stage
 
 - Stage ID
 - Stage Goal
@@ -28,12 +32,31 @@ The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer i
 - SCV Receipt refs (one per Slice)
 - Stage risk level (low / medium / high / critical)
 - Clean-room requirement (yes / no)
+- **review_scope** (stage | project)
+
+### review_scope: project
+
+- **review_scope** (must be `project`)
+- PRD path (reference to PRD Goals and Acceptance Criteria)
+- Final integrated snapshot (commit or tree ref)
+- Stage Review Receipts (one per Stage, with verdict ACCEPTED and path)
+- Stage Gate Receipts (one per Stage, with verdict and path)
+- All Architecture Work Item closure status
+- All unresolved deviations (per Stage, if any)
+- End-to-end scenario definitions
+- Known limitations / deferred work summary
 
 ## Expected results
 
+### review_scope: stage
+
 ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
 
-## Return codes
+### review_scope: project
+
+PROJECT_ACCEPTED, PROJECT_REJECTED, or PROJECT_BLOCKED verdict returned to Brain.
+
+## Return codes — review_scope: stage
 
 ### REJECTED
 
@@ -72,11 +95,52 @@ resume_target:
   stage: <stage-id | none>
 ```
 
+## Return codes — review_scope: project
+
+### PROJECT_REJECTED
+
+```yaml
+Verdict: PROJECT_REJECTED
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | EVIDENCE_GAP
+subtype: <specific subtype>
+finding_id: <id>
+affected_stages: <list>
+affected_criteria: <list>
+affected_artifacts: <list>
+evidence: <description>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id | none>
+```
+
+### PROJECT_BLOCKED
+
+```yaml
+Verdict: PROJECT_BLOCKED
+route_code: RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP
+subtype: <specific subtype>
+finding_id: <id | none>
+affected_stages: <list>
+reason: <description>
+suggested_owner: <owner>
+invalidation_scope: <list>
+resume_target:
+  owner: <owner>
+  phase: <phase>
+  stage: <stage-id | none>
+```
+
 ## Receipt Persistence Ownership
 
 The Stage Reviewer returns a structured verdict only. The Stage Reviewer does **not** write JSON receipts — its `edit: deny` permission prevents this by design.
 
 **Receipt persistence is Brain's responsibility:**
+
+### review_scope: stage
 
 ```
 Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
@@ -86,3 +150,12 @@ Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
 ```
 
 The Committer requires the persisted Stage Review Receipt to exist before executing stage-close. The `commit-boundary.md` contract's `stage-close` preconditions reference it by path.
+
+### review_scope: project
+
+```
+Stage Reviewer returns structured verdict (PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED)
+→ Brain writes a Project Review Receipt
+   Receipt written to .proofloop/receipts/project-review.json
+→ Brain routes to TERMINAL (if PROJECT_ACCEPTED) or typed recovery
+```

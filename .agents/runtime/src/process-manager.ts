@@ -1,3 +1,4 @@
+import { platform } from 'node:os';
 import { spawn, ChildProcess } from 'node:child_process';
 import { killProcessTree, isProcessAlive, isPortInUse, isShellExecutable, containsShellOperator, getPlatformInfo } from './platform-adapter.js';
 
@@ -61,6 +62,25 @@ export function validateSpawnOptions(options: SpawnOptions): SpawnValidation {
   return { valid: errors.length === 0, errors };
 }
 
+// ── Executable resolution ─────────────────────────────────────────────────────
+
+/**
+ * Resolve executable path for the current platform.
+ *
+ * On Windows, Node.js `spawn()` resolves executables via PATHEXT automatically
+ * (e.g., `npm` → `npm.cmd`). This function serves as documentation that on
+ * Windows we would try `.cmd` suffix first; no explicit suffix addition is needed
+ * because the underlying `spawn()` already handles it via PATHEXT.
+ */
+function resolveExecutable(exec: string): string {
+  if (platform() === 'win32' && !exec.endsWith('.exe') && !exec.endsWith('.cmd')) {
+    // Node.js spawn() on Windows uses PATHEXT to find the correct executable,
+    // so `npm`, `node`, `npx` etc. are resolved to `.cmd` or `.exe` automatically.
+    // No suffix change needed here.
+  }
+  return exec;
+}
+
 // ── Process runner ─────────────────────────────────────────────────────────────
 
 /**
@@ -83,8 +103,11 @@ export async function runProcess(options: SpawnOptions): Promise<ProcessResult> 
   const platform = getPlatformInfo();
   const startTime = Date.now();
 
+  // Resolve executable (Windows PATHEXT handles .cmd/.exe resolution automatically)
+  const resolvedExec = resolveExecutable(executable);
+
   // Spawn the process
-  const child: ChildProcess = spawn(executable, args, {
+  const child: ChildProcess = spawn(resolvedExec, args, {
     cwd,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -180,6 +203,211 @@ export async function runProcess(options: SpawnOptions): Promise<ProcessResult> 
       });
     });
   });
+}
+
+// ── Service management ─────────────────────────────────────────────────────────
+
+export interface ServiceHandle {
+  pid: number;
+  process: ChildProcess;
+  getStdout(): string;
+  getStderr(): string;
+}
+
+export interface SpawnServiceResult {
+  handle: ServiceHandle;
+}
+
+interface ServiceEntry {
+  pid: number;
+  process: ChildProcess;
+  getStdout(): string;
+  getStderr(): string;
+}
+
+// Module-level service registry (keyed by service name / step id)
+const serviceRegistry = new Map<string, ServiceEntry>();
+
+/**
+ * Spawn a long-running service process.
+ *
+ * Unlike runProcess(), this does NOT wait for close — it spawns and returns
+ * immediately with a handle that provides access to the child process and its
+ * accumulated stdout/stderr.
+ *
+ * The caller must eventually call stopService() or cleanupServices().
+ */
+export async function spawnService(options: SpawnOptions): Promise<ServiceHandle> {
+  const {
+    executable,
+    args,
+    cwd = process.cwd(),
+    env = process.env as Record<string, string | undefined>,
+  } = options;
+
+  const platform = getPlatformInfo();
+
+  const child: ChildProcess = spawn(executable, args, {
+    cwd,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...(platform.isPosix ? { detached: true } : {}),
+    shell: false,
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  if (child.stdout) {
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf-8');
+    });
+  }
+
+  if (child.stderr) {
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf-8');
+    });
+  }
+
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error(`Failed to spawn service: ${executable} ${args.join(' ')} — no PID assigned`);
+  }
+
+  return {
+    pid,
+    process: child,
+    getStdout: () => stdout,
+    getStderr: () => stderr,
+  };
+}
+
+/**
+ * Register a running service under a logical name.
+ * The name is typically the step id from the manifest.
+ */
+export function registerService(name: string, handle: ServiceHandle): void {
+  serviceRegistry.set(name, {
+    pid: handle.pid,
+    process: handle.process,
+    getStdout: handle.getStdout,
+    getStderr: handle.getStderr,
+  });
+}
+
+/**
+ * Look up a registered service by name.
+ * Returns undefined if no service is registered under that name.
+ */
+export function getRegisteredService(name: string): ServiceHandle | undefined {
+  const entry = serviceRegistry.get(name);
+  if (!entry) return undefined;
+  return {
+    pid: entry.pid,
+    process: entry.process,
+    getStdout: entry.getStdout,
+    getStderr: entry.getStderr,
+  };
+}
+
+/**
+ * Stop a service process gracefully:
+ * 1. Send SIGTERM
+ * 2. Wait up to `graceMs` for clean exit
+ * 3. If still alive, send SIGKILL
+ *
+ * After stopping, the service is removed from the registry.
+ */
+export async function stopService(pid: number, graceMs: number = 5000): Promise<void> {
+  // Remove from registry first (prevent double-stop from another code path)
+  for (const [name, entry] of serviceRegistry) {
+    if (entry.pid === pid) {
+      serviceRegistry.delete(name);
+      break;
+    }
+  }
+
+  // Send SIGTERM
+  killProcessTree(pid, 'SIGTERM');
+
+  // Wait for graceful shutdown
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return;
+    await sleep(100);
+  }
+
+  // Timeout — force kill
+  if (isProcessAlive(pid)) {
+    killProcessTree(pid, 'SIGKILL');
+  }
+}
+
+/**
+ * Stop a registered service by its logical name.
+ * Convenience wrapper around stopService(pid).
+ */
+export async function stopRegisteredService(name: string, graceMs: number = 5000): Promise<boolean> {
+  const entry = serviceRegistry.get(name);
+  if (!entry) return false;
+  await stopService(entry.pid, graceMs);
+  return true;
+}
+
+/**
+ * Wait for a service's output to contain the readiness signal.
+ *
+ * Polls accumulated stdout+stderr every 200ms until the signal is found
+ * or the timeout expires.
+ *
+ * Returns true if the signal was found, false on timeout.
+ */
+export async function waitForReadiness(
+  handle: ServiceHandle,
+  signal: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const stdout = handle.getStdout();
+    const stderr = handle.getStderr();
+
+    if (stdout.includes(signal) || stderr.includes(signal)) {
+      return true;
+    }
+
+    await sleep(200);
+  }
+
+  // One last check before giving up
+  const stdout = handle.getStdout();
+  const stderr = handle.getStderr();
+  return stdout.includes(signal) || stderr.includes(signal);
+}
+
+/**
+ * Stop and remove all registered services.
+ * Each service receives SIGTERM with a 5s grace period before SIGKILL.
+ */
+export async function cleanupServices(): Promise<void> {
+  const names = Array.from(serviceRegistry.keys());
+  for (const name of names) {
+    const entry = serviceRegistry.get(name);
+    if (!entry) continue;
+    try {
+      await stopService(entry.pid);
+    } catch {
+      // Best-effort cleanup; ignore individual failures
+    }
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── Cleanup ────────────────────────────────────────────────────────────────────

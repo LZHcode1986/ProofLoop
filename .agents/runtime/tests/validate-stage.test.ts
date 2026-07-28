@@ -74,7 +74,7 @@ Test seam
   - Public Seam: Test seam
   - Oracle Source: integration test
   - Success / Failure: exit 0
-  - Required Observation:
+  - Required Observation: N/A
   - Applicable Risk Facts:
 
 ### Proof Plan
@@ -130,7 +130,7 @@ Test seam
   - Public Seam: Test seam
   - Oracle Source: snapshot comparison
   - Success / Failure: exit 0
-  - Required Observation:
+  - Required Observation: N/A
   - Applicable Risk Facts:
 
 ### Proof Plan
@@ -201,7 +201,7 @@ Test seam
   - Behavior: verified
   - Public Seam: Test seam
   - Success / Failure: exit 0
-  - Required Observation:
+  - Required Observation: N/A
 
 ### Proof Plan
 
@@ -488,7 +488,7 @@ describe('validateStage', () => {
     const tasksPath = writeFixture('tasks.md', tasksMdMissingOracleSource());
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.type === 'MISSING_ORACLE_SOURCE')).toBe(true);
+    expect(result.errors.some(e => e.type === 'MISSING_ORACLE_VALUE')).toBe(true);
   });
 
   test('detects missing Risk Facts', () => {

@@ -6,9 +6,14 @@ export const SliceId = z.string().regex(/^S\d{2,}-[A-Z]$/);
 export const TaskId = z.string().regex(/^S\d{2,}-[A-Z]-T\d+$/);
 export const PoId = z.string().regex(/^PO-S\d{2,}-[A-Z]-\d{2}$/);
 
+// === Step type enum ===
+export const StepType = z.enum(['command', 'service_start', 'service_stop', 'probe']);
+export type StepType = z.infer<typeof StepType>;
+
 // === Runtime Proof Step ===
 export const RuntimeProofStep = z.object({
   id: z.string(),
+  type: StepType.optional().default('command'),
   executable: z.string(),
   args: z.array(z.string()),
   cwd: z.string().optional().default('.'),

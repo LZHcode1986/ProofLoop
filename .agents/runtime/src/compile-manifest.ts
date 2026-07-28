@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { z } from 'zod';
+import YAML from 'yaml';
 import { parseStageFile } from './parse-stage.js';
-import type { Manifest, RuntimeProofStep } from './schemas.js';
+import { computeScvLevel } from './compute-scv-level.js';
+import { RuntimeProofStep } from './schemas.js';
+import type { Manifest } from './schemas.js';
 
 /**
  * Extract the content of a Markdown section by heading (## or ###).
@@ -124,7 +128,8 @@ export function compileManifest(tasksPath: string): Manifest {
     const poDefSection = extractSection(slice.lines, 'Proof Obligations');
     if (poDefSection) {
       // Split by PO entries: each PO block starts with "- PO-"
-      const poBlocks = poDefSection.split(/\n\s*-\s*PO-/).slice(1);
+      // NOTE: Must prepend \n so the first PO is not discarded (split delimiter requires preceding \n)
+      const poBlocks = (`\n${poDefSection}`).split(/\n\s*-\s*PO-/).slice(1);
       for (const rawBlock of poBlocks) {
         const fullBlock = 'PO-' + rawBlock;
         const poIdMatch = fullBlock.match(/^(PO-S\d{2,}-[A-Z]-\d{2})/);
@@ -168,9 +173,8 @@ export function compileManifest(tasksPath: string): Manifest {
       }
     }
 
-    // Determine SCV minimum level
-    const scvLevelMatch = slice.raw.match(/scv_minimum_level["']?\s*:\s*["'](lite|standard|enhanced)["']/);
-    const scvMinimumLevel = (scvLevelMatch?.[1] ?? 'standard') as 'lite' | 'standard' | 'enhanced';
+    // Determine SCV minimum level from Risk Facts (not from manual scv_minimum_level field)
+    const scvMinimumLevel = computeScvLevel(sliceRiskFacts);
 
     return {
       slice_id: slice.sliceId,
@@ -185,8 +189,7 @@ export function compileManifest(tasksPath: string): Manifest {
     };
   });
 
-  // ── Helper: parse simple YAML array of objects ──
-  // Handles the indentation-based YAML used in Stage Runtime Proof sections.
+  // ── Helper: parse YAML steps using the yaml library ──
   // Expected format:
   //   steps:
   //     - id: build
@@ -197,136 +200,9 @@ export function compileManifest(tasksPath: string): Manifest {
   //       expected:
   //         exit_code: 0
   function parseYamlSteps(yamlText: string): RuntimeProofStep[] {
-    const steps: RuntimeProofStep[] = [];
-    const lines = yamlText.split('\n');
-
-    // Find the "steps:" line
-    const stepsIdx = lines.findIndex(l => l.trim() === 'steps:');
-    if (stepsIdx === -1) return steps;
-
-    // Determine indentation of the first list item under steps
-    const restLines = lines.slice(stepsIdx + 1);
-    const firstItemIdx = restLines.findIndex(l => l.trim().startsWith('- '));
-    if (firstItemIdx === -1) return steps;
-
-    const baseIndent = restLines[firstItemIdx].search(/\S/); // indent of first item marker
-
-    // Split into step blocks (each block starts with "- " at baseIndent)
-    const stepBlocks: string[] = [];
-    let currentBlock: string[] = [];
-    for (const rawLine of restLines.slice(firstItemIdx)) {
-      const indent = rawLine.search(/\S/);
-      const trimmed = rawLine.trim();
-      if (trimmed.length === 0) continue;
-
-      if (indent === baseIndent && trimmed.startsWith('- ')) {
-        if (currentBlock.length > 0) {
-          stepBlocks.push(currentBlock.join('\n'));
-        }
-        currentBlock = [trimmed.slice(2).trim()]; // remove "- " prefix
-      } else if (currentBlock.length > 0) {
-        currentBlock.push(rawLine);
-      }
-    }
-    if (currentBlock.length > 0) {
-      stepBlocks.push(currentBlock.join('\n'));
-    }
-
-    // Parse each step block into a RuntimeProofStep
-    for (const block of stepBlocks) {
-      const step: Record<string, unknown> = {};
-      const blines = block.split('\n');
-
-      // Detect child indent level for nested objects
-      const childIndent = blines.length > 1 ? blines.slice(1).find(l => l.trim().length > 0)?.search(/\S/) ?? 0 : 0;
-
-      let currentKey = '';
-      let currentNested: Record<string, unknown> = {};
-
-      for (const raw of blines) {
-        const trimmed = raw.trim();
-        if (trimmed.length === 0) continue;
-        const indent = raw.search(/\S/);
-
-        if (indent === 0 || indent < childIndent) {
-          // Top-level key-value or nested key flush
-          if (Object.keys(currentNested).length > 0) {
-            step[currentKey] = currentNested;
-            currentNested = {};
-          }
-          const match = trimmed.match(/^(.+?):\s*(.*)$/);
-          if (match) {
-            currentKey = match[1].trim();
-            const value = match[2].trim();
-            if (value === '') {
-              // Value will be filled by nested lines
-              step[currentKey] = null;
-            } else if (value.startsWith('[') && value.endsWith(']')) {
-              // Array: [a, b, c]
-              const items = value.slice(1, -1).split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-              step[currentKey] = items;
-            } else if (/^\d+$/.test(value)) {
-              step[currentKey] = parseInt(value, 10);
-            } else {
-              step[currentKey] = value;
-            }
-          }
-        } else if (indent >= childIndent && currentKey) {
-          // Nested key-value
-          const match = trimmed.match(/^(.+?):\s*(.*)$/);
-          if (match) {
-            const nk = match[1].trim();
-            const nv = match[2].trim();
-            currentNested[nk] = /^\d+$/.test(nv) ? parseInt(nv, 10) : nv;
-          }
-        }
-      }
-
-      // Flush any remaining nested object
-      if (Object.keys(currentNested).length > 0 && currentKey) {
-        step[currentKey] = currentNested;
-      }
-
-      if (step.id) {
-        const s = step as Record<string, any>;
-        const entry: RuntimeProofStep = {
-          id: String(s.id),
-          executable: String(s.executable ?? ''),
-          args: Array.isArray(s.args) ? s.args.map(String) : [],
-          cwd: String(s.cwd ?? '.'),
-          timeout_ms: typeof s.timeout_ms === 'number' ? s.timeout_ms : 300000,
-        };
-
-        // Handle readiness_signal
-        if (s.readiness_signal) {
-          entry.readiness_signal = String(s.readiness_signal);
-        }
-
-        // Handle expected_observation
-        if (s.expected_observation) {
-          entry.expected_observation = String(s.expected_observation);
-        }
-
-        // Handle not_applicable
-        if (s.not_applicable && typeof s.not_applicable === 'object') {
-          entry.not_applicable = { reason: String((s.not_applicable as Record<string, any>).reason ?? '') };
-        }
-
-        // Handle expected block
-        if (s.expected && typeof s.expected === 'object') {
-          const exp = s.expected as Record<string, any>;
-          const expected: Record<string, unknown> = {};
-          if (exp.exit_code !== undefined && exp.exit_code !== null) expected.exit_code = Number(exp.exit_code);
-          if (exp.output_contains) expected.output_contains = String(exp.output_contains);
-          if (exp.output_matches) expected.output_matches = String(exp.output_matches);
-          if (Object.keys(expected).length > 0) entry.expected = expected as RuntimeProofStep['expected'];
-        }
-
-        steps.push(entry);
-      }
-    }
-
-    return steps;
+    const parsed = YAML.parse(yamlText);
+    if (!parsed || !Array.isArray(parsed.steps)) return [];
+    return z.array(RuntimeProofStep).parse(parsed.steps);
   }
 
   // Build runtime proof steps (extract from Stage Runtime Proof section if present)

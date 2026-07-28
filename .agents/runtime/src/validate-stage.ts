@@ -181,12 +181,38 @@ export function validateStage(tasksPath: string, evidencePath?: string): Validat
           if (!poIdMatch) continue;
           const poId = poIdMatch[1];
 
-          // Check for Oracle Source field (case-insensitive, may be "Oracle Source" or "oracle_source")
-          const hasOracleSource = /\boracle\s*source\b/i.test(fullBlock);
-          if (!hasOracleSource) {
+          // Check Oracle Source has non-empty value
+          if (!/oracle\s*source:\s*\S+/i.test(fullBlock)) {
             errors.push({
-              type: 'MISSING_ORACLE_SOURCE',
-              message: `PO ${poId} in slice ${slice.sliceId} is missing Oracle Source field`,
+              type: 'MISSING_ORACLE_VALUE',
+              message: `PO ${poId} in slice ${slice.sliceId} is missing Oracle Source or has empty value`,
+              sliceId: slice.sliceId,
+            });
+          }
+
+          // Check Behavior has non-empty value
+          if (!/behavior:\s*\S+/i.test(fullBlock)) {
+            errors.push({
+              type: 'MISSING_BEHAVIOR_VALUE',
+              message: `PO ${poId} in slice ${slice.sliceId} is missing Behavior or has empty value`,
+              sliceId: slice.sliceId,
+            });
+          }
+
+          // Check Success / Failure has non-empty value
+          if (!/success\s*\/\s*failure:\s*\S+/i.test(fullBlock)) {
+            errors.push({
+              type: 'MISSING_SUCCESS_FAILURE_VALUE',
+              message: `PO ${poId} in slice ${slice.sliceId} is missing Success/Failure or has empty value`,
+              sliceId: slice.sliceId,
+            });
+          }
+
+          // Check Required Observation has non-empty value (if the field is present)
+          if (/required\s*observation\b/i.test(fullBlock) && !/required\s*observation:\s*\S+/i.test(fullBlock)) {
+            errors.push({
+              type: 'MISSING_REQUIRED_OBSERVATION_VALUE',
+              message: `PO ${poId} in slice ${slice.sliceId} has Required Observation field but empty value`,
               sliceId: slice.sliceId,
             });
           }
