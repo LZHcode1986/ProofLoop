@@ -15,6 +15,7 @@ export interface StepResult {
   timed_out: boolean;
   duration_ms: number;
   observations?: string;
+  skipped?: boolean;
 }
 
 export interface ReceiptData {
@@ -214,12 +215,56 @@ export function writeStageReviewReceipt(options: WriteStageReviewReceiptOptions)
   return path.resolve(filePath);
 }
 
-// ── Project Acceptance Manifest ────────────────────────────────────────────────
+// ── Project E2E Receipt ────────────────────────────────────────────────────────
 
-export interface ProjectAcceptanceManifest {
+export interface ProjectE2EReceiptData {
   project_id: string;
-  steps: RuntimeProofStep[];
-  compiled_at: string;
+  verdict: 'PROJECT_ACCEPTED' | 'PROJECT_REJECTED' | 'PROJECT_BLOCKED';
+  snapshot: string;
+  steps: Array<{
+    step_id: string;
+    exit_code: number | null;
+    observations?: string;
+    skipped?: boolean;
+  }>;
+  service_cleanup?: {
+    cleaned: string[];
+    failed: Array<{ service: string; pid: number; reason: string }>;
+    remainingPids: number[];
+  };
+  created_at: string;
+}
+
+export interface WriteProjectE2EReceiptOptions {
+  outputDir: string;
+  data: ProjectE2EReceiptData;
+}
+
+/**
+ * Write a structured JSON Project E2E Receipt to disk.
+ *
+ * Returns the absolute path of the written receipt file.
+ */
+export function writeProjectE2EReceipt(options: WriteProjectE2EReceiptOptions): string {
+  const { outputDir, data } = options;
+
+  // Ensure output directory exists
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const receipt: ProjectE2EReceiptData = {
+    project_id: data.project_id,
+    verdict: data.verdict,
+    snapshot: data.snapshot,
+    steps: data.steps,
+    service_cleanup: data.service_cleanup,
+    created_at: data.created_at ?? new Date().toISOString(),
+  };
+
+  const filePath = path.join(outputDir, `project-e2e-${Date.now()}.json`);
+
+  fs.writeFileSync(filePath, JSON.stringify(receipt, null, 2), 'utf-8');
+
+  return path.resolve(filePath);
 }
 
 // ── Project Review Receipt ──────────────────────────────────────────────────────

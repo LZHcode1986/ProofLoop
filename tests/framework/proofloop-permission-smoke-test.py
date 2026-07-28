@@ -617,7 +617,8 @@ def check_brain_bash_deny(root: Path) -> list:
             "git status*", "git log*", "git diff*", "git show*",
             "git branch --show-current", "rg *", "Select-String *",
             "Get-Content *", "Get-ChildItem *", "Test-Path *",
-            "node .agents/runtime/dist/receipt-writer.js *"
+            "node .agents/runtime/dist/receipt-writer.js *",
+            "node .agents/runtime/dist/run-stage.js *"
         }
         
         allowed = {k for k in bash_config if k != "*"}

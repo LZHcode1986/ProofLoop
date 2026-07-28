@@ -218,6 +218,15 @@ export interface SpawnServiceResult {
   handle: ServiceHandle;
 }
 
+/**
+ * Platform adapter interface for stopService.
+ * Allows injecting mock implementations in tests without global module mocks.
+ */
+export interface StopServicePlatform {
+  killProcessTree(pid: number, signal: string): void;
+  isProcessAlive(pid: number): boolean;
+}
+
 interface ServiceEntry {
   pid: number;
   process: ChildProcess;
@@ -325,35 +334,43 @@ export function getRegisteredService(name: string): ServiceHandle | undefined {
  *
  * After stopping, the service is removed from the registry.
  */
-export async function stopService(pid: number, graceMs: number = 5000): Promise<void> {
+export async function stopService(
+  pid: number,
+  graceMs: number = 5000,
+  platform?: StopServicePlatform,
+): Promise<void> {
+  const kill = platform?.killProcessTree ?? killProcessTree;
+  const alive = platform?.isProcessAlive ?? isProcessAlive;
+
   // Send SIGTERM
-  killProcessTree(pid, 'SIGTERM');
+  kill(pid, 'SIGTERM');
 
   // Wait for graceful shutdown
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
+    if (!alive(pid)) {
       removeServiceFromRegistry(pid);
       return;
     }
     await sleep(100);
   }
 
-  // Timeout — force kill
-  if (isProcessAlive(pid)) {
-    killProcessTree(pid, 'SIGKILL');
-    // Wait for the kill to take effect
-    const killDeadline = Date.now() + 2000;
-    while (Date.now() < killDeadline) {
-      if (!isProcessAlive(pid)) {
-        removeServiceFromRegistry(pid);
-        return;
-      }
-      await sleep(100);
+  // Timeout — force kill (no conditional; always SIGKILL after grace)
+  kill(pid, 'SIGKILL');
+
+  // Wait for the kill to take effect
+  const killDeadline = Date.now() + 2000;
+  while (Date.now() < killDeadline) {
+    if (!alive(pid)) {
+      removeServiceFromRegistry(pid);
+      return;
     }
-    // Process refused to die
-    throw new Error(`Process ${pid} remained alive after SIGTERM + SIGKILL`);
+    await sleep(100);
   }
+
+  // Process refused to die even after SIGKILL
+  // Keep it in registry (cleanup will report it as remaining)
+  throw new Error(`Process ${pid} remained alive after SIGTERM + SIGKILL`);
 }
 
 function removeServiceFromRegistry(pid: number): void {

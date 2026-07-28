@@ -1,7 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { Manifest as ManifestSchema } from './schemas.js';
-import type { Manifest, RuntimeProofStep, StepType } from './schemas.js';
+import { Manifest as ManifestSchema, ProjectAcceptanceManifestSchema } from './schemas.js';
+import type { Manifest, RuntimeProofStep, StepType, ProjectAcceptanceManifest, ProjectE2EReceipt } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
 import {
   runProcess,
@@ -11,9 +11,12 @@ import {
   stopRegisteredService,
   waitForReadiness,
   cleanupServices,
+  cleanupProcesses,
+  checkPortsFree,
   validateSpawnOptions,
 } from './process-manager.js';
-import { writeReceipt, computeSnapshot, type StepResult } from './receipt-writer.js';
+import type { ServiceCleanupResult } from './process-manager.js';
+import { writeReceipt, writeProjectE2EReceipt, computeSnapshot, type StepResult } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -32,63 +35,42 @@ export interface RunStageResult {
   stepCount: number;
 }
 
-// ── Main orchestrator ──────────────────────────────────────────────────────────
+// ── Shared Execution Engine ────────────────────────────────────────────────────
+
+export interface ExecuteRuntimeProofOptions {
+  knownPids?: number[];
+  knownPorts?: number[];
+}
+
+export interface ExecuteRuntimeProofResult {
+  success: boolean;
+  stepResults: StepResult[];
+  serviceCleanup: ServiceCleanupResult;
+  errors: string[];
+}
 
 /**
- * Run all Runtime Proof steps from a compiled Stage Manifest.
+ * Execute a sequence of RuntimeProofSteps in order.
  *
  * Flow:
- * 1. Load and validate Manifest
- * 2. Validate all RuntimeProofStep definitions (no shells, no operators)
- * 3. Execute each step in sequence
- * 4. On first failure, stop and return FAIL verdict
- * 5. Cleanup known PIDs / ports
- * 6. Write structured receipt
+ * 1. Validate all RuntimeProofStep definitions (no shells, no operators)
+ * 2. Execute each step in sequence
+ * 3. On first failure, stop
+ * 4. Cleanup services and known PIDs / ports
+ *
+ * This is the shared execution core used by both Stage Gate and Project E2E runners.
  */
-export async function runStageFromManifest(options: RunStageOptions): Promise<RunStageResult> {
+export async function executeRuntimeProof(
+  steps: RuntimeProofStep[],
+  options?: ExecuteRuntimeProofOptions,
+): Promise<ExecuteRuntimeProofResult> {
+  const knownPids = options?.knownPids ?? [];
+  const knownPorts = options?.knownPorts ?? [];
   const errors: string[] = [];
-  const { manifestPath, outputDir } = options;
-
-  // ── 1. Load manifest ──
-  if (!existsSync(manifestPath)) {
-    return {
-      success: false,
-      errors: [`Manifest not found: ${manifestPath}`],
-      stepCount: 0,
-    };
-  }
-
-  let manifest: Manifest;
-  try {
-    const content = readFileSync(manifestPath, 'utf-8');
-    const parsed = JSON.parse(content);
-    manifest = ManifestSchema.parse(parsed);
-  } catch (err) {
-    return {
-      success: false,
-      errors: [`Failed to parse manifest: ${err}`],
-      stepCount: 0,
-    };
-  }
-
-  // ── Validate Runtime Proof topology ──
-  const topologyErrors = validateRuntimeProofTopology(manifest.runtime_proof ?? []);
-  if (topologyErrors.length > 0) {
-    return {
-      success: false,
-      errors: topologyErrors.map(e => `[${e.type}] ${e.message}`),
-      stepCount: 0,
-    };
-  }
-
-  const steps: RuntimeProofStep[] = manifest.runtime_proof ?? [];
-  const resolvedOutputDir = outputDir ?? path.dirname(manifestPath);
-  const platformInfo = getPlatformInfo();
-  const startedAt = new Date();
   const stepResults: StepResult[] = [];
   let finalExitCode = 0;
 
-  // ── 2. Validate steps ──
+  // ── 1. Validate steps ──
   for (const step of steps) {
     const validation = validateSpawnOptions({
       executable: step.executable,
@@ -107,35 +89,13 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   if (errors.length > 0) {
     return {
       success: false,
+      stepResults,
+      serviceCleanup: { cleaned: [], failed: [], remainingPids: [] },
       errors,
-      stepCount: steps.length,
     };
   }
 
-  // ── Trivial fail: no steps → gate fails (proof without evidence) ──
-  if (steps.length === 0) {
-    errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
-    const receiptPath = writeReceipt({
-      outputDir: resolvedOutputDir,
-      data: {
-        stage_id: manifest.stage_id,
-        snapshot: computeSnapshot(process.cwd()),
-        platform: platformInfo.platform,
-        tool_versions: {},
-        steps: [],
-        exit_code: 1,
-        verdict: 'FAIL',
-        timestamps: {
-          started_at: startedAt.toISOString(),
-          completed_at: new Date().toISOString(),
-        },
-      },
-    });
-
-    return { success: false, receiptPath, errors, stepCount: 0 };
-  }
-
-  // ── 3. Execute each step sequentially ──
+  // ── 2. Execute each step sequentially ──
   let executedCount = 0;
   let skippedCount = 0;
 
@@ -151,6 +111,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         timed_out: false,
         duration_ms: 0,
         observations: `Skipped: ${step.not_applicable.reason}`,
+        skipped: true,
       });
       skippedCount++;
       continue;
@@ -325,10 +286,10 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
 
       stepResults.push(stepResult);
 
-      // ── 4. Check oracle expectations ──
+      // ── Check oracle expectations ──
       const expected = step.expected;
 
-      // 4a. Check exit_code
+      // a. Check exit_code
       const expectedExitCode = expected?.exit_code ?? 0;
       if (result.exitCode !== expectedExitCode) {
         const detail = [
@@ -345,7 +306,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         break;
       }
 
-      // 4b. Check output_contains (stdout must contain the expected text)
+      // b. Check output_contains (stdout must contain the expected text)
       if (expected?.output_contains) {
         if (!result.stdout.includes(expected.output_contains)) {
           errors.push(
@@ -357,7 +318,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         }
       }
 
-      // 4c. Check output_matches (stdout must match the expected regex)
+      // c. Check output_matches (stdout must match the expected regex)
       if (expected?.output_matches) {
         try {
           const regex = new RegExp(expected.output_matches);
@@ -376,7 +337,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         }
       }
 
-      // 4d. Check readiness_signal (merged stdout+stderr must contain signal)
+      // d. Check readiness_signal (merged stdout+stderr must contain signal)
       if (step.readiness_signal) {
         const combined = result.stdout + result.stderr;
         if (!combined.includes(step.readiness_signal)) {
@@ -389,7 +350,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
         }
       }
 
-      // 4e. Check expected_observation (merged stdout+stderr must contain observation)
+      // e. Check expected_observation (merged stdout+stderr must contain observation)
       if (step.expected_observation) {
         const combined = result.stdout + result.stderr;
         if (!combined.includes(step.expected_observation)) {
@@ -404,21 +365,16 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
     }
   }
 
-  // ── 4. All steps skipped check ──
+  // ── 3. All steps skipped check ──
   if (executedCount === 0 && steps.length > 0) {
     errors.push('ALL_STEPS_SKIPPED: All runtime proof steps were marked not_applicable');
     finalExitCode = -1;
   }
 
-  // ── 5. Cleanup ──
-  const knownPids = options.knownPids ?? [];
-  const knownPorts = options.knownPorts ?? [];
-
-  let cleanupResult: { cleaned: number; failed: string[] } | undefined;
-
+  // ── 4. Cleanup ──
   // Determine which services have a declared service_stop in the manifest
   const serviceStopRefs = new Set(
-    (manifest.runtime_proof ?? [])
+    steps
       .filter(s => s.type === 'service_stop')
       .map(s => s.service_ref ?? s.id),
   );
@@ -457,15 +413,16 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   }
 
   if (knownPids.length > 0) {
-    const { cleanupProcesses } = await import('./process-manager.js');
-    cleanupResult = await cleanupProcesses(knownPids);
+    const result = await cleanupProcesses(knownPids);
+    if (result.failed.length > 0) {
+      errors.push(`Process cleanup failures: ${result.failed.join('; ')}`);
+      if (finalExitCode === 0) finalExitCode = -1;
+    }
   }
 
   // Check ports after cleanup
-  let portsStillInUse: number[] = [];
   if (knownPorts.length > 0) {
-    const { checkPortsFree } = await import('./process-manager.js');
-    portsStillInUse = await checkPortsFree(knownPorts);
+    const portsStillInUse = await checkPortsFree(knownPorts);
     if (portsStillInUse.length > 0) {
       errors.push(
         `Ports still in use after cleanup: ${portsStillInUse.join(', ')}. ` +
@@ -475,10 +432,99 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
     }
   }
 
-  // ── 6. Determine verdict ──
-  const verdict = errors.length === 0 ? 'PASS' : 'FAIL';
+  return {
+    success: errors.length === 0,
+    stepResults,
+    serviceCleanup,
+    errors,
+  };
+}
 
-  // ── 7. Write receipt ──
+// ── Stage Gate orchestrator ────────────────────────────────────────────────────
+
+/**
+ * Run all Runtime Proof steps from a compiled Stage Manifest.
+ *
+ * Flow:
+ * 1. Load and validate Manifest
+ * 2. Validate all RuntimeProofStep topology
+ * 3. Execute each step in sequence via executeRuntimeProof
+ * 4. Write structured receipt
+ */
+export async function runStageFromManifest(options: RunStageOptions): Promise<RunStageResult> {
+  const errors: string[] = [];
+  const { manifestPath, outputDir } = options;
+
+  // ── 1. Load manifest ──
+  if (!existsSync(manifestPath)) {
+    return {
+      success: false,
+      errors: [`Manifest not found: ${manifestPath}`],
+      stepCount: 0,
+    };
+  }
+
+  let manifest: Manifest;
+  try {
+    const content = readFileSync(manifestPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    manifest = ManifestSchema.parse(parsed);
+  } catch (err) {
+    return {
+      success: false,
+      errors: [`Failed to parse manifest: ${err}`],
+      stepCount: 0,
+    };
+  }
+
+  // ── Validate Runtime Proof topology ──
+  const topologyErrors = validateRuntimeProofTopology(manifest.runtime_proof ?? []);
+  if (topologyErrors.length > 0) {
+    return {
+      success: false,
+      errors: topologyErrors.map(e => `[${e.type}] ${e.message}`),
+      stepCount: 0,
+    };
+  }
+
+  const steps: RuntimeProofStep[] = manifest.runtime_proof ?? [];
+  const resolvedOutputDir = outputDir ?? path.dirname(manifestPath);
+  const platformInfo = getPlatformInfo();
+  const startedAt = new Date();
+
+  // ── Trivial fail: no steps → gate fails (proof without evidence) ──
+  if (steps.length === 0) {
+    errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
+    const receiptPath = writeReceipt({
+      outputDir: resolvedOutputDir,
+      data: {
+        stage_id: manifest.stage_id,
+        snapshot: computeSnapshot(process.cwd()),
+        platform: platformInfo.platform,
+        tool_versions: {},
+        steps: [],
+        exit_code: 1,
+        verdict: 'FAIL',
+        timestamps: {
+          started_at: startedAt.toISOString(),
+          completed_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    return { success: false, receiptPath, errors, stepCount: 0 };
+  }
+
+  // ── 2. Execute all steps via shared engine ──
+  const execResult = await executeRuntimeProof(steps, {
+    knownPids: options.knownPids,
+    knownPorts: options.knownPorts,
+  });
+
+  // ── 3. Determine verdict ──
+  const verdict = execResult.errors.length === 0 ? 'PASS' : 'FAIL';
+
+  // ── 4. Write receipt ──
   const receiptPath = writeReceipt({
     outputDir: resolvedOutputDir,
     data: {
@@ -486,11 +532,10 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
       snapshot: computeSnapshot(process.cwd()),
       platform: platformInfo.platform,
       tool_versions: { node: process.version },
-      steps: stepResults,
-      exit_code: finalExitCode,
-      observations: errors.length > 0 ? errors.join('; ') : undefined,
-      cleanup: cleanupResult,
-      service_cleanup: serviceCleanup,
+      steps: execResult.stepResults,
+      exit_code: execResult.errors.length > 0 ? 1 : 0,
+      observations: execResult.errors.length > 0 ? execResult.errors.join('; ') : undefined,
+      service_cleanup: execResult.serviceCleanup,
       verdict,
       timestamps: {
         started_at: startedAt.toISOString(),
@@ -502,8 +547,96 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
   return {
     success: verdict === 'PASS',
     receiptPath,
-    errors,
+    errors: execResult.errors,
     stepCount: steps.length,
+  };
+}
+
+// ── Project Acceptance orchestrator ────────────────────────────────────────────
+
+export interface RunProjectAcceptanceResult {
+  success: boolean;
+  receipt?: ProjectE2EReceipt;
+  receiptPath?: string;
+  errors: string[];
+}
+
+/**
+ * Execute a Project Acceptance E2E run from a compiled ProjectAcceptanceManifest.
+ *
+ * Flow:
+ * 1. Validate E2E step topology
+ * 2. Execute each step in sequence via executeRuntimeProof
+ * 3. Determine verdict (PROJECT_ACCEPTED / PROJECT_REJECTED)
+ * 4. Write structured E2E receipt
+ */
+export async function runProjectAcceptance(
+  manifest: ProjectAcceptanceManifest,
+  outputDir?: string,
+): Promise<RunProjectAcceptanceResult> {
+  const errors: string[] = [];
+  const resolvedOutputDir = outputDir ?? process.cwd();
+
+  // ── 1. Validate E2E step topology ──
+  const topologyErrors = validateRuntimeProofTopology(manifest.e2e_steps);
+  if (topologyErrors.length > 0) {
+    return {
+      success: false,
+      errors: topologyErrors.map(e => `[${e.type}] ${e.message}`),
+    };
+  }
+
+  // ── 2. Execute E2E steps ──
+  const execResult = await executeRuntimeProof(manifest.e2e_steps);
+
+  // Merge execution errors
+  for (const err of execResult.errors) {
+    errors.push(err);
+  }
+
+  // ── 3. Determine verdict ──
+  const verdict: ProjectE2EReceipt['verdict'] = execResult.success
+    ? 'PROJECT_ACCEPTED'
+    : 'PROJECT_REJECTED';
+
+  // ── 4. Build receipt ──
+  const e2eSteps = execResult.stepResults.map(sr => ({
+    step_id: sr.id,
+    exit_code: sr.exit_code,
+    observations: sr.observations,
+    skipped: sr.skipped,
+  }));
+
+  const receipt: ProjectE2EReceipt = {
+    project_id: manifest.project_id,
+    verdict,
+    snapshot: computeSnapshot(process.cwd()),
+    steps: e2eSteps,
+    service_cleanup: execResult.serviceCleanup.cleaned.length > 0 || execResult.serviceCleanup.failed.length > 0
+      ? execResult.serviceCleanup
+      : undefined,
+    created_at: new Date().toISOString(),
+  };
+
+  // ── 5. Write receipt ──
+  mkdirSync(resolvedOutputDir, { recursive: true });
+  const receiptPath = writeProjectE2EReceipt({
+    outputDir: resolvedOutputDir,
+    data: {
+      project_id: manifest.project_id,
+      verdict,
+      snapshot: receipt.snapshot,
+      steps: e2eSteps,
+      service_cleanup: receipt.service_cleanup,
+      created_at: receipt.created_at,
+    },
+  });
+
+  return {
+    success: execResult.success,
+    receipt,
+    receiptPath,
+    errors,
   };
 }
 

@@ -63,7 +63,7 @@ This is a **project-level acceptance review** dispatched by Brain during the `PR
 
 3. **Read all Stage Gate Receipts** — Verify they exist and reference the correct snapshot.
 
-4. **Execute end-to-end scenarios** — Critical user journeys from the PRD User Flow must execute successfully on the integrated snapshot. Error and edge-case scenarios must be covered.
+4. **Read the Project E2E Gate Receipt** (`.proofloop/receipts/project-e2e-<attempt>.json`) — Independently challenge whether the E2E steps prove the PRD goals. Design counterexamples and compare against the recorded step results.
 
 5. **Check unresolved deviations** — Each unresolved deviation must have a documented reason, impact assessment, and Brain acceptance.
 

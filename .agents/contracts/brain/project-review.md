@@ -26,7 +26,8 @@ The Project Reviewer does not re-run Stage Gates or Slice verifications. Instead
 - Stage Gate Receipts (one per Stage, with verdict and path)
 - All Architecture Work Item closure status
 - All unresolved deviations (per Stage, if any)
-- End-to-end scenario definitions
+- ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
+- Project E2E Gate Receipt (.proofloop/receipts/project-e2e-<attempt>.json)
 - Known limitations / deferred work summary
 
 ## Expected results

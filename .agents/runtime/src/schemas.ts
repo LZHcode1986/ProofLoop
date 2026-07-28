@@ -91,6 +91,38 @@ export const ScvReceipt = z.object({
 });
 export type ScvReceipt = z.infer<typeof ScvReceipt>;
 
+// === Project Acceptance Schemas ===
+
+export const ProjectAcceptanceManifestSchema = z.object({
+  project_id: z.string(),
+  source_digest: z.string(),
+  prd_goals: z.array(z.string()),
+  acceptance_criteria: z.array(z.string()),
+  stage_review_receipts: z.array(z.string()),
+  e2e_steps: z.array(RuntimeProofStep),
+  compiled_at: z.string().optional(),
+});
+export type ProjectAcceptanceManifest = z.infer<typeof ProjectAcceptanceManifestSchema>;
+
+export const ProjectE2EReceiptSchema = z.object({
+  project_id: z.string(),
+  verdict: z.enum(['PROJECT_ACCEPTED', 'PROJECT_REJECTED', 'PROJECT_BLOCKED']),
+  snapshot: z.string(),
+  steps: z.array(z.object({
+    step_id: z.string(),
+    exit_code: z.number().int().nullable(),
+    observations: z.string().optional(),
+    skipped: z.boolean().optional(),
+  })),
+  service_cleanup: z.object({
+    cleaned: z.array(z.string()),
+    failed: z.array(z.object({ service: z.string(), pid: z.number(), reason: z.string() })),
+    remainingPids: z.array(z.number()),
+  }).optional(),
+  created_at: z.string(),
+});
+export type ProjectE2EReceipt = z.infer<typeof ProjectE2EReceiptSchema>;
+
 export const StageGateVerdict = z.enum(['PASS', 'FAIL', 'BLOCKED']);
 
 export const StageGateReceipt = z.object({

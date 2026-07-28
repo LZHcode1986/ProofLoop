@@ -19,6 +19,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "node .agents/runtime/dist/receipt-writer.js *": allow
+    "node .agents/runtime/dist/run-stage.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny
@@ -237,7 +238,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
 | `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
-| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Stage Reviewer (via Brain dispatch) | `brain/stage-review.md` with `review_scope: project` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
+| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Executor → Runner → Stage Reviewer (via Brain dispatch) | Executor generates ProjectAcceptanceManifest; Runner executes via `runProjectAcceptance()`; Reviewer via `brain/stage-review.md` with `review_scope: project` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
 
@@ -508,25 +509,45 @@ Project Review is dispatched through the `brain/stage-review.md` contract with `
 
 ### Dispatch
 
-Brain dispatches the Stage Reviewer (existing Agent) with `review_scope: project`:
+Brain dispatches the following sequence:
 
 ```text
 PROJECT_ACCEPTANCE
-→ Brain loads brain/stage-review.md contract with review_scope: project
-→ Brain loads brain/project-review.md for supplementary guidance
-→ Brain dispatches Stage Reviewer with:
-    - review_scope: project
-    - PRD path
-    - Final integrated snapshot
-    - All Stage Review Receipts (one per Stage, verdict ACCEPTED)
-    - All Stage Gate Receipts
-    - All Architecture Work Item closure status
-    - Unresolved deviations summary
-    - End-to-end scenario definitions
-    - Known limitations / deferred work
-→ Stage Reviewer returns PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED
-→ Brain writes Project Review Receipt to .proofloop/receipts/project-review.json
-→ Route to TERMINAL or typed recovery
+1. MANIFEST GENERATION
+   → Brain or Executor generates ProjectAcceptanceManifest
+      (.proofloop/manifests/project-acceptance.json)
+   → Contains: project_id, source_digest, prd_goals, acceptance_criteria,
+     stage_review_receipts, e2e_steps (compiled from PRD user flows)
+
+2. E2E EXECUTION
+   → Brain dispatches Runner (node .agents/runtime/dist/run-stage.js
+     or direct call to runProjectAcceptance())
+   → Runner executes E2E steps, writes Project E2E Gate Receipt
+      (.proofloop/receipts/project-e2e-<attempt>.json)
+   → Receipt contains: project_id, verdict (PROJECT_ACCEPTED / PROJECT_REJECTED / PROJECT_BLOCKED),
+     snapshot, per-step results, service_cleanup
+
+3. INDEPENDENT REVIEW
+   → Brain loads brain/stage-review.md contract with review_scope: project
+   → Brain loads brain/project-review.md for supplementary guidance
+   → Brain dispatches Stage Reviewer with:
+      - review_scope: project
+      - PRD path
+      - Final integrated snapshot
+      - All Stage Review Receipts (one per Stage, verdict ACCEPTED)
+      - All Stage Gate Receipts
+      - All Architecture Work Item closure status
+      - Unresolved deviations summary
+      - ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
+      - Project E2E Gate Receipt (.proofloop/receipts/project-e2e-<attempt>.json)
+      - Known limitations / deferred work
+   → Stage Reviewer reads the E2E Gate Receipt, independently challenges
+     whether the E2E steps prove the PRD goals, designs counterexamples
+   → Stage Reviewer returns PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED
+
+4. PERSISTENCE
+   → Brain writes Project Review Receipt to .proofloop/receipts/project-review.json
+   → Route to TERMINAL or typed recovery
 ```
 
 ### Results
