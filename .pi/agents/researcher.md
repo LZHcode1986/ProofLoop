@@ -1,20 +1,11 @@
 ---
-description: Researcher — external technical solution research.
-mode: subagent
-model: opencode-go/deepseek-v4-flash
-variant: max
-hidden: true
-permission:
-  webfetch: allow
-  websearch: allow
-  read: allow
-  glob: allow
-  grep: allow
-  edit: deny
-  bash: ask
-  question: deny
-  task: deny
-  skill: deny
+name: researcher
+package: proofloop
+description: Researcher — external technical solution research
+model: opencode-go/deepseek-v4-flash:max
+tools: read, bash, grep, find, ls
+edit: deny
+context: fresh
 ---
 
 # Researcher Agent

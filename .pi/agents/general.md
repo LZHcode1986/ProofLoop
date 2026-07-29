@@ -1,21 +1,13 @@
 ---
-description: Execute bounded Brain direct tasks.
-mode: subagent
-model: opencode-go/deepseek-v4-flash
-variant: high
-hidden: true
-color: "#7aa2f7"
-permission:
-  edit: allow
-  bash: allow
-  question: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "diagnose": allow
-    "code-review-and-quality": allow
-  task: deny
+name: general
+package: proofloop
+description: Execute bounded Brain direct tasks
+model: opencode-go/deepseek-v4-flash:high
+tools: read, write, edit, bash, grep, find, ls
+edit: allow
+skills: diagnose, code-review-and-quality
+context: fresh
+acceptanceRole: writer
 ---
 
 # General Agent

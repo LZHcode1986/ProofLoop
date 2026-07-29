@@ -1,39 +1,12 @@
 ---
-description: Executor — Active Stage runtime orchestrator.
-mode: subagent
-model: opencode-go/deepseek-v4-flash
-variant: max
-color: "#ae89bc"
-permission:
-  edit:
-    "*": deny
-  bash:
-    "*": deny
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "git worktree *": allow
-    "git branch *": allow
-    "git branch --show-current": allow
-    "git checkout*": allow
-    "git merge*": allow
-    "git rebase*": allow
-    "rg *": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
-    "node .agents/runtime/dist/*": allow
-    "bun .agents/runtime/dist/*": allow
-  skill: deny
-  task:
-    "*": deny
-    "worker": allow
-    "code-verifier": allow
-    "committer": allow
-  question: deny
-  webfetch: deny
-  websearch: deny
+name: executor
+package: proofloop
+description: Executor — Active Stage runtime orchestrator
+model: opencode-go/deepseek-v4-flash:max
+tools: read, bash, grep, find, ls, subagent
+edit: deny
+context: fresh
+acceptanceRole: writer
 ---
 # Executor Agent
 

@@ -1,37 +1,12 @@
 ---
-description: Stage Reviewer — Goal-first Stage review and code review.
-mode: subagent
-model: openai/gpt-5.6-terra
-variant: xhigh
-hidden: true
-color: "#9ece6a"
-permission:
-  edit: deny
-  read: allow
-  glob: allow
-  grep: allow
-  bash:
-    "*": deny
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "rg *": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
-    "node .agents/runtime/dist/*": allow
-    "python -m pytest *": allow
-    "npm test *": allow
-  task:
-    "*": deny
-  skill:
-    "*": deny
-    "code-review-and-quality": allow
-    "security-and-hardening": allow
-  question: deny
-  webfetch: deny
-  websearch: deny
+name: stage-reviewer
+package: proofloop
+description: Stage Reviewer — Goal-first Stage review and code review
+model: openai-codex/gpt-5.6-terra:xhigh
+tools: read, bash, grep, find, ls
+edit: deny
+skills: code-review-and-quality, security-and-hardening
+context: fresh
 ---
 
 # Stage Reviewer Agent

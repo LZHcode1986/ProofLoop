@@ -1,21 +1,12 @@
 ---
-description: Prototype — local technical experiment in isolated worktree.
-mode: subagent
-model: openai/gpt-5.6-luna
-variant: xhigh
-hidden: true
-permission:
-  read: allow
-  glob: allow
-  grep: allow
-  edit: allow
-  bash: allow
-  question: deny
-  webfetch: deny
-  websearch: deny
-  skill: deny
-  task:
-    "*": deny
+name: prototype
+package: proofloop
+description: Prototype — local technical experiment in isolated worktree
+model: openai-codex/gpt-5.6-luna:xhigh
+tools: read, write, edit, bash, grep, find, ls
+edit: allow
+context: fresh
+acceptanceRole: writer
 ---
 
 # Prototype Agent

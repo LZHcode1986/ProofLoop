@@ -1,31 +1,11 @@
 ---
-description: Committer — Git boundary closure agent.
-mode: subagent
-model: sensenova/deepseek-v4-flash
-hidden: true
-temperature: 0.0
-permission:
-  read: allow
-  glob: allow
-  grep: allow
-  edit: deny
-  bash:
-    "*": deny
-    "git status*": allow
-    "git diff*": allow
-    "git show*": allow
-    "git add *": allow
-    "git commit*": allow
-    "git rev-parse*": allow
-    "git branch --show-current": allow
-    "git log*": allow
-  external_directory: deny
-  question: deny
-  webfetch: deny
-  websearch: deny
-  task:
-    "*": deny
-  skill: deny
+name: committer
+package: proofloop
+description: Committer — Git boundary closure agent
+model: opencode-go/deepseek-v4-flash:off
+tools: read, bash, grep, find, ls
+edit: deny
+context: fresh
 ---
 
 # Committer Agent

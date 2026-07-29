@@ -1,21 +1,13 @@
 ---
-description: Worker — implements one Slice, checks off Tasks, writes Evidence.
-mode: subagent
-model: opencode-go/deepseek-v4-flash
-variant: high
-hidden: true
-permission:
-  edit: allow
-  bash: allow
-  task: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "test-driven-development": allow
-    "diagnose": allow
-  external_directory: deny
-  question: deny
+name: worker
+package: proofloop
+description: Worker — implements one Slice, checks off Tasks, writes Evidence
+model: opencode-go/deepseek-v4-flash:high
+tools: read, write, edit, bash, grep, find, ls
+edit: allow
+skills: test-driven-development, diagnose
+context: fresh
+acceptanceRole: writer
 ---
 
 # Worker Agent

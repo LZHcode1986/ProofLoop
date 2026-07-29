@@ -1,32 +1,11 @@
 ---
-description: SCV — adversarial slice verification agent.
-mode: subagent
-model: openai/gpt-5.6-luna
-variant: xhigh
-hidden: true
-permission:
-  edit: deny
-  bash:
-    "*": deny
-    "git status*": allow
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "Get-Content *": allow
-    "Get-ChildItem *": allow
-    "Test-Path *": allow
-    "rg *": allow
-    "python -m pytest *": allow
-    "npm test *": allow
-  read: allow
-  glob: allow
-  grep: allow
-  task: deny
-  skill: deny
-  external_directory: deny
-  question: deny
-  webfetch: deny
-  websearch: deny
+name: code-verifier
+package: proofloop
+description: SCV — adversarial slice verification agent
+model: openai-codex/gpt-5.6-luna:xhigh
+tools: read, bash, grep, find, ls
+edit: deny
+context: fresh
 ---
 
 # Slice Challenge Verifier (SCV)
