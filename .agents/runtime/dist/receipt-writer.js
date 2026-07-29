@@ -122,7 +122,7 @@ export function writeProjectE2EReceipt(outputDir, data) {
  *
  * Returns the absolute path of the written receipt file.
  */
-export function writeProjectReviewReceipt(outputDir, data) {
+export function internalWriteProjectReviewReceipt(outputDir, data) {
     // Schema validation — fail-closed even if caller bypasses CLI
     const parsed = WriteProjectReviewReceiptOptionsSchema.parse(data);
     // Ensure output directory exists
@@ -156,24 +156,22 @@ function isScriptEntry() {
 /**
  * CLI usage:
  *   `node dist/receipt-writer.js stage-review <json-input>`
- *   `node dist/receipt-writer.js project-review <json-input>`
  *
  * Parses the JSON input and calls the appropriate receipt writer, outputting
  * the resulting receipt path as JSON to stdout.
+ *
+ * Note: project-review mode is deliberately NOT exposed via CLI.
+ * Use finalize-project-review.ts instead.
  */
 if (isScriptEntry()) {
-    const mode = process.argv[2]; // 'stage-review' or 'project-review'
+    const mode = process.argv[2];
     const input = JSON.parse(process.argv[3]);
     if (mode === 'stage-review') {
         const result = writeStageReviewReceipt(input.outputDir, input.data);
         console.log(JSON.stringify(result));
     }
-    else if (mode === 'project-review') {
-        const result = writeProjectReviewReceipt(input.outputDir, input.data);
-        console.log(JSON.stringify(result));
-    }
     else {
-        console.error('Usage: node receipt-writer.js <stage-review|project-review> <json-input>');
+        console.error('Usage: node receipt-writer.js stage-review <json-input>');
         process.exit(1);
     }
 }

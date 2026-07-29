@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import YAML from 'yaml';
 import { parseStageFile } from './parse-stage.js';
@@ -254,4 +256,44 @@ export function compileManifest(tasksPath: string): Manifest {
   };
 
   return manifest;
+}
+
+// ── CLI entry point ────────────────────────────────────────────────────────────
+
+function isScriptEntry(): boolean {
+  const scriptPath = process.argv[1];
+  if (!scriptPath) return false;
+  try {
+    const resolved = path.resolve(scriptPath);
+    const currentFile = fileURLToPath(import.meta.url);
+    return resolved === currentFile;
+  } catch {
+    const base = path.basename(scriptPath);
+    return base === 'compile-manifest.js' || base === 'compile-manifest.ts';
+  }
+}
+
+if (isScriptEntry()) {
+  const tasksPath = process.argv[2];
+  const outputPath = process.argv[3];
+
+  if (!tasksPath || !outputPath) {
+    console.error('Usage: node compile-manifest.js <tasks-path> <output-manifest-path>');
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(tasksPath)) {
+    console.error(`Tasks file not found: ${tasksPath}`);
+    process.exit(1);
+  }
+
+  try {
+    const manifest = compileManifest(tasksPath);
+    fs.writeFileSync(outputPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    console.log(`Stage manifest written to ${outputPath}`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`Compilation failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }

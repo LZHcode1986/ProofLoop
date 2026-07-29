@@ -94,7 +94,7 @@ export type ScvReceipt = z.infer<typeof ScvReceipt>;
 // === Project Acceptance Schemas ===
 
 export const ProjectAcceptanceManifestSchema = z.object({
-  project_id: z.string(),
+  project_id: z.string().min(1),
   expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i, 'expected_snapshot must be a 16-char hex digest'),
   prd_goals: z.array(z.string().min(1)).min(1),
   acceptance_criteria: z.array(z.string().min(1)).min(1),
@@ -115,6 +115,23 @@ export const ProjectAcceptanceManifestSchema = z.object({
   })).min(1),
   e2e_steps: z.array(RuntimeProofStep).min(1),
   compiled_at: z.string().optional(),
+}).superRefine((data, ctx) => {
+  // Stage ID 唯一性
+  const stageIds = data.stage_receipts.map(s => s.stage_id);
+  if (new Set(stageIds).size !== stageIds.length) {
+    ctx.addIssue({
+      code: 'custom', path: ['stage_receipts'],
+      message: 'Duplicate stage_id is not allowed',
+    });
+  }
+  // Criteria 唯一性
+  const criteriaSet = new Set(data.acceptance_criteria);
+  if (criteriaSet.size !== data.acceptance_criteria.length) {
+    ctx.addIssue({
+      code: 'custom', path: ['acceptance_criteria'],
+      message: 'Duplicate acceptance criteria is not allowed',
+    });
+  }
 });
 export type ProjectAcceptanceManifest = z.infer<typeof ProjectAcceptanceManifestSchema>;
 
@@ -215,7 +232,7 @@ export const ProjectReviewResultSchema = z.object({
     digest: z.string().regex(/^[a-f0-9]{16}$/i),
   }),
   criteria_results: z.array(z.object({
-    criteria: z.string(),
+    criteria: z.string().min(1),
     passed: z.boolean(),
     notes: z.string().optional(),
   })),
@@ -225,6 +242,14 @@ export const ProjectReviewResultSchema = z.object({
   })).optional().default([]),
   accepted_deviations: z.array(z.string()).optional().default([]),
   reviewed_at: z.string(),
+}).superRefine((data, ctx) => {
+  const criteriaSet = new Set(data.criteria_results.map(c => c.criteria));
+  if (criteriaSet.size !== data.criteria_results.length) {
+    ctx.addIssue({
+      code: 'custom', path: ['criteria_results'],
+      message: 'Duplicate criteria in reviewer result is not allowed',
+    });
+  }
 });
 export type ProjectReviewResult = z.infer<typeof ProjectReviewResultSchema>;
 
@@ -240,16 +265,20 @@ export const WriteProjectReviewReceiptOptionsSchema = z.object({
   reviewer: z.string().min(1).optional(),
   project_manifest: z.object({
     path: z.string().min(1),
-    digest: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{16}$/i),
   }).optional(),
   project_e2e_receipt: z.object({
     path: z.string().min(1),
-    digest: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{16}$/i),
   }).optional(),
   stage_receipts: z.array(z.object({
     stage_id: z.string().min(1),
-    review: z.object({ path: z.string().min(1), digest: z.string().min(1) }),
-    gate: z.object({ path: z.string().min(1), digest: z.string().min(1) }),
+    stage_manifest: z.object({
+      path: z.string().min(1),
+      digest: z.string().regex(/^[a-f0-9]{16}$/i),
+    }),
+    review: z.object({ path: z.string().min(1), digest: z.string().regex(/^[a-f0-9]{16}$/i) }),
+    gate: z.object({ path: z.string().min(1), digest: z.string().regex(/^[a-f0-9]{16}$/i) }),
     snapshot: z.string(),
   })).optional().default([]),
   accepted_deviations: z.array(z.string()).optional().default([]),

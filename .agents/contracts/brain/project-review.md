@@ -10,7 +10,7 @@ All of the following conditions are met:
 - The original PRD is still the current valid version
 - No blocking Findings remain open
 - ProjectAcceptanceManifest has been compiled
-- Project E2E Gate Receipt has been written (verdict: PASS)
+- Project E2E Receipt has been written (verdict: PASS)
 
 ## Review method
 
@@ -19,7 +19,7 @@ All of the following conditions are met:
 The Project Reviewer does not re-run Stage Gates or Slice verifications. Instead, the Reviewer independently challenges whether the complete, integrated project satisfies the PRD Goals and Acceptance Criteria, using:
 
 - ProjectAcceptanceManifest (path + digest)
-- Project E2E Gate Receipt (path + digest)
+- Project E2E Receipt (path + digest)
 - All Stage Review Receipts (one per Stage, with verdict and path)
 - All Stage Gate Receipts (one per Stage, with verdict and path)
 - All Architecture Work Item closure status

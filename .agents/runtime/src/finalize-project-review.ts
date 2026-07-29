@@ -3,13 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
+  Manifest,
   ProjectAcceptanceManifestSchema,
   ProjectE2EReceiptSchema,
   StageReviewReceiptSchema,
   StageGateReceipt,
   ProjectReviewResultSchema,
 } from './schemas.js';
-import { writeProjectReviewReceipt } from './receipt-writer.js';
+import { internalWriteProjectReviewReceipt } from './receipt-writer.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
 
 function computeFileDigest(filePath: string): string {
@@ -112,6 +113,7 @@ if (!fs.existsSync(reviewerResult.project_e2e_receipt.path)) {
 // ── 4. From Manifest read all Stage evidence (single authoritative path) ───────────────────
 const stageReceiptResults: Array<{
   stage_id: string;
+  stage_manifest: { path: string; digest: string };
   review: { path: string; digest: string };
   gate: { path: string; digest: string };
   snapshot: string;
@@ -124,13 +126,15 @@ if (manifest.stage_receipts.length === 0) {
 for (const ms of manifest.stage_receipts) {
   const sid = ms.stage_id;
 
-  // a. Verify stage_manifest file exists and digest matches
+  // a. Read Stage Manifest and compute Canonical Digest
+  let canonicalStageManifestDigest = '';
   if (!fs.existsSync(ms.stage_manifest.path)) {
     errors.push(`Stage manifest file not found for ${sid}: ${ms.stage_manifest.path}`);
   } else {
-    const stageManifestDigest = computeFileDigest(ms.stage_manifest.path);
-    if (stageManifestDigest !== ms.stage_manifest.digest) {
-      errors.push(`Stage manifest for ${sid}: file digest "${stageManifestDigest}" != declared "${ms.stage_manifest.digest}"`);
+    const stageManifestRaw = readJson(ms.stage_manifest.path);
+    canonicalStageManifestDigest = computeCanonicalJsonDigest(Manifest, stageManifestRaw);
+    if (ms.stage_manifest.digest !== canonicalStageManifestDigest) {
+      errors.push(`Stage manifest for ${sid}: declared digest "${ms.stage_manifest.digest}" != canonical "${canonicalStageManifestDigest}"`);
     }
   }
 
@@ -162,6 +166,14 @@ for (const ms of manifest.stage_receipts) {
   // Snapshot consistency
   if (review.snapshot !== gate.snapshot) errors.push(`Review snapshot "${review.snapshot}" != Gate snapshot "${gate.snapshot}" for ${sid}`);
 
+  // e. Canonical digest triple-binding: review.manifest_digest and gate.manifest_digest
+  if (canonicalStageManifestDigest && review.manifest_digest !== canonicalStageManifestDigest) {
+    errors.push(`Review manifest_digest for ${sid}: "${review.manifest_digest}" != canonical "${canonicalStageManifestDigest}"`);
+  }
+  if (canonicalStageManifestDigest && gate.manifest_digest !== canonicalStageManifestDigest) {
+    errors.push(`Gate manifest_digest for ${sid}: "${gate.manifest_digest}" != canonical "${canonicalStageManifestDigest}"`);
+  }
+
   // Triple-binding: review.stage_gate_receipt.path file digest === review.stage_gate_receipt.digest
   if (!fs.existsSync(review.stage_gate_receipt.path)) {
     errors.push(`Review's stage_gate_receipt path not found for ${sid}: ${review.stage_gate_receipt.path}`);
@@ -190,6 +202,7 @@ for (const ms of manifest.stage_receipts) {
 
   stageReceiptResults.push({
     stage_id: sid,
+    stage_manifest: { path: path.resolve(ms.stage_manifest.path), digest: canonicalStageManifestDigest },
     review: { path: path.resolve(ms.review_receipt.path), digest: reviewFileDigest },
     gate: { path: path.resolve(ms.gate_receipt.path), digest: gateFileDigest },
     snapshot: review.snapshot,
@@ -197,6 +210,10 @@ for (const ms of manifest.stage_receipts) {
 }
 
 // ── 5. Validate criteria one-to-one coverage ───────────────────────────────────────────────
+// Length check: require exact count match (rejects duplicates and gaps)
+if (manifest.acceptance_criteria.length !== reviewerResult.criteria_results.length) {
+  errors.push(`Criteria count mismatch: Manifest has ${manifest.acceptance_criteria.length}, Reviewer has ${reviewerResult.criteria_results.length}`);
+}
 const manifestCriteria = new Set(manifest.acceptance_criteria.map(c => c.trim()));
 const resultCriteria = new Set(reviewerResult.criteria_results.map(c => c.criteria.trim()));
 for (const mc of manifestCriteria) {
@@ -234,15 +251,16 @@ if (fs.existsSync(reviewerResult.project_e2e_receipt.path)) {
 if (errors.length > 0) exitError(errors);
 
 // ── 8. All checks passed — write PROJECT_ACCEPTED (inheriting from Reviewer) ───────────────
-const receiptPath = writeProjectReviewReceipt(input.outputDir, {
+const receiptPath = internalWriteProjectReviewReceipt(input.outputDir, {
   project_id: manifest.project_id,
   verdict: 'PROJECT_ACCEPTED',
   snapshot: manifest.expected_snapshot,
   reviewer: reviewerResult.reviewer,
   findings: reviewerResult.findings,
   accepted_deviations: reviewerResult.accepted_deviations,
-  project_manifest: { path: path.resolve(input.manifestPath), digest: manifestFileDigest },
+  project_manifest: { path: path.resolve(input.manifestPath), digest: manifestDigest },
   project_e2e_receipt: { path: path.resolve(input.e2eReceiptPath), digest: e2eFileDigest },
+  reviewed_at: reviewerResult.reviewed_at,
   stage_receipts: stageReceiptResults,
   criteria_results: reviewerResult.criteria_results,
 });
