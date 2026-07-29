@@ -47,7 +47,8 @@ export const Slice = z.object({
     proof_obligations: z.array(ProofObligation).optional().default([]),
     tasks: z.array(TaskId).optional().default([]),
     risk_facts: z.array(z.string()).optional().default([]),
-    scv_minimum_level: z.enum(['lite', 'standard', 'enhanced']).optional().default('standard'),
+    evidence_path: z.string(),
+    cv_minimum_level: z.enum(['lite', 'standard', 'enhanced']).optional().default('standard'),
 });
 // === Manifest ===
 export const Manifest = z.object({
@@ -64,16 +65,65 @@ export const Manifest = z.object({
     compiled_by: z.string().optional(),
 });
 // === Receipt Types ===
-export const ScvVerdict = z.enum(['PASS', 'REPAIR', 'REPLAN', 'BLOCKED', 'ESCALATION_REQUIRED']);
-export const ScvReceipt = z.object({
+export const CvVerdict = z.enum(['PASS', 'REPAIR', 'REPLAN', 'BLOCKED', 'ESCALATION_REQUIRED']);
+/** Persisted lifecycle state for the mutable Slice Evidence status field.
+ *
+ * These states deliberately do not reuse immutable CV verdict strings.  The
+ * legacy verdict-shaped values remain accepted by runtime adapters only so
+ * already-created evidence can be migrated without losing its receipt.
+ */
+export const CvLifecycleState = z.enum([
+    'NOT_RUN', 'READY_FOR_CV', 'CV_VERIFYING', 'CV_REPAIR_REQUIRED',
+    'CV_REPLAN_REQUIRED', 'CV_BLOCKED', 'CV_ESCALATION_REQUIRED', 'CV_PASS',
+    'SLICE_COMPLETE',
+]);
+/** Compact, persisted proof that a slice reached Slice COMPLETE. */
+export const SliceCompleteFacts = z.object({
     slice_id: SliceId,
+    // Receipt references are resolved and read by run-stage; this schema only
+    // accepts a meaningful path token (never whitespace or a caller boolean).
+    cv: z.object({ verdict: z.literal('PASS'), receipt_ref: z.string().trim().min(1) }),
+    // A COMPLETE fact names the actual Git object, not an arbitrary label.
+    commit: z.object({ commit_sha: z.string().regex(/^[a-f0-9]{40}$/i) }),
+    // Integration refs are persisted artifact references and are checked by the gate.
+    integration: z.object({ integration_ref: z.string().trim().min(1) }),
+});
+/**
+ * CV (Code Verification) Receipt.
+ *
+ * Records a Code Verifier run for a single slice. All fields are
+ * business facts — no session IDs or operational metadata.
+ */
+export const CvReceipt = z.object({
+    /** Slice this receipt covers. */
+    slice_id: SliceId,
+    /** Stage this receipt belongs to. */
+    stage_id: StageId,
+    /** Content snapshot at time of verification. */
     snapshot: z.string(),
-    scv_level: z.enum(['lite', 'standard', 'enhanced']),
-    verdict: ScvVerdict,
+    /** The CV level at which verification was performed. */
+    cv_level: z.enum(['lite', 'standard', 'enhanced']),
+    /** Type of verification (e.g. 'initial', 'recheck'). */
+    verification_type: z.enum(['initial', 'recheck']).optional().default('initial'),
+    /** Verdict from the Code Verifier. */
+    verdict: CvVerdict,
+    /** Proof obligations that failed (PO IDs). */
     failed_po_ids: z.array(z.string()).optional().default([]),
+    /** Task IDs affected by the failure. */
+    affected_task_ids: z.array(z.string()).optional().default([]),
+    /** Test IDs that produced invalid/untrustworthy results. */
     invalid_tests: z.array(z.string()).optional().default([]),
+    /** Counterexamples demonstrating the failure. */
     counterexamples: z.array(z.string()).optional().default([]),
+    /** Scope violations detected. */
     scope_violations: z.array(z.string()).optional().default([]),
+    /** The criterion that failed (free-text). */
+    failed_criterion: z.string().optional(),
+    /** Deterministic failure signature for change-detection. */
+    failure_signature: z.string().optional(),
+    /** Scope that must be rechecked on the next run (array of scope items). */
+    required_recheck_scope: z.array(z.string()).optional().default([]),
+    /** ISO-8601 timestamp. */
     timestamp: z.string().optional(),
 });
 // === Project Acceptance Schemas ===
@@ -176,6 +226,12 @@ export const StageGateReceipt = z.object({
     stage_id: StageId,
     snapshot: z.string().regex(/^[a-f0-9]{16}$/i),
     manifest_digest: z.string().regex(/^[a-f0-9]{16}$/i),
+    /** The manifest slices proven complete before the gate was run. */
+    completed_slice_ids: z.array(SliceId).optional().default([]),
+    /** Verifiable Slice COMPLETE facts; IDs and proof fields must cover the manifest. */
+    slice_complete_facts: z.array(SliceCompleteFacts).optional().default([]),
+    /** Canonical manifest path used by the gate (informational, never a session id). */
+    manifest_path: z.string().optional(),
     platform: z.string(),
     verdict: StageGateVerdict,
     steps: z.array(z.object({
@@ -194,6 +250,46 @@ export const StageGateReceipt = z.object({
         completed_at: z.string(),
     }),
 });
+/**
+ * A Stage Gate PASS is a persisted fact only when it identifies the stage and
+ * manifest and contains at least one executed proof step.  The caller must
+ * additionally compare completed_slice_ids and manifest_digest with the
+ * currently loaded manifest.
+ */
+export function isValidStageGatePassReceipt(receipt, stageId, manifestDigest, expectedSliceIds) {
+    const parsed = StageGateReceipt.safeParse(receipt);
+    if (!parsed.success || parsed.data.verdict !== 'PASS' || parsed.data.stage_id !== stageId)
+        return false;
+    if (manifestDigest && parsed.data.manifest_digest !== manifestDigest)
+        return false;
+    // A PASS is an evidence claim, not merely a verdict string.  It must have
+    // an explicit, duplicate-free slice set and every executed proof step must
+    // have succeeded.  Every non-empty stage also needs compact Slice COMPLETE
+    // facts proving CV PASS, commit, and integration; a caller boolean is never
+    // accepted as a substitute.
+    if (new Set(parsed.data.completed_slice_ids).size !== parsed.data.completed_slice_ids.length)
+        return false;
+    const facts = parsed.data.slice_complete_facts;
+    if (facts.length !== parsed.data.completed_slice_ids.length ||
+        new Set(facts.map(f => f.slice_id)).size !== facts.length ||
+        facts.some(f => !parsed.data.completed_slice_ids.includes(f.slice_id)))
+        return false;
+    if (facts.some(f => f.cv.verdict !== 'PASS' || !f.commit.commit_sha || !f.integration.integration_ref))
+        return false;
+    const executedSteps = parsed.data.steps.filter(step => !step.skipped);
+    if (executedSteps.length === 0 || executedSteps.some(step => step.exit_code !== 0))
+        return false;
+    if (parsed.data.service_cleanup.failed.length > 0 || parsed.data.service_cleanup.remainingPids.length > 0)
+        return false;
+    if (expectedSliceIds) {
+        const actual = new Set(parsed.data.completed_slice_ids);
+        const expected = new Set(expectedSliceIds);
+        if (actual.size !== expected.size || expected.size !== expectedSliceIds.length ||
+            expectedSliceIds.some(id => !actual.has(id)))
+            return false;
+    }
+    return true;
+}
 export const ProjectReviewResultSchema = z.object({
     verdict: z.enum(['PROJECT_ACCEPTED', 'PROJECT_REJECTED', 'PROJECT_BLOCKED']),
     reviewer: z.string().min(1),

@@ -68,15 +68,49 @@ jobs:
       - name: Build TypeScript
         run: npm run build
         working-directory: .agents/runtime
-      - name: Validate positive fixture
-        run: node scripts/fixture-check.mjs ../../tests/fixtures/positive/tasks.md
+      - name: Validate all checked-in fixture skeletons
+        run: |
+          for tasks in \
+            ../../tests/fixtures/positive/delivery/stages/S00-POS/tasks.md \
+            ../../tests/fixtures/cv/delivery/stages/S00-CV/tasks.md \
+            ../../tests/fixtures/stage-gate/delivery/stages/S00-GATE/tasks.md \
+            ../../tests/fixtures/continuation/delivery/stages/S00-CONT/tasks.md; do
+            node scripts/fixture-check.mjs "$tasks"
+          done
         working-directory: .agents/runtime
-      - name: Validate SCV fixture
-        run: node scripts/fixture-check.mjs ../../tests/fixtures/scv/tasks.md
+      - name: Validate checked-in negative fixtures reject intended condition
+        run: |
+          check_negative() {
+            local tasks="$1"
+            local expected_category="$2"
+            local output
+            local rc=0
+            output=$(node scripts/fixture-check.mjs "$tasks" 2>&1) || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              echo "Expected fixture to fail validation: $tasks"
+              exit 1
+            fi
+            if [[ "$output" != *"[$expected_category]"* ]]; then
+              echo "Expected [$expected_category] for $tasks, got:"
+              echo "$output"
+              exit 1
+            fi
+            if [[ "$output" == *"[INVALID_EVIDENCE_PATH_PATTERN]"* ]]; then
+              echo "Negative fixture failed for a non-intended evidence path condition: $tasks"
+              exit 1
+            fi
+            echo "Confirmed [$expected_category]: $tasks"
+          }
+          check_negative \
+            ../../tests/fixtures/negative/incomplete-worker/delivery/stages/S00-INCOMPLETE/tasks.md \
+            INCOMPLETE_WORKER
+          check_negative \
+            ../../tests/fixtures/negative/missing-po/delivery/stages/S00-NOPO/tasks.md \
+            MISSING_PROOF_OBLIGATION
         working-directory: .agents/runtime
-      - name: Validate Stage Gate fixture
-        run: node scripts/fixture-check.mjs ../../tests/fixtures/stage-gate/tasks.md
-        working-directory: .agents/runtime
-      - name: Validate Continuation fixture
-        run: node scripts/fixture-check.mjs ../../tests/fixtures/continuation/tasks.md
-        working-directory: .agents/runtime
+      - name: Scenario 2 dispatch mismatch acceptance
+        run: python tests/fixtures/dispatch-mismatch/scenario-2-dispatch-mismatch.py
+      - name: Ensure fixture checks are read-only
+        run: git diff --exit-code -- tests/fixtures
+      - name: Shell smoke test (compile, validate, gate, cleanup)
+        run: bash tests/framework/proofloop-smoke-test.sh

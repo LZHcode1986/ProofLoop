@@ -179,6 +179,10 @@ describe('compileManifest', () => {
     const slice = manifest.slices[0];
     expect(slice.slice_id).toBe('S01-A');
 
+    // Check evidence_path and cv_minimum_level are present
+    expect(slice.evidence_path).toBe('delivery/stages/S01/evidence/S01-A.md');
+    expect(slice.cv_minimum_level).toBe('lite');
+
     // Check the first PO is present
     expect(slice.proof_obligations).toHaveLength(1);
     const po = slice.proof_obligations[0];
@@ -309,7 +313,7 @@ steps:
     const md = minimalTasksMd('S01-A', ['bogus_invalid_risk']);
     const tasksPath = writeFixture('tasks.md', md);
 
-    // computeScvLevel is called during compilation and throws on unknown risk facts
+    // computeCvLevel is called during compilation and throws on unknown risk facts
     expect(() => compileManifest(tasksPath)).toThrow(/Unknown risk fact/);
   });
 
@@ -450,9 +454,11 @@ Done.
     const sliceB = manifest.slices.find(s => s.slice_id === 'S03-B')!;
     expect(sliceB.risk_facts).toEqual(['persistent_state']);
 
-    // SCV levels derived from slice risk facts
-    expect(sliceA.scv_minimum_level).toBe('enhanced');
-    expect(sliceB.scv_minimum_level).toBe('standard');
+    // CV levels derived from slice risk facts
+    expect(sliceA.cv_minimum_level).toBe('enhanced');
+    expect(sliceA.evidence_path).toBe('delivery/stages/S03/evidence/S03-A.md');
+    expect(sliceB.cv_minimum_level).toBe('standard');
+    expect(sliceB.evidence_path).toBe('delivery/stages/S03/evidence/S03-B.md');
   });
 
   // ── Runtime Proof validation ──

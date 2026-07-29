@@ -19,20 +19,20 @@ Planner  → declares Risk Facts and candidate Profiles per Slice
 Validator → computes required Profiles from Risk Facts and Slice behavior
 SPV      → audits whether required Profiles are complete and correctly applied
 Worker   → executes evidence per declared Profiles (may not lower requirements)
-SCV      → may require additional Profiles based on observed risk
+CV      → may require additional Profiles based on observed risk
 ```
 
-- **Planner** does not hand-select SCV level; it declares Risk Facts.
+- **Planner** does not hand-select CV level; it declares Risk Facts.
 - **Validator** maps Risk Facts to required Profiles.
 - **SPV** checks completeness against Risk Facts.
 - **Worker** cannot reduce or skip a declared Profile.
-- **SCV (Code Verifier)** can demand additional Profiles if evidence is insufficient.
+- **CV (Code Verifier)** can demand additional Profiles if evidence is insufficient.
 
 ## Profile structure
 
 Each profile specifies:
 - **Applies to**: what kind of behavior this profile covers
-- **Minimum SCV level**: the lowest SCV tier that satisfies this profile
+- **Minimum CV level**: the lowest CV tier that satisfies this profile
 - **Applicable Risk Facts**: which Risk Facts trigger this profile
 - **Required PO types**: what kinds of POs are needed
 - **Forbidden mocks**: what must NOT be mocked/substituted
@@ -44,7 +44,7 @@ Each profile specifies:
 
 ## 1. api-shape
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** public_api_change
 - **Required PO types:** response shape, status codes, error shape
 - **Forbidden mocks:** none
@@ -69,7 +69,7 @@ Verifier refutation:
 
 ## 2. route-default
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** public_api_change
 - **Required PO types:** explicit vs default behavior comparison
 - **Forbidden mocks:** none
@@ -92,7 +92,7 @@ Verifier refutation:
 
 ## 3. ui-cardinality
 
-- **Minimum SCV level:** 1 (unit/component)
+- **Minimum CV level:** 1 (unit/component)
 - **Applicable Risk Facts:** none specific
 - **Required PO types:** element count, item binding
 - **Forbidden mocks:** none
@@ -116,7 +116,7 @@ Verifier refutation:
 
 ## 4. empty-state
 
-- **Minimum SCV level:** 1 (unit/component)
+- **Minimum CV level:** 1 (unit/component)
 - **Applicable Risk Facts:** none specific
 - **Required PO types:** state combinations
 - **Forbidden mocks:** none
@@ -141,7 +141,7 @@ Verifier refutation:
 
 ## 5. integration-path
 
-- **Minimum SCV level:** 3 (real environment)
+- **Minimum CV level:** 3 (real environment)
 - **Applicable Risk Facts:** external_side_effect, cross_process_behavior
 - **Required PO types:** full-path behavior, end-to-end observable outcome
 - **Forbidden mocks:** all external collaborators must be real
@@ -165,7 +165,7 @@ Verifier refutation:
 
 ## 6. state-transition
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** core_state_machine
 - **Required PO types:** legal transition, illegal rejection, state invariance
 - **Forbidden mocks:** state store must be real
@@ -191,7 +191,7 @@ Verifier refutation:
 
 ## 7. persistence-roundtrip
 
-- **Minimum SCV level:** 3 (real environment)
+- **Minimum CV level:** 3 (real environment)
 - **Applicable Risk Facts:** persistent_state
 - **Required PO types:** save, reload, modify, delete
 - **Forbidden mocks:** database/persistence layer must be real
@@ -217,7 +217,7 @@ Verifier refutation:
 
 ## 8. permission-boundary
 
-- **Minimum SCV level:** 3 (real environment)
+- **Minimum CV level:** 3 (real environment)
 - **Applicable Risk Facts:** authorization
 - **Required PO types:** access granted, access denied, unauthenticated rejection, privilege escalation
 - **Forbidden mocks:** auth system must be real
@@ -243,7 +243,7 @@ Verifier refutation:
 
 ## 9. error-recovery
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** irreversible_operation, external_side_effect
 - **Required PO types:** error response, recovery state, resource cleanup
 - **Forbidden mocks:** error triggers must be real or realistically simulated
@@ -269,7 +269,7 @@ Verifier refutation:
 
 ## 10. idempotency
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** concurrency, irreversible_operation
 - **Required PO types:** repeatable operation, side effect idempotence
 - **Forbidden mocks:** operation under test must be real
@@ -293,7 +293,7 @@ Verifier refutation:
 
 ## 11. frontend-backend-contract
 
-- **Minimum SCV level:** 2 (isolated service)
+- **Minimum CV level:** 2 (isolated service)
 - **Applicable Risk Facts:** public_api_change
 - **Required PO types:** request shape, response shape, error shape, status codes
 - **Forbidden mocks:** both sides must be real or contract-tested
@@ -318,7 +318,7 @@ Verifier refutation:
 
 ## 12. stream-lifecycle
 
-- **Minimum SCV level:** 3 (real environment)
+- **Minimum CV level:** 3 (real environment)
 - **Applicable Risk Facts:** cross_process_behavior, external_side_effect
 - **Required PO types:** connection, data flow, clean close, error handling, cancel handling
 - **Forbidden mocks:** stream infrastructure must be real
@@ -345,7 +345,7 @@ Verifier refutation:
 
 ## 13. concurrency-conflict
 
-- **Minimum SCV level:** 3 (real environment)
+- **Minimum CV level:** 3 (real environment)
 - **Applicable Risk Facts:** concurrency
 - **Required PO types:** concurrent access, conflict detection, conflict resolution, data integrity
 - **Forbidden mocks:** shared resource must be real

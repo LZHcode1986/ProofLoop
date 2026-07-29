@@ -8,10 +8,14 @@
     "typecheck": "tsc --noEmit",
     "validate-stage": "node dist/validate-stage.js",
     "compile-manifest": "node dist/compile-manifest.js",
+    "initialize-slice-evidence": "node dist/initialize-slice-evidence.js",
     "run-stage": "node dist/run-stage.js",
     "run-project-acceptance": "node dist/run-project-acceptance.js",
     "compile-project-acceptance": "node dist/compile-project-acceptance.js",
-    "finalize-project-review": "node dist/finalize-project-review.js"
+    "finalize-project-review": "node dist/finalize-project-review.js",
+    "write-cv-receipt": "node dist/receipt-writer.js cv",
+    "derive-next-action": "node dist/derive-next-action.js",
+    "update-current-cv-status": "node dist/update-current-cv-status.js"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

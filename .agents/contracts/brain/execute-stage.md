@@ -13,7 +13,6 @@ A Stage plan is ready (SPV PLAN_READY), all blocking Hard Parts are VALIDATED or
 - Stage ID
 - Stage Goal
 - tasks.md path
-- evidence.md path
 - Slice DAG
 - Stage Plan Commit / Base Ref
 - Integration Branch
@@ -21,20 +20,19 @@ A Stage plan is ready (SPV PLAN_READY), all blocking Hard Parts are VALIDATED or
 
 **New required fields for Stage Gate:**
 
-- **Manifest path** — path to the compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`)
+- **Manifest path** — path to the compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`). The Manifest declares per-Slice `evidence_path` entries and their corresponding CV Receipt refs.
 - **Manifest digest** — SHA-256 digest of the Manifest file, for integrity verification against tasks.md
-- **SCV Risk Policy version** — version identifier of the Risk Policy used to determine SCV minimum levels
+- **CV Risk Policy version** — version identifier of the Risk Policy used to determine CV minimum levels
 - **Stage Runtime Proof structured plan** — the array of `RuntimeProofStep` objects from the Manifest, defining the Stage Gate execution sequence
 - **Expected Stage Gate Receipt path** — output path where the Stage Gate Receipt will be written after execution
 
 ### Stage Validator PASS Reference
 
 Validator must confirm:
-- tasks.md and evidence.md are well-formed
+- tasks.md is well-formed
 - All slice markers are balanced and valid
 - DAG has no cycles
 - Each slice has Risk Facts and Proof Obligations with oracle sources
-- Evidence file has matching markers
 
 ### SPV PLAN_READY Reference
 
@@ -42,13 +40,48 @@ SPV must confirm:
 - Every Slice Goal is bounded and testable
 - Every Observable Outcome is measurable
 - Every Public Seam identifies a real interface boundary
-- Proof Obligations are sufficient for the Slice's SCV level
+- Proof Obligations are sufficient for the Slice's CV level
 - Risk Facts are complete and actionable
 - Manifest has been compiled and its digest matches tasks.md content
 
+## Derive Next Action
+
+After each step, the Executor deterministically derives the next action:
+
+| Condition | Next action |
+|---|---|
+| All Slices integrated and CV PASS | Execute Stage Gate runtime proof sequence |
+| Persisted Stage Gate Receipt validates PASS | Return `STAGE_GATE_PASSED` with receipt path |
+| Slice CV verdict `REPAIR` | Only `REPAIR` enters repair: re-dispatch the Worker in repair mode |
+| Slice CV verdict `REPLAN` | Return to Brain/planner per the rectification plan |
+| Slice CV verdict `BLOCKED` | Return to Brain per the rectification plan |
+| Slice CV verdict `ESCALATION_REQUIRED` | Return to Brain/human per the rectification plan |
+| Stage Gate step FAIL (non-zero exit) | Return `IMPLEMENTATION_DEFECT` / `STAGE_GATE_STEP_FAILED` |
+| Missing step or invalid step definition | Return `PLAN_GAP` / `STAGE_GATE_MISSING_STEP` |
+| Observation mismatch vs Manifest outcomes | Return `EVIDENCE_GAP` / `STAGE_GATE_OBSERVATION_FAILURE` |
+| Environment precondition unmet | Return `RUNTIME_BLOCKER` / `STAGE_GATE_ENV_FAILURE` |
+| Cleanup failure after Gate execution | Return `RUNTIME_BLOCKER` / `STAGE_GATE_CLEANUP_FAILURE` |
+
+## Committer and Integration boundary closure
+
+Receipt-backed scope validation is closed through the existing slice boundary:
+Committer validates the CV receipt and changed-file boundary, then Integration
+and post-merge checks validate the resulting Stage boundary. No standalone scope
+action is dispatched.
+
+## Stage Gate receipt and review boundary
+
+Executor runs the Stage Gate and must verify that its persisted Stage Gate
+Receipt exists and validates the Stage ID, Manifest digest, integrated snapshot,
+and every Manifest Slice before returning `STAGE_GATE_PASSED`. A transient or
+in-memory PASS is not sufficient. After that return, Brain alone dispatches a
+fresh Stage Reviewer; Executor never dispatches Stage Reviewer.
+
 ## Expected results
 
-All Slices integrated, all required SCV Gates passed, Stage Gate passed on integrated snapshot, `STAGE_GATE_PASSED` returned with full receipt.
+All Slices integrated, all required CV Gates passed, the persisted Stage Gate
+Receipt shows PASS on the integrated snapshot, and `STAGE_GATE_PASSED` is
+returned with the receipt path.
 
 ## Return codes (unified route code format)
 

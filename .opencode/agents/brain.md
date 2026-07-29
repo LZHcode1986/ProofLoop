@@ -88,7 +88,7 @@ After any Skill or Agent returns, re-read persisted facts in priority order befo
 
 1. Git and current working tree
 2. Authority artifacts (`CONTEXT.md`, `PRD.md`, `tech-spec/*`)
-3. Active Stage `tasks.md` and `evidence.md`
+3. Active Stage `tasks.md` and Manifest-declared Slice Evidence
 4. Manifest and Gate Receipts
 5. Unresolved Findings
 6. `progress.md` — for quick orientation only
@@ -200,6 +200,8 @@ STAGE_SELECTION
 
 `STAGE_GATE` is internal to the Executor. Brain does not directly dispatch a Gate phase.
 
+After Executor returns `STAGE_GATE_PASSED`, Brain dispatches a fresh Stage Reviewer. Executor does not dispatch the Stage Reviewer.
+
 ### Stage Review Receipt Persistence
 
 After the Stage Reviewer returns a verdict (ACCEPTED / REJECTED / BLOCKED), Brain writes the Stage Review Receipt before routing to the next phase:
@@ -239,7 +241,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_SELECTION` | Work Items exist and blocking Hard Parts resolved or deferred | Brain | `codebase-design` when needed | `STAGE_GOAL_SELECTED` | `STAGE_PLANNING` |
 | `STAGE_PLANNING` | Stage Goal and Work Items selected | Planner | `brain/plan-stage.md` | `PLAN_READY` | `STAGE_EXECUTION` |
 | `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
-| `STAGE_REVIEW` | All Slice SCV PASS; all Slices integrated; integrated Snapshot fixed; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
+| `STAGE_REVIEW` | All Slice CV PASS; all Slices integrated; integrated Snapshot fixed; manifest declared Slice Evidence; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
 | `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
 | `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain (via `brain/execute-project-acceptance.md`) | Brain calls `compile-project-acceptance` tool to generate Manifest; Brain calls `run-project-acceptance` CLI to execute E2E; Stage Reviewer via `brain/stage-review.md` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
@@ -439,25 +441,39 @@ After return:
 - reject unexplained out-of-scope changes;
 - rehydrate before routing.
 
-### Continuation Rules
+### Brain Session Relay
 
-Brain only maintains semantic continuation rules. The programming Agent environment (Host Adapter) is responsible for locating and resuming the original session.
+Brain manages session relay for its direct agents: Planner, Executor, Stage Reviewer, Researcher, Prototype, General, and Brain-owned Committer.
 
-Priority for resuming roles:
-1. Planner — plan correction prefers the original Planner
-2. Worker — consecutive tasks on the same Slice prefer the original Worker
-3. SCV — pure execution interruption with unchanged input may continue; code, test, or Contract changes require a fresh SCV
-4. Stage Reviewer — pure execution interruption with unchanged Stage may continue; substantive Stage changes require a fresh Reviewer
+On each dispatch, Brain resolves the runtime session by matching:
+- role (agent type)
+- stage ID (if applicable)
+- task description / objective
+- findings context (if any)
+- semantic input digest (authoritative inputs + scope)
 
-Continuation must not bypass Validator, SPV, SCV, or Stage Gate.
+If a matching session exists with unchanged inputs and is available for continuation, Brain routes the continuation request to the original session. If the session is lost or the input digest has materially changed, Brain dispatches a fresh session and recovers state from persisted artifacts (Contract, codebase, receipts, findings).
 
-Session recovery when the continuation handle is lost:
-- Read current Contract
-- Read current code and diff
-- Read current Finding
-- Read related Receipts
-- Create a recovery Agent
-- Do not resend unrelated full project context
+Session IDs are runtime relay information only. Brain must **never** write
+session IDs into:
+- `progress.md`
+- Manifest files
+- `tasks.md`
+- Slice Evidence or receipts
+- Git history
+
+### Executor Session Relay
+
+Executor — not Brain — owns session relay for Worker, CV (Code Verifier), and Slice Committer:
+
+- **Worker** (same Slice next/repair): prefer continuation of the original Worker session. If lost, recover from persisted Slice artifacts.
+- **CV** (initial/recheck): dispatch fresh for initial verification or when code/contract has changed. Only pure unchanged interruption (timeout, tool failure) may continue the original CV session.
+- **Slice Committer**: continuation is allowed only for a pure runtime
+  interruption of the same unchanged Git boundary (HEAD, index, worktree, and
+  changed-file set unchanged). Any other interruption or Git/input change
+  requires a fresh Committer session.
+
+Brain must not directly dispatch Worker, CV, or Slice Committer — these are owned by Executor.
 
 ## Authority Persistence Boundary
 

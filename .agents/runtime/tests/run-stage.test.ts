@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runStageFromManifest } from '../src/run-stage.js';
@@ -118,6 +119,96 @@ describe('runStageFromManifest', () => {
       expect(serviceCleanup.failed).toHaveLength(0);
       expect(serviceCleanup.remainingPids).toHaveLength(0);
     }, 20000);
+  });
+
+  describe('Slice COMPLETE facts gate PASS', () => {
+    test('successful runtime proof cannot PASS when slice commit/integration facts are absent', async () => {
+      const manifestPath = writeManifest('missing-slice-facts.json', {
+        ...BASE_MANIFEST, stage_id: 'S99-FACTS', slices: [{ slice_id: 'S99-A', goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      });
+      const result = await runStageFromManifest({ manifestPath, outputDir: tmpDir });
+      expect(result.success).toBe(false);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('FAIL');
+      expect(result.errors.join(' ')).toMatch(/Slice COMPLETE facts/i);
+    });
+
+    test('successful runtime proof cannot PASS from placeholder or nonexistent evidence refs', async () => {
+      const manifestPath = writeManifest('placeholder-facts.json', {
+        ...BASE_MANIFEST, stage_id: 'S99-FACTS2', slices: [{ slice_id: 'S99-A', goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      });
+      const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const result = await runStageFromManifest({
+        manifestPath, outputDir: tmpDir,
+        sliceCompleteFacts: [{ slice_id: 'S99-A', cv: { verdict: 'PASS', receipt_ref: 'missing-cv.json' }, commit: { commit_sha: commitSha }, integration: { integration_ref: 'missing-integration.json' } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.errors.join(' ')).toMatch(/persisted CV PASS, commit, and integration evidence/i);
+      expect(readReceipt(result.receiptPath!).verdict).toBe('FAIL');
+    });
+
+    test('integration evidence must be a persisted identity-bound record, not a label or unrelated artifact', async () => {
+      const stageId = 'S99-INTEGRATION';
+      const sliceId = 'S99-A';
+      const manifestPath = writeManifest('unbound-integration.json', {
+        ...BASE_MANIFEST, stage_id: stageId, slices: [{ slice_id: sliceId, goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      });
+      const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const cvPath = join(tmpDir, 'cv-pass-unbound.json');
+      const integrationPath = join(tmpDir, 'integration-unbound.json');
+      writeFileSync(cvPath, JSON.stringify({
+        stage_id: stageId, slice_id: sliceId, snapshot: 'a'.repeat(16), cv_level: 'standard',
+        verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
+      }));
+      writeFileSync(integrationPath, 'integration complete');
+
+      const result = await runStageFromManifest({
+        manifestPath, outputDir: tmpDir,
+        sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: cvPath }, commit: { commit_sha: commitSha }, integration: { integration_ref: integrationPath } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.errors.join(' ')).toMatch(/persisted CV PASS, commit, and integration evidence/i);
+
+      writeFileSync(integrationPath, JSON.stringify({
+        stage_id: stageId, slice_id: 'S99-B', commit_sha: commitSha, status: 'integrated',
+      }));
+      const mismatched = await runStageFromManifest({
+        manifestPath, outputDir: tmpDir,
+        sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: cvPath }, commit: { commit_sha: commitSha }, integration: { integration_ref: integrationPath } }],
+      });
+      expect(mismatched.success).toBe(false);
+    });
+
+    test('successful runtime proof PASS requires real persisted CV, commit, and integration artifacts', async () => {
+      const stageId = 'S99-FACTS3';
+      const sliceId = 'S99-A';
+      const manifestPath = writeManifest('with-slice-facts.json', {
+        ...BASE_MANIFEST, stage_id: stageId, slices: [{ slice_id: sliceId, goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      });
+      const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const cvPath = join(tmpDir, 'cv-pass.json');
+      const integrationPath = join(tmpDir, 'integration.json');
+      writeFileSync(cvPath, JSON.stringify({
+        stage_id: stageId, slice_id: sliceId, snapshot: 'a'.repeat(16), cv_level: 'standard',
+        verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
+      }));
+      writeFileSync(integrationPath, JSON.stringify({ stage_id: stageId, slice_id: sliceId, commit_sha: commitSha, status: 'integrated' }));
+
+      const result = await runStageFromManifest({
+        manifestPath, outputDir: tmpDir,
+        sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: cvPath }, commit: { commit_sha: commitSha }, integration: { integration_ref: integrationPath } }],
+      });
+      expect(result.success).toBe(true);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('PASS');
+      expect(receipt.slice_complete_facts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ slice_id: sliceId, cv: expect.objectContaining({ receipt_ref: cvPath }), integration: expect.objectContaining({ integration_ref: integrationPath }) }),
+      ]));
+    });
   });
 
   describe('负向路径 1 — readiness 前进程退出', () => {

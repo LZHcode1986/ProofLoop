@@ -26,9 +26,9 @@ Slice 内的一个实施中间目标。Task 是目标型（如"实现保存行�
 
 ## Evidence
 
-Worker 对当前 Slice 的完成声明。包含 Worker Statement、Implementation、Verification、Limitations。CV 将其作为待攻击目标。
+当前 Slice 的持久化事实记录。包含每个 Task 的 Evidence、Current Slice Evidence，以及由 Executor 独占维护的 Current CV Status（含最新 CV Receipt）。CV 将其作为待攻击目标。
 
-*Avoid*: 修复历史、旧 Evidence、CV 结果、commit hash
+*Avoid*: 修复历史、旧 Evidence、commit hash
 
 ## Code Verifier (CV)
 
@@ -52,11 +52,11 @@ Worker 对当前 Slice 的完成声明。包含 Worker Statement、Implementatio
 
 用户入口和全局纠偏路由者。维护权威文档，不实现代码，不创建 Slice/Task。
 
-*Avoid*: 代码实现、直接修改 tasks.md/evidence.md
+*Avoid*: 代码实现、直接修改 tasks.md、Manifest-declared Slice Evidence
 
 ## Planner
 
-Stage→Slice→Task 规划者。创建 tasks.md 和 evidence.md 框架。
+Stage→Slice→Task 规划者。创建 tasks.md 并通过 compile-manifest 初始化 Manifest，再调用 initialize-slice-evidence 生成 per-Slice Evidence 文件。
 
 *Avoid*: 预测代码文件清单、实现代码
 
@@ -68,7 +68,7 @@ Active Stage 的运行时编排器。管理 Worktree、Worker Session、CV 派�
 
 ## Worker
 
-一次只负责一个 Slice 的实施者。只接收当前 Slice 的最小上下文，不读取 Stage Goal。
+一次只接收 Executor 派发的一个 Task。仅在被重新派发时，才可在同一 Slice 内按顺序继续处理后续 Task。
 
 *Avoid*: 读取完整 Stage Goal、修改其他 Slice 区域
 

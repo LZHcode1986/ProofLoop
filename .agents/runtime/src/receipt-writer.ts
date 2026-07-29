@@ -4,9 +4,11 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import {
   StageGateReceipt,
+  isValidStageGatePassReceipt,
   StageReviewReceiptSchema,
   ProjectE2EReceiptSchema,
   WriteProjectReviewReceiptOptionsSchema,
+  CvReceipt,
 } from './schemas.js';
 import { z } from 'zod';
 
@@ -94,6 +96,9 @@ export function computeSnapshot(dir: string): string {
 export function writeGateReceipt(outputDir: string, data: z.infer<typeof StageGateReceipt>): string {
   // Schema validation — fail-closed even if caller bypasses CLI
   const parsed = StageGateReceipt.parse(data);
+  if (parsed.verdict === 'PASS' && !isValidStageGatePassReceipt(parsed, parsed.stage_id, parsed.manifest_digest)) {
+    throw new Error('Invalid Stage Gate PASS receipt: Slice COMPLETE facts, successful proof steps, and cleanup facts are required.');
+  }
 
   // Ensure output directory exists
   fs.mkdirSync(outputDir, { recursive: true });
@@ -104,6 +109,21 @@ export function writeGateReceipt(outputDir: string, data: z.infer<typeof StageGa
 
   fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8');
 
+  return path.resolve(filePath);
+}
+
+/** Canonical immutable Stage Gate receipt writer. */
+export function writeStageGateReceipt(
+  data: z.infer<typeof StageGateReceipt>,
+  receiptRoot = path.join(process.cwd(), '.proofloop', 'receipts', 'stage-gate'),
+): string {
+  const parsed = StageGateReceipt.parse(data);
+  if (!isValidStageGatePassReceipt(parsed, parsed.stage_id, parsed.manifest_digest)) {
+    throw new Error('Invalid Stage Gate PASS receipt: it must prove every executed step and include completed_slice_ids.');
+  }
+  fs.mkdirSync(receiptRoot, { recursive: true });
+  const filePath = path.join(receiptRoot, `${parsed.stage_id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), { encoding: 'utf-8', flag: 'wx' });
   return path.resolve(filePath);
 }
 
@@ -182,6 +202,121 @@ export function internalWriteProjectReviewReceipt(outputDir: string, data: z.inf
   return path.resolve(filePath);
 }
 
+// ── CV Receipt writer ──────────────────────────────────────────────────────────
+
+/**
+ * The root directory for all CV receipts: `.proofloop/receipts/cv/`
+ * Resolved relative to `process.cwd()` when not overridden.
+ */
+export function getDefaultCvReceiptRoot(): string {
+  return path.join(process.cwd(), '.proofloop', 'receipts', 'cv');
+}
+
+/**
+ * Write a CV Receipt to disk at `.proofloop/receipts/cv/<stage-id>/<slice-id>/`.
+ *
+ * The filename follows the pattern `{initial|recheck}-NNN.json` where NNN is
+ * the next available sequence number **globally across all receipt files** for
+ * that slice (not per-prefix). The file is never overwritten — each call
+ * produces a strictly increasing number.
+ *
+ * Write uses exclusive-create (`wx` flag) to prevent races. If the target
+ * file already exists (concurrent write), the function retries with the next
+ * sequence number up to a limited number of attempts.
+ *
+ * @param data            The CV receipt data (validated against CvReceipt schema).
+ * @param receiptRoot     Override the receipt root directory. Defaults to
+ *                        `.proofloop/receipts/cv/` under cwd().
+ * @returns The absolute path of the written receipt file.
+ */
+export function writeCvReceipt(
+  data: z.infer<typeof CvReceipt>,
+  receiptRoot?: string,
+): string {
+  // Schema validation — fail-closed
+  const parsed = CvReceipt.parse(data);
+
+  const root = receiptRoot ?? getDefaultCvReceiptRoot();
+
+  // Build path: <root>/<stage-id>/<slice-id>/
+  const safeStageId = parsed.stage_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeSliceId = parsed.slice_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const receiptDir = path.join(root, safeStageId, safeSliceId);
+
+  // Ensure directory exists
+  fs.mkdirSync(receiptDir, { recursive: true });
+
+  // ── Determine next global sequence number across all receipt files ──
+  // Scan all {initial|recheck}-NNN.json in this slice directory
+  const RECEIPT_FILE_RE = /^(initial|recheck)-(\d{3})\.json$/;
+  const allReceiptFiles = fs.readdirSync(receiptDir)
+    .filter(f => RECEIPT_FILE_RE.test(f))
+    .sort();
+
+  let globalMaxSeq = 0;
+  for (const f of allReceiptFiles) {
+    const m = f.match(RECEIPT_FILE_RE);
+    if (m) {
+      const seq = parseInt(m[2], 10);
+      if (seq > globalMaxSeq) globalMaxSeq = seq;
+    }
+  }
+
+  const prefix = parsed.verification_type ?? 'initial';
+  const jsonContent = JSON.stringify(parsed, null, 2);
+
+  // ── Attempt write with exclusive-create and retry ──
+  const MAX_RETRIES = 5;
+  let candidateSeq = globalMaxSeq;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    candidateSeq++;
+    const seqStr = String(candidateSeq).padStart(3, '0');
+    const fileName = `${prefix}-${seqStr}.json`;
+    const filePath = path.join(receiptDir, fileName);
+
+    try {
+      fs.writeFileSync(filePath, jsonContent, { encoding: 'utf-8', flag: 'wx' });
+      return path.resolve(filePath);
+    } catch (err: unknown) {
+      // EEXIST / EACCES — file was created between our scan and write
+      if (isFileExistsError(err)) {
+        // Re-read the directory to detect concurrent writes
+        const updatedFiles = fs.readdirSync(receiptDir)
+          .filter(f => RECEIPT_FILE_RE.test(f));
+        for (const uf of updatedFiles) {
+          const um = uf.match(RECEIPT_FILE_RE);
+          if (um) {
+            const seq = parseInt(um[2], 10);
+            if (seq > globalMaxSeq) globalMaxSeq = seq;
+          }
+        }
+        candidateSeq = globalMaxSeq;
+        continue; // retry
+      }
+      // Re-throw other errors (e.g. permission denied, disk full)
+      throw err;
+    }
+  }
+
+  // Exhausted retries — throw
+  throw new Error(
+    `Cannot write CV receipt after ${MAX_RETRIES} attempts. ` +
+    `Directory "${receiptDir}" is being contended.`,
+  );
+}
+
+/**
+ * Check whether a thrown error indicates the file already exists.
+ */
+function isFileExistsError(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code: string }).code;
+    return code === 'EEXIST' || code === 'EACCES';
+  }
+  return false;
+}
+
 // ── CLI entry point ─────────────────────────────────────────────────────────────
 
 /**
@@ -221,8 +356,16 @@ if (isScriptEntry()) {
   if (mode === 'stage-review') {
     const result = writeStageReviewReceipt(input.outputDir, input.data);
     console.log(JSON.stringify(result));
+  } else if (mode === 'stage-gate') {
+    const result = writeStageGateReceipt(input.data, input.receiptRoot);
+    console.log(JSON.stringify(result));
+  } else if (mode === 'cv') {
+    const result = writeCvReceipt(input.data, input.receiptRoot);
+    console.log(JSON.stringify(result));
   } else {
     console.error('Usage: node receipt-writer.js stage-review <json-input>');
+    console.error('       node receipt-writer.js stage-gate <json-input>');
+    console.error('       node receipt-writer.js cv <json-input>');
     process.exit(1);
   }
 }
@@ -239,11 +382,26 @@ export function validateReceipt(receiptPath: string): { valid: boolean; error?: 
     const content = fs.readFileSync(receiptPath, 'utf-8');
     const parsed = JSON.parse(content);
 
-    // Validate against StageGateReceipt schema
-    StageGateReceipt.parse(parsed);
+    // Validate against the schema and the stronger PASS invariants.  FAIL and
+    // BLOCKED receipts remain useful diagnostics; only PASS can authorize a
+    // stage transition.
+    const validated = StageGateReceipt.parse(parsed);
+    if (validated.verdict === 'PASS' &&
+        !isValidStageGatePassReceipt(validated, validated.stage_id, validated.manifest_digest)) {
+      return { valid: false, error: 'Stage Gate PASS receipt does not contain complete proof facts.' };
+    }
 
     return { valid: true };
   } catch (err) {
     return { valid: false, error: `Receipt validation error: ${err}` };
   }
+}
+
+/**
+ * Read and parse a CV receipt from disk.
+ */
+export function readCvReceipt(receiptPath: string): z.infer<typeof CvReceipt> {
+  const content = fs.readFileSync(receiptPath, 'utf-8');
+  const parsed = JSON.parse(content);
+  return CvReceipt.parse(parsed);
 }

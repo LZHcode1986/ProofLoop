@@ -1,11 +1,118 @@
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { Manifest as ManifestSchema, ProjectAcceptanceManifestSchema } from './schemas.js';
+import { CvReceipt as CvReceiptSchema, Manifest as ManifestSchema, ProjectAcceptanceManifestSchema, SliceCompleteFacts as SliceCompleteFactsSchema } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
 import { runProcess, spawnService, registerService, getRegisteredService, stopRegisteredService, waitForReadiness, cleanupServices, cleanupProcesses, checkPortsFree, validateSpawnOptions, } from './process-manager.js';
 import { writeGateReceipt, writeProjectE2EReceipt, computeSnapshot } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
+// ── Persisted Slice COMPLETE evidence ──────────────────────────────────────────
+/**
+ * Resolve a persisted evidence reference without treating the reference itself
+ * as evidence. Relative refs may be rooted at the run output directory or at
+ * the canonical .proofloop receipt root; absolute refs are accepted as-is.
+ */
+function resolveEvidenceFile(reference, outputDir) {
+    const candidates = path.isAbsolute(reference)
+        ? [reference]
+        : [
+            path.resolve(outputDir, reference),
+            path.resolve(outputDir, '.proofloop', 'receipts', reference),
+            path.resolve(process.cwd(), reference),
+            path.resolve(process.cwd(), '.proofloop', 'receipts', reference),
+        ];
+    for (const candidate of candidates) {
+        try {
+            if (statSync(candidate).isFile())
+                return path.resolve(candidate);
+        }
+        catch {
+            // A missing/unreadable candidate is not persisted evidence.
+        }
+    }
+    return null;
+}
+function hasPersistedCvReceipt(reference, stageId, sliceId, outputDir) {
+    const receiptPath = resolveEvidenceFile(reference, outputDir);
+    if (!receiptPath)
+        return null;
+    try {
+        const parsed = CvReceiptSchema.safeParse(JSON.parse(readFileSync(receiptPath, 'utf-8')));
+        if (!parsed.success || parsed.data.stage_id !== stageId || parsed.data.slice_id !== sliceId || parsed.data.verdict !== 'PASS') {
+            return null;
+        }
+        return receiptPath;
+    }
+    catch {
+        return null;
+    }
+}
+function hasPersistedCommit(commitSha) {
+    if (!/^[a-f0-9]{40}$/i.test(commitSha))
+        return false;
+    try {
+        // Git is the persistence boundary for a commit fact.  Checking the object
+        // prevents a caller from smuggling an arbitrary nonempty commit label.
+        execFileSync('git', ['cat-file', '-e', `${commitSha}^{commit}`], {
+            cwd: process.cwd(),
+            stdio: 'ignore',
+        });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function hasPersistedIntegration(reference, stageId, sliceId, commitSha, outputDir) {
+    const artifactPath = resolveEvidenceFile(reference, outputDir);
+    if (!artifactPath)
+        return null;
+    try {
+        const content = readFileSync(artifactPath, 'utf-8').trim();
+        if (!content)
+            return null;
+        // An integration reference is evidence only when its persisted record
+        // carries the complete identity tuple. A non-JSON label, or a JSON object
+        // that omits any binding field, is just caller-supplied text and cannot
+        // authorize Slice COMPLETE.
+        if (!artifactPath.toLowerCase().endsWith('.json'))
+            return null;
+        const parsed = JSON.parse(content);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return null;
+        const record = parsed;
+        if (record.stage_id !== stageId || record.slice_id !== sliceId || record.commit_sha !== commitSha)
+            return null;
+        if (record.status !== 'integrated')
+            return null;
+        return artifactPath;
+    }
+    catch {
+        return null;
+    }
+}
+function validatePersistedSliceFacts(facts, stageId, outputDir) {
+    const errors = [];
+    const persistedFacts = [];
+    for (const fact of facts) {
+        const cvReceiptPath = hasPersistedCvReceipt(fact.cv.receipt_ref, stageId, fact.slice_id, outputDir);
+        const commitValid = hasPersistedCommit(fact.commit.commit_sha);
+        const integrationPath = hasPersistedIntegration(fact.integration.integration_ref, stageId, fact.slice_id, fact.commit.commit_sha, outputDir);
+        if (!cvReceiptPath || !commitValid || !integrationPath) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id} must reference persisted CV PASS, commit, and integration evidence.`);
+            continue;
+        }
+        // Store canonical paths in the gate receipt so later readers can verify the
+        // same files rather than reinterpreting caller-relative references.
+        persistedFacts.push({
+            ...fact,
+            cv: { ...fact.cv, receipt_ref: cvReceiptPath },
+            integration: { ...fact.integration, integration_ref: integrationPath },
+        });
+    }
+    return { facts: persistedFacts, errors };
+}
 /**
  * Execute a sequence of RuntimeProofSteps in order.
  *
@@ -385,6 +492,27 @@ export async function runStageFromManifest(options) {
     }
     const steps = manifest.runtime_proof ?? [];
     const resolvedOutputDir = outputDir ?? path.dirname(manifestPath);
+    const suppliedFacts = options.sliceCompleteFacts ?? [];
+    const parsedFacts = suppliedFacts.map(fact => SliceCompleteFactsSchema.safeParse(fact));
+    const factErrors = [];
+    if (suppliedFacts.length !== manifest.slices.length) {
+        factErrors.push(`Slice COMPLETE facts must contain exactly one fact per manifest slice (expected ${manifest.slices.length}, got ${suppliedFacts.length}).`);
+    }
+    if (parsedFacts.some(parsed => !parsed.success))
+        factErrors.push('Slice COMPLETE facts contain an invalid commit, integration, or CV receipt fact.');
+    const structurallyValidFacts = parsedFacts
+        .filter((parsed) => parsed.success)
+        .map(parsed => parsed.data);
+    const factIds = structurallyValidFacts.map(fact => fact.slice_id);
+    const manifestIds = manifest.slices.map(slice => slice.slice_id);
+    if (new Set(factIds).size !== factIds.length || factIds.length !== manifestIds.length || manifestIds.some(id => !factIds.includes(id))) {
+        factErrors.push('Slice COMPLETE facts must uniquely cover every manifest slice.');
+    }
+    // Validate every reference against persisted artifacts before a PASS can be
+    // selected. Caller-provided strings are never copied into a PASS receipt.
+    const persistedFactsResult = validatePersistedSliceFacts(structurallyValidFacts, manifest.stage_id, resolvedOutputDir);
+    factErrors.push(...persistedFactsResult.errors);
+    const validFacts = persistedFactsResult.facts;
     const platformInfo = getPlatformInfo();
     const startedAt = new Date();
     // Compute canonical manifest digest
@@ -392,10 +520,14 @@ export async function runStageFromManifest(options) {
     // ── Trivial fail: no steps → gate fails (proof without evidence) ──
     if (steps.length === 0) {
         errors.push('Stage Runtime Proof has zero steps — a proof with no evidence is not a valid pass.');
+        errors.push(...factErrors);
         const receiptPath = writeGateReceipt(resolvedOutputDir, {
             stage_id: manifest.stage_id,
             snapshot: computeSnapshot(process.cwd()),
             manifest_digest: manifestDigest,
+            completed_slice_ids: validFacts.map(fact => fact.slice_id),
+            slice_complete_facts: validFacts,
+            manifest_path: manifestPath,
             platform: platformInfo.platform,
             verdict: 'FAIL',
             steps: [],
@@ -413,12 +545,16 @@ export async function runStageFromManifest(options) {
         knownPorts: options.knownPorts,
     });
     // ── 3. Determine verdict ──
-    const verdict = execResult.errors.length === 0 ? 'PASS' : 'FAIL';
+    const verdict = execResult.errors.length === 0 && factErrors.length === 0 ? 'PASS' : 'FAIL';
+    errors.push(...factErrors);
     // ── 4. Write receipt ──
     const receiptPath = writeGateReceipt(resolvedOutputDir, {
         stage_id: manifest.stage_id,
         snapshot: computeSnapshot(process.cwd()),
         manifest_digest: manifestDigest,
+        completed_slice_ids: validFacts.map(fact => fact.slice_id),
+        slice_complete_facts: validFacts,
+        manifest_path: manifestPath,
         platform: platformInfo.platform,
         verdict,
         steps: execResult.stepResults,
@@ -431,7 +567,7 @@ export async function runStageFromManifest(options) {
     return {
         success: verdict === 'PASS',
         receiptPath,
-        errors: execResult.errors,
+        errors: [...execResult.errors, ...factErrors],
         stepCount: steps.length,
     };
 }

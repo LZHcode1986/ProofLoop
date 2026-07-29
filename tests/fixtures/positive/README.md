@@ -1,11 +1,16 @@
 # Positive Fixture
 
-A minimal but complete Stage workspace that follows the current `tasks.md` and `evidence.md` templates.
+A minimal but complete Stage workspace that follows the current `tasks.md` and per-Slice `evidence/<slice-id>.md` templates.
+
+## Per-Slice Evidence
+
+The single Slice S00-A has its own evidence file at `delivery/stages/S00-POS/evidence/S00-A.md`,
+referenced via the Manifest `evidence_path` model.
 
 ## Contents
 
-- `tasks.md` — Contains Stage Goal, Observable Outcomes, one Slice (S1) with one task
-- `evidence.md` — Contains matching Evidence for Slice S1
+- `delivery/stages/S00-POS/tasks.md` — Contains Stage Goal, Observable Outcomes, one Slice (S00-A) with one task
+- `delivery/stages/S00-POS/evidence/S00-A.md` — Per-Slice evidence for Slice S00-A
 
 ## Purpose
 

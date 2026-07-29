@@ -1,11 +1,12 @@
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeSnapshot, writeGateReceipt, writeStageReviewReceipt, writeProjectE2EReceipt } from '../src/receipt-writer.js';
 import { computeCanonicalJsonDigest } from '../src/canonical-digest.js';
+import { runStageFromManifest } from '../src/run-stage.js';
 import { Manifest as ManifestSchema, ProjectAcceptanceManifestSchema } from '../src/schemas.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────────
@@ -23,9 +24,12 @@ const DIST_DIR = join(__dirname, '..', 'dist');
 const RUN_PROJECT_ACCEPTANCE = join(DIST_DIR, 'run-project-acceptance.js');
 const COMPILE_PROJECT_ACCEPTANCE = join(DIST_DIR, 'compile-project-acceptance.js');
 const COMPILE_MANIFEST = join(DIST_DIR, 'compile-manifest.js');
+const VALIDATE_STAGE = join(DIST_DIR, 'validate-stage.js');
 const RUN_STAGE = join(DIST_DIR, 'run-stage.js');
 const RECEIPT_WRITER = join(DIST_DIR, 'receipt-writer.js');
 const FINALIZE_PROJECT_REVIEW = join(DIST_DIR, 'finalize-project-review.js');
+const DERIVE_NEXT_ACTION = join(DIST_DIR, 'derive-next-action.js');
+const UPDATE_CV_STATUS = join(DIST_DIR, 'update-current-cv-status.js');
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -68,7 +72,8 @@ function makeStageManifest(stageId = 'S01', extra?: Record<string, unknown>): Re
       proof_obligations: [],
       tasks: [],
       risk_facts: ['none'],
-      scv_minimum_level: 'lite',
+      evidence_path: 'delivery/stages/S01/evidence/S01-A.md',
+      cv_minimum_level: 'lite',
     }],
     dependencies: [],
     risk_facts: ['none'],
@@ -513,7 +518,7 @@ describe('CLI Integration Tests', () => {
 
     // ── 完整往返: 使用真实生产链路 ─────────────────────────────────────────────
 
-    test('完整往返: compile Stage → run Stage → review → E2E → finalize → PROJECT_ACCEPTED', () => {
+    test('完整往返: compile Stage → run Stage → review → E2E → finalize → PROJECT_ACCEPTED', async () => {
       const dir = tmpDir();
       try {
         // ── 1. Create tasks.md input for compile-manifest ──
@@ -530,8 +535,27 @@ describe('CLI Integration Tests', () => {
         const stageManifestCanonicalDigest = computeCanonicalJsonDigest(ManifestSchema, stageManifestRaw);
 
         // ── 3. Run Stage to generate Gate receipt ──
-        const r1 = cliRun(RUN_STAGE, stageManifestPath, dir);
-        expect(r1.status).toBe(0);
+        // A Stage Gate PASS must be backed by one persisted Slice COMPLETE fact
+        // per manifest slice: CV PASS receipt, commit, and integration.
+        const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+        const cvReceiptPath = join(dir, 'cv-S01-A.json');
+        const integrationPath = join(dir, 'integration-S01-A.json');
+        writeJSON(cvReceiptPath, {
+          stage_id: 'S01', slice_id: 'S01-A', snapshot: 'a'.repeat(16), cv_level: 'standard',
+          verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
+        });
+        writeJSON(integrationPath, { stage_id: 'S01', slice_id: 'S01-A', commit_sha: commitSha, status: 'integrated' });
+        const r1 = await runStageFromManifest({
+          manifestPath: stageManifestPath,
+          outputDir: dir,
+          sliceCompleteFacts: [{
+            slice_id: 'S01-A',
+            cv: { verdict: 'PASS', receipt_ref: cvReceiptPath },
+            commit: { commit_sha: commitSha },
+            integration: { integration_ref: integrationPath },
+          }],
+        });
+        expect(r1.success).toBe(true);
 
         // ── 4. Read the Gate receipt ──
         const gateFiles = readdirSync(dir).filter((f: string) => f.startsWith('stage-gate-'));
@@ -2553,5 +2577,651 @@ describe('CLI Integration Tests', () => {
         rmSync(dir, { recursive: true, force: true });
       }
     }, 30000);
+  });
+
+  describe('validate-stage.js', () => {
+
+    const VALID_TASKS_MD = `# Stage S01 — Test Stage
+
+## Stage Goal
+
+This is a test stage.
+
+## Observable Outcomes
+
+- OUT-01 First outcome
+
+## Dependencies
+
+---
+
+## Slice S01-A — First Slice
+<!-- SLICE:S01-A:BEGIN -->
+
+### Goal
+
+First slice goal
+
+### Observable Outcome
+
+OUT-01 realized
+
+### Public Seam
+
+Test seam
+
+### Risk Facts
+
+- persistent_state
+
+### Dependencies
+
+### Proof Obligations
+
+- PO-S01-A-01
+  - Behavior: verified
+  - Public Seam: Test seam
+  - Oracle Source: integration test
+  - Success / Failure: exit 0
+  - Required Observation: N/A
+  - Applicable Risk Facts:
+
+### Proof Plan
+
+| PO ID | Test Level | Seam | Required Test |
+|---|---|---|---|
+| PO-S01-A-01 | unit | Test seam | verify behavior |
+
+### Tasks
+
+- [ ] S01-A-T01 Do the task
+
+### Task → Slice Closure
+
+Done.
+
+### Worker Status
+
+- Status: planned
+
+<!-- SLICE:S01-A:END -->
+
+---
+
+## Slice → Stage Closure
+`;
+
+    function makeValidManifest(stageId = 'S01'): Record<string, unknown> {
+      return {
+        stage_id: stageId,
+        source_path: 'tasks.md',
+        source_digest: '0000000000000000000000000000000000000000000000000000000000000000',
+        stage_goal: 'Test stage goal',
+        outcomes: ['Outcome 1'],
+        slices: [{
+          slice_id: stageId + '-A',
+          goal: 'Goal',
+          observable_outcome: 'Outcome',
+          public_seam: 'Seam',
+          dependencies: [],
+          proof_obligations: [],
+          tasks: [],
+          risk_facts: ['persistent_state'],
+          evidence_path: 'delivery/stages/S01/evidence/S01-A.md',
+          cv_minimum_level: 'standard',
+        }],
+        dependencies: [],
+        risk_facts: [],
+        runtime_proof: [],
+        compiled_at: new Date().toISOString(),
+        compiled_by: 'test',
+      };
+    }
+
+    test('exit 0 with valid tasks and manifest', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+
+        // Compile manifest from the same tasks file so source_path/digest match
+        const r0 = cliRun(COMPILE_MANIFEST, tasksPath, join(dir, 'manifest.json'));
+        expect(r0.status).toBe(0);
+        const manifestPath = join(dir, 'manifest.json');
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(0);
+        expect(r.stdout).toMatch(/passed/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when tasks file does not exist', () => {
+      const dir = tmpDir();
+      try {
+        const manifestPath = join(dir, 'manifest.json');
+        writeJSON(manifestPath, makeValidManifest());
+
+        const r = cliRun(VALIDATE_STAGE, '/nonexistent/tasks.md', manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/not found/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest file does not exist', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, '/nonexistent/manifest.json');
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/not found/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest has invalid schema', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+        const manifestPath = join(dir, 'manifest.json');
+        // Write manifest missing required fields (no slices)
+        writeJSON(manifestPath, { stage_id: 'S01', source_path: 'tasks.md' });
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/schema validation failed/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest source_digest does not match', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = makeValidManifest();
+        manifest.source_digest = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'; // wrong digest
+        writeJSON(manifestPath, manifest);
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/MANIFEST_SOURCE_DIGEST_MISMATCH/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest has duplicate slice_id', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = makeValidManifest();
+        // Add a duplicate slice with same slice_id
+        manifest.slices = [
+          ...manifest.slices,
+          { ...manifest.slices[0] }, // duplicate
+        ];
+        writeJSON(manifestPath, manifest);
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/DUPLICATE_MANIFEST_SLICE_ID/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest has duplicate evidence_path', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = makeValidManifest();
+        // Add another slice with same evidence_path
+        manifest.slices = [
+          ...manifest.slices,
+          {
+            slice_id: 'S01-B',
+            goal: 'Another slice',
+            observable_outcome: 'Outcome',
+            public_seam: 'Seam',
+            dependencies: [],
+            proof_obligations: [],
+            tasks: [],
+            risk_facts: ['none'],
+            evidence_path: 'delivery/stages/S01/evidence/S01-A.md', // same as S01-A
+            cv_minimum_level: 'lite',
+          },
+        ];
+        writeJSON(manifestPath, manifest);
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/DUPLICATE_MANIFEST_EVIDENCE_PATH/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 when manifest stage_id does not match tasks stage ID', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = makeValidManifest('S99'); // manifest says S99, but tasks says S01
+        writeJSON(manifestPath, manifest);
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/STAGE_ID_MISMATCH/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 1 with evidence-dir missing evidence files', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+
+        // Compile manifest
+        const r0 = cliRun(COMPILE_MANIFEST, tasksPath, join(dir, 'manifest.json'));
+        expect(r0.status).toBe(0);
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+
+        // Create canonical evidence dir (empty — missing evidence files)
+        const evidenceDir = join(dir, 'delivery', 'stages', manifest.stage_id, 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath, evidenceDir);
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/MISSING_EVIDENCE_FILE/i);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+
+    test('exit 0 with evidence-dir and all evidence files present', () => {
+      const dir = tmpDir();
+      try {
+        const tasksPath = join(dir, 'tasks.md');
+        writeFileSync(tasksPath, VALID_TASKS_MD, 'utf-8');
+
+        // Compile manifest
+        const r0 = cliRun(COMPILE_MANIFEST, tasksPath, join(dir, 'manifest.json'));
+        expect(r0.status).toBe(0);
+        const manifestPath = join(dir, 'manifest.json');
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+
+        // Create evidence files matching manifest evidence_path
+        const evidenceDir = join(dir, 'delivery', 'stages', 'S01', 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+        for (const slice of manifest.slices) {
+          const fileName = basename(slice.evidence_path);
+          writeFileSync(join(evidenceDir, fileName), `# ${slice.slice_id} Evidence`, 'utf-8');
+        }
+
+        const r = cliRun(VALIDATE_STAGE, tasksPath, manifestPath, evidenceDir);
+        expect(r.status).toBe(0);
+        expect(r.stdout).toMatch(/passed/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 15000);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  //  Batch 5: derive-next-action.js CLI
+  // ────────────────────────────────────────────────────────────────────────────
+
+  describe('derive-next-action.js', () => {
+
+    test('valid state.json → outputs JSON action, exit 0', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'state.json');
+        writeJSON(statePath, {
+          stage_gate: { gate_run: false, gate_passed: false },
+          slices: [{
+            slice_id: 'S01-A',
+            dependencies: [],
+            tasks: [{ task_id: 'S01-A-T1', checked: false, evidence_written: false }],
+            slice_evidence_finalized: false,
+            cv_status: 'NOT_RUN',
+            repair_attempt: 0,
+            scope_check_passed: false,
+            committed: false,
+            integrated: false,
+            complete: false,
+          }],
+          stage_committed: false,
+          stage_integrated: false,
+        });
+
+        const { stdout, stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+
+        expect(status).toBe(0);
+        expect(stderr).toBe('');
+
+        const action = JSON.parse(stdout);
+        expect(action.action_type).toBe('implement');
+        expect(action.slice_id).toBe('S01-A');
+        expect(action.task_id).toBe('S01-A-T1');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('missing state.json path → stderr usage, exit 1', () => {
+      const { stdout, stderr, status } = cliRun(DERIVE_NEXT_ACTION);
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/Usage/);
+      expect(stdout).toBe('');
+    });
+
+    test('nonexistent state file → stderr error, exit 1', () => {
+      const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, '/nonexistent/state.json');
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/Cannot read state file/);
+    });
+
+    test('invalid JSON → stderr error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'bad.json');
+        writeFileSync(statePath, 'not valid json', 'utf-8');
+
+        const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/Invalid JSON/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('missing stage_gate → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'bad.json');
+        writeJSON(statePath, {
+          slices: [],
+          stage_committed: false,
+          stage_integrated: false,
+        });
+
+        const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/stage_gate/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('non-array slices → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'bad.json');
+        writeJSON(statePath, {
+          stage_gate: { gate_run: false, gate_passed: false },
+          slices: 'not array',
+          stage_committed: false,
+          stage_integrated: false,
+        });
+
+        const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/slices.*must be an array/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('invalid cv_status → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'bad.json');
+        writeJSON(statePath, {
+          stage_gate: { gate_run: false, gate_passed: false },
+          slices: [{
+            slice_id: 'S01-A',
+            dependencies: [],
+            tasks: [],
+            slice_evidence_finalized: false,
+            cv_status: 'INVALID',
+            repair_attempt: 0,
+            committed: false,
+            integrated: false,
+            complete: false,
+          }],
+          stage_committed: false,
+          stage_integrated: false,
+        });
+
+        const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/cv_status/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('negative repair_attempt → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const statePath = join(dir, 'bad.json');
+        writeJSON(statePath, {
+          stage_gate: { gate_run: false, gate_passed: false },
+          slices: [{
+            slice_id: 'S01-A',
+            dependencies: [],
+            tasks: [],
+            slice_evidence_finalized: false,
+            cv_status: 'NOT_RUN',
+            repair_attempt: -1,
+            committed: false,
+            integrated: false,
+            complete: false,
+          }],
+          stage_committed: false,
+          stage_integrated: false,
+        });
+
+        const { stderr, status } = cliRun(DERIVE_NEXT_ACTION, statePath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/repair_attempt/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  //  Batch 5: update-current-cv-status.js CLI
+  // ────────────────────────────────────────────────────────────────────────────
+
+  describe('update-current-cv-status.js', () => {
+
+    test('valid options.json → outputs JSON result, exit 0', () => {
+      const dir = tmpDir();
+      try {
+        // Create canonical evidence directory
+        const evidenceDir = join(dir, 'delivery', 'stages', 'S01', 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+
+        // Write a valid evidence file at canonical path
+        const evidencePath = join(evidenceDir, 'S01-A.md');
+        writeFileSync(evidencePath, `# Slice S01-A Evidence
+
+## Current CV Status
+
+- Status: NOT_RUN
+- Level: *Not yet determined*
+- Latest CV Receipt: *None*
+- Open Finding: *None*
+
+## Other
+`, 'utf-8');
+
+        // Write options with required canonical fields
+        const optsPath = join(dir, 'opts.json');
+        writeJSON(optsPath, {
+          evidencePath,
+          status: 'READY_FOR_CV',
+          stageId: 'S01',
+          sliceId: 'S01-A',
+          deliveryRoot: dir,
+        });
+
+        const { stdout, stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+
+        expect(status).toBe(0);
+        expect(stderr).toBe('');
+
+        const result = JSON.parse(stdout);
+        expect(result.success).toBe(true);
+        expect(result.modified).toBe(true);
+
+        // Verify the file was actually updated
+        const content = readFileSync(evidencePath, 'utf-8');
+        expect(content).toContain('- Status: READY_FOR_CV');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('missing options path → stderr usage, exit 1', () => {
+      const { stdout, stderr, status } = cliRun(UPDATE_CV_STATUS);
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/Usage/);
+      expect(stdout).toBe('');
+    });
+
+    test('nonexistent options file → stderr error, exit 1', () => {
+      const { stderr, status } = cliRun(UPDATE_CV_STATUS, '/nonexistent/opts.json');
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/ENOENT|no such file|Cannot read/);
+    });
+
+    test('invalid JSON → stderr error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const optsPath = join(dir, 'bad.json');
+        writeFileSync(optsPath, 'not json', 'utf-8');
+
+        const { stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/Invalid JSON/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('missing evidencePath → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const optsPath = join(dir, 'bad.json');
+        writeJSON(optsPath, { status: 'READY_FOR_CV', stageId: 'S01', sliceId: 'S01-A', deliveryRoot: dir });
+
+        const { stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/evidencePath/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('empty status string → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const optsPath = join(dir, 'bad.json');
+        writeJSON(optsPath, { evidencePath: '/some/path.md', status: '' });
+
+        const { stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/status/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('non-string cvLevel → Validation Error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const optsPath = join(dir, 'bad.json');
+        writeJSON(optsPath, { evidencePath: "/some/path.md", status: "READY_FOR_CV", cvLevel: 42, stageId: "S01", sliceId: "S01-A", deliveryRoot: dir });
+
+        const { stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/cvLevel/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('evidence missing section → library fail, exit 1', () => {
+      const dir = tmpDir();
+      try {
+                // Create canonical evidence directory
+        const evidenceDir = join(dir, 'delivery', 'stages', 'S01', 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+
+        // Evidence file without ## Current CV Status section
+        const evidencePath = join(evidenceDir, 'S01-A.md');
+        writeFileSync(evidencePath, '# Slice\n\n## Task Evidence\n\nNo CV status here.\n', 'utf-8');
+
+        const optsPath = join(dir, 'opts.json');
+        writeJSON(optsPath, { evidencePath, status: 'READY_FOR_CV', stageId: 'S01', sliceId: 'S01-A', deliveryRoot: dir });
+
+        const { stdout, stderr, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stdout).toMatch(/missing/);
+        expect(stdout).toMatch(/Current CV Status/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('evidence missing - Status: line → library fail, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const evidenceDir = join(dir, 'delivery', 'stages', 'S01', 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+
+        const evidencePath = join(evidenceDir, 'S01-A.md');
+        writeFileSync(evidencePath, `# Slice
+
+## Current CV Status
+
+- Level: standard
+- Latest CV Receipt: *None*
+
+## Other
+`, 'utf-8');
+
+        const optsPath = join(dir, 'opts.json');
+        writeJSON(optsPath, { evidencePath, status: 'READY_FOR_CV', stageId: 'S01', sliceId: 'S01-A', deliveryRoot: dir });
+
+        const { stdout, status } = cliRun(UPDATE_CV_STATUS, optsPath);
+        expect(status).toBe(1);
+        expect(stdout).toMatch(/- Status:/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

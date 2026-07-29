@@ -15,7 +15,7 @@ Conditional requirements per boundary type:
 - Stage Validator PASS
 - Manifest compiled and stored at `.proofloop/manifests/<stage-id>.json`
 - SPV PLAN_READY
-- tasks.md, evidence.md, and manifest digest are consistent (SHA-256 of Manifest matches what is referenced in the boundary)
+- Manifest-declared Slice Evidence is complete; manifest digest is consistent (SHA-256 of Manifest matches what is referenced in the boundary)
 - Stage plan is on a clean branch with stable Git boundary
 
 ### stage-close preconditions
@@ -25,7 +25,7 @@ Conditional requirements per boundary type:
 - Stage Gate Receipt path is valid and readable
 - Stage Review Receipt path is valid and readable
 - Integrated snapshot content matches receipts (receipt snapshot digest matches working tree state)
-- evidence.md contains finalised Evidence for all Slices
+- Manifest-declared Slice Evidence is finalised for all Slices
 
 ## Boundary Type
 
@@ -58,7 +58,7 @@ Note: `slice-output` is dispatched by Executor, not Brain, and is not part of th
 
 Boundary closed with commit hash, or blocked with reason.
 
-`stage-plan` output includes the compiled Manifest alongside tasks.md/evidence.md.
+`stage-plan` output includes the compiled Manifest alongside tasks.md and per-Slice Evidence declared in the Manifest.
 
 `stage-close` output includes final progress.md summary and confirmed receipt paths.
 

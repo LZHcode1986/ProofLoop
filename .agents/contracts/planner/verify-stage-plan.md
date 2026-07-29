@@ -4,13 +4,13 @@ Planner must run SPV verification before returning to Brain.
 
 ## When to use
 
-After writing `tasks.md` and `evidence.md`, before returning to Brain.
+After writing `tasks.md` and compiling `.proofloop/manifests/<stage-id>.json`, before returning to Brain.
 
 ## Verification chain
 
 ```text
-Tasks.md + Evidence.md written
-  → Stage Validator (mechanical) — python .agents/validators/proofloop-validate-stage.py
+Tasks.md + `.proofloop/manifests/<stage-id>.json` + Evidence directory written
+  → Stage Validator (mechanical) — validate-stage <tasks.md> .proofloop/manifests/<stage-id>.json <evidence-dir>
   → SPV (semantic) — stage-plan-verifier task agent
   → Return to Brain
 ```
@@ -22,13 +22,14 @@ Tasks.md + Evidence.md written
 - Observable Outcomes
 - Authority References
 - `tasks.md` path: `delivery/stages/<stage-id>/tasks.md`
-- `evidence.md` path: `delivery/stages/<stage-id>/evidence.md`
+- `manifest.json` path: `.proofloop/manifests/<stage-id>.json`
+- `evidence-dir` path: `delivery/stages/<stage-id>/evidence/`
 - Slice DAG
 - Blocking Hard Parts status
 
 ## Stage Validator mechanical checks
 
-Planner must run `proofloop-validate-stage.py --stage <stage-id>` before calling SPV.
+Planner must run `validate-stage <tasks.md> .proofloop/manifests/<stage-id>.json <evidence-dir>` before calling SPV.
 
 The validator checks:
 - Required sections present
@@ -79,7 +80,8 @@ Stage Goal: <one sentence>
 Scope: delivery/stages/<stage-id>/
 Stage Validator Result: PASS | FAIL
 tasks.md: <path>
-evidence.md: <path>
+manifest: `.proofloop/manifests/<stage-id>.json`
+evidence-dir: <path>
 Authority References: <refs>
 Blocking Hard Parts: <VALIDATED list>
 Expected Result: PLAN_READY | PLAN_DEFECT | AUTHORITY_GAP | TECHNICAL_UNKNOWN

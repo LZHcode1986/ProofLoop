@@ -25,11 +25,11 @@ The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer i
 - Tech Spec References
 - Stage branch ref
 - tasks.md path
-- evidence.md path
 - Integrated snapshot (commit or tree ref)
 - Manifest digest
 - Stage Gate Receipt ref
-- SCV Receipt refs (one per Slice)
+- Manifest path (`.proofloop/manifests/<stage-id>.json`) — enumerates per-Slice `evidence_path` and CV Receipt refs
+- CV Receipt refs (one per Slice)
 - Stage risk level (low / medium / high / critical)
 - Clean-room requirement (yes / no)
 - **review_scope** (stage | project)

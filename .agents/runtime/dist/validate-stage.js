@@ -1,6 +1,10 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { parseStageFile } from './parse-stage.js';
-import { normalizeRiskFact, ALL_KNOWN_RISK_FACTS } from './compute-scv-level.js';
+import { normalizeRiskFact, ALL_KNOWN_RISK_FACTS } from './compute-cv-level.js';
+import { Manifest as ManifestSchema } from './schemas.js';
 /**
  * Extract the content of a Markdown section by heading name (## or ###).
  */
@@ -32,7 +36,7 @@ function extractListItems(text) {
 function extractIds(text, regex) {
     return [...text.matchAll(regex)].map(m => m[0]);
 }
-export function validateStage(tasksPath, evidencePath) {
+export function validateStage(tasksPath, evidenceDir) {
     const errors = [];
     let text;
     try {
@@ -264,59 +268,378 @@ export function validateStage(tasksPath, evidencePath) {
             }
         }
     }
-    // ── 8. Evidence markers (if evidencePath provided) ──
-    if (evidencePath) {
-        try {
-            const evidenceText = fs.readFileSync(evidencePath, 'utf-8');
-            const evidenceBeginIds = [...evidenceText.matchAll(/<!--\s*EVIDENCE:(\S+):BEGIN\s*-->/g)].map(m => m[1]);
-            const evidenceEndIds = [...evidenceText.matchAll(/<!--\s*EVIDENCE:(\S+):END\s*-->/g)].map(m => m[1]);
-            // Each slice should have a matching evidence marker
-            for (const slice of parsed.slices) {
-                if (!evidenceBeginIds.includes(slice.sliceId)) {
-                    errors.push({
-                        type: 'MISSING_EVIDENCE_MARKER',
-                        message: `Slice ${slice.sliceId} has no EVIDENCE:BEGIN marker in evidence.md`,
-                        sliceId: slice.sliceId,
-                    });
-                }
-            }
-            // Each evidence marker should have a matching slice
-            for (const evId of evidenceBeginIds) {
-                if (!parsed.slices.some(s => s.sliceId === evId)) {
-                    errors.push({
-                        type: 'ORPHANED_EVIDENCE_MARKER',
-                        message: `Evidence marker ${evId} has no matching slice in tasks.md`,
-                        sliceId: evId,
-                    });
-                }
-            }
-            // Evidence BEGIN/END matching
-            for (const id of evidenceBeginIds) {
-                if (!evidenceEndIds.includes(id)) {
-                    errors.push({
-                        type: 'UNCLOSED_EVIDENCE',
-                        message: `Evidence ${id} has BEGIN but no END marker`,
-                        sliceId: id,
-                    });
-                }
-            }
-            for (const id of evidenceEndIds) {
-                if (!evidenceBeginIds.includes(id)) {
-                    errors.push({
-                        type: 'ORPHANED_EVIDENCE_END',
-                        message: `Evidence ${id} has END but no BEGIN marker`,
-                        sliceId: id,
-                    });
-                }
-            }
-        }
-        catch {
+    // ── 8. Per-Slice Evidence file validation (if evidenceDir provided) ──
+    if (evidenceDir) {
+        // Resolve the evidence directory path
+        const resolvedEvidenceDir = path.resolve(evidenceDir);
+        // Check that evidence directory exists
+        if (!fs.existsSync(resolvedEvidenceDir)) {
             errors.push({
-                type: 'EVIDENCE_FILE_ERROR',
-                message: `Cannot read evidence file: ${evidencePath}`,
+                type: 'EVIDENCE_DIR_NOT_FOUND',
+                message: `Evidence directory not found: ${evidenceDir}`,
             });
+        }
+        else {
+            // Check that evidenceDir is a directory
+            const stat = fs.statSync(resolvedEvidenceDir);
+            if (!stat.isDirectory()) {
+                errors.push({
+                    type: 'EVIDENCE_DIR_NOT_DIRECTORY',
+                    message: `Evidence path is not a directory: ${evidenceDir}`,
+                });
+            }
+            else {
+                // Get actual files in the evidence directory
+                let actualFiles;
+                try {
+                    actualFiles = fs.readdirSync(resolvedEvidenceDir);
+                }
+                catch {
+                    actualFiles = [];
+                }
+                // Expected file names (slice-id.md)
+                const expectedFileNames = new Set(parsed.slices.map(s => `${s.sliceId}.md`));
+                // ── 8a. Missing evidence files ──
+                for (const slice of parsed.slices) {
+                    const expectedFileName = `${slice.sliceId}.md`;
+                    if (!actualFiles.includes(expectedFileName)) {
+                        errors.push({
+                            type: 'MISSING_EVIDENCE_FILE',
+                            message: `Slice ${slice.sliceId} is missing its evidence file: ${expectedFileName}`,
+                            sliceId: slice.sliceId,
+                        });
+                    }
+                }
+                // ── 8b. Orphaned/extra evidence files ──
+                for (const fileName of actualFiles) {
+                    // Only check .md files
+                    if (!fileName.endsWith('.md'))
+                        continue;
+                    if (!expectedFileNames.has(fileName)) {
+                        const sliceIdFromFile = fileName.replace(/\.md$/, '');
+                        errors.push({
+                            type: 'ORPHANED_EVIDENCE_FILE',
+                            message: `Evidence file "${fileName}" has no matching slice in tasks.md`,
+                            sliceId: sliceIdFromFile,
+                        });
+                    }
+                }
+                // ── 8c. Path traversal check: verify file names don't contain path separators ──
+                for (const slice of parsed.slices) {
+                    const expectedFileName = `${slice.sliceId}.md`;
+                    if (expectedFileName.includes('/') || expectedFileName.includes('\\')) {
+                        errors.push({
+                            type: 'EVIDENCE_PATH_TRAVERSAL',
+                            message: `Slice ${slice.sliceId} has an evidence file name with path separators: ${expectedFileName}`,
+                            sliceId: slice.sliceId,
+                        });
+                    }
+                }
+            }
         }
     }
     return { valid: errors.length === 0, stageId, errors };
+}
+// ── Manifest-based validation ──────────────────────────────────────────────────
+/**
+ * Expected evidence path pattern.
+ * Must be exactly: delivery/stages/<stage-id>/evidence/<slice-id>.md
+ */
+const EVIDENCE_PATH_PATTERN = /^delivery\/stages\/(S\d[\w-]*)\/evidence\/(S\d{2,}-[A-Z])\.md$/;
+/**
+ * Validate a Stage against its compiled Manifest.
+ *
+ * This supersedes the older `validateStage` for manifest-aware validation.
+ * It performs:
+ * 1. All structural tasks.md checks (delegates to `validateStage` internally)
+ * 2. Manifest source_path / source_digest matches the tasks file
+ * 3. Manifest slice IDs match parsed tasks slice IDs (bidirectional union)
+ * 4. Each slice's evidence_path matches the canonical pattern
+ * 5. Evidence file existence/orphan checks against manifest's evidence_path set
+ *
+ * @param manifest  The compiled Manifest object.
+ * @param tasksPath  Path to the tasks.md file.
+ * @param evidenceDir  Optional directory containing per-slice evidence files.
+ */
+export function validateStageWithManifest(manifest, tasksPath, evidenceDir) {
+    const errors = [];
+    // ── 1. Structural tasks.md checks ──
+    const structuralResult = validateStage(tasksPath, undefined);
+    if (!structuralResult.valid) {
+        // Propagate structural errors but continue with manifest-specific checks
+        errors.push(...structuralResult.errors);
+    }
+    // ── 1b. Validate manifest.stage_id matches tasks.md Stage ID ──
+    if (structuralResult.stageId !== 'unknown' && structuralResult.stageId !== manifest.stage_id) {
+        errors.push({
+            type: 'STAGE_ID_MISMATCH',
+            message: `Manifest stage_id "${manifest.stage_id}" does not match tasks.md Stage ID "${structuralResult.stageId}"`,
+        });
+    }
+    // ── 1c. Reject duplicate manifest slice_id ──
+    const manifestSliceIdSet = new Set();
+    for (const slice of manifest.slices) {
+        if (manifestSliceIdSet.has(slice.slice_id)) {
+            errors.push({
+                type: 'DUPLICATE_MANIFEST_SLICE_ID',
+                message: `Manifest contains duplicate slice_id: "${slice.slice_id}"`,
+                sliceId: slice.slice_id,
+            });
+        }
+        manifestSliceIdSet.add(slice.slice_id);
+    }
+    // ── 1d. Reject duplicate manifest evidence_path ──
+    const manifestEvidencePathSet = new Set();
+    for (const slice of manifest.slices) {
+        if (slice.evidence_path && manifestEvidencePathSet.has(slice.evidence_path)) {
+            errors.push({
+                type: 'DUPLICATE_MANIFEST_EVIDENCE_PATH',
+                message: `Manifest contains duplicate evidence_path: "${slice.evidence_path}"`,
+                sliceId: slice.slice_id,
+            });
+        }
+        if (slice.evidence_path) {
+            manifestEvidencePathSet.add(slice.evidence_path);
+        }
+    }
+    // We need the tasks content for slice set comparison
+    let tasksText;
+    try {
+        tasksText = fs.readFileSync(tasksPath, 'utf-8');
+    }
+    catch {
+        errors.push({
+            type: 'FILE_ERROR',
+            message: `Cannot read tasks file: ${tasksPath}`,
+        });
+        return { valid: false, stageId: manifest.stage_id, errors };
+    }
+    // ── 2. Validate manifest source_path matches tasksPath ──
+    // Normalize both paths for comparison (resolve relative paths)
+    const resolvedTasksPath = path.resolve(tasksPath);
+    const manifestSourcePath = manifest.source_path;
+    const resolvedSourcePath = path.resolve(manifestSourcePath);
+    if (resolvedSourcePath !== resolvedTasksPath) {
+        errors.push({
+            type: 'MANIFEST_SOURCE_PATH_MISMATCH',
+            message: `Manifest source_path "${manifestSourcePath}" (resolved: "${resolvedSourcePath}") ` +
+                `does not match provided tasksPath "${tasksPath}" (resolved: "${resolvedTasksPath}")`,
+        });
+    }
+    // ── 3. Validate manifest source_digest matches tasks.md SHA-256 ──
+    const computedDigest = crypto.createHash('sha256').update(tasksText, 'utf-8').digest('hex');
+    if (manifest.source_digest !== computedDigest) {
+        errors.push({
+            type: 'MANIFEST_SOURCE_DIGEST_MISMATCH',
+            message: `Manifest source_digest "${manifest.source_digest}" does not match ` +
+                `computed SHA-256 of tasks.md: "${computedDigest}"`,
+        });
+    }
+    // ── 4. Parse tasks slices for comparison ──
+    const parsed = parseStageFile(tasksPath);
+    const tasksSliceIds = new Set(parsed.slices.map(s => s.sliceId));
+    const manifestSliceIds = new Set(manifest.slices.map(s => s.slice_id));
+    // Slices in manifest but not in tasks
+    for (const sliceId of manifestSliceIds) {
+        if (!tasksSliceIds.has(sliceId)) {
+            errors.push({
+                type: 'SLICE_IN_MANIFEST_NOT_IN_TASKS',
+                message: `Slice "${sliceId}" is in manifest but not found in tasks.md`,
+                sliceId,
+            });
+        }
+    }
+    // Slices in tasks but not in manifest
+    for (const sliceId of tasksSliceIds) {
+        if (!manifestSliceIds.has(sliceId)) {
+            errors.push({
+                type: 'SLICE_IN_TASKS_NOT_IN_MANIFEST',
+                message: `Slice "${sliceId}" is in tasks.md but not found in manifest`,
+                sliceId,
+            });
+        }
+    }
+    // ── 5. Validate each slice's evidence_path pattern ──
+    for (const slice of manifest.slices) {
+        const evidencePath = slice.evidence_path;
+        if (!evidencePath) {
+            errors.push({
+                type: 'MISSING_EVIDENCE_PATH',
+                message: `Slice "${slice.slice_id}" has no evidence_path in manifest`,
+                sliceId: slice.slice_id,
+            });
+            continue;
+        }
+        const match = evidencePath.match(EVIDENCE_PATH_PATTERN);
+        if (!match) {
+            errors.push({
+                type: 'INVALID_EVIDENCE_PATH_PATTERN',
+                message: `Slice "${slice.slice_id}" evidence_path "${evidencePath}" does not match ` +
+                    `expected pattern "delivery/stages/<stage-id>/evidence/<slice-id>.md"`,
+                sliceId: slice.slice_id,
+            });
+        }
+        else {
+            if (match[1] !== manifest.stage_id) {
+                errors.push({
+                    type: 'EVIDENCE_PATH_STAGE_ID_MISMATCH',
+                    message: `Slice "${slice.slice_id}" evidence_path "${evidencePath}" ` +
+                        `has stage ID "${match[1]}" but manifest stage_id is "${manifest.stage_id}"`,
+                    sliceId: slice.slice_id,
+                });
+            }
+            if (match[2] !== slice.slice_id) {
+                errors.push({
+                    type: 'EVIDENCE_PATH_SLICE_ID_MISMATCH',
+                    message: `Slice "${slice.slice_id}" evidence_path "${evidencePath}" ` +
+                        `has slice ID "${match[2]}" but slice slice_id is "${slice.slice_id}"`,
+                    sliceId: slice.slice_id,
+                });
+            }
+        }
+    }
+    // ── 6. Evidence file validation against manifest's evidence_path set ──
+    if (evidenceDir) {
+        const resolvedEvidenceDir = path.resolve(evidenceDir);
+        // ── 6a. Verify evidenceDir matches the canonical stage evidence directory ──
+        // The canonical evidence dir suffix is: delivery/stages/<stage-id>/evidence/
+        // We check that the resolved path ends with this suffix (handles both
+        // absolute and relative paths).
+        const canonicalSuffix = path.join('delivery', 'stages', manifest.stage_id, 'evidence');
+        const resolvedStr = resolvedEvidenceDir.replace(/\\/g, '/');
+        const canonicalSuffixStr = canonicalSuffix.replace(/\\/g, '/');
+        if (!resolvedStr.endsWith(canonicalSuffixStr)) {
+            errors.push({
+                type: 'EVIDENCE_DIR_MISMATCH',
+                message: `Evidence directory "${evidenceDir}" (resolved: "${resolvedEvidenceDir}") ` +
+                    `does not match the canonical Manifest-declared evidence directory suffix ` +
+                    `"${canonicalSuffix}". The evidence-dir must point to the Manifest-declared ` +
+                    `stage evidence location: delivery/stages/<stage-id>/evidence/.`,
+            });
+        }
+        else if (!fs.existsSync(resolvedEvidenceDir)) {
+            errors.push({
+                type: 'EVIDENCE_DIR_NOT_FOUND',
+                message: `Evidence directory not found: ${evidenceDir}`,
+            });
+        }
+        else {
+            const stat = fs.statSync(resolvedEvidenceDir);
+            if (!stat.isDirectory()) {
+                errors.push({
+                    type: 'EVIDENCE_DIR_NOT_DIRECTORY',
+                    message: `Evidence path is not a directory: ${evidenceDir}`,
+                });
+            }
+            else {
+                let actualFiles;
+                try {
+                    actualFiles = fs.readdirSync(resolvedEvidenceDir);
+                }
+                catch {
+                    actualFiles = [];
+                }
+                // Build expected file names from manifest's evidence_path values
+                const expectedFileNames = new Set(manifest.slices
+                    .filter(s => s.evidence_path)
+                    .map(s => path.basename(s.evidence_path)));
+                // ── 6b. Missing evidence files ──
+                for (const slice of manifest.slices) {
+                    if (!slice.evidence_path)
+                        continue; // already reported above
+                    const expectedFileName = path.basename(slice.evidence_path);
+                    if (!actualFiles.includes(expectedFileName)) {
+                        errors.push({
+                            type: 'MISSING_EVIDENCE_FILE',
+                            message: `Slice "${slice.slice_id}" is missing its evidence file: ${expectedFileName} ` +
+                                `(declared in manifest as "${slice.evidence_path}")`,
+                            sliceId: slice.slice_id,
+                        });
+                    }
+                }
+                // ── 6c. Orphaned/extra evidence files ──
+                for (const fileName of actualFiles) {
+                    if (!fileName.endsWith('.md'))
+                        continue;
+                    if (!expectedFileNames.has(fileName)) {
+                        const sliceIdFromFile = fileName.replace(/\.md$/, '');
+                        errors.push({
+                            type: 'ORPHANED_EVIDENCE_FILE',
+                            message: `Evidence file "${fileName}" has no matching slice in manifest evidence_path`,
+                            sliceId: sliceIdFromFile,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    return { valid: errors.length === 0, stageId: manifest.stage_id, errors };
+}
+// ── CLI entry point ────────────────────────────────────────────────────────────
+/**
+ * CLI usage:
+ * ```
+ * node dist/validate-stage.js <tasks.md> <manifest.json> [evidence-dir]
+ * ```
+ *
+ * Reads and schema-parses the manifest, then performs manifest-aware validation
+ * against the tasks.md file. Exits with code 0 on success, 1 on failure.
+ * All errors are printed to stderr.
+ */
+function isScriptEntry() {
+    const scriptPath = process.argv[1];
+    if (!scriptPath)
+        return false;
+    try {
+        const resolved = path.resolve(scriptPath);
+        const currentFile = fileURLToPath(import.meta.url);
+        return resolved === currentFile;
+    }
+    catch {
+        const base = path.basename(scriptPath);
+        return base === 'validate-stage.js' || base === 'validate-stage.ts';
+    }
+}
+if (isScriptEntry()) {
+    const tasksPath = process.argv[2];
+    const manifestPath = process.argv[3];
+    const evidenceDir = process.argv[4];
+    if (!tasksPath || !manifestPath) {
+        console.error('Usage: node dist/validate-stage.js <tasks.md> <manifest.json> [evidence-dir]');
+        process.exit(1);
+    }
+    // Check that tasks file exists
+    if (!fs.existsSync(tasksPath)) {
+        console.error(`Tasks file not found: ${tasksPath}`);
+        process.exit(1);
+    }
+    // Check that manifest file exists
+    if (!fs.existsSync(manifestPath)) {
+        console.error(`Manifest file not found: ${manifestPath}`);
+        process.exit(1);
+    }
+    // Read and schema-parse manifest
+    let manifest;
+    try {
+        const content = fs.readFileSync(manifestPath, 'utf-8');
+        const parsed = JSON.parse(content);
+        manifest = ManifestSchema.parse(parsed);
+    }
+    catch (err) {
+        console.error(`Manifest schema validation failed: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+    }
+    // Perform manifest-aware validation
+    const result = validateStageWithManifest(manifest, tasksPath, evidenceDir || undefined);
+    // Print all errors to stderr
+    for (const err of result.errors) {
+        const sliceInfo = err.sliceId ? ` (slice: ${err.sliceId})` : '';
+        console.error(`[${err.type}] ${err.message}${sliceInfo}`);
+    }
+    if (!result.valid) {
+        process.exit(1);
+    }
+    console.log('Stage validation passed.');
+    process.exit(0);
 }
 //# sourceMappingURL=validate-stage.js.map

@@ -46,7 +46,7 @@ The `review_scope` field determines the scope and verdict set for the review.
 
 | Scope | Verdict set | Inputs |
 |---|---|---|
-| `stage` (default) | `ACCEPTED` / `REJECTED` / `BLOCKED` | Stage Goal, Observable Outcomes, Stage Gate Receipt, SCV Receipts |
+| `stage` (default) | `ACCEPTED` / `REJECTED` / `BLOCKED` | Stage Goal, Observable Outcomes, Stage Gate Receipt, Manifest path (enumerates per-Slice `evidence_path` and CV Receipts) |
 | `project` | `PROJECT_ACCEPTED` / `PROJECT_REJECTED` / `PROJECT_BLOCKED` | PRD Goals, all Stage Review Receipts, all Stage Gate Receipts, end-to-end scenarios |
 
 When `review_scope` is not specified, `stage` is the default.

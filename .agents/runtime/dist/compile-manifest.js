@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import YAML from 'yaml';
 import { parseStageFile } from './parse-stage.js';
-import { computeScvLevel } from './compute-scv-level.js';
+import { computeCvLevel } from './compute-cv-level.js';
 import { RuntimeProofStep } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
 /**
@@ -156,8 +156,10 @@ export function compileManifest(tasksPath) {
                 });
             }
         }
-        // Determine SCV minimum level from Risk Facts (not from manual scv_minimum_level field)
-        const scvMinimumLevel = computeScvLevel(sliceRiskFacts);
+        // Determine CV minimum level from Risk Facts
+        const cvMinimumLevel = computeCvLevel(sliceRiskFacts);
+        // Build evidence path: delivery/stages/<stage-id>/evidence/<slice-id>.md
+        const evidencePath = `delivery/stages/${stageId}/evidence/${slice.sliceId}.md`;
         return {
             slice_id: slice.sliceId,
             goal,
@@ -167,7 +169,8 @@ export function compileManifest(tasksPath) {
             proof_obligations: proofObligations,
             tasks,
             risk_facts: sliceRiskFacts,
-            scv_minimum_level: scvMinimumLevel,
+            evidence_path: evidencePath,
+            cv_minimum_level: cvMinimumLevel,
         };
     });
     // ── Helper: parse YAML steps using the yaml library ──

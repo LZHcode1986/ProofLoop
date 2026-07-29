@@ -35,7 +35,7 @@ You do not:
 - broaden task scope
 - fix Active Stage Slices
 - modify authority documents
-- modify Stage tasks.md/evidence.md
+- modify Stage tasks.md or Manifest-declared Slice Evidence
 
 ## Stop conditions
 

@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { validateStage } from '../src/validate-stage.js';
+import crypto from 'node:crypto';
+import { validateStage, validateStageWithManifest } from '../src/validate-stage.js';
+import { compileManifest } from '../src/compile-manifest.js';
 
 let tmpDir: string;
 
@@ -548,5 +550,365 @@ describe('validateStage', () => {
     const result = validateStage(tasksPath);
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.type === 'MISSING_RISK_FACTS')).toBe(true);
+  });
+
+  // ── Evidence file validation ──
+
+  test('detects missing evidence directory', () => {
+    const tasksPath = writeFixture('tasks.md', validTasksMd());
+    const result = validateStage(tasksPath, '/nonexistent/evidence-dir');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'EVIDENCE_DIR_NOT_FOUND')).toBe(true);
+  });
+
+  test('detects missing evidence files for slices', () => {
+    const tasksPath = writeFixture('tasks.md', validTasksMd());
+    // Create an evidence directory with no files
+    const evidenceDir = path.join(tmpDir, 'evidence');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+
+    const result = validateStage(tasksPath, evidenceDir);
+    expect(result.valid).toBe(false);
+
+    // Both slices should have missing evidence files
+    const missingErrors = result.errors.filter(e => e.type === 'MISSING_EVIDENCE_FILE');
+    expect(missingErrors.length).toBeGreaterThanOrEqual(2);
+    expect(missingErrors.some(e => e.sliceId === 'S01-A')).toBe(true);
+    expect(missingErrors.some(e => e.sliceId === 'S01-B')).toBe(true);
+  });
+
+  test('detects orphaned evidence files (no matching slice)', () => {
+    const tasksPath = writeFixture('tasks.md', validTasksMd());
+    const evidenceDir = path.join(tmpDir, 'evidence');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+
+    // Create valid evidence files
+    fs.writeFileSync(path.join(evidenceDir, 'S01-A.md'), '# S01-A Evidence', 'utf-8');
+    fs.writeFileSync(path.join(evidenceDir, 'S01-B.md'), '# S01-B Evidence', 'utf-8');
+
+    // Create an orphaned file with no matching slice
+    fs.writeFileSync(path.join(evidenceDir, 'ORPHAN-X.md'), '# Orphan', 'utf-8');
+
+    const result = validateStage(tasksPath, evidenceDir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'ORPHANED_EVIDENCE_FILE')).toBe(true);
+    expect(result.errors.some(e => e.sliceId === 'ORPHAN-X')).toBe(true);
+  });
+
+  test('passes with all evidence files present', () => {
+    const tasksPath = writeFixture('tasks.md', validTasksMd());
+    const evidenceDir = path.join(tmpDir, 'evidence');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+
+    // Create all required evidence files
+    fs.writeFileSync(path.join(evidenceDir, 'S01-A.md'), '# S01-A Evidence', 'utf-8');
+    fs.writeFileSync(path.join(evidenceDir, 'S01-B.md'), '# S01-B Evidence', 'utf-8');
+
+    const result = validateStage(tasksPath, evidenceDir);
+    // Should have no evidence-related errors
+    const evidenceErrors = result.errors.filter(e =>
+      ['MISSING_EVIDENCE_FILE', 'ORPHANED_EVIDENCE_FILE', 'EVIDENCE_DIR_NOT_FOUND',
+       'EVIDENCE_DIR_NOT_DIRECTORY'].includes(e.type)
+    );
+    expect(evidenceErrors).toHaveLength(0);
+  });
+
+  test('reports error when evidence path is a file instead of directory', () => {
+    const tasksPath = writeFixture('tasks.md', validTasksMd());
+    const evidenceFile = path.join(tmpDir, 'evidence-file.md');
+    fs.writeFileSync(evidenceFile, '# Not a dir', 'utf-8');
+
+    const result = validateStage(tasksPath, evidenceFile);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'EVIDENCE_DIR_NOT_DIRECTORY')).toBe(true);
+  });
+});
+
+describe('validateStageWithManifest', () => {
+  function makeAndCompile(tasksMd: string): { tasksPath: string; manifest: ReturnType<typeof compileManifest> } {
+    const tasksPath = path.join(tmpDir, 'tasks.md');
+    fs.writeFileSync(tasksPath, tasksMd, 'utf-8');
+    const manifest = compileManifest(tasksPath);
+    return { tasksPath, manifest };
+  }
+
+  test('passes with valid manifest and matching tasks', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const result = validateStageWithManifest(manifest, tasksPath);
+    // Should pass structural checks; manifest source_path/digest are auto-computed
+    // Note: source_path will be the absolute path since compileManifest resolves
+    // We check that errors don't contain MANIFEST-specific failures
+    const manifestErrors = result.errors.filter(e =>
+      ['MANIFEST_SOURCE_PATH_MISMATCH', 'MANIFEST_SOURCE_DIGEST_MISMATCH',
+       'SLICE_IN_MANIFEST_NOT_IN_TASKS', 'SLICE_IN_TASKS_NOT_IN_MANIFEST',
+       'MISSING_EVIDENCE_PATH', 'INVALID_EVIDENCE_PATH_PATTERN',
+       'EVIDENCE_PATH_STAGE_ID_MISMATCH', 'EVIDENCE_PATH_SLICE_ID_MISMATCH',
+      ].includes(e.type)
+    );
+    expect(manifestErrors).toHaveLength(0);
+  });
+
+  test('detects manifest source_path mismatch', () => {
+    const { manifest } = makeAndCompile(validTasksMd());
+    // Override the source_path in the manifest to create a mismatch
+    const tampered = { ...manifest, source_path: 'different-tasks.md' };
+    const result = validateStageWithManifest(tampered, path.join(tmpDir, 'tasks.md'));
+    expect(result.errors.some(e => e.type === 'MANIFEST_SOURCE_PATH_MISMATCH')).toBe(true);
+  });
+
+  test('detects manifest source_digest mismatch', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const tampered = { ...manifest, source_digest: '0000000000000000000000000000000000000000000000000000000000000000' };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'MANIFEST_SOURCE_DIGEST_MISMATCH')).toBe(true);
+  });
+
+  test('detects slice in manifest but not in tasks', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Add an extra slice to the manifest that doesn't exist in tasks
+    const tampered = {
+      ...manifest,
+      slices: [
+        ...manifest.slices,
+        {
+          slice_id: 'S01-Z',
+          goal: 'Fake slice',
+          observable_outcome: 'Fake',
+          public_seam: 'Fake',
+          dependencies: [],
+          proof_obligations: [],
+          tasks: [],
+          risk_facts: ['none'],
+          evidence_path: 'delivery/stages/S01/evidence/S01-Z.md',
+          cv_minimum_level: 'lite',
+        },
+      ],
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'SLICE_IN_MANIFEST_NOT_IN_TASKS')).toBe(true);
+  });
+
+  test('detects slice in tasks but not in manifest', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const tampered = { ...manifest, slices: manifest.slices.slice(0, 1) }; // Remove S01-B
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'SLICE_IN_TASKS_NOT_IN_MANIFEST')).toBe(true);
+  });
+
+  test('detects invalid evidence_path pattern', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const tampered = {
+      ...manifest,
+      slices: manifest.slices.map((s, i) =>
+        i === 0 ? { ...s, evidence_path: 'wrong/path.md' } : s,
+      ),
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'INVALID_EVIDENCE_PATH_PATTERN')).toBe(true);
+  });
+
+  test('detects evidence_path stage ID mismatch', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const tampered = {
+      ...manifest,
+      slices: manifest.slices.map((s, i) =>
+        i === 0 ? { ...s, evidence_path: 'delivery/stages/S99/evidence/S01-A.md' } : s,
+      ),
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'EVIDENCE_PATH_STAGE_ID_MISMATCH')).toBe(true);
+  });
+
+  test('detects evidence_path slice ID mismatch', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const tampered = {
+      ...manifest,
+      slices: manifest.slices.map((s, i) =>
+        i === 0 ? { ...s, evidence_path: 'delivery/stages/S01/evidence/S99-Z.md' } : s,
+      ),
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'EVIDENCE_PATH_SLICE_ID_MISMATCH')).toBe(true);
+  });
+
+  // ── Helper to create canonical evidence directory structure ──
+  function makeCanonicalEvidenceDir(stageId: string): string {
+    const dir = path.join(tmpDir, 'delivery', 'stages', stageId, 'evidence');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  test('detects missing evidence files against manifest evidence_path', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const evidenceDir = makeCanonicalEvidenceDir(manifest.stage_id);
+
+    // Don't create any evidence files
+    const result = validateStageWithManifest(manifest, tasksPath, evidenceDir);
+    expect(result.valid).toBe(false);
+    const missingErrors = result.errors.filter(e => e.type === 'MISSING_EVIDENCE_FILE');
+    // Should report missing files for all manifest slices
+    expect(missingErrors.length).toBe(manifest.slices.length);
+  });
+
+  test('detects orphaned evidence files against manifest evidence_path', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const evidenceDir = makeCanonicalEvidenceDir(manifest.stage_id);
+
+    // Create all required evidence files plus an orphan
+    for (const slice of manifest.slices) {
+      const fileName = path.basename(slice.evidence_path);
+      fs.writeFileSync(path.join(evidenceDir, fileName), `# ${slice.slice_id} Evidence`, 'utf-8');
+    }
+    fs.writeFileSync(path.join(evidenceDir, 'ORPHAN-X.md'), '# Orphan', 'utf-8');
+
+    const result = validateStageWithManifest(manifest, tasksPath, evidenceDir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.type === 'ORPHANED_EVIDENCE_FILE')).toBe(true);
+  });
+
+  test('passes with all evidence files present', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const evidenceDir = makeCanonicalEvidenceDir(manifest.stage_id);
+
+    // Create all required evidence files
+    for (const slice of manifest.slices) {
+      const fileName = path.basename(slice.evidence_path);
+      fs.writeFileSync(path.join(evidenceDir, fileName), `# ${slice.slice_id} Evidence`, 'utf-8');
+    }
+
+    const result = validateStageWithManifest(manifest, tasksPath, evidenceDir);
+    const evidenceErrors = result.errors.filter(e =>
+      ['MISSING_EVIDENCE_FILE', 'ORPHANED_EVIDENCE_FILE', 'EVIDENCE_DIR_NOT_FOUND',
+       'EVIDENCE_DIR_NOT_DIRECTORY', 'INVALID_EVIDENCE_PATH_PATTERN',
+       'EVIDENCE_PATH_STAGE_ID_MISMATCH', 'EVIDENCE_PATH_SLICE_ID_MISMATCH',
+       'MISSING_EVIDENCE_PATH',
+      ].includes(e.type)
+    );
+    expect(evidenceErrors).toHaveLength(0);
+  });
+
+  // ── EVIDENCE_DIR_MISMATCH tests ──
+
+  test('detects when evidence-dir does not match canonical stage evidence directory', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Use an evidence directory that doesn't match the canonical location
+    const nonCanonicalDir = path.join(tmpDir, 'wrong-evidence');
+    fs.mkdirSync(nonCanonicalDir, { recursive: true });
+
+    const result = validateStageWithManifest(manifest, tasksPath, nonCanonicalDir);
+    expect(result.errors.some(e => e.type === 'EVIDENCE_DIR_MISMATCH')).toBe(true);
+  });
+
+  test('passes with canonical evidence directory', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Use the canonical evidence directory structure
+    const canonicalDir = makeCanonicalEvidenceDir(manifest.stage_id);
+
+    // Create required evidence files
+    for (const slice of manifest.slices) {
+      const fileName = path.basename(slice.evidence_path);
+      fs.writeFileSync(path.join(canonicalDir, fileName), `# ${slice.slice_id} Evidence`, 'utf-8');
+    }
+
+    const result = validateStageWithManifest(manifest, tasksPath, canonicalDir);
+    const evidenceErrors = result.errors.filter(e =>
+      ['MISSING_EVIDENCE_FILE', 'ORPHANED_EVIDENCE_FILE', 'EVIDENCE_DIR_NOT_FOUND',
+       'EVIDENCE_DIR_NOT_DIRECTORY', 'EVIDENCE_DIR_MISMATCH',
+       'INVALID_EVIDENCE_PATH_PATTERN',
+      ].includes(e.type)
+    );
+    expect(evidenceErrors).toHaveLength(0);
+  });
+
+  // ── Round-trip test: compile → validate matches itself ──
+  test('compiled manifest validates against its own tasks file', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const result = validateStageWithManifest(manifest, tasksPath);
+    // The compileManifest function sets source_path to the exact path provided,
+    // which should match what we pass. No MANIFEST_SOURCE_PATH_MISMATCH expected.
+    expect(result.errors.some(e => e.type === 'MANIFEST_SOURCE_PATH_MISMATCH')).toBe(false);
+    expect(result.errors.some(e => e.type === 'MANIFEST_SOURCE_DIGEST_MISMATCH')).toBe(false);
+    expect(result.errors.some(e => e.type === 'SLICE_IN_MANIFEST_NOT_IN_TASKS')).toBe(false);
+    expect(result.errors.some(e => e.type === 'SLICE_IN_TASKS_NOT_IN_MANIFEST')).toBe(false);
+  });
+
+  // ── Fail-closed checks ──
+
+  test('detects manifest stage_id mismatch with tasks.md Stage ID', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Tamper with stage_id in manifest (S99 vs S01)
+    const tampered = { ...manifest, stage_id: 'S99' };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'STAGE_ID_MISMATCH')).toBe(true);
+  });
+
+  test('detects duplicate manifest slice_id', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Add a duplicate slice with the same slice_id
+    const tampered = {
+      ...manifest,
+      slices: [
+        ...manifest.slices,
+        { ...manifest.slices[0] }, // duplicate S01-A
+      ],
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'DUPLICATE_MANIFEST_SLICE_ID')).toBe(true);
+  });
+
+  test('detects duplicate manifest evidence_path', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Add a slice with the same evidence_path
+    const tampered = {
+      ...manifest,
+      slices: [
+        ...manifest.slices,
+        {
+          slice_id: 'S01-Z',
+          goal: 'Fake slice',
+          observable_outcome: 'Fake',
+          public_seam: 'Fake',
+          dependencies: [],
+          proof_obligations: [],
+          tasks: [],
+          risk_facts: ['none'],
+          evidence_path: manifest.slices[0].evidence_path, // same as first slice
+          cv_minimum_level: 'lite',
+        },
+      ],
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'DUPLICATE_MANIFEST_EVIDENCE_PATH')).toBe(true);
+  });
+
+  test('detects both duplicate slice_id and evidence_path simultaneously', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    // Add two duplicates
+    const tampered = {
+      ...manifest,
+      slices: [
+        ...manifest.slices,
+        { ...manifest.slices[0] }, // duplicate S01-A with same evidence_path
+        { ...manifest.slices[manifest.slices.length - 1] }, // duplicate S01-B with same evidence_path
+      ],
+    };
+    const result = validateStageWithManifest(tampered, tasksPath);
+    expect(result.errors.some(e => e.type === 'DUPLICATE_MANIFEST_SLICE_ID')).toBe(true);
+    expect(result.errors.some(e => e.type === 'DUPLICATE_MANIFEST_EVIDENCE_PATH')).toBe(true);
+  });
+
+  // ── Combined test: valid manifest still passes all new checks ──
+  test('passes all fail-closed checks with a valid compiled manifest', () => {
+    const { tasksPath, manifest } = makeAndCompile(validTasksMd());
+    const result = validateStageWithManifest(manifest, tasksPath);
+    // None of the fail-closed error types should appear
+    const failClosedTypes = [
+      'STAGE_ID_MISMATCH',
+      'DUPLICATE_MANIFEST_SLICE_ID',
+      'DUPLICATE_MANIFEST_EVIDENCE_PATH',
+    ];
+    for (const type of failClosedTypes) {
+      expect(result.errors.some(e => e.type === type)).toBe(false);
+    }
   });
 });

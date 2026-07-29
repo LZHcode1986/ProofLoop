@@ -2,10 +2,15 @@
 
 A Stage fixture designed to validate the full Runtime Proof lifecycle (Stage Gate) execution.
 
+## Per-Slice Evidence
+
+The single Slice S01-A has its own evidence file at `delivery/stages/S00-GATE/evidence/S01-A.md`,
+referenced via the Manifest `evidence_path` model.
+
 ## Contents
 
-- `tasks.md` — Stage with one Slice and a complete `## Stage Runtime Proof` YAML section
-- `evidence.md` — Empty placeholder template
+- `delivery/stages/S00-GATE/tasks.md` — Stage with one Slice and a complete `## Stage Runtime Proof` YAML section
+- `delivery/stages/S00-GATE/evidence/S01-A.md` — Slice evidence for the Runtime Proof Slice
 
 ## Runtime Proof Steps
 

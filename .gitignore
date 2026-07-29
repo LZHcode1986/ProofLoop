@@ -1,5 +1,7 @@
 docs/
 .proofloop/
+.pi-subagents/
+.codegraph/
 
 __pycache__/
 *.pyc
