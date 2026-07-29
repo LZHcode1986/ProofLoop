@@ -97,7 +97,7 @@ export const ProjectAcceptanceManifestSchema = z.object({
   project_id: z.string().min(1),
   expected_snapshot: z.string().regex(/^[a-f0-9]{16}$/i, 'expected_snapshot must be a 16-char hex digest'),
   prd_goals: z.array(z.string().min(1)).min(1),
-  acceptance_criteria: z.array(z.string().min(1)).min(1),
+  acceptance_criteria: z.array(z.string().trim().min(1)).min(1),
   stage_receipts: z.array(z.object({
     stage_id: z.string().min(1),
     stage_manifest: z.object({
@@ -232,7 +232,7 @@ export const ProjectReviewResultSchema = z.object({
     digest: z.string().regex(/^[a-f0-9]{16}$/i),
   }),
   criteria_results: z.array(z.object({
-    criteria: z.string().min(1),
+    criteria: z.string().trim().min(1),
     passed: z.boolean(),
     notes: z.string().optional(),
   })),

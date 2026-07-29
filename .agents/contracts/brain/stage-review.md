@@ -148,8 +148,27 @@ The Stage Reviewer returns a structured verdict only. The Stage Reviewer does **
 
 ```
 Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
-→ Brain calls writeStageReviewReceipt() from .agents/runtime/src/receipt-writer.ts
-   Receipt written to .proofloop/receipts/stage-review-<stage-id>.json
+→ Brain invokes receipt-writer CLI:
+     node .agents/runtime/dist/receipt-writer.js stage-review '<json-input>'
+   JSON input:
+   {
+     "outputDir": ".proofloop/receipts",
+     "data": {
+       "stage_id": "S01",
+       "verdict": "ACCEPTED",
+       "snapshot": "16-char-hex",
+       "manifest_digest": "16-char-hex",
+       "stage_gate_receipt": {
+         "path": ".proofloop/receipts/stage-gate-S01.json",
+         "digest": "16-char-hex"
+       },
+       "findings": [],
+       "reviewer": "stage-reviewer",
+       "reviewed_at": "ISO-8601"
+     }
+   }
+   Exit 0 → stdout returns absolute Receipt path; Brain verifies file exists
+   Exit 1 → stderr contains error message; Brain routes to recovery
 → Brain routes to STAGE_CLOSE (if ACCEPTED) or typed recovery
 ```
 
