@@ -18,7 +18,7 @@ import { CvReceipt, SliceCommitReceipt, SliceIntegrationReceipt } from '../src/s
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slice-boundary-test-'));
+  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'slice-boundary-test-')));
   // Initialize a git repository in tmpDir
   execFileSync('git', ['init'], { cwd: tmpDir, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpDir, stdio: 'ignore' });
@@ -492,7 +492,7 @@ describe('findLatestIntegrationReceipt', () => {
     const sliceCommit = createCommit('file1.txt', 'v1');
 
     // Create an orphan commit that's not related to HEAD
-    const orphanDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orphan-repo-'));
+    const orphanDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'orphan-repo-')));
     execFileSync('git', ['init'], { cwd: orphanDir, stdio: 'ignore' });
     execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: orphanDir, stdio: 'ignore' });
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: orphanDir, stdio: 'ignore' });
