@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "test": "node --experimental-vm-modules node_modules/jest-cli/bin/jest.js",
+    "test": "node --experimental-vm-modules node_modules/jest-cli/bin/jest.js --maxWorkers=2",
     "typecheck": "tsc --noEmit",
     "validate-stage": "node dist/validate-stage.js",
     "compile-manifest": "node dist/compile-manifest.js",
