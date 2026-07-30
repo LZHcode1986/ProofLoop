@@ -19,10 +19,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Manifest as ManifestSchema, CvReceipt as CvReceiptSchema, StageGateReceipt } from './schemas.js';
-import type { Manifest, CvReceipt, StageGateReceipt as StageGateReceiptType, SliceCompleteFacts } from './schemas.js';
+import type { Manifest, CvReceipt, CvLifecycleState, StageGateReceipt as StageGateReceiptType, SliceCompleteFacts } from './schemas.js';
 import type {
   DeriveNextActionInput,
   SliceDeriveState,
@@ -30,73 +29,35 @@ import type {
   StageGateState,
   CvStatus,
 } from './derive-next-action.js';
+import {
+  canonicalCvStatus,
+} from './derive-next-action.js';
 import { assertRegularFileBelowTrustedRoot } from './canonical-artifact-path.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
+import { findLatestSliceCommitReceipt, findLatestIntegrationReceipt } from './slice-boundary-receipts.js';
 
 // ── Input interface ───────────────────────────────────────────────────────────
 
 export interface ReconcileStageStateInput {
   /** Stage ID to reconcile. */
   stage_id: string;
+  /**
+   * Project root directory. All artifact paths are validated against and
+   * resolved relative to this trusted root.
+   *
+   * Canonical directories are derived deterministically:
+   *   cv:          projectRoot/.proofloop/receipts/cv
+   *   committer:   projectRoot/.proofloop/receipts/committer
+   *   integration: projectRoot/.proofloop/receipts/integration
+   *   stage-gate:  projectRoot/.proofloop/receipts/stage-gate
+   */
+  project_root: string;
   /** Path to the compiled Manifest JSON. */
   manifest_path: string;
   /** Path to the tasks.md file. */
   tasks_path: string;
-  /** Root directory for CV receipts (default: .proofloop/receipts/cv/). */
-  cv_receipt_root?: string;
-  /** Root directory for integration receipts (default: .proofloop/receipts/integration/). */
-  integration_receipt_root?: string;
   /** Path to an existing Stage Gate receipt (optional). */
   stage_gate_receipt_path?: string;
-  /** Delivery root directory for resolving evidence paths (default: process.cwd()). */
-  delivery_root?: string;
-}
-
-// ── Git helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Return the current HEAD commit SHA from the git repository.
- * Returns null if git is unavailable or not in a repository.
- */
-function getHeadSha(): string | null {
-  try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: process.cwd(),
-      stdio: 'pipe',
-      encoding: 'utf-8',
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check whether a commit exists and is an ancestor of HEAD.
- * Returns { exists, ancestor }.
- */
-function hasCommitAncestor(commitSha: string): { exists: boolean; ancestor: boolean } {
-  if (!/^[a-f0-9]{40}$/i.test(commitSha)) return { exists: false, ancestor: false };
-  try {
-    execFileSync('git', ['cat-file', '-e', `${commitSha}^{commit}`], {
-      cwd: process.cwd(),
-      stdio: 'ignore',
-    });
-    execFileSync('git', ['merge-base', '--is-ancestor', commitSha, 'HEAD'], {
-      cwd: process.cwd(),
-      stdio: 'ignore',
-    });
-    return { exists: true, ancestor: true };
-  } catch {
-    try {
-      execFileSync('git', ['cat-file', '-e', `${commitSha}^{commit}`], {
-        cwd: process.cwd(),
-        stdio: 'ignore',
-      });
-      return { exists: true, ancestor: false };
-    } catch {
-      return { exists: false, ancestor: false };
-    }
-  }
 }
 
 // ── tasks.md parsing ──────────────────────────────────────────────────────────
@@ -491,57 +452,65 @@ export function collectAllCvReceipts(
   return receipts;
 }
 
-// ── Integration status ────────────────────────────────────────────────────────
+// ── Authoritative CV Status derivation ────────────────────────────────────────
 
 /**
- * Check if a slice has a persisted integration receipt with status 'integrated'.
+ * Derive the authoritative CV lifecycle state from persisted facts, and
+ * determine whether the mutable evidence `## Current CV Status` display state
+ * must be synchronized.
  *
- * Integration receipts are stored at:
- *   <integrationRoot>/<stageId>/<sliceId>/<filename>.json
+ * Rules:
+ * - If a latest CV receipt exists → map verdict to canonical lifecycle state.
+ * - If all tasks checked + evidence finalized + no receipt → READY_FOR_CV.
+ * - Otherwise → retain the canonicalized persisted status (no upgrade).
  *
- * The receipt JSON must be parseable, must contain stage_id, slice_id, commit_sha
- * matching the expected values, and must have status === 'integrated'.
+ * statusSyncRequired = canonicalize(persistedStatus) !== authoritativeStatus
+ * statusSyncTarget = authoritativeStatus when sync is required, undefined otherwise.
  */
-export function checkSliceIntegrated(
-  integrationRoot: string,
-  stageId: string,
-  sliceId: string,
-  _commitSha?: string,
-): boolean {
-  const integrationDir = path.resolve(integrationRoot, stageId, sliceId);
+export function deriveAuthoritativeCvStatus(input: {
+  persistedStatus: CvStatus;
+  allTasksChecked: boolean;
+  sliceEvidenceFinalized: boolean;
+  latestReceipt: CvReceipt | null;
+}): { authoritativeStatus: CvLifecycleState; statusSyncRequired: boolean; statusSyncTarget?: CvLifecycleState } {
+  const { persistedStatus, allTasksChecked, sliceEvidenceFinalized, latestReceipt } = input;
 
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(integrationDir);
-  } catch {
-    return false;
-  }
+  let authoritativeStatus: CvLifecycleState;
 
-  const jsonFiles = entries.filter(e => e.toLowerCase().endsWith('.json'));
-
-  for (const file of jsonFiles) {
-    const filePath = path.join(integrationDir, file);
-    try {
-      // Only accept regular files
-      const stat = fs.lstatSync(filePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) continue;
-
-      const content = fs.readFileSync(filePath, 'utf-8').trim();
-      if (!content) continue;
-
-      const parsed: unknown = JSON.parse(content);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
-
-      const record = parsed as Record<string, unknown>;
-      if (record.stage_id !== stageId || record.slice_id !== sliceId) continue;
-      if (_commitSha && record.commit_sha !== _commitSha) continue;
-      if (record.status === 'integrated') return true;
-    } catch {
-      continue;
+  if (latestReceipt) {
+    switch (latestReceipt.verdict) {
+      case 'PASS':
+        authoritativeStatus = 'CV_PASS';
+        break;
+      case 'REPLAN':
+        authoritativeStatus = 'CV_REPLAN_REQUIRED';
+        break;
+      case 'BLOCKED':
+        authoritativeStatus = 'CV_BLOCKED';
+        break;
+      case 'ESCALATION_REQUIRED':
+        authoritativeStatus = 'CV_ESCALATION_REQUIRED';
+        break;
+      case 'REPAIR':
+        // Worker repair 完成后，Evidence Status 会先进入 CV_VERIFYING。
+        if (persistedStatus === 'CV_VERIFYING' || persistedStatus === 'PENDING_RECHECK') {
+          authoritativeStatus = 'CV_VERIFYING';
+        } else {
+          authoritativeStatus = 'CV_REPAIR_REQUIRED';
+        }
+        break;
     }
+  } else if (allTasksChecked && sliceEvidenceFinalized) {
+    authoritativeStatus = 'READY_FOR_CV';
+  } else {
+    authoritativeStatus = canonicalCvStatus(persistedStatus);
   }
 
-  return false;
+  const canonicalPersisted = canonicalCvStatus(persistedStatus);
+  const statusSyncRequired = canonicalPersisted !== authoritativeStatus;
+  const statusSyncTarget: CvLifecycleState | undefined = statusSyncRequired ? authoritativeStatus : undefined;
+
+  return { authoritativeStatus, statusSyncRequired, statusSyncTarget };
 }
 
 // ── Stage Gate receipt reading ────────────────────────────────────────────────
@@ -573,6 +542,10 @@ export function readStageGateReceipt(receiptPath: string): StageGateReceiptType 
  * This is the deterministic bridge between persisted facts (manifest, tasks.md,
  * evidence files, receipts, git) and the deriveNextAction state machine.
  *
+ * All artifact paths are validated against the project_root as the trust root,
+ * using shared canonical-artifact-path helpers.  No file outside the project
+ * root is accepted.
+ *
  * @param input - Paths and identifiers for the reconciliation.
  * @returns A fully populated DeriveNextActionInput ready for deriveNextAction().
  * @throws If required files cannot be read or parsed, or if manifest validation fails.
@@ -580,13 +553,20 @@ export function readStageGateReceipt(receiptPath: string): StageGateReceiptType 
 export function reconcileStageState(input: ReconcileStageStateInput): DeriveNextActionInput {
   const {
     stage_id,
+    project_root,
     manifest_path,
     tasks_path,
-    cv_receipt_root = path.resolve(process.cwd(), '.proofloop', 'receipts', 'cv'),
-    integration_receipt_root = path.resolve(process.cwd(), '.proofloop', 'receipts', 'integration'),
     stage_gate_receipt_path,
-    delivery_root = process.cwd(),
   } = input;
+
+  // Resolve and validate project_root
+  const resolvedProjectRoot = path.resolve(project_root);
+  // We do not call assertDirectoryBelowTrustedRoot on the project_root itself
+  // because the trust boundary rule allows system-level aliases at the root.
+  // All files *below* this root are canonicalized.
+
+  // Derive canonical receipt directories from project_root
+  const cvReceiptRoot = path.join(resolvedProjectRoot, '.proofloop', 'receipts', 'cv');
 
   // ── 1. Read and validate Manifest ──
   let manifest: Manifest;
@@ -594,10 +574,10 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
   try {
     const resolvedManifestPath = assertRegularFileBelowTrustedRoot(
       path.resolve(manifest_path),
-      delivery_root,
+      resolvedProjectRoot,
     );
     if (!resolvedManifestPath) {
-      throw new Error(`Manifest path "${manifest_path}" does not resolve to a regular file within the delivery root.`);
+      throw new Error(`Manifest path "${manifest_path}" does not resolve to a regular file within the project root.`);
     }
     const content = fs.readFileSync(resolvedManifestPath, 'utf-8');
     manifestData = JSON.parse(content);
@@ -624,10 +604,10 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
   try {
     const resolvedTasksPath = assertRegularFileBelowTrustedRoot(
       path.resolve(tasks_path),
-      delivery_root,
+      resolvedProjectRoot,
     );
     if (!resolvedTasksPath) {
-      throw new Error(`Tasks path "${tasks_path}" does not resolve to a regular file within the delivery root.`);
+      throw new Error(`Tasks path "${tasks_path}" does not resolve to a regular file within the project root.`);
     }
     tasksMd = fs.readFileSync(resolvedTasksPath, 'utf-8');
   } catch (err) {
@@ -638,18 +618,25 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
     );
   }
 
-  // ── 3. Read Stage Gate receipt (before slice loop for Fix B+C) ──
+  // ── 3. Read Stage Gate receipt (before slice loop) ──
   let stageGateState: StageGateState = {};
 
   if (stage_gate_receipt_path) {
-    const receipt = readStageGateReceipt(stage_gate_receipt_path);
-    if (receipt) {
-      stageGateState = {
-        receipt,
-        receipt_path: path.resolve(stage_gate_receipt_path),
-        gate_run: true,
-        gate_passed: receipt.verdict === 'PASS',
-      };
+    // Canonicalize the stage gate receipt path before reading
+    const resolvedGatePath = assertRegularFileBelowTrustedRoot(
+      path.resolve(stage_gate_receipt_path),
+      resolvedProjectRoot,
+    );
+    if (resolvedGatePath) {
+      const receipt = readStageGateReceipt(resolvedGatePath);
+      if (receipt) {
+        stageGateState = {
+          receipt,
+          receipt_path: resolvedGatePath,
+          gate_run: true,
+          gate_passed: receipt.verdict === 'PASS',
+        };
+      }
     }
   }
 
@@ -664,11 +651,11 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
     const taskCheckboxes = parseTaskCheckboxes(tasksMd, slice_id, taskIds);
 
     // ── Read slice evidence file ──
-    // Evidence path from manifest is relative to delivery_root
-    const evidenceFullPath = path.resolve(delivery_root, evidence_path);
+    // Evidence path from manifest is relative to project_root
+    const evidenceFullPath = path.resolve(resolvedProjectRoot, evidence_path);
     let evidenceContent: string | null = null;
     try {
-      const resolvedEvPath = assertRegularFileBelowTrustedRoot(evidenceFullPath, delivery_root);
+      const resolvedEvPath = assertRegularFileBelowTrustedRoot(evidenceFullPath, resolvedProjectRoot);
       if (resolvedEvPath) {
         evidenceContent = fs.readFileSync(resolvedEvPath, 'utf-8');
       }
@@ -696,8 +683,8 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
     }
 
     // ── Read CV receipts ──
-    const latestReceipt = findLatestCvReceipt(cv_receipt_root, stage_id, slice_id);
-    const sliceReceipts = collectAllCvReceipts(cv_receipt_root, stage_id, slice_id);
+    const latestReceipt = findLatestCvReceipt(cvReceiptRoot, stage_id, slice_id);
+    const sliceReceipts = collectAllCvReceipts(cvReceiptRoot, stage_id, slice_id);
     allCvReceipts.push(...sliceReceipts);
 
     // If there's a latest receipt, update repair_attempt from receipt history
@@ -710,79 +697,74 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
       repairAttempt = Math.max(0, repairReceiptCount - 1);
     }
 
-    // ── Map slice_complete_facts from Stage Gate receipt (Fix B) ──
-    let sliceCompleteFacts: SliceCompleteFacts | null = null;
-    if (stageGateState.receipt && stageGateState.receipt.slice_complete_facts) {
-      const facts = stageGateState.receipt.slice_complete_facts.find(
-        (f: SliceCompleteFacts) => f.slice_id === slice_id
-      );
-      if (facts) {
-        sliceCompleteFacts = facts;
-      }
-    }
+    // ── Derive authoritative CV status from receipts and evidence state ──
+    const allTasksCheckedForSlice = taskCheckboxes.length > 0 && taskCheckboxes.every(t => t.checked);
+    const authoritativeCvResult = deriveAuthoritativeCvStatus({
+      persistedStatus: evCvStatus as CvStatus,
+      allTasksChecked: allTasksCheckedForSlice,
+      sliceEvidenceFinalized: evSliceEvidenceFinalized,
+      latestReceipt: latestReceipt ?? null,
+    });
 
-    // ── Derive committed/integrated/complete (Fix C) ──
-    // Priority: 1. Stage Gate receipt facts (authoritative)
-    //           2. Explicit Committer/Integration receipts
-    //           3. Git status (last resort)
-    let gateDerivedCommitted = false;
-    let gateDerivedIntegrated = false;
-    let gateDerivedComplete = false;
+    // ── Update cv_status to authoritative status ──
+    const authoritativeCvStatus = authoritativeCvResult.authoritativeStatus as CvStatus;
 
-    // Priority 1: Stage Gate receipt has authoritative facts
-    if (sliceCompleteFacts) {
-      gateDerivedCommitted = true;
-      gateDerivedIntegrated = true;
-      gateDerivedComplete = true;
-    }
+    // ── Derive committed/integrated/complete from authoritative receipts ──
+    // Priority: CV PASS + Committer Receipt + Integration Receipt (all must bind).
+    // No longer uses: git status --porcelain, git ls-files --cached, or Stage Gate
+    // receipt facts.  The Stage Gate receipt is only for cross-validation, not for
+    // construction of slice state.
+    const commitBoundary = latestReceipt?.verdict === 'PASS'
+      ? findLatestSliceCommitReceipt(resolvedProjectRoot, stage_id, slice_id)
+      : null;
 
-    if (!gateDerivedIntegrated) {
-      // Priority 2: Check integration receipt (with commit SHA binding)
-      const commitSha = sliceCompleteFacts?.commit?.commit_sha;
-      gateDerivedIntegrated = checkSliceIntegrated(
-        integration_receipt_root,
-        stage_id,
-        slice_id,
-        commitSha,
-      );
-    }
+    const integrationBoundary = commitBoundary
+      ? findLatestIntegrationReceipt(
+          resolvedProjectRoot,
+          stage_id,
+          slice_id,
+          commitBoundary.receipt.slice_commit_sha,
+        )
+      : null;
 
-    if (!gateDerivedCommitted) {
-      // Priority 3: Last resort - git status check (only when no gate receipt)
-      if (latestReceipt && latestReceipt.verdict === 'PASS') {
-        try {
-          const evidenceRelPath = path.relative(process.cwd(), evidenceFullPath);
-          const gitStatus = execFileSync('git', ['status', '--porcelain', evidenceRelPath], {
-            cwd: process.cwd(),
-            stdio: 'pipe',
-            encoding: 'utf-8',
-          }).trim();
-          if (gitStatus.length === 0) {
-            const tracked = execFileSync('git', ['ls-files', '--cached', evidenceRelPath], {
-              cwd: process.cwd(),
-              stdio: 'pipe',
-              encoding: 'utf-8',
-            }).trim();
-            if (tracked.length > 0) {
-              gateDerivedCommitted = true;
-            }
+    const committed = commitBoundary !== null;
+    const integrated = integrationBoundary !== null;
+
+    const complete =
+      taskCheckboxes.every(t => t.checked) &&
+      evSliceEvidenceFinalized &&
+      latestReceipt?.verdict === 'PASS' &&
+      committed &&
+      integrated;
+
+    // ── Construct slice_complete_facts from authoritative receipts ──
+    // Stage Gate receipt facts are only for cross-validation, not construction.
+    // A complete slice requires all three receipts (CV PASS, Commit, Integration)
+    // to be present and bound to the same slice commit SHA.
+    const sliceCompleteFacts: SliceCompleteFacts | null =
+      complete && latestReceipt && commitBoundary && integrationBoundary
+        ? {
+            slice_id,
+            cv: { verdict: 'PASS', receipt_ref: commitBoundary.receipt.cv_receipt_ref },
+            commit: {
+              commit_sha: commitBoundary.receipt.slice_commit_sha,
+              receipt_ref: commitBoundary.path,
+            },
+            integration: {
+              integration_ref: integrationBoundary.path,
+            },
           }
-        } catch {
-          gateDerivedCommitted = false;
-        }
-      }
-    }
-
-    const committed = gateDerivedCommitted;
-    const integrated = gateDerivedIntegrated;
-    const complete = gateDerivedComplete || (committed && integrated);
+        : null;
 
     slices.push({
       slice_id,
       dependencies,
       tasks: taskCheckboxes,
       slice_evidence_finalized: evSliceEvidenceFinalized,
-      cv_status: evCvStatus as CvStatus,
+      cv_status: authoritativeCvStatus,
+      persisted_cv_status: evCvStatus as CvStatus,
+      status_sync_required: authoritativeCvResult.statusSyncRequired,
+      status_sync_target: authoritativeCvResult.statusSyncTarget,
       repair_attempt: repairAttempt,
       scope_check_passed: evScopeCheckPassed,
       latest_cv_receipt: latestReceipt ?? null,
@@ -795,33 +777,11 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
 
 
 
-  // ── 5. Check git state at stage level ──
-  let stageCommitted = false;
-  let stageIntegrated = false;
-  try {
-    // Check if tasks.md is committed
-    const tasksRelPath = path.relative(process.cwd(), path.resolve(tasks_path));
-    const tasksStatus = execFileSync('git', ['status', '--porcelain', tasksRelPath], {
-      cwd: process.cwd(),
-      stdio: 'pipe',
-      encoding: 'utf-8',
-    }).trim();
-    if (tasksStatus.length === 0) {
-      const tracked = execFileSync('git', ['ls-files', '--cached', tasksRelPath], {
-        cwd: process.cwd(),
-        stdio: 'pipe',
-        encoding: 'utf-8',
-      }).trim();
-      if (tracked.length > 0) {
-        stageCommitted = true;
-      }
-    }
-  } catch {
-    stageCommitted = false;
-  }
-
-  // Stage is integrated when all slices are integrated
-  stageIntegrated = slices.length > 0 && slices.every(s => s.integrated);
+  // ── 5. Derive stage-level status from slice facts ──
+  // Stage committed/integrated are derived from slice-level receipt facts,
+  // not from git status.  No git status --porcelain or git ls-files calls remain.
+  const stageCommitted = slices.length > 0 && slices.every(s => s.committed);
+  const stageIntegrated = slices.length > 0 && slices.every(s => s.integrated);
 
   // ── 6. Build DeriveNextActionInput ──
   const result: DeriveNextActionInput = {
@@ -865,6 +825,8 @@ if (isScriptEntry()) {
     console.error('');
     console.error('Reads a JSON input file conforming to ReconcileStageStateInput');
     console.error('and outputs a DeriveNextActionInput JSON to stdout.');
+    console.error('');
+    console.error('Required fields: stage_id (string), project_root (string), manifest_path (string), tasks_path (string)');
     process.exit(1);
   }
 
@@ -873,8 +835,8 @@ if (isScriptEntry()) {
     const raw = fs.readFileSync(inputPath, 'utf-8');
     const parsed = JSON.parse(raw);
     // Minimal validation
-    if (typeof parsed.stage_id !== 'string' || typeof parsed.manifest_path !== 'string' || typeof parsed.tasks_path !== 'string') {
-      throw new Error('Input must contain stage_id (string), manifest_path (string), and tasks_path (string).');
+    if (typeof parsed.stage_id !== 'string' || typeof parsed.project_root !== 'string' || typeof parsed.manifest_path !== 'string' || typeof parsed.tasks_path !== 'string') {
+      throw new Error('Input must contain stage_id (string), project_root (string), manifest_path (string), and tasks_path (string).');
     }
     input = parsed as ReconcileStageStateInput;
   } catch (err) {
@@ -887,6 +849,7 @@ if (isScriptEntry()) {
     console.log(JSON.stringify(result, null, 2));
   } catch (err) {
     console.error(`Error reconciling stage state: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(err);
     process.exit(1);
   }
 }

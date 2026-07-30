@@ -38,6 +38,7 @@ export type NextActionType =
   | 'recover'
   | 'implement'
   | 'finalize'
+  | 'sync_cv_status'
   | 'initial_cv'
   | 'recheck_cv'
   | 'repair'
@@ -58,7 +59,7 @@ export type CvStatus = CvLifecycleState |
   // separation. Legacy routed verdict strings are intentionally not accepted.
   'PENDING_RECHECK' | 'PASS' | 'REPAIR';
 
-function canonicalCvStatus(status: CvStatus): CvLifecycleState {
+export function canonicalCvStatus(status: CvStatus): CvLifecycleState {
   switch (status) {
     case 'PASS': return 'CV_PASS';
     case 'REPAIR': return 'CV_REPAIR_REQUIRED';
@@ -99,6 +100,12 @@ export interface SliceDeriveState {
   slice_evidence_finalized: boolean;
   /** Current CV status from `## Current CV Status > Status`. */
   cv_status: CvStatus;
+  /** Evidence 文件中实际保存的展示状态。 */
+  persisted_cv_status: CvStatus;
+  /** 是否需要同步 Evidence 中的展示状态到权威状态。 */
+  status_sync_required: boolean;
+  /** 同步目标状态。 */
+  status_sync_target?: CvLifecycleState;
   /** Number of repair attempts so far. */
   repair_attempt: number;
   /** Whether scope check has passed (required before Committer can proceed). */
@@ -326,6 +333,17 @@ export function deriveNextAction(input: DeriveNextActionInput): NextAction {
       return action('finalize', {
         slice_id: slice.slice_id, mode: 'finalize-slice', contract_ref: 'worker', contract: '.agents/contracts/executor/worker.md',
         reason: `Slice "${slice.slice_id}" all ${slice.tasks.length} tasks checked. Worker must finalize Slice Evidence.`,
+      });
+    }
+
+    // ── sync_cv_status: 修复中断导致的展示状态与权威状态不一致 ──
+    if (slice.status_sync_required && slice.status_sync_target) {
+      return action('sync_cv_status', {
+        slice_id: slice.slice_id,
+        mode: 'sync',
+        contract_ref: 'runtime',
+        contract: '.agents/runtime/dist/update-current-cv-status.js',
+        reason: `Persisted CV display state must be synchronized to ${slice.status_sync_target}.`,
       });
     }
 

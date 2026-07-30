@@ -16,6 +16,8 @@
     "write-cv-receipt": "node dist/receipt-writer.js cv",
     "derive-next-action": "node dist/derive-next-action.js",
     "reconcile-stage-state": "node dist/reconcile-stage-state.js",
+    "prepare-stage-gate-facts": "node dist/prepare-stage-gate-facts.js",
+    "executor-next-action": "node dist/executor-next-action.js",
     "update-current-cv-status": "node dist/update-current-cv-status.js"
   },
   "devDependencies": {

@@ -89,23 +89,31 @@ Before every decision point, re-read:
 5. **Git state** — branch, dirty files, current diff, HEAD commit
 6. **Integration state** — whether slice commits have been integrated
 
-### 3. DERIVE NEXT ACTION
+### 3. DERIVE NEXT ACTION (one-step path-only interface)
 
-Construct the full DeriveNextActionInput JSON from reconciled facts and pass
-it to the derive tool:
+The Executor does NOT construct DeriveNextActionInput manually. Instead:
 
-```
-node .agents/runtime/dist/derive-next-action.js <state.json>
-```
+1. Executor only writes a **path-only** `ReconcileStageStateInput` JSON file:
+   ```json
+   {
+     "stage_id": "S01",
+     "project_root": ".",
+     "manifest_path": ".proofloop/manifests/S01.json",
+     "tasks_path": "delivery/stages/S01/tasks.md",
+     "stage_gate_receipt_path": ".proofloop/receipts/stage-gate/S01/stage-gate-S01.json"
+   }
+   ```
+2. Executor runs the one-step resolver:
+   ```
+   node .agents/runtime/dist/executor-next-action.js <reconcile-input.json>
+   ```
+3. The tool internally calls `reconcileStageState` → `deriveNextAction` and
+   outputs exactly one `NextAction` with `action_type`, `slice_id`, `task_id`,
+   `mode`, `contract_ref` (short value), and `reason`.
+4. Executor executes exactly the returned action.
 
-The `state.json` must conform to `DeriveNextActionInput`:
-`{ stage_gate: {...}, slices: [...], stage_committed: bool, stage_integrated: bool }`.
-
-The tool returns exactly one `NextAction` with `action_type`, `slice_id`,
-`task_id`, `mode`, `contract_ref` (short value), and `reason`.
-
-The Executor MUST execute exactly the returned action. It MUST NOT skip steps,
-combine actions, or reorder based on prompt intuition.
+The Executor MUST never create, edit, or override `DeriveNextActionInput`
+fields.  All state construction is handled by the Runtime.
 
 ### 4. EXECUTE ACTION
 
@@ -114,6 +122,7 @@ value; map it to the full contract path:
 
 | action_type | contract_ref (short → full path) | Execute |
 |---|---|---|
+| `sync_cv_status` | — | Run `node .agents/runtime/dist/update-current-cv-status.js <options.json>`; no Agent dispatch. Re-call executor-next-action after completion. |
 | `implement` | `worker` → `.agents/contracts/executor/worker.md` | Dispatch Worker with Mode `implement-task` for exactly the returned `task_id` |
 | `recover` | `worker` → `.agents/contracts/executor/worker.md` | Dispatch Worker with Mode `recover-task` for the returned `task_id` |
 | `finalize` | `worker` → `.agents/contracts/executor/worker.md` | Dispatch Worker with Mode `finalize-slice` |
@@ -141,8 +150,10 @@ After the dispatched agent returns:
 3. If the return was `DISPATCH_MISMATCH` (subtype `MULTIPLE_TASKS_SUPPLIED` or
    `TASK_ORDER_MISMATCH`), re-read `tasks.md` and redispatch the correct single
    task. Do NOT route to Brain.
-4. Call `derive-next-action` to determine the next step
-5. Loop until action_type is `stage_gate_passed` or a return-to-Brain condition
+4. Write a fresh path-only ReconcileStageStateInput JSON reflecting the new state.
+5. Call `node .agents/runtime/dist/executor-next-action.js <reconcile-input.json>`
+   to determine the next step.
+6. Loop until action_type is `stage_gate_passed` or a return-to-Brain condition
 
 ---
 
@@ -236,17 +247,46 @@ pure runtime interruption with completely unchanged inputs may use continuation.
 | BLOCKED | — | Brain |
 | ESCALATION_REQUIRED | — | Brain / human review |
 
+### sync_cv_status Action
+
+When `derive-next-action` returns `action_type: sync_cv_status`:
+
+1. Run `node .agents/runtime/dist/update-current-cv-status.js <options.json>`
+   to synchronize the persisted CV display status in the Slice Evidence file.
+2. Do NOT dispatch an Agent for this action.
+3. Re-call `executor-next-action` to determine the next real action.
+
+This handles interruption recovery from any point in the CV lifecycle:
+- Finalize → evidence NOT_RUN → sync to `READY_FOR_CV`
+- CV PASS receipt written, evidence still `READY_FOR_CV` → sync to `CV_PASS`
+- CV REPAIR receipt written, evidence still `READY_FOR_CV` → sync to `CV_REPAIR_REQUIRED`
+
 ### After CV PASS
 
 1. Confirm the CV PASS receipt has `scope_violations: []`; scope validation is
    receipt-backed and closes through the existing Committer and
    Integration/post-merge steps.
 2. Dispatch Committer (Mode: `slice-output`) — no standalone scope action exists.
-3. Wait for commit hash.
-4. Run integration (`git merge --no-ff --no-edit <slice-commit>`), including
-   post-merge boundary validation.
-5. If integration changes code/test/evidence, re-enter finalization/CV path.
-6. Mark `SLICE_COMPLETE`.
+3. Wait for structured commit result:
+   - Committer returns structured fields (`stage_id`, `slice_id`, `pre_commit_head`,
+     `slice_commit_sha`, `changed_files`, `cv_receipt_ref`, `verified_snapshot`).
+   - Executor does NOT convert natural language to `committed: true`.
+   - Executor constructs a `SliceCommitReceipt` input, calls the Runtime to
+     verify Git commit, CV Receipt, Snapshot, and persists via `writeSliceCommitReceipt`.
+   - Executor must NOT hand-construct the receipt; the Runtime is the sole writer.
+4. After the receipt is written, re-call `executor-next-action`.
+5. If the result is `integration`, run:
+   ```
+   git merge --no-ff --no-edit <slice_commit_sha>
+   ```
+   - Run post-merge checks.
+   - Capture `stage_head_before` / `stage_head_after`.
+   - Executor does NOT convert exit codes to `integrated: true`.
+   - Executor constructs `SliceIntegrationReceipt` input; the Runtime verifies
+     and persists the receipt.
+6. After integration receipt is written, re-call `executor-next-action`.
+7. If integration changes code/test/evidence, re-enter finalization/CV path.
+8. Mark `SLICE_COMPLETE`.
 
 ### Slice COMPLETE Condition
 
@@ -291,11 +331,12 @@ When all slices are COMPLETE:
    - `integration`: `{ integration_ref: "<persisted integration artifact path>" }`
 6. Run Stage Gate via:
    ```
-   node .agents/runtime/dist/run-stage.js <manifest-path> <slice-complete-facts-path> [output-dir]
+   node .agents/runtime/dist/run-stage.js <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]
    ```
    - `<manifest-path>` — path to compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`)
    - `<slice-complete-facts-path>` — path to the JSON array from step 5
    - `[output-dir]` — optional output directory (defaults to `.proofloop/receipts/stage-gate/`)
+   - `[project-root]` — optional project root for Git/Snapshot operations (defaults to `process.cwd()`)
 
    The entry point validates the facts array against the `SliceCompleteFacts` schema,
    resolves canonical paths for CV and integration artifacts, then executes the Runtime

@@ -103,8 +103,31 @@ git add delivery/stages/<stage-id>/tasks.md
 git add <evidence_path>   # Slice Evidence at Manifest path
 git add .proofloop/receipts/cv/<stage-id>/<slice-id>/<receipt>.json
 git commit -m "slice-output: <stage-id>-<slice-id>"
-Return: Boundary closed (commit hash: <hash>)
 ```
+
+### slice-output return format
+
+Committer returns structured YAML fields (not free-form prose). Executor uses
+these machine-extractable fields to construct the `SliceCommitReceipt` via the
+Runtime writer.
+
+```yaml
+result: BOUNDARY_CLOSED
+stage_id: <stage-id>
+slice_id: <slice-id>
+pre_commit_head: <40-char sha>
+slice_commit_sha: <40-char sha>
+commit_message: "slice-output: <stage-id>-<slice-id>"
+changed_files:
+  - <path/to/changed/file>
+cv_receipt_ref: .proofloop/receipts/cv/<stage-id>/<slice-id>/<receipt>.json
+verified_snapshot: <same as CV receipt snapshot>
+evidence_path: delivery/stages/<stage-id>/evidence/<slice-id>.md
+tasks_path: delivery/stages/<stage-id>/tasks.md
+```
+
+Committer does NOT write receipt files. Executor passes the structured return
+to the deterministic Runtime writer (`writeSliceCommitReceipt`) for persistence.
 
 Boundary scope closure: fail if unrelated dirty files are present and cannot
 be separated. This is part of Committer closure; no standalone scope action is
@@ -115,6 +138,28 @@ Evidence committed:
 - Slice Evidence at its Manifest-declared `evidence_path` with Task Evidence
   and Current Slice Evidence
 - CV Receipt reference (committed receipt JSON)
+
+### Pre-execution checks (slice-output)
+
+Before staging and committing, Committer MUST verify ALL of the following:
+
+1. **CV Receipt verdict is PASS** — verify the CV receipt file at the
+   supplied `cv_receipt_ref` path contains `verdict: PASS`.
+2. **CV Receipt snapshot matches packet** — the `snapshot` field in the CV
+   receipt MUST equal the `verified_snapshot` value supplied in the dispatch
+   packet.
+3. **CV Receipt is in canonical directory** — the CV receipt file MUST reside
+   under `.proofloop/receipts/cv/<stage-id>/<slice-id>/` (validated against
+   `projectRoot`).
+4. **All expected files are staged** — changed files, `tasks.md`, Slice
+   Evidence, and CV receipt MUST all be present in `git diff --cached
+   --name-only`.
+5. **Staged file set is valid** — every file in `git diff --cached
+   --name-only` MUST belong to the allowed set (changed code/tests, tasks.md,
+   Slice Evidence at its declared path, CV receipt at its canonical path).
+   Files outside this set cause `Boundary blocked`.
+
+If any precondition is not met, return `result: BLOCKED` with the reason.
 
 ### authority-update
 

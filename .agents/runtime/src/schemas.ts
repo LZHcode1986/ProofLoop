@@ -76,6 +76,11 @@ export const Manifest = z.object({
 });
 export type Manifest = z.infer<typeof Manifest>;
 
+// === Generic SHA / ID types ===
+export const GitCommitSha = z.string().regex(/^[a-f0-9]{40}$/i);
+export const SnapshotId = z.string().trim().min(1);
+export const ArtifactRef = z.string().trim().min(1);
+
 // === Receipt Types ===
 export const CvVerdict = z.enum(['PASS', 'REPAIR', 'REPLAN', 'BLOCKED', 'ESCALATION_REQUIRED']);
 export type CvVerdict = z.infer<typeof CvVerdict>;
@@ -98,13 +103,89 @@ export const SliceCompleteFacts = z.object({
   slice_id: SliceId,
   // Receipt references are resolved and read by run-stage; this schema only
   // accepts a meaningful path token (never whitespace or a caller boolean).
-  cv: z.object({ verdict: z.literal('PASS'), receipt_ref: z.string().trim().min(1) }),
+  cv: z.object({ verdict: z.literal('PASS'), receipt_ref: ArtifactRef }),
   // A COMPLETE fact names the actual Git object, not an arbitrary label.
-  commit: z.object({ commit_sha: z.string().regex(/^[a-f0-9]{40}$/i) }),
+  commit: z.object({
+    commit_sha: GitCommitSha,
+    receipt_ref: ArtifactRef,
+  }),
   // Integration refs are persisted artifact references and are checked by the gate.
-  integration: z.object({ integration_ref: z.string().trim().min(1) }),
+  integration: z.object({ integration_ref: ArtifactRef }),
 });
 export type SliceCompleteFacts = z.infer<typeof SliceCompleteFacts>;
+
+/**
+ * Slice Commit Receipt — persists that Committer created a slice-output commit.
+ *
+ * Binds the CV PASS receipt, verified snapshot, and new slice commit together.
+ * The superRefine ensures the commit actually created new content.
+ */
+export const SliceCommitReceipt = z.object({
+  stage_id: StageId,
+  slice_id: SliceId,
+  status: z.literal('committed'),
+
+  pre_commit_head: GitCommitSha,
+  slice_commit_sha: GitCommitSha,
+
+  manifest_digest: z.string().trim().min(1),
+
+  cv_receipt_ref: ArtifactRef,
+  cv_receipt_digest: z.string().regex(/^[a-f0-9]{64}$/i),
+  verified_snapshot: SnapshotId,
+
+  tasks_path: ArtifactRef,
+  evidence_path: ArtifactRef,
+  changed_files: z.array(z.string().trim().min(1)).min(1),
+
+  created_at: z.string().datetime(),
+}).superRefine((data, ctx) => {
+  if (data.pre_commit_head === data.slice_commit_sha) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['slice_commit_sha'],
+      message: 'slice_commit_sha must identify the newly created slice-output commit',
+    });
+  }
+});
+export type SliceCommitReceipt = z.infer<typeof SliceCommitReceipt>;
+
+/**
+ * Slice Integration Receipt — persists that a slice commit was merged into Stage.
+ *
+ * Binds the same CV PASS receipt, snapshot, and slice commit to the integration.
+ * The superRefine ensures integrated_commit_sha === stage_head_after.
+ */
+export const SliceIntegrationReceipt = z.object({
+  stage_id: StageId,
+  slice_id: SliceId,
+  status: z.literal('integrated'),
+
+  slice_commit_sha: GitCommitSha,
+  stage_head_before: GitCommitSha,
+  integrated_commit_sha: GitCommitSha,
+  stage_head_after: GitCommitSha,
+
+  cv_receipt_ref: ArtifactRef,
+  verified_snapshot: SnapshotId,
+  post_merge_snapshot: SnapshotId,
+
+  post_merge_checks: z.array(z.object({
+    id: z.string().trim().min(1),
+    exit_code: z.number().int(),
+  })),
+
+  created_at: z.string().datetime(),
+}).superRefine((data, ctx) => {
+  if (data.integrated_commit_sha !== data.stage_head_after) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['integrated_commit_sha'],
+      message: 'integrated_commit_sha must equal stage_head_after',
+    });
+  }
+});
+export type SliceIntegrationReceipt = z.infer<typeof SliceIntegrationReceipt>;
 
 /**
  * CV (Code Verification) Receipt.
@@ -118,7 +199,7 @@ export const CvReceipt = z.object({
   /** Stage this receipt belongs to. */
   stage_id: StageId,
   /** Content snapshot at time of verification. */
-  snapshot: z.string(),
+  snapshot: SnapshotId,
   /** The CV level at which verification was performed. */
   cv_level: z.enum(['lite', 'standard', 'enhanced']),
   /** Type of verification (e.g. 'initial', 'recheck'). */

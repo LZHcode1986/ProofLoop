@@ -29,6 +29,9 @@ function makeSlice(sliceId: string, overrides?: Partial<SliceDeriveState>): Slic
     tasks: [],
     slice_evidence_finalized: false,
     cv_status: 'NOT_RUN',
+    persisted_cv_status: 'NOT_RUN',
+    status_sync_required: false,
+    status_sync_target: undefined,
     repair_attempt: 0,
     scope_check_passed: false,
     committed: false,
@@ -73,7 +76,7 @@ describe('deriveNextAction', () => {
       fs.writeFileSync(receiptPath, JSON.stringify({
         stage_id: 'S01', snapshot: 'a'.repeat(16), manifest_digest: 'b'.repeat(16),
         completed_slice_ids: ['S01-A'],
-        slice_complete_facts: [{ slice_id: 'S01-A', cv: { verdict: 'PASS', receipt_ref: 'cv/initial-001.json' }, commit: { commit_sha: 'a'.repeat(40) }, integration: { integration_ref: 'integration-001' } }],
+        slice_complete_facts: [{ slice_id: 'S01-A', cv: { verdict: 'PASS', receipt_ref: 'cv/initial-001.json' }, commit: { commit_sha: 'a'.repeat(40), receipt_ref: 'committer/slice-output-001.json' }, integration: { integration_ref: 'integration-001' } }],
         platform: 'test', verdict: 'PASS',
         steps: [{ id: 'proof', exit_code: 0 }],
         service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
@@ -83,7 +86,7 @@ describe('deriveNextAction', () => {
         stage_id: 'S01', manifest_digest: 'b'.repeat(16),
         manifest: { stage_id: 'S01', source_digest: 'source', slices: [{ slice_id: 'S01-A' }] } as any,
         stage_gate: { gate_passed: true, receipt_path: receiptPath },
-        slices: [makeSlice('S01-A', { complete: true, slice_complete_facts: { slice_id: 'S01-A', cv: { verdict: 'PASS', receipt_ref: 'cv/initial-001.json' }, commit: { commit_sha: 'a'.repeat(40) }, integration: { integration_ref: 'integration-001' } } })],
+        slices: [makeSlice('S01-A', { complete: true, slice_complete_facts: { slice_id: 'S01-A', cv: { verdict: 'PASS', receipt_ref: 'cv/initial-001.json' }, commit: { commit_sha: 'a'.repeat(40), receipt_ref: 'committer/slice-output-001.json' }, integration: { integration_ref: 'integration-001' } } })],
       }));
       expect(result.action).toBe('stage_gate_passed');
     } finally {
@@ -687,6 +690,186 @@ describe('deriveNextAction', () => {
       slices: [makeSlice('S01-A', { complete: true })],
     }));
     expect(s8.action_type).toBe('stage_gate');
+  });
+
+  // ── Patch 4: sync_cv_status and CV state recovery scenarios (§11.2) ──
+
+  test('SYNC_CV_STATUS when status_sync_required with target', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'READY_FOR_CV',
+          persisted_cv_status: 'NOT_RUN',
+          status_sync_required: true,
+          status_sync_target: 'READY_FOR_CV',
+        }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('sync_cv_status');
+    expect(result.slice_id).toBe('S01-A');
+    expect(result.mode).toBe('sync');
+    expect(result.contract_ref).toBe('runtime');
+    expect(result.contract).toBe('.agents/runtime/dist/update-current-cv-status.js');
+    expect(result.reason).toContain('READY_FOR_CV');
+  });
+
+  test('SYNC_CV_STATUS fires before CV state machine dispatching', () => {
+    // Even if CV state would normally dispatch something else,
+    // sync_cv_status has higher priority (after finalize, before CV).
+    const result = deriveNextAction(makeInput({
+      slice_id: 'S01',
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'READY_FOR_CV',
+          persisted_cv_status: 'NOT_RUN',
+          status_sync_required: true,
+          status_sync_target: 'READY_FOR_CV',
+          latest_cv_receipt: null,
+        }),
+      ],
+    }));
+
+    // Should NOT return initial_cv because sync_cv_status takes priority
+    expect(result.action_type).toBe('sync_cv_status');
+  });
+
+  test('sync_cv_status does NOT fire when status_sync_required is false', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'READY_FOR_CV',
+          status_sync_required: false,
+          status_sync_target: undefined,
+          latest_cv_receipt: null,
+        }),
+      ],
+    }));
+
+    // Without sync needed, normal CV dispatching occurs
+    expect(result.action_type).toBe('initial_cv');
+  });
+
+  test('sync_cv_status does NOT fire when status_sync_target is undefined', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'READY_FOR_CV',
+          status_sync_required: true,
+          status_sync_target: undefined,
+          latest_cv_receipt: null,
+        }),
+      ],
+    }));
+
+    // Without a target, no sync action — falls through to normal CV
+    expect(result.action_type).toBe('initial_cv');
+  });
+
+  // ── §11.2: 同步后的 READY_FOR_CV → initial_cv ──
+  test('after sync READY_FOR_CV with no receipt → initial_cv', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'READY_FOR_CV',
+          status_sync_required: false, // already synced
+          latest_cv_receipt: null,
+        }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('initial_cv');
+    expect(result.slice_id).toBe('S01-A');
+    expect(result.contract_ref).toBe('code-verifier');
+  });
+
+  // ── §11.2: 同步后的 CV_PASS → committer ──
+  test('after sync CV_PASS with no commit receipt → committer', () => {
+    const result = deriveNextAction(makeInput({
+      stage_id: 'S01',
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'CV_PASS',
+          status_sync_required: false, // already synced
+          scope_check_passed: false,
+          committed: false,
+          latest_cv_receipt: {
+            stage_id: 'S01', slice_id: 'S01-A', snapshot: 'a'.repeat(16), cv_level: 'standard',
+            verification_type: 'initial', verdict: 'PASS',
+            scope_violations: [],
+          } as any,
+        }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('committer');
+    expect(result.slice_id).toBe('S01-A');
+    expect(result.contract_ref).toBe('committer');
+  });
+
+  // ── §11.2: valid commit receipt + no integration → integration ──
+  test('committed but no integration → integration', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'PASS',
+          scope_check_passed: true,
+          committed: true,
+          integrated: false,
+        }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('integration');
+    expect(result.slice_id).toBe('S01-A');
+    expect(result.contract_ref).toBe('integration');
+  });
+
+  // ── §11.2: complete facts closed → slice_complete / stage_gate ──
+  test('committed and integrated with PASS → slice_complete', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', {
+          tasks: [makeTask('S01-A-T1', { checked: true, evidence_written: true })],
+          slice_evidence_finalized: true,
+          cv_status: 'PASS',
+          scope_check_passed: true,
+          committed: true,
+          integrated: true,
+          complete: false,
+        }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('slice_complete');
+    expect(result.slice_id).toBe('S01-A');
+  });
+
+  test('all slices complete → stage_gate', () => {
+    const result = deriveNextAction(makeInput({
+      slices: [
+        makeSlice('S01-A', { complete: true }),
+        makeSlice('S01-B', { complete: true }),
+      ],
+    }));
+
+    expect(result.action_type).toBe('stage_gate');
+    expect(result.reason).toContain('All');
+    expect(result.reason).toContain('slices complete');
   });
 });
 

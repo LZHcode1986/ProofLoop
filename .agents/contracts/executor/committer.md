@@ -37,6 +37,16 @@ Preconditions (all must be true):
   Integration/post-merge closure
 - **Changed Files** (list of file paths to be committed)
 - **Verification Result Reference** (CV receipt path or reference)
+- **Manifest Digest** — SHA-256 digest of the compiled Stage Manifest
+- **Verified Snapshot** — content snapshot from the CV PASS receipt (must match
+  `CV receipt.snapshot`)
+- **CV Receipt canonical path** — the absolute/resolved path to the CV PASS
+  receipt file, already validated to be under the canonical receipt directory
+- **Expected Committer Receipt root** — the canonical root directory for
+  Committer receipts
+  (`.proofloop/receipts/committer/<stage-id>/<slice-id>/`)
+- **Pre-commit HEAD** — the 40-character Git commit SHA of HEAD before the
+  slice-output commit
 
 ## Commit scope
 
@@ -62,6 +72,10 @@ Evidence committed for a slice-output:
 - Include the Slice Evidence file at its Manifest-declared `evidence_path`
 - Fail if unrelated dirty files are present and cannot be separated
 - Commit message: `slice-output: <stage-id>-<slice-id>`
+- **Committer does not authorize Slice COMPLETE.** A persisted
+  `SliceCommitReceipt` written by the deterministic Runtime is required to
+  advance the Slice past Committer. The structured return from Committer is
+  the input to that Runtime writer; it is not itself a completion signal.
 
 ## Packet shape
 
@@ -76,7 +90,23 @@ Scope Outcome: receipt-backed PASS (`scope_violations: []`)
 Changed Files: <list>
 Evidence Path: <manifest evidence_path for this slice>
 CV Receipt Path: <path to CV receipt JSON>
-Expected Result: Boundary closed (returns commit hash) | Boundary blocked
+Manifest Digest: <SHA-256 of compiled Stage Manifest>
+Verified Snapshot: <content snapshot from CV PASS receipt>
+Expected Committer Receipt root: .proofloop/receipts/committer/<stage-id>/<slice-id>/
+Pre-commit HEAD: <40-char sha>
+Expected Result:
+  result: BOUNDARY_CLOSED | BLOCKED
+  stage_id: <Sxx>
+  slice_id: <Sxx-Sx>
+  pre_commit_head: <40-char sha>
+  slice_commit_sha: <40-char sha>
+  commit_message: "slice-output: <stage-id>-<slice-id>"
+  changed_files:
+    - <path>
+  cv_receipt_ref: <CV receipt canonical path>
+  verified_snapshot: <same as CV receipt snapshot>
+  evidence_path: <manifest evidence_path for this slice>
+  tasks_path: delivery/stages/<stage-id>/tasks.md
 ```
 
 ## Session continuation rule
@@ -94,7 +124,8 @@ interruption or any Git/input change requires a fresh Committer.
 
 | Condition | Result |
 |---|---|
-| Unrelated dirty files present and inseparable | `Boundary blocked` |
-| Git add/commit fails | `Boundary blocked` with reason |
-| Precondition not met (no CV PASS) | `Boundary blocked` |
-| Commit succeeds | `Boundary closed (commit hash: <hash>)` |
+| Unrelated dirty files present and inseparable | `result: BLOCKED` |
+| Git add/commit fails | `result: BLOCKED` with reason |
+| Precondition not met (no CV PASS) | `result: BLOCKED` |
+| Pre-execution check fails | `result: BLOCKED` with reason |
+| Commit succeeds | structured YAML with `result: BOUNDARY_CLOSED` (see expected result) |

@@ -30,6 +30,7 @@ const RECEIPT_WRITER = join(DIST_DIR, 'receipt-writer.js');
 const FINALIZE_PROJECT_REVIEW = join(DIST_DIR, 'finalize-project-review.js');
 const DERIVE_NEXT_ACTION = join(DIST_DIR, 'derive-next-action.js');
 const UPDATE_CV_STATUS = join(DIST_DIR, 'update-current-cv-status.js');
+const EXECUTOR_NEXT_ACTION = join(DIST_DIR, 'executor-next-action.js');
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -521,6 +522,14 @@ describe('CLI Integration Tests', () => {
     test('完整往返: compile Stage → run Stage → review → E2E → finalize → PROJECT_ACCEPTED', async () => {
       const dir = tmpDir();
       try {
+        // ── 0. Initialize a git repo in dir (required by stage gate validation) ──
+        execFileSync('git', ['init'], { cwd: dir, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@test.com'], { cwd: dir, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir, stdio: 'pipe' });
+        writeFileSync(join(dir, '.gitkeep'), '');
+        execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'base'], { cwd: dir, stdio: 'pipe' });
+
         // ── 1. Create tasks.md input for compile-manifest ──
         const tasksMdPath = join(dir, 'tasks.md');
         writeFileSync(tasksMdPath, TASKS_MD_CONTENT, 'utf-8');
@@ -534,17 +543,57 @@ describe('CLI Integration Tests', () => {
         const stageManifestRaw = JSON.parse(readFileSync(stageManifestPath, 'utf-8'));
         const stageManifestCanonicalDigest = computeCanonicalJsonDigest(ManifestSchema, stageManifestRaw);
 
-        // ── 3. Run Stage to generate Gate receipt ──
-        // A Stage Gate PASS must be backed by one persisted Slice COMPLETE fact
-        // per manifest slice: CV PASS receipt, commit, and integration.
-        const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-        const cvReceiptPath = join(dir, 'cv-S01-A.json');
-        const integrationPath = join(dir, 'integration-S01-A.json');
+        // ── 2b. Create a slice commit so we have preCommitHead !== sliceCommitSha ──
+        writeFileSync(join(dir, 'output.txt'), 'slice output');
+        execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'slice output'], { cwd: dir, stdio: 'pipe' });
+        const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+        const preCommitHead = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: dir, encoding: 'utf8' }).trim();
+        const snapshot = 'a'.repeat(16);
+
+        // Canonical CV receipt
+        const cvDir = join(dir, '.proofloop', 'receipts', 'cv', 'S01', 'S01-A');
+        mkdirSync(cvDir, { recursive: true });
+        const cvReceiptPath = join(cvDir, 'initial-001.json');
         writeJSON(cvReceiptPath, {
-          stage_id: 'S01', slice_id: 'S01-A', snapshot: 'a'.repeat(16), cv_level: 'standard',
+          stage_id: 'S01', slice_id: 'S01-A', snapshot, cv_level: 'standard',
           verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
         });
-        writeJSON(integrationPath, { stage_id: 'S01', slice_id: 'S01-A', commit_sha: commitSha, status: 'integrated' });
+        const cvDigest = crypto.createHash('sha256').update(readFileSync(cvReceiptPath)).digest('hex');
+
+        // Canonical Committer receipt
+        const committerDir = join(dir, '.proofloop', 'receipts', 'committer', 'S01', 'S01-A');
+        mkdirSync(committerDir, { recursive: true });
+        writeJSON(join(committerDir, 'slice-output-001.json'), {
+          stage_id: 'S01', slice_id: 'S01-A', status: 'committed',
+          pre_commit_head: preCommitHead,
+          slice_commit_sha: commitSha,
+          manifest_digest: stageManifestCanonicalDigest,
+          cv_receipt_ref: cvReceiptPath,
+          cv_receipt_digest: cvDigest,
+          verified_snapshot: snapshot,
+          tasks_path: 'tasks.json', evidence_path: 'evidence.json',
+          changed_files: ['output.txt'],
+          created_at: new Date().toISOString(),
+        });
+
+        // Canonical Integration receipt
+        const intDir = join(dir, '.proofloop', 'receipts', 'integration', 'S01', 'S01-A');
+        mkdirSync(intDir, { recursive: true });
+        const integrationPath = join(intDir, 'integration-001.json');
+        writeJSON(integrationPath, {
+          stage_id: 'S01', slice_id: 'S01-A', status: 'integrated',
+          slice_commit_sha: commitSha,
+          stage_head_before: preCommitHead,
+          integrated_commit_sha: commitSha,
+          stage_head_after: commitSha,
+          cv_receipt_ref: cvReceiptPath,
+          verified_snapshot: snapshot,
+          post_merge_snapshot: 'b'.repeat(16),
+          post_merge_checks: [],
+          created_at: new Date().toISOString(),
+        });
+
         const r1 = await runStageFromManifest({
           manifestPath: stageManifestPath,
           outputDir: dir,
@@ -552,7 +601,7 @@ describe('CLI Integration Tests', () => {
           sliceCompleteFacts: [{
             slice_id: 'S01-A',
             cv: { verdict: 'PASS', receipt_ref: cvReceiptPath },
-            commit: { commit_sha: commitSha },
+            commit: { commit_sha: commitSha, receipt_ref: 'committer/slice-output-001.json' },
             integration: { integration_ref: integrationPath },
           }],
         });
@@ -3224,5 +3273,104 @@ Done.
         rmSync(dir, { recursive: true, force: true });
       }
     });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  //  Batch 6: executor-next-action.js CLI
+  // ────────────────────────────────────────────────────────────────────────────
+
+  describe('executor-next-action.js', () => {
+
+    test('missing input path → stderr usage, exit 1', () => {
+      const { stdout, stderr, status } = cliRun(EXECUTOR_NEXT_ACTION);
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/Usage/);
+      expect(stdout).toBe('');
+    });
+
+    test('nonexistent input file → stderr error, exit 1', () => {
+      const { stderr, status } = cliRun(EXECUTOR_NEXT_ACTION, '/nonexistent/input.json');
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/ENOENT|no such file|Cannot read/);
+    });
+
+    test('invalid JSON file → stderr error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const inputPath = join(dir, 'bad.json');
+        writeFileSync(inputPath, 'not valid json', 'utf-8');
+
+        const { stderr, status } = cliRun(EXECUTOR_NEXT_ACTION, inputPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/Invalid JSON|Error reading input/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('missing required fields → stderr error, exit 1', () => {
+      const dir = tmpDir();
+      try {
+        const inputPath = join(dir, 'bad.json');
+        writeJSON(inputPath, { stage_id: 'S01' });
+
+        const { stderr, status } = cliRun(EXECUTOR_NEXT_ACTION, inputPath);
+        expect(status).toBe(1);
+        expect(stderr).toMatch(/manifest_path|tasks_path|project_root/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test('valid path input with compiled manifest → exit 0, outputs JSON with action', () => {
+      const dir = tmpDir();
+      try {
+        // ── 1. Create project structure ──
+        const projectRoot = dir;
+        const tasksDir = join(dir, 'delivery', 'stages', 'S01');
+        const evidenceDir = join(tasksDir, 'evidence');
+        mkdirSync(evidenceDir, { recursive: true });
+
+        // ── 2. Write tasks.md ──
+        const tasksPath = join(tasksDir, 'tasks.md');
+        writeFileSync(tasksPath, TASKS_MD_CONTENT, 'utf-8');
+
+        // ── 3. Compile manifest ──
+        const manifestPath = join(dir, '.proofloop', 'manifests', 'S01.json');
+        mkdirSync(join(dir, '.proofloop', 'manifests'), { recursive: true });
+        const r0 = cliRun(COMPILE_MANIFEST, tasksPath, manifestPath);
+        expect(r0.status).toBe(0);
+
+        // ── 4. Create reconcile input JSON ──
+        const inputPath = join(dir, 'reconcile-input.json');
+        writeJSON(inputPath, {
+          stage_id: 'S01',
+          project_root: projectRoot,
+          manifest_path: manifestPath,
+          tasks_path: tasksPath,
+        });
+
+        // ── 5. Run executor-next-action ──
+        const { stdout, stderr, status } = cliRun(EXECUTOR_NEXT_ACTION, inputPath);
+        expect(status).toBe(0);
+        expect(stderr).toBe('');
+
+        // ── 6. Verify output ──
+        const result = JSON.parse(stdout);
+        expect(result).toHaveProperty('stage_id', 'S01');
+        expect(result).toHaveProperty('manifest_digest');
+        expect(typeof result.manifest_digest).toBe('string');
+        expect(result.manifest_digest!.length).toBeGreaterThan(0);
+        expect(result).toHaveProperty('action');
+        expect(result.action).toHaveProperty('action_type');
+        expect(result.action).toHaveProperty('action', result.action.action_type);
+        expect(typeof result.action.action_type).toBe('string');
+        expect(result.action).toHaveProperty('reason');
+        expect(typeof result.action.reason).toBe('string');
+        expect(result.action.reason.length).toBeGreaterThan(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 30000);
   });
 });

@@ -9,6 +9,8 @@ import {
   ProjectE2EReceiptSchema,
   WriteProjectReviewReceiptOptionsSchema,
   CvReceipt,
+  SliceCommitReceipt,
+  SliceIntegrationReceipt,
 } from './schemas.js';
 import { z } from 'zod';
 
@@ -202,6 +204,145 @@ export function internalWriteProjectReviewReceipt(outputDir: string, data: z.inf
   return path.resolve(filePath);
 }
 
+// ── Default receipt roots ──────────────────────────────────────────────────────
+
+/**
+ * The default root directory for committer (slice-output) receipts.
+ * `.proofloop/receipts/committer/` under the given project root.
+ */
+export function getDefaultCommitterReceiptRoot(projectRoot = process.cwd()): string {
+  return path.join(projectRoot, '.proofloop', 'receipts', 'committer');
+}
+
+/**
+ * The default root directory for integration receipts.
+ * `.proofloop/receipts/integration/` under the given project root.
+ */
+export function getDefaultIntegrationReceiptRoot(projectRoot = process.cwd()): string {
+  return path.join(projectRoot, '.proofloop', 'receipts', 'integration');
+}
+
+// ── Sequenced JSON receipt writer ─────────────────────────────────────────────
+
+const SEQUENCE_FILE_RE = /^(\w+)-(\d{3})\.json$/;
+
+/**
+ * Write an immutable sequenced JSON receipt to a directory.
+ *
+ * Creates the directory (recursively) if not present, scans existing files
+ * matching `<prefix>-NNN.json` to determine the next sequence number, then
+ * writes using `flag: 'wx'`. If `EEXIST` occurs (concurrent write), rescans
+ * and retries up to a limited number of attempts.
+ *
+ * @param receiptDir - The directory to write into (created if needed).
+ * @param prefix     - Filename prefix (e.g. 'slice-output', 'integration').
+ * @param data       - The data to serialize as JSON.
+ * @returns The absolute path of the written file.
+ */
+function writeSequencedJsonReceipt(
+  receiptDir: string,
+  prefix: string,
+  data: unknown,
+): string {
+  fs.mkdirSync(receiptDir, { recursive: true });
+
+  // Scan existing files to find the global max sequence number
+  let globalMaxSeq = 0;
+  try {
+    const existingFiles = fs.readdirSync(receiptDir);
+    for (const f of existingFiles) {
+      const m = f.match(SEQUENCE_FILE_RE);
+      if (m) {
+        const seq = parseInt(m[2], 10);
+        if (seq > globalMaxSeq) globalMaxSeq = seq;
+      }
+    }
+  } catch {
+    // Directory might not exist yet; mkdirSync above handles that
+  }
+
+  const jsonContent = JSON.stringify(data, null, 2);
+
+  const MAX_RETRIES = 5;
+  let candidateSeq = globalMaxSeq;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    candidateSeq++;
+    const seqStr = String(candidateSeq).padStart(3, '0');
+    const fileName = `${prefix}-${seqStr}.json`;
+    const filePath = path.join(receiptDir, fileName);
+
+    try {
+      fs.writeFileSync(filePath, jsonContent, { encoding: 'utf-8', flag: 'wx' });
+      return path.resolve(filePath);
+    } catch (err: unknown) {
+      if (isFileExistsError(err)) {
+        // Re-scan directory for concurrent writes
+        try {
+          const updatedFiles = fs.readdirSync(receiptDir);
+          for (const uf of updatedFiles) {
+            const um = uf.match(SEQUENCE_FILE_RE);
+            if (um) {
+              const seq = parseInt(um[2], 10);
+              if (seq > globalMaxSeq) globalMaxSeq = seq;
+            }
+          }
+        } catch {
+          // ignore read errors during retry
+        }
+        candidateSeq = globalMaxSeq;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error(
+    `Cannot write sequenced receipt after ${MAX_RETRIES} attempts. ` +
+    `Directory "${receiptDir}" is being contended.`,
+  );
+}
+
+// ── Slice Commit Receipt writer ────────────────────────────────────────────────
+
+/**
+ * Write a SliceCommitReceipt to disk.
+ *
+ * Path: `<receiptRoot>/<stage_id>/<slice_id>/slice-output-NNN.json`
+ *
+ * @param data        - The receipt data (validated against SliceCommitReceipt).
+ * @param receiptRoot - Override root directory; defaults to getDefaultCommitterReceiptRoot().
+ * @returns The absolute path of the written receipt file.
+ */
+export function writeSliceCommitReceipt(
+  data: z.infer<typeof SliceCommitReceipt>,
+  receiptRoot = getDefaultCommitterReceiptRoot(),
+): string {
+  const parsed = SliceCommitReceipt.parse(data);
+  const dir = path.join(receiptRoot, parsed.stage_id, parsed.slice_id);
+  return writeSequencedJsonReceipt(dir, 'slice-output', parsed);
+}
+
+// ── Slice Integration Receipt writer ───────────────────────────────────────────
+
+/**
+ * Write a SliceIntegrationReceipt to disk.
+ *
+ * Path: `<receiptRoot>/<stage_id>/<slice_id>/integration-NNN.json`
+ *
+ * @param data        - The receipt data (validated against SliceIntegrationReceipt).
+ * @param receiptRoot - Override root directory; defaults to getDefaultIntegrationReceiptRoot().
+ * @returns The absolute path of the written receipt file.
+ */
+export function writeSliceIntegrationReceipt(
+  data: z.infer<typeof SliceIntegrationReceipt>,
+  receiptRoot = getDefaultIntegrationReceiptRoot(),
+): string {
+  const parsed = SliceIntegrationReceipt.parse(data);
+  const dir = path.join(receiptRoot, parsed.stage_id, parsed.slice_id);
+  return writeSequencedJsonReceipt(dir, 'integration', parsed);
+}
+
 // ── CV Receipt writer ──────────────────────────────────────────────────────────
 
 /**
@@ -351,23 +492,61 @@ function isScriptEntry(): boolean {
  */
 if (isScriptEntry()) {
   const mode = process.argv[2];
-  const input = JSON.parse(process.argv[3]);
+  const rawArg = process.argv[3];
 
   if (mode === 'stage-review') {
+    const input = JSON.parse(rawArg);
     const result = writeStageReviewReceipt(input.outputDir, input.data);
     console.log(JSON.stringify(result));
   } else if (mode === 'stage-gate') {
+    const input = JSON.parse(rawArg);
     const result = writeStageGateReceipt(input.data, input.receiptRoot);
     console.log(JSON.stringify(result));
   } else if (mode === 'cv') {
+    const input = JSON.parse(rawArg);
     const result = writeCvReceipt(input.data, input.receiptRoot);
+    console.log(JSON.stringify(result));
+  } else if (mode === 'slice-commit') {
+    // Accept JSON from a file path argument: receipt-writer.js slice-commit <input.json>
+    // The file contains the full SliceCommitReceipt data (not wrapped in {data, receiptRoot}).
+    const jsonInput = readCliJsonInput(rawArg);
+    // Cast to any — schema validation inside the writer will catch issues
+    const result = writeSliceCommitReceipt(jsonInput as any);
+    console.log(JSON.stringify(result));
+  } else if (mode === 'integration') {
+    // Accept JSON from a file path argument: receipt-writer.js integration <input.json>
+    const jsonInput = readCliJsonInput(rawArg);
+    const result = writeSliceIntegrationReceipt(jsonInput as any);
     console.log(JSON.stringify(result));
   } else {
     console.error('Usage: node receipt-writer.js stage-review <json-input>');
     console.error('       node receipt-writer.js stage-gate <json-input>');
     console.error('       node receipt-writer.js cv <json-input>');
+    console.error('       node receipt-writer.js slice-commit <input.json>');
+    console.error('       node receipt-writer.js integration <input.json>');
     process.exit(1);
   }
+}
+
+/**
+ * Read JSON input from a file path or from the argument directly.
+ * For slice-commit and integration modes the user passes a file path.
+ */
+function readCliJsonInput(rawArg: string | undefined): Record<string, unknown> {
+  if (!rawArg) {
+    throw new Error('Missing JSON input argument. Provide a file path or inline JSON.');
+  }
+  // If it looks like a file path (contains path separators, dots, or exists), try reading it
+  if (rawArg.includes(path.sep) || rawArg.includes('.') || fs.existsSync(rawArg)) {
+    try {
+      const content = fs.readFileSync(rawArg, 'utf-8');
+      return JSON.parse(content);
+    } catch {
+      // fall through to try as inline JSON
+    }
+  }
+  // Try as inline JSON
+  return JSON.parse(rawArg);
 }
 
 /**

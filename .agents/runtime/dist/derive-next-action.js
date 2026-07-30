@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isValidStageGatePassReceipt, CvReceipt as CvReceiptSchema } from './schemas.js';
-function canonicalCvStatus(status) {
+export function canonicalCvStatus(status) {
     switch (status) {
         case 'PASS': return 'CV_PASS';
         case 'REPAIR': return 'CV_REPAIR_REQUIRED';
@@ -189,6 +189,16 @@ export function deriveNextAction(input) {
             return action('finalize', {
                 slice_id: slice.slice_id, mode: 'finalize-slice', contract_ref: 'worker', contract: '.agents/contracts/executor/worker.md',
                 reason: `Slice "${slice.slice_id}" all ${slice.tasks.length} tasks checked. Worker must finalize Slice Evidence.`,
+            });
+        }
+        // ── sync_cv_status: 修复中断导致的展示状态与权威状态不一致 ──
+        if (slice.status_sync_required && slice.status_sync_target) {
+            return action('sync_cv_status', {
+                slice_id: slice.slice_id,
+                mode: 'sync',
+                contract_ref: 'runtime',
+                contract: '.agents/runtime/dist/update-current-cv-status.js',
+                reason: `Persisted CV display state must be synchronized to ${slice.status_sync_target}.`,
             });
         }
         // ── CV state machine ──

@@ -11,6 +11,50 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+// ── Shared internal implementation ───────────────────────────────────────────────
+/**
+ * Internal shared implementation for both file and directory validation.
+ *
+ * Rules (same for both):
+ * 1. trustRoot itself can pass through system-level aliases (e.g. macOS /var -> /private/var).
+ * 2. Any symlink strictly BELOW trustRoot is rejected.
+ * 3. The target must match the expected type (file or directory).
+ * 4. realpath(target) must be within realRoot.
+ *
+ * @returns The real (symlink-resolved) path on success, or null on failure.
+ */
+function resolveBelowTrustedRoot(targetPath, trustRoot, expectedType) {
+    try {
+        // 1. Resolve trustRoot to absolute + realpath (handle system aliases)
+        const resolvedRoot = path.resolve(trustRoot);
+        const realRoot = fs.realpathSync(resolvedRoot);
+        // 2. Resolve targetPath to absolute
+        const resolvedTarget = path.resolve(targetPath);
+        // 3. Walk ancestors checking for symlinks below trustRoot
+        const symlinkCheck = checkNoSymlinkBelowTrustRoot(resolvedTarget, resolvedRoot);
+        if (symlinkCheck !== null)
+            return null;
+        // 4. Check expected type
+        if (expectedType === 'file') {
+            if (!fs.statSync(resolvedTarget).isFile())
+                return null;
+        }
+        else {
+            if (!fs.statSync(resolvedTarget).isDirectory())
+                return null;
+        }
+        // 5. Get real path and verify it starts with realRoot
+        const realTarget = fs.realpathSync(resolvedTarget);
+        const realRootPrefix = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+        if (!realTarget.startsWith(realRootPrefix) && realTarget !== realRoot)
+            return null;
+        // 6. Return the real path
+        return realTarget;
+    }
+    catch {
+        return null;
+    }
+}
 // ── Exported functions ─────────────────────────────────────────────────────────
 /**
  * Resolve an artifact reference to a canonical file path.
@@ -62,43 +106,31 @@ export function resolveCanonicalArtifact(reference, trustRoot, searchPaths) {
  * Assert that a resolved path is a regular file below a trusted root,
  * with no symlink components strictly below that root.
  *
- * 1. Resolve trustRoot to absolute + realpath (to handle system aliases).
- * 2. Resolve targetPath to absolute.
- * 3. Walk ancestors from targetPath up to (but not including) trustRoot;
- *    if any is a symlink, reject.
- * 4. Check `statSync().isFile()` — must be a regular file.
- * 5. Use `realpathSync()` to get the real path and verify it starts with realRoot.
- * 6. Return the real path on success, or null on any failure.
+ * Delegates to the shared implementation `resolveBelowTrustedRoot`.
  *
  * @param targetPath - The path to validate.
  * @param trustRoot  - The trusted root directory.
  * @returns The real (symlink-resolved) path on success, or null on failure.
  */
 export function assertRegularFileBelowTrustedRoot(targetPath, trustRoot) {
-    try {
-        // 1. Resolve trustRoot to absolute + realpath (handle system aliases)
-        const resolvedRoot = path.resolve(trustRoot);
-        const realRoot = fs.realpathSync(resolvedRoot);
-        // 2. Resolve targetPath to absolute
-        const resolvedTarget = path.resolve(targetPath);
-        // 3. Walk ancestors checking for symlinks below trustRoot
-        const symlinkCheck = checkNoSymlinkBelowTrustRoot(resolvedTarget, resolvedRoot);
-        if (symlinkCheck !== null)
-            return null;
-        // 4. Must be a regular file
-        if (!fs.statSync(resolvedTarget).isFile())
-            return null;
-        // 5. Get real path and verify it starts with realRoot
-        const realTarget = fs.realpathSync(resolvedTarget);
-        const realRootPrefix = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-        if (!realTarget.startsWith(realRootPrefix) && realTarget !== realRoot)
-            return null;
-        // 6. Return the real path
-        return realTarget;
-    }
-    catch {
-        return null;
-    }
+    return resolveBelowTrustedRoot(targetPath, trustRoot, 'file');
+}
+/**
+ * Assert that a resolved path is a directory below a trusted root,
+ * with no symlink components strictly below that root.
+ *
+ * Rules are identical to `assertRegularFileBelowTrustedRoot`:
+ * 1. trustRoot itself can pass through system-level aliases.
+ * 2. Any symlink strictly BELOW trustRoot is rejected.
+ * 3. The target must be a directory.
+ * 4. realpath(target) must be within realRoot.
+ *
+ * @param targetPath - The path to validate.
+ * @param trustRoot  - The trusted root directory.
+ * @returns The real (symlink-resolved) path on success, or null on failure.
+ */
+export function assertDirectoryBelowTrustedRoot(targetPath, trustRoot) {
+    return resolveBelowTrustedRoot(targetPath, trustRoot, 'directory');
 }
 /**
  * Check that no component of targetPath (strictly below trustRoot) is a symlink.

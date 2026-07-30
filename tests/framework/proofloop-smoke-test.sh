@@ -16,6 +16,9 @@ cleanup() {
   rm -f "${ROOT_DIR:?}/${MANIFEST_PATH}"
   rm -rf "${ROOT_DIR:?}/${GATE_OUTPUT_DIR}"
   rm -f "${ROOT_DIR:?}/${GATE_OUTPUT_DIR}/slice-complete-facts.json"
+  rm -rf "${ROOT_DIR}/.proofloop/receipts/cv/${STAGE_ID}"
+  rm -rf "${ROOT_DIR}/.proofloop/receipts/committer/${STAGE_ID}"
+  rm -rf "${ROOT_DIR}/.proofloop/receipts/integration/${STAGE_ID}"
 }
 trap cleanup EXIT
 
@@ -337,47 +340,90 @@ if [ ! -f "${RUN_STAGE_CLI}" ]; then
 else
   GATE_OUTPUT_DIR_ABS="${ROOT_DIR}/${GATE_OUTPUT_DIR}"
   COMMIT_SHA="$(git rev-parse --verify HEAD)"
-  mkdir -p "${GATE_OUTPUT_DIR_ABS}/receipt" "${GATE_OUTPUT_DIR_ABS}/integration"
+  PRE_COMMIT_SHA="$(git rev-parse HEAD~1)"
+
+  # Create CV, Committer, and Integration receipts in production layout
   for slice_id in S99-A S99-B; do
-    cat > "${GATE_OUTPUT_DIR_ABS}/receipt/${slice_id}.json" <<RECEIPT_EOF
+    # ── CV receipt ──
+    mkdir -p "${ROOT_DIR}/.proofloop/receipts/cv/${STAGE_ID}/${slice_id}"
+    cat > "${ROOT_DIR}/.proofloop/receipts/cv/${STAGE_ID}/${slice_id}/initial-001.json" <<CV_EOF
 {
   "slice_id": "${slice_id}",
   "stage_id": "${STAGE_ID}",
-  "snapshot": "smoke-fixture",
+  "snapshot": "smoke-snapshot-001",
   "cv_level": "lite",
   "verdict": "PASS"
 }
-RECEIPT_EOF
-    cat > "${GATE_OUTPUT_DIR_ABS}/integration/${slice_id}.json" <<INTEGRATION_EOF
+CV_EOF
+
+    # SHA-256 digest of the CV receipt (required by Committer Receipt)
+    CV_RECEIPT_DIGEST="$(sha256sum "${ROOT_DIR}/.proofloop/receipts/cv/${STAGE_ID}/${slice_id}/initial-001.json" | cut -d' ' -f1)"
+
+    # ── Committer receipt (slice-output) ──
+    mkdir -p "${ROOT_DIR}/.proofloop/receipts/committer/${STAGE_ID}/${slice_id}"
+    cat > "${ROOT_DIR}/.proofloop/receipts/committer/${STAGE_ID}/${slice_id}/slice-output-001.json" <<COMMITTER_EOF
 {
   "stage_id": "${STAGE_ID}",
   "slice_id": "${slice_id}",
-  "commit_sha": "${COMMIT_SHA}",
-  "status": "integrated"
+  "status": "committed",
+  "pre_commit_head": "${PRE_COMMIT_SHA}",
+  "slice_commit_sha": "${COMMIT_SHA}",
+  "manifest_digest": "smoke-test-manifest",
+  "cv_receipt_ref": ".proofloop/receipts/cv/${STAGE_ID}/${slice_id}/initial-001.json",
+  "cv_receipt_digest": "${CV_RECEIPT_DIGEST}",
+  "verified_snapshot": "smoke-snapshot-001",
+  "tasks_path": "delivery/stages/${STAGE_ID}/tasks.md",
+  "evidence_path": "delivery/stages/${STAGE_ID}/evidence/${slice_id}.md",
+  "changed_files": ["delivery/stages/${STAGE_ID}/tasks.md"],
+  "created_at": "2024-01-01T00:00:00.000Z"
+}
+COMMITTER_EOF
+
+    # ── Integration receipt ──
+    mkdir -p "${ROOT_DIR}/.proofloop/receipts/integration/${STAGE_ID}/${slice_id}"
+    cat > "${ROOT_DIR}/.proofloop/receipts/integration/${STAGE_ID}/${slice_id}/integration-001.json" <<INTEGRATION_EOF
+{
+  "stage_id": "${STAGE_ID}",
+  "slice_id": "${slice_id}",
+  "status": "integrated",
+  "slice_commit_sha": "${COMMIT_SHA}",
+  "stage_head_before": "${PRE_COMMIT_SHA}",
+  "integrated_commit_sha": "${COMMIT_SHA}",
+  "stage_head_after": "${COMMIT_SHA}",
+  "cv_receipt_ref": ".proofloop/receipts/cv/${STAGE_ID}/${slice_id}/initial-001.json",
+  "verified_snapshot": "smoke-snapshot-001",
+  "post_merge_snapshot": "smoke-post-merge",
+  "post_merge_checks": [],
+  "created_at": "2024-01-01T00:00:00.000Z"
 }
 INTEGRATION_EOF
   done
 
   # Generate Slice COMPLETE facts JSON for the compiled CLI
+  mkdir -p "${GATE_OUTPUT_DIR_ABS}"
   FACTS_FILE="${GATE_OUTPUT_DIR_ABS}/slice-complete-facts.json"
   cat > "${FACTS_FILE}" << FACTS_EOF
 [
   {
     "slice_id": "S99-A",
-    "cv": { "verdict": "PASS", "receipt_ref": "${GATE_OUTPUT_DIR}/receipt/S99-A.json" },
-    "commit": { "commit_sha": "${COMMIT_SHA}" },
-    "integration": { "integration_ref": "${GATE_OUTPUT_DIR}/integration/S99-A.json" }
+    "cv": { "verdict": "PASS", "receipt_ref": ".proofloop/receipts/cv/${STAGE_ID}/S99-A/initial-001.json" },
+    "commit": { "commit_sha": "${COMMIT_SHA}", "receipt_ref": ".proofloop/receipts/committer/${STAGE_ID}/S99-A/slice-output-001.json" },
+    "integration": { "integration_ref": ".proofloop/receipts/integration/${STAGE_ID}/S99-A/integration-001.json" }
   },
   {
     "slice_id": "S99-B",
-    "cv": { "verdict": "PASS", "receipt_ref": "${GATE_OUTPUT_DIR}/receipt/S99-B.json" },
-    "commit": { "commit_sha": "${COMMIT_SHA}" },
-    "integration": { "integration_ref": "${GATE_OUTPUT_DIR}/integration/S99-B.json" }
+    "cv": { "verdict": "PASS", "receipt_ref": ".proofloop/receipts/cv/${STAGE_ID}/S99-B/initial-001.json" },
+    "commit": { "commit_sha": "${COMMIT_SHA}", "receipt_ref": ".proofloop/receipts/committer/${STAGE_ID}/S99-B/slice-output-001.json" },
+    "integration": { "integration_ref": ".proofloop/receipts/integration/${STAGE_ID}/S99-B/integration-001.json" }
   }
 ]
 FACTS_EOF
 
-  if node "${RUN_STAGE_CLI}"     "${ROOT_DIR}/${MANIFEST_PATH}"     "${FACTS_FILE}"     "${GATE_OUTPUT_DIR_ABS}" 2>&1; then
+  if node "${RUN_STAGE_CLI}" \
+    "${ROOT_DIR}/${MANIFEST_PATH}" \
+    "${FACTS_FILE}" \
+    "${GATE_OUTPUT_DIR_ABS}" \
+    "${ROOT_DIR}" 2>&1; then
     step_pass "run-stage CLI exit 0"
     # Assert PASS receipt was written
     GATE_RECEIPT_FILE="$(ls "${GATE_OUTPUT_DIR_ABS}"/stage-gate-*.json 2>/dev/null | head -1)"
