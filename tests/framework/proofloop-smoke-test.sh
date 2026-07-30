@@ -364,15 +364,15 @@ INTEGRATION_EOF
 [
   {
     "slice_id": "S99-A",
-    "cv": { "verdict": "PASS", "receipt_ref": "receipt/S99-A.json" },
+    "cv": { "verdict": "PASS", "receipt_ref": "${GATE_OUTPUT_DIR}/receipt/S99-A.json" },
     "commit": { "commit_sha": "${COMMIT_SHA}" },
-    "integration": { "integration_ref": "integration/S99-A.json" }
+    "integration": { "integration_ref": "${GATE_OUTPUT_DIR}/integration/S99-A.json" }
   },
   {
     "slice_id": "S99-B",
-    "cv": { "verdict": "PASS", "receipt_ref": "receipt/S99-B.json" },
+    "cv": { "verdict": "PASS", "receipt_ref": "${GATE_OUTPUT_DIR}/receipt/S99-B.json" },
     "commit": { "commit_sha": "${COMMIT_SHA}" },
-    "integration": { "integration_ref": "integration/S99-B.json" }
+    "integration": { "integration_ref": "${GATE_OUTPUT_DIR}/integration/S99-B.json" }
   }
 ]
 FACTS_EOF
