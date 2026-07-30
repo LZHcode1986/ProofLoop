@@ -200,7 +200,7 @@ describe('runStageFromManifest', () => {
       writeFileSync(integrationPath, JSON.stringify({ stage_id: stageId, slice_id: sliceId, commit_sha: commitSha, status: 'integrated' }));
 
       const result = await runStageFromManifest({
-        manifestPath, outputDir: tmpDir,
+        manifestPath, outputDir: tmpDir, projectRoot: tmpDir,
         sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: cvPath }, commit: { commit_sha: commitSha }, integration: { integration_ref: integrationPath } }],
       });
       expect(result.success).toBe(true);
@@ -488,7 +488,7 @@ describe('CLI — runStageCli facts file validation', () => {
       }]));
 
       // ── Run CLI handler ──
-      const code = await runStageCli([manifestPath, factsPath, tmpDir]);
+      const code = await runStageCli([manifestPath, factsPath, tmpDir, tmpDir]);
       expect(code).toBe(0);
       expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/Stage Gate PASSED/));
 
@@ -799,6 +799,7 @@ describe('CLI — runStageCli facts file validation', () => {
       const result = await runStageFromManifest({
         manifestPath,
         outputDir: tmpDir,
+        projectRoot: tmpDir,
         sliceCompleteFacts: facts,
       });
 
@@ -819,6 +820,7 @@ describe('CLI — runStageCli facts file validation', () => {
       const result = await runStageFromManifest({
         manifestPath,
         outputDir: tmpDir,
+        projectRoot: tmpDir,
         sliceCompleteFacts: facts,
       });
 

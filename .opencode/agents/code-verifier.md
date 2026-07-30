@@ -24,7 +24,10 @@ permission:
     "python tests/framework/proofloop-check-agent-yaml.py *": allow
     "npm test *": allow
     "npm run test *": allow
+    "npm run build *": allow
+    "npm run lint *": allow
     "npx tsc --noEmit *": allow
+    "make test *": allow
   read: allow
   glob: allow
   grep: allow

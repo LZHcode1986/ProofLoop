@@ -548,6 +548,7 @@ describe('CLI Integration Tests', () => {
         const r1 = await runStageFromManifest({
           manifestPath: stageManifestPath,
           outputDir: dir,
+          projectRoot: dir,
           sliceCompleteFacts: [{
             slice_id: 'S01-A',
             cv: { verdict: 'PASS', receipt_ref: cvReceiptPath },

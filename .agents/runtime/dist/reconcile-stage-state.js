@@ -290,12 +290,34 @@ export function findLatestCvReceipt(cvReceiptRoot, stageId, sliceId) {
         return null;
     }
     const jsonFiles = entries.filter(e => e.toLowerCase().endsWith('.json')).sort();
-    // Read all JSON files and parse with CvReceipt schema
+    const RECEIPT_FILE_RE = /^(?:initial|recheck)-(\d{3})\.json$/;
+    // Try filename-based sequence sorting first
+    const validFiles = [];
+    for (const file of jsonFiles) {
+        const match = file.match(RECEIPT_FILE_RE);
+        if (match) {
+            validFiles.push({ file, seq: parseInt(match[1], 10) });
+        }
+    }
+    if (validFiles.length > 0) {
+        // Sort by sequence number descending (newest first)
+        validFiles.sort((a, b) => b.seq - a.seq);
+        // Parse the newest file
+        const filePath = path.join(receiptDir, validFiles[0].file);
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const parsed = JSON.parse(content);
+            return CvReceiptSchema.parse(parsed);
+        }
+        catch {
+            return null;
+        }
+    }
+    // Fallback: try older naming patterns with timestamp sorting
     const receipts = [];
     for (const file of jsonFiles) {
         const filePath = path.join(receiptDir, file);
         try {
-            // Only accept regular files (skip symlinks, dirs, etc.)
             const stat = fs.lstatSync(filePath);
             if (!stat.isFile() || stat.isSymbolicLink())
                 continue;
@@ -305,13 +327,12 @@ export function findLatestCvReceipt(cvReceiptRoot, stageId, sliceId) {
             receipts.push(receipt);
         }
         catch {
-            // Skip invalid receipts
             continue;
         }
     }
     if (receipts.length === 0)
         return null;
-    // Find the latest by timestamp (ISO-8601 string comparison works lexically)
+    // Sort by timestamp (last resort)
     receipts.sort((a, b) => {
         const tA = a.timestamp ?? '';
         const tB = b.timestamp ?? '';
@@ -336,11 +357,39 @@ export function collectAllCvReceipts(cvReceiptRoot, stageId, sliceId) {
         return [];
     }
     const jsonFiles = entries.filter(e => e.toLowerCase().endsWith('.json')).sort();
+    const RECEIPT_FILE_RE = /^(?:initial|recheck)-(\d{3})\.json$/;
+    // Try filename-based sequence sorting first
+    const validFiles = [];
+    for (const file of jsonFiles) {
+        const match = file.match(RECEIPT_FILE_RE);
+        if (match) {
+            validFiles.push({ file, seq: parseInt(match[1], 10) });
+        }
+    }
+    if (validFiles.length > 0) {
+        // Sort by sequence number ascending (oldest first)
+        validFiles.sort((a, b) => a.seq - b.seq);
+        // Parse all valid files in order
+        const receipts = [];
+        for (const entry of validFiles) {
+            const filePath = path.join(receiptDir, entry.file);
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                const parsed = JSON.parse(content);
+                const receipt = CvReceiptSchema.parse(parsed);
+                receipts.push(receipt);
+            }
+            catch {
+                continue;
+            }
+        }
+        return receipts;
+    }
+    // Fallback: try older naming patterns with timestamp sorting
     const receipts = [];
     for (const file of jsonFiles) {
         const filePath = path.join(receiptDir, file);
         try {
-            // Only accept regular files
             const stat = fs.lstatSync(filePath);
             if (!stat.isFile() || stat.isSymbolicLink())
                 continue;
@@ -477,7 +526,20 @@ export function reconcileStageState(input) {
     catch (err) {
         throw new Error(`Failed to read tasks.md at "${tasks_path}": ${err instanceof Error ? err.message : String(err)}`);
     }
-    // ── 3. Read evidence files and CV receipts per slice ──
+    // ── 3. Read Stage Gate receipt (before slice loop for Fix B+C) ──
+    let stageGateState = {};
+    if (stage_gate_receipt_path) {
+        const receipt = readStageGateReceipt(stage_gate_receipt_path);
+        if (receipt) {
+            stageGateState = {
+                receipt,
+                receipt_path: path.resolve(stage_gate_receipt_path),
+                gate_run: true,
+                gate_passed: receipt.verdict === 'PASS',
+            };
+        }
+    }
+    // ── 4. Read evidence files and CV receipts per slice ──
     const allCvReceipts = [];
     const slices = [];
     for (const sliceDef of manifest.slices) {
@@ -526,43 +588,61 @@ export function reconcileStageState(input) {
             // Repair count-1 gives us the next attempt index.
             repairAttempt = Math.max(0, repairReceiptCount - 1);
         }
-        // ── Check git commit status ──
-        // A slice is considered "committed" if there's a CV PASS receipt whose
-        // snapshot content has been committed.  We check this by looking for any
-        // commit that references the slice evidence file.
-        let committed = false;
-        if (latestReceipt && latestReceipt.verdict === 'PASS') {
-            // Try to find the slice evidence commit in git log
-            try {
-                const evidenceRelPath = path.relative(process.cwd(), evidenceFullPath);
-                // Check if the evidence file has been committed (is tracked by git and has no uncommitted changes)
-                const gitStatus = execFileSync('git', ['status', '--porcelain', evidenceRelPath], {
-                    cwd: process.cwd(),
-                    stdio: 'pipe',
-                    encoding: 'utf-8',
-                }).trim();
-                // If status is empty, the file has no uncommitted changes
-                if (gitStatus.length === 0) {
-                    // Check that the file is actually tracked (not just clean but untracked)
-                    const tracked = execFileSync('git', ['ls-files', '--cached', evidenceRelPath], {
+        // ── Map slice_complete_facts from Stage Gate receipt (Fix B) ──
+        let sliceCompleteFacts = null;
+        if (stageGateState.receipt && stageGateState.receipt.slice_complete_facts) {
+            const facts = stageGateState.receipt.slice_complete_facts.find((f) => f.slice_id === slice_id);
+            if (facts) {
+                sliceCompleteFacts = facts;
+            }
+        }
+        // ── Derive committed/integrated/complete (Fix C) ──
+        // Priority: 1. Stage Gate receipt facts (authoritative)
+        //           2. Explicit Committer/Integration receipts
+        //           3. Git status (last resort)
+        let gateDerivedCommitted = false;
+        let gateDerivedIntegrated = false;
+        let gateDerivedComplete = false;
+        // Priority 1: Stage Gate receipt has authoritative facts
+        if (sliceCompleteFacts) {
+            gateDerivedCommitted = true;
+            gateDerivedIntegrated = true;
+            gateDerivedComplete = true;
+        }
+        if (!gateDerivedIntegrated) {
+            // Priority 2: Check integration receipt (with commit SHA binding)
+            const commitSha = sliceCompleteFacts?.commit?.commit_sha;
+            gateDerivedIntegrated = checkSliceIntegrated(integration_receipt_root, stage_id, slice_id, commitSha);
+        }
+        if (!gateDerivedCommitted) {
+            // Priority 3: Last resort - git status check (only when no gate receipt)
+            if (latestReceipt && latestReceipt.verdict === 'PASS') {
+                try {
+                    const evidenceRelPath = path.relative(process.cwd(), evidenceFullPath);
+                    const gitStatus = execFileSync('git', ['status', '--porcelain', evidenceRelPath], {
                         cwd: process.cwd(),
                         stdio: 'pipe',
                         encoding: 'utf-8',
                     }).trim();
-                    if (tracked.length > 0) {
-                        committed = true;
+                    if (gitStatus.length === 0) {
+                        const tracked = execFileSync('git', ['ls-files', '--cached', evidenceRelPath], {
+                            cwd: process.cwd(),
+                            stdio: 'pipe',
+                            encoding: 'utf-8',
+                        }).trim();
+                        if (tracked.length > 0) {
+                            gateDerivedCommitted = true;
+                        }
                     }
                 }
-            }
-            catch {
-                committed = false;
+                catch {
+                    gateDerivedCommitted = false;
+                }
             }
         }
-        // ── Check integration status ──
-        const integrated = checkSliceIntegrated(integration_receipt_root, stage_id, slice_id);
-        // ── Determine if all dependencies are complete ──
-        // (this is computed later in deriveNextAction, but we mark complete here)
-        const complete = committed && integrated;
+        const committed = gateDerivedCommitted;
+        const integrated = gateDerivedIntegrated;
+        const complete = gateDerivedComplete || (committed && integrated);
         slices.push({
             slice_id,
             dependencies,
@@ -572,23 +652,11 @@ export function reconcileStageState(input) {
             repair_attempt: repairAttempt,
             scope_check_passed: evScopeCheckPassed,
             latest_cv_receipt: latestReceipt ?? null,
+            slice_complete_facts: sliceCompleteFacts,
             committed,
             integrated,
             complete,
         });
-    }
-    // ── 4. Read Stage Gate receipt ──
-    let stageGateState = {};
-    if (stage_gate_receipt_path) {
-        const receipt = readStageGateReceipt(stage_gate_receipt_path);
-        if (receipt) {
-            stageGateState = {
-                receipt,
-                receipt_path: path.resolve(stage_gate_receipt_path),
-                gate_run: true,
-                gate_passed: receipt.verdict === 'PASS',
-            };
-        }
     }
     // ── 5. Check git state at stage level ──
     let stageCommitted = false;

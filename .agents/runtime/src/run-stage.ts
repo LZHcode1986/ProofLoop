@@ -37,9 +37,9 @@ function hasPersistedCvReceipt(
   reference: string,
   stageId: string,
   sliceId: string,
-  outputDir: string,
+  trustRoot: string,
 ): string | null {
-  const receiptPath = resolveEvidenceFile(reference, outputDir);
+  const receiptPath = resolveEvidenceFile(reference, trustRoot);
   if (!receiptPath) return null;
   try {
     const parsed = CvReceiptSchema.safeParse(JSON.parse(readFileSync(receiptPath, 'utf-8')));
@@ -116,9 +116,9 @@ function hasPersistedIntegration(
   stageId: string,
   sliceId: string,
   commitSha: string,
-  outputDir: string,
+  trustRoot: string,
 ): string | null {
-  const artifactPath = resolveEvidenceFile(reference, outputDir);
+  const artifactPath = resolveEvidenceFile(reference, trustRoot);
   if (!artifactPath) return null;
   try {
     const content = readFileSync(artifactPath, 'utf-8').trim();
@@ -142,7 +142,7 @@ function hasPersistedIntegration(
 function validatePersistedSliceFacts(
   facts: SliceCompleteFacts[],
   stageId: string,
-  outputDir: string,
+  trustRoot: string,
 ): { facts: SliceCompleteFacts[]; errors: string[] } {
   const errors: string[] = [];
   const persistedFacts: SliceCompleteFacts[] = [];
@@ -151,7 +151,7 @@ function validatePersistedSliceFacts(
   const headSha = getHeadSha();
 
   for (const fact of facts) {
-    const cvReceiptPath = hasPersistedCvReceipt(fact.cv.receipt_ref, stageId, fact.slice_id, outputDir);
+    const cvReceiptPath = hasPersistedCvReceipt(fact.cv.receipt_ref, stageId, fact.slice_id, trustRoot);
     // Validate commit exists AND is an ancestor of HEAD (does NOT need to equal HEAD).
     const commitResult = hasCommitAncestor(fact.commit.commit_sha);
     let commitValid = false;
@@ -170,7 +170,7 @@ function validatePersistedSliceFacts(
       stageId,
       fact.slice_id,
       fact.commit.commit_sha,
-      outputDir,
+      trustRoot,
     );
 
     if (!cvReceiptPath || !commitValid || !integrationPath) {
@@ -196,6 +196,9 @@ function validatePersistedSliceFacts(
 
 export interface RunStageOptions {
   manifestPath: string;
+  /** Project root directory — trusted boundary for input artifact resolution.  Defaults to process.cwd(). */
+  projectRoot?: string;
+  /** Output directory for the Stage Gate receipt.  Defaults to .proofloop/receipts/stage-gate/<stage_id>. */
   outputDir?: string;
   knownPids?: number[];
   knownPorts?: number[];
@@ -628,7 +631,7 @@ export async function executeRuntimeProof(
  */
 export async function runStageFromManifest(options: RunStageOptions): Promise<RunStageResult> {
   const errors: string[] = [];
-  const { manifestPath, outputDir } = options;
+  const { manifestPath, outputDir, projectRoot } = options;
 
   // ── 1. Load manifest ──
   if (!existsSync(manifestPath)) {
@@ -664,6 +667,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
 
   const steps: RuntimeProofStep[] = manifest.runtime_proof ?? [];
   const resolvedOutputDir = outputDir ?? path.resolve(process.cwd(), '.proofloop', 'receipts', 'stage-gate', manifest.stage_id);
+  const resolvedProjectRoot = projectRoot ?? path.resolve(process.cwd());
   const suppliedFacts = options.sliceCompleteFacts ?? [];
   const parsedFacts = suppliedFacts.map(fact => SliceCompleteFactsSchema.safeParse(fact));
   const factErrors: string[] = [];
@@ -682,7 +686,7 @@ export async function runStageFromManifest(options: RunStageOptions): Promise<Ru
 
   // Validate every reference against persisted artifacts before a PASS can be
   // selected. Caller-provided strings are never copied into a PASS receipt.
-  const persistedFactsResult = validatePersistedSliceFacts(structurallyValidFacts, manifest.stage_id, resolvedOutputDir);
+  const persistedFactsResult = validatePersistedSliceFacts(structurallyValidFacts, manifest.stage_id, resolvedProjectRoot);
   factErrors.push(...persistedFactsResult.errors);
   const validFacts = persistedFactsResult.facts;
   const platformInfo = getPlatformInfo();
@@ -885,10 +889,10 @@ export async function runProjectAcceptance(
  * a clear error message before calling runStageFromManifest.
  */
 export async function runStageCli(argv: string[]): Promise<number> {
-  const [manifestPath, factsPath, outputDir] = argv;
+  const [manifestPath, factsPath, outputDir, projectRoot] = argv;
 
   if (!manifestPath || !factsPath) {
-    console.error('Usage: run-stage <manifest-path> <slice-complete-facts-path> [output-dir]');
+    console.error('Usage: run-stage <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]');
     return 1;
   }
 
@@ -918,6 +922,7 @@ export async function runStageCli(argv: string[]): Promise<number> {
     const result = await runStageFromManifest({
       manifestPath,
       outputDir,
+      projectRoot: projectRoot ? path.resolve(projectRoot) : undefined,
       sliceCompleteFacts: parsedFacts as SliceCompleteFacts[],
     });
 
