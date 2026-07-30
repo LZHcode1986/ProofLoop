@@ -23,7 +23,7 @@ import { Manifest as ManifestSchema, CvReceipt as CvReceiptSchema, StageGateRece
 import { canonicalCvStatus, } from './derive-next-action.js';
 import { assertRegularFileBelowTrustedRoot } from './canonical-artifact-path.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
-import { findLatestSliceCommitReceipt, findLatestIntegrationReceipt } from './slice-boundary-receipts.js';
+import { findLatestCvPassReceipt, collectAllCvReceipts as collectAllCvReceiptsFromBoundary, findLatestSliceCommitReceipt, findLatestIntegrationReceipt, } from './slice-boundary-receipts.js';
 // ── tasks.md parsing ──────────────────────────────────────────────────────────
 /**
  * Parse a tasks.md file and extract checkbox states for the given slice's tasks.
@@ -550,14 +550,24 @@ export function reconcileStageState(input) {
             }
         }
         // ── Read CV receipts ──
-        const latestReceipt = findLatestCvReceipt(cvReceiptRoot, stage_id, slice_id);
-        const sliceReceipts = collectAllCvReceipts(cvReceiptRoot, stage_id, slice_id);
-        allCvReceipts.push(...sliceReceipts);
+        const cvLookup = findLatestCvPassReceipt(resolvedProjectRoot, stage_id, slice_id);
+        const sliceReceiptResult = collectAllCvReceiptsFromBoundary(resolvedProjectRoot, stage_id, slice_id);
+        allCvReceipts.push(...sliceReceiptResult.receipts);
+        // P1-2: 损坏的 Receipt → 无法安全推导 → 记录到 stageGateState
+        const invalidCvFiles = [...cvLookup.invalidFiles, ...sliceReceiptResult.invalidFiles];
+        const uniqueInvalidFiles = [...new Set(invalidCvFiles)];
+        if (uniqueInvalidFiles.length > 0) {
+            // 记录到 stageGateState 以便上层检测
+            stageGateState.cv_receipt_invalid_files = uniqueInvalidFiles;
+        }
+        const latestReceipt = cvLookup.latest?.receipt ?? null;
+        const latestCvDigest = cvLookup.latest?.digest;
+        const latestCvPath = cvLookup.latest?.path;
         // If there's a latest receipt, update repair_attempt from receipt history
         // (receipt count is more accurate than the evidence file's Open Finding text).
         let repairAttempt = evRepairAttempt;
-        if (sliceReceipts.length > 0) {
-            const repairReceiptCount = sliceReceipts.filter(r => r.verdict === 'REPAIR').length;
+        if (sliceReceiptResult.receipts.length > 0) {
+            const repairReceiptCount = sliceReceiptResult.receipts.filter(r => r.verdict === 'REPAIR').length;
             // repair_attempt in the state machine is 0-based: how many repairs have been attempted.
             // Repair count-1 gives us the next attempt index.
             repairAttempt = Math.max(0, repairReceiptCount - 1);
@@ -577,8 +587,18 @@ export function reconcileStageState(input) {
         // No longer uses: git status --porcelain, git ls-files --cached, or Stage Gate
         // receipt facts.  The Stage Gate receipt is only for cross-validation, not for
         // construction of slice state.
-        const commitBoundary = latestReceipt?.verdict === 'PASS'
-            ? findLatestSliceCommitReceipt(resolvedProjectRoot, stage_id, slice_id)
+        const commitBoundary = latestReceipt?.verdict === 'PASS' && cvLookup.latest
+            ? findLatestSliceCommitReceipt({
+                projectRoot: resolvedProjectRoot,
+                stageId: stage_id,
+                sliceId: slice_id,
+                expectedCvReceiptPath: cvLookup.latest.path,
+                expectedCvReceiptDigest: cvLookup.latest.digest,
+                expectedVerifiedSnapshot: cvLookup.latest.receipt.snapshot,
+                expectedManifestDigest: manifestDigest,
+                expectedTasksPath: tasks_path,
+                expectedEvidencePath: sliceDef.evidence_path,
+            })
             : null;
         const integrationBoundary = commitBoundary
             ? findLatestIntegrationReceipt(resolvedProjectRoot, stage_id, slice_id, commitBoundary.receipt.slice_commit_sha)

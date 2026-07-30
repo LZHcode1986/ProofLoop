@@ -116,19 +116,23 @@ function validatePathBelowRoot(filePath, projectRoot) {
  * Find the latest CV PASS receipt for a given stage/slice by scanning the
  * canonical CV receipt directory.
  *
- * Returns the receipt and its path, or null if no PASS receipt found.
+ * Returns a CvReceiptLookupResult containing the latest PASS receipt (if found),
+ * its canonical path and digest, and a list of files that failed to parse.
+ * Invalid files are tracked even when a valid PASS receipt exists, so callers
+ * can detect and escalate corrupted history.
  */
 export function findLatestCvPassReceipt(projectRoot, stageId, sliceId) {
+    const result = { latest: null, invalidFiles: [] };
     const cvDir = path.join(projectRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
     if (!directoryExists(cvDir))
-        return null;
+        return result;
     const CV_FILE_RE = /^(initial|recheck)-(\d{3})\.json$/;
     let files;
     try {
         files = fs.readdirSync(cvDir);
     }
     catch {
-        return null;
+        return result;
     }
     // Filter matching files, sort by sequence number descending
     const matching = files
@@ -138,23 +142,76 @@ export function findLatestCvPassReceipt(projectRoot, stageId, sliceId) {
     for (const f of matching) {
         const filePath = path.join(cvDir, f);
         const canonical = validatePathBelowRoot(filePath, projectRoot);
-        if (!canonical)
+        if (!canonical) {
+            result.invalidFiles.push(filePath);
             continue;
+        }
         const data = readJsonFile(filePath);
-        if (!data)
+        if (!data) {
+            result.invalidFiles.push(filePath);
             continue;
+        }
         try {
             const parsed = CvReceipt.parse(data);
             if (parsed.verdict === 'PASS' && parsed.stage_id === stageId && parsed.slice_id === sliceId) {
-                return { receipt: parsed, path: canonical };
+                const digest = sha256Digest(filePath) ?? '';
+                result.latest = { receipt: parsed, path: canonical, digest };
+                return result;
             }
         }
         catch {
-            // Invalid CV receipt — skip
+            // Invalid CV receipt — record as invalid
+            result.invalidFiles.push(filePath);
             continue;
         }
     }
-    return null;
+    return result;
+}
+/**
+ * Collect ALL valid CV receipts for a given stage/slice, ordered oldest to newest.
+ *
+ * Returns a list of parsed receipts and a list of files that failed to parse.
+ * This enables callers to detect corrupted CV receipt history.
+ */
+export function collectAllCvReceipts(projectRoot, stageId, sliceId) {
+    const result = { receipts: [], invalidFiles: [] };
+    const cvDir = path.join(projectRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
+    if (!directoryExists(cvDir))
+        return result;
+    const CV_FILE_RE = /^(initial|recheck)-(\d{3})\.json$/;
+    let files;
+    try {
+        files = fs.readdirSync(cvDir);
+    }
+    catch {
+        return result;
+    }
+    // Filter matching files, sort by sequence number ascending (oldest first)
+    const matching = files
+        .filter(f => CV_FILE_RE.test(f))
+        .sort(); // ascending
+    for (const f of matching) {
+        const filePath = path.join(cvDir, f);
+        const canonical = validatePathBelowRoot(filePath, projectRoot);
+        if (!canonical) {
+            result.invalidFiles.push(filePath);
+            continue;
+        }
+        const data = readJsonFile(filePath);
+        if (!data) {
+            result.invalidFiles.push(filePath);
+            continue;
+        }
+        try {
+            const parsed = CvReceipt.parse(data);
+            result.receipts.push(parsed);
+        }
+        catch {
+            result.invalidFiles.push(filePath);
+            continue;
+        }
+    }
+    return result;
 }
 // ── Committer Receipt finder ──────────────────────────────────────────────────
 /**
@@ -172,12 +229,22 @@ export function findLatestCvPassReceipt(projectRoot, stageId, sliceId) {
  * - verified_snapshot matches the CV receipt's snapshot
  * - No symlinks below projectRoot in the receipt path
  *
- * @param projectRoot - The trusted project root (must be a real Git root).
- * @param stageId     - The stage identifier.
- * @param sliceId     - The slice identifier.
+ * Additional optional expected-param checks (P0-3):
+ * - expectedCvReceiptPath:      cv_receipt_ref must resolve to this path
+ * - expectedCvReceiptDigest:    cv_receipt_digest must match
+ * - expectedVerifiedSnapshot:   verified_snapshot must match
+ * - expectedManifestDigest:     manifest_digest must match
+ * - expectedTasksPath:          tasks_path must resolve to this path
+ * - expectedEvidencePath:       evidence_path must resolve to this path
+ *
+ * @param params.projectRoot - The trusted project root (must be a real Git root).
+ * @param params.stageId     - The stage identifier.
+ * @param params.sliceId     - The slice identifier.
+ * @param params.expected*   - Optional expected values for additional validation.
  * @returns The validated receipt and its canonical path, or null.
  */
-export function findLatestSliceCommitReceipt(projectRoot, stageId, sliceId) {
+export function findLatestSliceCommitReceipt(params) {
+    const { projectRoot, stageId, sliceId } = params;
     const receiptDir = committerReceiptDir(projectRoot, stageId, sliceId);
     if (!directoryExists(receiptDir))
         return null;
@@ -249,6 +316,40 @@ export function findLatestSliceCommitReceipt(projectRoot, stageId, sliceId) {
         }
         catch {
             continue;
+        }
+        // ── P0-3: Additional expected-param checks ──────────────────────────────
+        // If expectedCvReceiptPath is provided, verify cv_receipt_ref resolves to the same path
+        if (params.expectedCvReceiptPath) {
+            const canonicalCvRef = resolveCanonicalArtifact(parsed.cv_receipt_ref, params.projectRoot);
+            if (!canonicalCvRef || canonicalCvRef !== params.expectedCvReceiptPath) {
+                continue;
+            }
+        }
+        // If expectedCvReceiptDigest is provided, verify match
+        if (params.expectedCvReceiptDigest && parsed.cv_receipt_digest !== params.expectedCvReceiptDigest) {
+            continue;
+        }
+        // If expectedVerifiedSnapshot is provided, verify match
+        if (params.expectedVerifiedSnapshot && parsed.verified_snapshot !== params.expectedVerifiedSnapshot) {
+            continue;
+        }
+        // If expectedManifestDigest is provided, verify match
+        if (params.expectedManifestDigest && parsed.manifest_digest !== params.expectedManifestDigest) {
+            continue;
+        }
+        // If expectedTasksPath is provided, resolve and compare
+        if (params.expectedTasksPath) {
+            const canonicalExpected = path.resolve(params.projectRoot, params.expectedTasksPath);
+            const canonicalActual = path.resolve(params.projectRoot, parsed.tasks_path);
+            if (canonicalExpected !== canonicalActual)
+                continue;
+        }
+        // If expectedEvidencePath is provided, resolve and compare
+        if (params.expectedEvidencePath) {
+            const canonicalExpected = path.resolve(params.projectRoot, params.expectedEvidencePath);
+            const canonicalActual = path.resolve(params.projectRoot, parsed.evidence_path);
+            if (canonicalExpected !== canonicalActual)
+                continue;
         }
         // All checks passed
         return { receipt: parsed, path: canonical };
@@ -371,16 +472,21 @@ export function findLatestIntegrationReceipt(projectRoot, stageId, sliceId, expe
 export function resolveSliceBoundary(projectRoot, stageId, sliceId) {
     // CV PASS is the prerequisite for everything else
     const cvResult = findLatestCvPassReceipt(projectRoot, stageId, sliceId);
-    if (!cvResult)
+    if (!cvResult.latest)
         return null;
-    const commitResult = findLatestSliceCommitReceipt(projectRoot, stageId, sliceId);
+    const commitResult = findLatestSliceCommitReceipt({
+        projectRoot,
+        stageId,
+        sliceId,
+    });
     let integrationResult = null;
     if (commitResult) {
         integrationResult = findLatestIntegrationReceipt(projectRoot, stageId, sliceId, commitResult.receipt.slice_commit_sha);
     }
     return {
-        cvReceipt: cvResult.receipt,
-        cvReceiptPath: cvResult.path,
+        cvReceipt: cvResult.latest.receipt,
+        cvReceiptPath: cvResult.latest.path,
+        cvReceiptDigest: cvResult.latest.digest,
         commitReceipt: commitResult?.receipt ?? null,
         commitReceiptPath: commitResult?.path ?? null,
         integrationReceipt: integrationResult?.receipt ?? null,
