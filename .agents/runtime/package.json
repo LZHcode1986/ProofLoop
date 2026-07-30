@@ -15,6 +15,7 @@
     "finalize-project-review": "node dist/finalize-project-review.js",
     "write-cv-receipt": "node dist/receipt-writer.js cv",
     "derive-next-action": "node dist/derive-next-action.js",
+    "reconcile-stage-state": "node dist/reconcile-stage-state.js",
     "update-current-cv-status": "node dist/update-current-cv-status.js"
   },
   "devDependencies": {

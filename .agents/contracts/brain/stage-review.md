@@ -28,7 +28,7 @@ The Reviewer does not re-run the declared runtime proof. Instead, the Reviewer i
 - Integrated snapshot (commit or tree ref)
 - Manifest digest
 - Stage Gate Receipt ref
-- Manifest path (`.proofloop/manifests/<stage-id>.json`) — enumerates per-Slice `evidence_path` and CV Receipt refs
+- Manifest path (`.proofloop/manifests/<stage-id>.json`) — enumerates per-Slice `evidence_path`. CV Receipt refs are supplied via Slice COMPLETE Facts (separate JSON array passed to run-stage), not embedded in the Manifest.
 - CV Receipt refs (one per Slice)
 - Stage risk level (low / medium / high / critical)
 - Clean-room requirement (yes / no)

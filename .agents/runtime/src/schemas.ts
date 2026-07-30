@@ -182,6 +182,52 @@ export const CvReceipt = z.object({
       });
     }
   }
+
+  // PASS receipts must be clean — no scope violations, no failures, no affected tasks.
+  if (data.verdict === 'PASS') {
+    if (data.scope_violations && data.scope_violations.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['scope_violations'],
+        message: 'scope_violations must be empty when verdict is PASS',
+      });
+    }
+    if (data.failed_po_ids && data.failed_po_ids.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failed_po_ids'],
+        message: 'failed_po_ids must be empty when verdict is PASS',
+      });
+    }
+    if (data.affected_task_ids && data.affected_task_ids.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['affected_task_ids'],
+        message: 'affected_task_ids must be empty when verdict is PASS',
+      });
+    }
+    if (data.invalid_tests && data.invalid_tests.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['invalid_tests'],
+        message: 'invalid_tests must be empty when verdict is PASS',
+      });
+    }
+    if (data.failed_criterion && data.failed_criterion.trim().length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failed_criterion'],
+        message: 'failed_criterion must be empty when verdict is PASS',
+      });
+    }
+    if (data.failure_signature && data.failure_signature.trim().length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failure_signature'],
+        message: 'failure_signature must be empty when verdict is PASS',
+      });
+    }
+  }
 });
 export type CvReceipt = z.infer<typeof CvReceipt>;
 

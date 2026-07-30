@@ -191,7 +191,7 @@ describe('fresh recovery packet (no CV failure receipt)', () => {
 
   test('builds a recovery packet with all fields populated', () => {
     const packet = buildRecoveryPacket(recoverParams);
-    expect(packet.mode).toBe('recover');
+    expect(packet.mode).toBe('recover-task');
     expect(packet.completed_task_ids).toEqual(['S01-A-T01']);
     expect(packet.task_evidence_refs).toEqual({ 'S01-A-T01': 'evidence/tasks/S01-A-T01.md' });
     expect(packet.current_slice_evidence_ref).toBe('evidence/S01-A.md');

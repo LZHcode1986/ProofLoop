@@ -106,10 +106,11 @@ Code Verifier is **read-only** (`edit: deny`). It does not:
 - Create commits or scratch files
 
 **Permitted commands for verification** (allowed by CV packet permissions):
-- `build`, `lint`, `node`, `npm`, `npx`, `python`, `pip`, `gcc`, `make` — for building
-  and running tests specified in the verification commands
-- File reading (`cat`, `type`, file reads) — for examining code and evidence
-- `diff`, `git diff` — for checking scope boundaries
+- `python -m pytest <args>` — run Python tests (no `python -c` arbitrary code)
+- `npm test <args>`, `npm run test <args>`, `npm run build <args>`, `npm run lint <args>` — run npm scripts
+- `npx tsc --noEmit <args>` — TypeScript type checking
+- `make test <args>` — run tests via Makefile
+- File reading (`cat`, `type`, `rg`, `diff`, `git diff`, `git show`, `git log`) — for examining code and evidence
 
 **Forbidden commands:**
 - `git add`, `git commit`, `git push` — no writes

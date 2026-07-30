@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { jest } from '@jest/globals';
 import { runStageFromManifest, runStageCli } from '../src/run-stage.js';
 import { cleanupServices } from '../src/process-manager.js';
@@ -590,7 +590,7 @@ describe('CLI — runStageCli facts file validation', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.errors.join(' ')).toMatch(/not the current HEAD/i);
+      expect(result.errors.join(' ')).toMatch(/not an ancestor of HEAD/i);
       const receipt = readReceipt(result.receiptPath!);
       expect(receipt.verdict).toBe('FAIL');
     });
@@ -670,5 +670,190 @@ describe('CLI — runStageCli facts file validation', () => {
       const receipt = readReceipt(result.receiptPath!);
       expect(receipt.verdict).toBe('FAIL');
     }, 15000);
+  });
+
+  describe('stage gate with real git commits', () => {
+    let repoDir: string;
+    let originalCwd: string;
+
+    beforeAll(() => {
+      originalCwd = process.cwd();
+      repoDir = mkdtempSync(join(tmpdir(), 'stage-gate-repo-'));
+      process.chdir(repoDir);
+      execFileSync('git', ['init'], { stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.email', 'test@test.com'], { stdio: 'pipe' });
+      execFileSync('git', ['config', 'user.name', 'Test'], { stdio: 'pipe' });
+      writeFileSync(join(repoDir, 'base.txt'), 'base');
+      execFileSync('git', ['add', '.'], { stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', 'base'], { stdio: 'pipe' });
+      // Normalise branch name to 'main' regardless of git version default
+      const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf-8' }).trim();
+      if (currentBranch !== 'main') {
+        execFileSync('git', ['branch', '-m', currentBranch, 'main'], { stdio: 'pipe' });
+      }
+    });
+
+    afterAll(() => {
+      process.chdir(originalCwd);
+      if (repoDir) {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+
+    /**
+     * Create a feature branch, add files, commit, switch back to main,
+     * and merge with --no-ff.  Returns the original slice commit SHA
+     * (the branch tip before merge, which should be an ancestor of the
+     * eventual merge commit HEAD).
+     */
+    function createSliceCommit(branchName: string, files: Record<string, string>): string {
+      execFileSync('git', ['checkout', '-b', branchName], { stdio: 'pipe' });
+      for (const [filePath, content] of Object.entries(files)) {
+        const fullPath = join(repoDir, filePath);
+        mkdirSync(dirname(fullPath), { recursive: true });
+        writeFileSync(fullPath, content);
+      }
+      execFileSync('git', ['add', '.'], { stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', `slice: ${branchName}`], { stdio: 'pipe' });
+      const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
+      execFileSync('git', ['checkout', 'main'], { stdio: 'pipe' });
+      execFileSync('git', ['merge', '--no-ff', '--no-edit', branchName], { stdio: 'pipe' });
+      return sha;
+    }
+
+    /**
+     * Build a stage manifest + persisted evidence artifacts + SliceCompleteFacts
+     * array that reference the given commit SHAs.
+     */
+    function buildManifestAndFacts(
+      stageId: string,
+      sliceIds: string[],
+      commitShas: string[],
+    ): { manifestPath: string; facts: Array<{
+      slice_id: string;
+      cv: { verdict: string; receipt_ref: string };
+      commit: { commit_sha: string };
+      integration: { integration_ref: string };
+    }> } {
+      const manifest = {
+        ...BASE_MANIFEST,
+        stage_id: stageId,
+        slices: sliceIds.map((sliceId) => ({
+          slice_id: sliceId,
+          goal: 'x',
+          observable_outcome: 'x',
+          public_seam: 'x',
+          evidence_path: 'x',
+        })),
+        runtime_proof: [
+          { id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] },
+        ],
+      };
+      const manifestPath = writeManifest(`real-git-${stageId}.json`, manifest);
+
+      const facts: Array<{
+        slice_id: string;
+        cv: { verdict: string; receipt_ref: string };
+        commit: { commit_sha: string };
+        integration: { integration_ref: string };
+      }> = [];
+
+      for (let i = 0; i < sliceIds.length; i++) {
+        const sliceId = sliceIds[i];
+        const commitSha = commitShas[i];
+        const cvPath = join(tmpDir, `cv-${stageId}-${sliceId}.json`);
+        const integrationPath = join(tmpDir, `integration-${stageId}-${sliceId}.json`);
+
+        writeFileSync(cvPath, JSON.stringify({
+          stage_id: stageId,
+          slice_id: sliceId,
+          snapshot: 'a'.repeat(16),
+          cv_level: 'standard',
+          verification_type: 'initial',
+          verdict: 'PASS',
+          failed_po_ids: [],
+        }));
+        writeFileSync(integrationPath, JSON.stringify({
+          stage_id: stageId,
+          slice_id: sliceId,
+          commit_sha: commitSha,
+          status: 'integrated',
+        }));
+
+        facts.push({
+          slice_id: sliceId,
+          cv: { verdict: 'PASS', receipt_ref: cvPath },
+          commit: { commit_sha: commitSha },
+          integration: { integration_ref: integrationPath },
+        });
+      }
+
+      return { manifestPath, facts };
+    }
+
+    // ── Scenario A: Single slice + merge --no-ff ────────────────────────────
+    test('单 Slice + merge --no-ff: ancestor check 通过', async () => {
+      const sliceSha = createSliceCommit('slice-A', { 'output/file.txt': 'slice A output' });
+      const { manifestPath, facts } = buildManifestAndFacts('S99-GITA', ['S99-A'], [sliceSha]);
+
+      const result = await runStageFromManifest({
+        manifestPath,
+        outputDir: tmpDir,
+        sliceCompleteFacts: facts,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('PASS');
+    }, 30000);
+
+    // ── Scenario B: Two slices + merge --no-ff ───────────────────────────────
+    test('两个独立 Slice + merge --no-ff: 多 Slice 都通过', async () => {
+      const sliceASha = createSliceCommit('slice-B1', { 'output/b1.txt': 'slice B1 output' });
+      const sliceBSha = createSliceCommit('slice-B2', { 'output/b2.txt': 'slice B2 output' });
+      const { manifestPath, facts } = buildManifestAndFacts(
+        'S99-GITB', ['S99-B', 'S99-C'], [sliceASha, sliceBSha],
+      );
+
+      const result = await runStageFromManifest({
+        manifestPath,
+        outputDir: tmpDir,
+        sliceCompleteFacts: facts,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('PASS');
+      expect(receipt.slice_complete_facts).toHaveLength(2);
+    }, 30000);
+
+    // ── Scenario C: Non-ancestor commit should be rejected ───────────────────
+    test('非祖先 commit（属于未合并分支）被拒绝', async () => {
+      // Create a commit on a branch that is never merged to main.
+      // Its commit is NOT an ancestor of HEAD.
+      execFileSync('git', ['checkout', '-b', 'unrelated'], { stdio: 'pipe' });
+      writeFileSync(join(repoDir, 'unrelated.txt'), 'unrelated');
+      execFileSync('git', ['add', '.'], { stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', 'unrelated commit'], { stdio: 'pipe' });
+      const unrelatedSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
+
+      // Switch back to main — unrelated branch is never merged
+      execFileSync('git', ['checkout', 'main'], { stdio: 'pipe' });
+
+      const { manifestPath, facts } = buildManifestAndFacts('S99-GITC', ['S99-D'], [unrelatedSha]);
+
+      const result = await runStageFromManifest({
+        manifestPath,
+        outputDir: tmpDir,
+        sliceCompleteFacts: facts,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors.join(' ')).toMatch(/not an ancestor of HEAD/i);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('FAIL');
+    }, 30000);
   });
 });

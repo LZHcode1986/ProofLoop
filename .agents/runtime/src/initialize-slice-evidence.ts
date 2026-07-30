@@ -16,59 +16,38 @@ import path from 'node:path';
 import type { Manifest } from './schemas.js';
 import { Manifest as ManifestSchema } from './schemas.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
+import { checkNoSymlinkBelowTrustRoot } from './canonical-artifact-path.js';
 
-// ── Symlink detection ──────────────────────────────────────────────────────────
+// ── Path boundary check ────────────────────────────────────────────────────────
 
 /**
  * Check that a resolved path stays within the project root boundary.
- * Returns the normalized path if safe, or null if the path escapes the project root
+ * Returns the resolved path if safe, or null if the path escapes the project root
  * or traverses through a symlink.
  *
- * This rejects:
- *  - Path traversal via ".." components
- *  - Any symbolic-link component along the target path, including links that
- *    resolve within the project root
- *  - Symlinks in any existing parent directory (even if the target file does not exist)
- *
- * It does NOT reject Windows 8.3 short-name aliases or benign directory junctions
- * that are not reported as symbolic links by lstat.
+ * Delegates symlink checking below the delivery root to the shared module
+ * `checkNoSymlinkBelowTrustRoot`. System symlinks at or above the delivery root
+ * (e.g. macOS /var -> /private/var) are accepted.
  */
 function checkPathWithinProject(targetPath: string, projectRoot: string): string | null {
-  const normalizedTarget = path.normalize(path.resolve(targetPath));
-  const normalizedRoot = path.normalize(path.resolve(projectRoot));
-  const realRoot = fs.realpathSync(projectRoot);
+  // Delegate symlink checking to the shared module (checks components strictly
+  // below projectRoot, allowing system aliases at/above the root).
+  const symlinkError = checkNoSymlinkBelowTrustRoot(targetPath, projectRoot);
+  if (symlinkError !== null) return null;
 
-  // Check every existing ancestor directory for symlinks.
-  // This catches symlink escapes even when the target file itself doesn't exist.
-  let current = normalizedTarget;
-  const rootParts = normalizedRoot.split(path.sep);
-  while (current.length >= normalizedRoot.length) {
-    try {
-      const stat = fs.lstatSync(current);
-      if (stat.isSymbolicLink()) {
-        // Reject every symbolic link, even when it resolves within the project root.
-        return null;
-      }
-    } catch {
-      // Path component doesn't exist yet — that's fine, continue checking existing parents
-    }
-
-    // Move to parent directory
-    const parent = path.dirname(current);
-    if (parent === current) break; // reached filesystem root
-    current = parent;
-  }
-
-  // Final check: try realpath on the complete path (handles symlink in the final component)
+  // Path boundary check
   try {
     const realTarget = fs.realpathSync(targetPath);
-    if (!realTarget.startsWith(realRoot + path.sep) && realTarget !== realRoot) {
+    const realRoot = fs.realpathSync(projectRoot);
+    const realRootPrefix = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+    if (!realTarget.startsWith(realRootPrefix) && realTarget !== realRoot) {
       return null;
     }
     return realTarget;
   } catch {
-    // Target file doesn't exist — we've already checked parents above.
-    // Use normalized path; symlink escape through parents has been rejected.
+    // Target file doesn't exist — verify via normalized path
+    const normalizedTarget = path.normalize(path.resolve(targetPath));
+    const normalizedRoot = path.normalize(path.resolve(projectRoot));
     if (!normalizedTarget.startsWith(normalizedRoot + path.sep) && normalizedTarget !== normalizedRoot) {
       return null;
     }

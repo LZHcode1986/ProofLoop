@@ -135,7 +135,7 @@ export function buildRecoveryPacket(params) {
     const currentTask = nonEmptyRecover(params.current_task, 'current_task');
     const codeSnapshot = nonEmptyRecover(params.current_code_snapshot, 'current_code_snapshot');
     return {
-        mode: 'recover',
+        mode: 'recover-task',
         completed_task_ids: completed,
         task_evidence_refs: refs,
         current_slice_evidence_ref: sliceEvidence,

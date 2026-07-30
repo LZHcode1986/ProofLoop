@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { CvReceipt as CvReceiptSchema, Manifest as ManifestSchema, ProjectAcceptanceManifestSchema, SliceCompleteFacts as SliceCompleteFactsSchema } from './schemas.js';
@@ -7,31 +7,15 @@ import { runProcess, spawnService, registerService, getRegisteredService, stopRe
 import { writeGateReceipt, writeProjectE2EReceipt, computeSnapshot } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
+import { resolveCanonicalArtifact } from './canonical-artifact-path.js';
 // ── Persisted Slice COMPLETE evidence ──────────────────────────────────────────
 /**
  * Resolve a persisted evidence reference without treating the reference itself
- * as evidence. Relative refs may be rooted at the run output directory or at
- * the canonical .proofloop receipt root; absolute refs are accepted as-is.
+ * as evidence. Delegates to the shared `resolveCanonicalArtifact` module
+ * which searches multiple candidate locations and validates the result.
  */
 function resolveEvidenceFile(reference, outputDir) {
-    const candidates = path.isAbsolute(reference)
-        ? [reference]
-        : [
-            path.resolve(outputDir, reference),
-            path.resolve(outputDir, '.proofloop', 'receipts', reference),
-            path.resolve(process.cwd(), reference),
-            path.resolve(process.cwd(), '.proofloop', 'receipts', reference),
-        ];
-    for (const candidate of candidates) {
-        try {
-            if (statSync(candidate).isFile())
-                return path.resolve(candidate);
-        }
-        catch {
-            // A missing/unreadable candidate is not persisted evidence.
-        }
-    }
-    return null;
+    return resolveCanonicalArtifact(reference, outputDir);
 }
 function hasPersistedCvReceipt(reference, stageId, sliceId, outputDir) {
     const receiptPath = resolveEvidenceFile(reference, outputDir);
@@ -39,7 +23,7 @@ function hasPersistedCvReceipt(reference, stageId, sliceId, outputDir) {
         return null;
     try {
         const parsed = CvReceiptSchema.safeParse(JSON.parse(readFileSync(receiptPath, 'utf-8')));
-        if (!parsed.success || parsed.data.stage_id !== stageId || parsed.data.slice_id !== sliceId || parsed.data.verdict !== 'PASS') {
+        if (!parsed.success || parsed.data.stage_id !== stageId || parsed.data.slice_id !== sliceId || parsed.data.verdict !== 'PASS' || (parsed.data.scope_violations?.length ?? 0) > 0) {
             return null;
         }
         return receiptPath;
@@ -62,6 +46,36 @@ function hasPersistedCommit(commitSha) {
     }
     catch {
         return false;
+    }
+}
+function hasCommitAncestor(commitSha) {
+    if (!/^[a-f0-9]{40}$/i.test(commitSha))
+        return { exists: false, ancestor: false };
+    try {
+        // First verify the commit object exists
+        execFileSync('git', ['cat-file', '-e', `${commitSha}^{commit}`], {
+            cwd: process.cwd(),
+            stdio: 'ignore',
+        });
+        // Then verify it's an ancestor of HEAD
+        execFileSync('git', ['merge-base', '--is-ancestor', commitSha, 'HEAD'], {
+            cwd: process.cwd(),
+            stdio: 'ignore',
+        });
+        return { exists: true, ancestor: true };
+    }
+    catch {
+        // If cat-file succeeded but merge-base failed, commit exists but isn't ancestor
+        try {
+            execFileSync('git', ['cat-file', '-e', `${commitSha}^{commit}`], {
+                cwd: process.cwd(),
+                stdio: 'ignore',
+            });
+            return { exists: true, ancestor: false };
+        }
+        catch {
+            return { exists: false, ancestor: false };
+        }
     }
 }
 /**
@@ -115,23 +129,23 @@ function validatePersistedSliceFacts(facts, stageId, outputDir) {
     const headSha = getHeadSha();
     for (const fact of facts) {
         const cvReceiptPath = hasPersistedCvReceipt(fact.cv.receipt_ref, stageId, fact.slice_id, outputDir);
-        const commitExists = hasPersistedCommit(fact.commit.commit_sha);
-        // Validate commit both exists AND equals HEAD.
-        let commitIsHead = false;
-        if (!commitExists) {
+        // Validate commit exists AND is an ancestor of HEAD (does NOT need to equal HEAD).
+        const commitResult = hasCommitAncestor(fact.commit.commit_sha);
+        let commitValid = false;
+        if (!commitResult.exists) {
             errors.push(`Slice COMPLETE fact for ${fact.slice_id} references non-existent commit ${fact.commit.commit_sha}.`);
         }
         else if (headSha === null) {
             errors.push(`Slice COMPLETE fact for ${fact.slice_id}: cannot determine HEAD commit (git rev-parse HEAD failed).`);
         }
-        else if (fact.commit.commit_sha !== headSha) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id} references commit ${fact.commit.commit_sha} which is not the current HEAD (${headSha}).`);
+        else if (!commitResult.ancestor) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id} references commit ${fact.commit.commit_sha} which is not an ancestor of HEAD (${headSha}).`);
         }
         else {
-            commitIsHead = true;
+            commitValid = true;
         }
         const integrationPath = hasPersistedIntegration(fact.integration.integration_ref, stageId, fact.slice_id, fact.commit.commit_sha, outputDir);
-        if (!cvReceiptPath || !commitIsHead || !integrationPath) {
+        if (!cvReceiptPath || !commitValid || !integrationPath) {
             // Add a generic error only when no slice-specific error was already emitted.
             if (!errors.some(e => e.includes(fact.slice_id))) {
                 errors.push(`Slice COMPLETE fact for ${fact.slice_id} must reference persisted CV PASS, commit, and integration evidence.`);
@@ -526,7 +540,7 @@ export async function runStageFromManifest(options) {
         };
     }
     const steps = manifest.runtime_proof ?? [];
-    const resolvedOutputDir = outputDir ?? path.dirname(manifestPath);
+    const resolvedOutputDir = outputDir ?? path.resolve(process.cwd(), '.proofloop', 'receipts', 'stage-gate', manifest.stage_id);
     const suppliedFacts = options.sliceCompleteFacts ?? [];
     const parsedFacts = suppliedFacts.map(fact => SliceCompleteFactsSchema.safeParse(fact));
     const factErrors = [];

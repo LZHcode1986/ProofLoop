@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CvReceipt as CvReceiptSchema } from './schemas.js';
+import { checkNoSymlinkBelowTrustRoot } from './canonical-artifact-path.js';
 // ── CV lifecycle status enum ──────────────────────────────────────────────────
 /**
  * The only valid CV statuses for the `## Current CV Status` section.
@@ -110,29 +111,16 @@ export function updateCurrentCvStatus(options) {
     const realCanonicalEvidencePath = path.resolve(realRoot, 'delivery', 'stages', stageId, 'evidence', `${sliceId}.md`);
     const resolvedEvidencePath = path.resolve(evidencePath);
     // Check every existing ancestor directory for symlinks that are strictly
-    // *below* the deliveryRoot.  Any symlink below the trusted boundary is
-    // rejected regardless of where its target resolves.  Symlinks at or above
-    // the trusted deliveryRoot boundary (e.g. macOS /var -> /private/var) are
-    // accepted because the ancestor walk stops at the deliveryRoot.
-    let current = resolvedEvidencePath;
-    while (current.length > resolvedDeliveryRoot.length) {
-        try {
-            const stat = fs.lstatSync(current);
-            if (stat.isSymbolicLink()) {
-                return {
-                    success: false,
-                    error: `Evidence path component "${current}" is a symlink below the trusted delivery root. Rejected.`,
-                    modified: false,
-                };
-            }
-        }
-        catch {
-            // Path component doesn't exist — continue checking existing parents
-        }
-        const parent = path.dirname(current);
-        if (parent === current || parent.length <= resolvedDeliveryRoot.length)
-            break;
-        current = parent;
+    // *below* the deliveryRoot.  Uses the shared `checkNoSymlinkBelowTrustRoot`
+    // which allows system symlinks at or above the deliveryRoot boundary
+    // (e.g. macOS /var -> /private/var) but rejects any symlink below it.
+    const symlinkError = checkNoSymlinkBelowTrustRoot(resolvedEvidencePath, resolvedDeliveryRoot);
+    if (symlinkError !== null) {
+        return {
+            success: false,
+            error: `Evidence path component is a symlink below the trusted delivery root: ${symlinkError}`,
+            modified: false,
+        };
     }
     // Compare paths in their real-root-resolved form so that a trusted
     // deliveryRoot that goes through a system symlink (e.g. /var -> /private/var
@@ -195,18 +183,12 @@ export function updateCurrentCvStatus(options) {
             return { success: false, error: `CV receipt does not exist: "${resolvedReceiptPath}".`, modified: false };
         try {
             // Reject symlinks in the receipt itself and in any existing parent
-            // *strictly below* the deliveryRoot.  System symlinks at or above the
-            // trusted deliveryRoot boundary (e.g. macOS /var -> /private/var) are
-            // accepted.
-            let current = resolvedReceiptPath;
-            while (current.length > receiptRoot.length) {
-                const stat = fs.lstatSync(current);
-                if (stat.isSymbolicLink())
-                    return { success: false, error: 'CV receipt must be a regular immutable file, not a symlink.', modified: false };
-                const parent = path.dirname(current);
-                if (parent === current || parent.length <= receiptRoot.length)
-                    break;
-                current = parent;
+            // *strictly below* the deliveryRoot.  Uses the shared module which
+            // allows system symlinks at or above the trusted deliveryRoot boundary
+            // (e.g. macOS /var -> /private/var) but rejects any symlink below it.
+            const receiptSymlinkError = checkNoSymlinkBelowTrustRoot(resolvedReceiptPath, receiptRoot);
+            if (receiptSymlinkError !== null) {
+                return { success: false, error: 'CV receipt must be a regular immutable file, not a symlink.', modified: false };
             }
             const realReceiptPath = fs.realpathSync(resolvedReceiptPath);
             const realReceiptDir = path.dirname(realReceiptPath);

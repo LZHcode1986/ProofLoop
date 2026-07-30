@@ -39,7 +39,7 @@ export interface RepairDispatchPacket {
  * instead of a CV failure receipt and repair scope.
  */
 export interface RecoveryDispatchPacket {
-  mode: 'recover';
+  mode: 'recover-task';
   completed_task_ids: readonly string[];
   task_evidence_refs: Readonly<Record<string, string>>;
   current_slice_evidence_ref: string;
@@ -197,7 +197,7 @@ export function buildRecoveryPacket(params: {
   const codeSnapshot = nonEmptyRecover(params.current_code_snapshot, 'current_code_snapshot');
 
   return {
-    mode: 'recover',
+    mode: 'recover-task',
     completed_task_ids: completed,
     task_evidence_refs: refs,
     current_slice_evidence_ref: sliceEvidence,
