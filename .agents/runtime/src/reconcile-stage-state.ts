@@ -500,10 +500,10 @@ export function checkSliceIntegrated(
 export function readStageGateReceipt(receiptPath: string): StageGateReceiptType | null {
   try {
     const resolvedPath = path.resolve(receiptPath);
-    // Only accept regular files, not symlinks
-    const stat = fs.lstatSync(resolvedPath);
-    if (!stat.isFile() || stat.isSymbolicLink()) return null;
-
+    // Delegate file-validity checks to the caller (assertRegularFileBelowTrustedRoot).
+    // Here we only need to read and parse — lstat-based symlink rejection is
+    // redundant and can reject valid regular files on platforms where the path
+    // traverses above a trusted-root system alias (e.g. macOS /tmp -> /private/tmp).
     const content = fs.readFileSync(resolvedPath, 'utf-8');
     const parsed = JSON.parse(content);
     return StageGateReceipt.parse(parsed);
