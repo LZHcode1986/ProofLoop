@@ -125,6 +125,44 @@ export const CvReceipt = z.object({
     required_recheck_scope: z.array(z.string()).optional().default([]),
     /** ISO-8601 timestamp. */
     timestamp: z.string().optional(),
+}).superRefine((data, ctx) => {
+    if (data.verdict === 'REPAIR') {
+        // REPAIR receipts require a non-blank failed_criterion
+        if (!data.failed_criterion || data.failed_criterion.trim().length === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['failed_criterion'],
+                message: 'failed_criterion is required and must be non-empty when verdict is REPAIR',
+            });
+        }
+        // REPAIR receipts require a non-blank failure_signature
+        if (!data.failure_signature || data.failure_signature.trim().length === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['failure_signature'],
+                message: 'failure_signature is required and must be non-empty when verdict is REPAIR',
+            });
+        }
+        // REPAIR receipts require at least one actionable failure locator
+        const hasLocator = (data.failed_po_ids && data.failed_po_ids.length > 0) ||
+            (data.affected_task_ids && data.affected_task_ids.length > 0) ||
+            (data.counterexamples && data.counterexamples.length > 0);
+        if (!hasLocator) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['failed_po_ids'],
+                message: 'At least one of failed_po_ids, affected_task_ids, or counterexamples must be non-empty when verdict is REPAIR',
+            });
+        }
+        // REPAIR receipts require non-empty required_recheck_scope
+        if (!data.required_recheck_scope || data.required_recheck_scope.length === 0) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['required_recheck_scope'],
+                message: 'required_recheck_scope must be non-empty when verdict is REPAIR',
+            });
+        }
+    }
 });
 // === Project Acceptance Schemas ===
 export const ProjectAcceptanceManifestSchema = z.object({

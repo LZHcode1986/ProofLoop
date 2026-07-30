@@ -16,17 +16,15 @@ permission:
     "Get-ChildItem *": allow
     "Test-Path *": allow
     "rg *": allow
-    "python -m pytest *": allow
-    "python *": allow
-    "npm *": allow
-    "npx *": allow
-    "node *": allow
-    "pip *": allow
-    "gcc *": allow
-    "make *": allow
     "cat *": allow
     "type *": allow
     "diff *": allow
+    "python -m pytest *": allow
+    "python tests/framework/proofloop-permission-smoke-test.py *": allow
+    "python tests/framework/proofloop-check-agent-yaml.py *": allow
+    "npm test *": allow
+    "npm run test *": allow
+    "npx tsc --noEmit *": allow
   read: allow
   glob: allow
   grep: allow

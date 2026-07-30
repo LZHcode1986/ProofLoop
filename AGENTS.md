@@ -1,6 +1,6 @@
-# AGENTS.md — Agent Continuation & Environment Contract
+# AGENTS.md — Host Adapter Boundary & Task Naming
 
-This file describes project-level conventions for multi-agent programming environments operating on this codebase.
+This file covers host-adapter boundaries and task naming only.
 
 It is not a workflow state document. It is not an authority document.
 
@@ -8,9 +8,7 @@ It is not a workflow state document. It is not an authority document.
 
 ## Host Adapter Boundary
 
-This file declares when continuation is semantically valid or required.
-
-The programming Agent environment (Host Adapter) is responsible for locating the original session, restoring context, and routing the continuation request. This file does not describe Host Adapter internals.
+Role-specific continuation semantics belong to the Brain and Executor contracts.
 
 ---
 

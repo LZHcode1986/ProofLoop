@@ -1,4 +1,4 @@
-# Stage S00-incomplete — Incomplete Worker Fixture
+# Stage S00-INCOMPLETE — Incomplete Worker Fixture
 
 ## Stage Goal
 

@@ -174,15 +174,42 @@ Otherwise:
 - **Whether Contract changed**
 - **Whether fresh Worker is required**
 
-### Fresh repair/session-loss packet (repair or fresh recover-task)
+### Fresh recover-task packet (session loss before any CV failure)
 
-When the Worker session is lost, or a repair must run in a fresh Worker session,
-Executor MUST construct a fresh packet from persisted facts. The packet MUST
-include all of these fields; refs point to the current Slice Evidence unless
-otherwise noted:
+When the Worker session is lost before any CV-failure receipt exists, the
+Executor MUST construct a fresh packet from persisted facts using the same
+structure as `buildRecoveryPacket`. The packet MUST include exactly these
+fields; refs point to the current Slice Evidence unless otherwise noted:
 
 ```yaml
 # List fields are required and may be empty.
+mode: recover
+completed_task_ids: [<task-id>]
+task_evidence_refs:
+  <completed-task-id>: <persisted-evidence-ref>
+current_slice_evidence_ref: <persisted-evidence-ref>
+current_task: <single-task-id>
+current_code_snapshot: <source-snapshot>
+```
+
+The packet MUST NOT contain a `cv_failure_receipt` or CV failure-scope fields
+(`failed_po_ids`, `counterexamples`, `required_recheck_scope`).  Recovery is a
+consistency closure for persisted evidence/checkbox state, not a repair of a
+known CV failure.  This packet matches `buildRecoveryPacket` in the runtime.
+
+### Fresh repair packet (CV failure-driven)
+
+When a repair or diagnose must run in a fresh Worker session driven by an
+existing CV failure receipt, the Executor MUST construct a packet from
+persisted facts using the same structure as `buildRepairPacket`. The packet
+MUST include all of these fields:
+
+```yaml
+# completed_task_ids and task_evidence_refs may be empty only for initial
+# recovery (pre-CV-failure).  For a REPAIR-driven packet, at least one of
+# failed_po_ids, affected_task_ids, or counterexamples MUST be non-empty
+# (actionable failure locator), and required_recheck_scope MUST be non-empty.
+mode: repair
 completed_task_ids: [<task-id>]
 task_evidence_refs:
   <completed-task-id>: <persisted-evidence-ref>
@@ -193,15 +220,24 @@ cv_failure_receipt:
   failed_criterion: <string>
   failure_signature: <string>
 failed_po_ids: [<po-id>]
+affected_task_ids: [<task-id>]
 counterexamples: [<counterexample>]
 required_recheck_scope: [<scope-item>]
 ```
 
-The fields are required even when their lists are empty. `task_evidence_refs` must
-match `completed_task_ids` exactly: each completed Task has one persisted evidence
-ref and no other Task may appear. `cv_failure_receipt` must preserve the immutable
-CV failure receipt together with its non-PASS verdict, failed criterion, and failure
-signature; `required_recheck_scope` must remain limited to the failed CV scope.
+`completed_task_ids` and `task_evidence_refs` may be empty only for an initial
+recovery packet (no CV failure yet). For a REPAIR-driven repair packet they
+reflect tasks completed before the CV failure and MUST be non-empty when at
+least one task was completed. `task_evidence_refs` must match `completed_task_ids`
+exactly: each completed Task has one persisted evidence ref and no other Task may
+appear. `cv_failure_receipt` must preserve the immutable CV failure receipt
+together with its non-PASS verdict, failed criterion, and failure signature.
+`affected_task_ids` is bound to the immutable CV failure receipt; it identifies
+which tasks the failure covers and must not be broadened beyond the receipt's
+scope. When the receipt verdict is REPAIR, `required_recheck_scope` MUST be
+non-empty (§CvReceipt.superRefine), and at least one of `failed_po_ids`,
+`affected_task_ids`, or `counterexamples` MUST be non-empty to provide an
+actionable failure locator.
 
 ### Diagnose Context (diagnose only)
 

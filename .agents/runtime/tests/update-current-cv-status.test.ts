@@ -29,8 +29,13 @@ function canonicalReceiptPath(stageId = 'S01', sliceId = 'S01-A', filename = 'in
     slice_id: sliceId, stage_id: stageId, snapshot: 'a1b2c3d4e5f6a7b8',
     cv_level: /pass/i.test(filename) ? 'enhanced' : 'standard',
     verification_type: normalized.startsWith('recheck') ? 'recheck' : 'initial',
-    verdict: isRepair ? 'REPAIR' : 'PASS', failed_po_ids: [], affected_task_ids: [],
-    invalid_tests: [], counterexamples: [], scope_violations: [], required_recheck_scope: [],
+    verdict: isRepair ? 'REPAIR' : 'PASS',
+    failed_po_ids: isRepair ? ['PO-S01-A-01'] : [],
+    affected_task_ids: [],
+    invalid_tests: [], counterexamples: [], scope_violations: [],
+    required_recheck_scope: isRepair ? ['full'] : [],
+    failed_criterion: isRepair ? 'output mismatch' : undefined,
+    failure_signature: isRepair ? 'abc123' : undefined,
     timestamp: new Date().toISOString(),
   }), 'utf8');
   return path.relative(tmpDir, absolute);
@@ -48,12 +53,14 @@ function createReceipt(stageId = 'S01', sliceId = 'S01-A', filename = 'initial-0
     cv_level: 'standard',
     verification_type: 'initial',
     verdict,
-    failed_po_ids: [],
+    failed_po_ids: verdict === 'REPAIR' ? ['PO-S01-A-01'] : [],
     affected_task_ids: [],
     invalid_tests: [],
     counterexamples: [],
     scope_violations: [],
-    required_recheck_scope: [],
+    required_recheck_scope: verdict === 'REPAIR' ? ['full'] : [],
+    failed_criterion: verdict === 'REPAIR' ? 'output mismatch' : undefined,
+    failure_signature: verdict === 'REPAIR' ? 'abc123' : undefined,
     timestamp: new Date().toISOString(),
   });
   fs.writeFileSync(receiptPath, receiptContent, 'utf-8');
@@ -459,6 +466,142 @@ describe('updateCurrentCvStatus', () => {
     });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/symlink|immutable/i);
+  });
+
+  // ── Symlinked deliveryRoot alias (macOS /var -> /private/var) ────────
+
+  test('accepts symlinked deliveryRoot alias for evidence path', () => {
+    // Create a symlink alias to the real tmpDir and use it as deliveryRoot.
+    // This simulates macOS /var -> /private/var where the caller supplies a
+    // deliveryRoot that resolves through a system symlink.
+    const aliasDir = path.join(path.dirname(tmpDir), 'cv-test-symlink-' + path.basename(tmpDir));
+    let aliasCleanup: (() => void) | null = null;
+    try {
+      try { fs.rmSync(aliasDir, { recursive: true, force: true }); } catch { /* ok */ }
+      fs.symlinkSync(tmpDir, aliasDir, 'dir');
+      aliasCleanup = () => { try { fs.rmSync(aliasDir, { recursive: true, force: true }); } catch { /* ok */ } };
+    } catch {
+      // Symlinks unsupported on this platform — skip
+      return;
+    }
+
+    try {
+      // Evidence file lives at the REAL tmpDir's canonical path
+      const filePath = path.join(tmpDir, canonicalEvidencePath());
+      fs.writeFileSync(filePath, EVIDENCE_WITH_CV_SECTION, 'utf-8');
+
+      // But deliveryRoot is the symlink alias
+      const result = updateCurrentCvStatus({
+        evidencePath: filePath,
+        status: 'READY_FOR_CV',
+        stageId: 'S01',
+        sliceId: 'S01-A',
+        deliveryRoot: aliasDir,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.modified).toBe(true);
+    } finally {
+      if (aliasCleanup) aliasCleanup();
+    }
+  });
+
+  test('accepts symlinked deliveryRoot alias for receipt path', () => {
+    const aliasDir = path.join(path.dirname(tmpDir), 'cv-test-symlink-r-' + path.basename(tmpDir));
+    let aliasCleanup: (() => void) | null = null;
+    try {
+      try { fs.rmSync(aliasDir, { recursive: true, force: true }); } catch { /* ok */ }
+      fs.symlinkSync(tmpDir, aliasDir, 'dir');
+      aliasCleanup = () => { try { fs.rmSync(aliasDir, { recursive: true, force: true }); } catch { /* ok */ } };
+    } catch {
+      return;
+    }
+
+    try {
+      const filePath = path.join(tmpDir, canonicalEvidencePath());
+      fs.writeFileSync(filePath, EVIDENCE_WITH_CV_SECTION, 'utf-8');
+      const receiptPath = createReceipt('S01', 'S01-A', 'initial-001.json', 'PASS');
+
+      // deliveryRoot is the symlink alias; receipt path uses REAL tmpDir
+      const result = updateCurrentCvStatus({
+        evidencePath: filePath,
+        status: 'PASS',
+        stageId: 'S01',
+        sliceId: 'S01-A',
+        deliveryRoot: aliasDir,
+        cvLevel: 'standard',
+        latestReceiptPath: receiptPath,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.modified).toBe(true);
+    } finally {
+      if (aliasCleanup) aliasCleanup();
+    }
+  });
+
+  test('rejects canonical evidence path when delivery/ component itself is a symlink below deliveryRoot', () => {
+    // Create a real directory inside tmpDir to hold the evidence file
+    // at a genuine sub-path: stages/S01/evidence/S01-A.md
+    const realContentDir = path.join(tmpDir, 'real-content');
+    fs.mkdirSync(path.join(realContentDir, 'stages', 'S01', 'evidence'), { recursive: true });
+    const realEvidenceFile = path.join(realContentDir, 'stages', 'S01', 'evidence', 'S01-A.md');
+    fs.writeFileSync(realEvidenceFile, EVIDENCE_WITH_CV_SECTION, 'utf-8');
+
+    // Create symlink at deliveryRoot/delivery → real-content (inside deliveryRoot)
+    const deliveryLink = path.join(tmpDir, 'delivery');
+    try { fs.symlinkSync(realContentDir, deliveryLink, 'dir'); } catch { return; }
+
+    // The canonical lexical evidence path goes through the symlink
+    const canonicalPath = path.join(tmpDir, 'delivery', 'stages', 'S01', 'evidence', 'S01-A.md');
+
+    const result = updateCurrentCvStatus({
+      evidencePath: canonicalPath,
+      status: 'READY_FOR_CV',
+      stageId: 'S01',
+      sliceId: 'S01-A',
+      deliveryRoot: tmpDir,
+    });
+
+    // Should reject because delivery/ is a symlink below deliveryRoot
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/symlink/i);
+  });
+
+  test('still rejects symlink in receipt path below deliveryRoot', () => {
+    // Receipt path using a symlinked directory below deliveryRoot must be rejected
+    const realDir = path.join(tmpDir, 'receipt-real');
+    fs.mkdirSync(realDir, { recursive: true });
+    const linkDir = path.join(tmpDir, 'receipt-link');
+    try { fs.symlinkSync(realDir, linkDir, 'dir'); } catch { return; }
+
+    const filePath = path.join(tmpDir, canonicalEvidencePath());
+    fs.writeFileSync(filePath, EVIDENCE_WITH_CV_SECTION, 'utf-8');
+
+    // Create a receipt that looks canonical but lives through a symlink
+    const fakeReceiptDir = path.join(linkDir, '.proofloop', 'receipts', 'cv', 'S01', 'S01-A');
+    fs.mkdirSync(fakeReceiptDir, { recursive: true });
+    const fakeReceipt = path.join(fakeReceiptDir, 'initial-001.json');
+    fs.writeFileSync(fakeReceipt, JSON.stringify({
+      slice_id: 'S01-A', stage_id: 'S01', snapshot: 'x',
+      cv_level: 'standard', verification_type: 'initial',
+      verdict: 'PASS', failed_po_ids: [], affected_task_ids: [],
+      invalid_tests: [], counterexamples: [], scope_violations: [],
+      required_recheck_scope: [], timestamp: new Date().toISOString(),
+    }), 'utf-8');
+
+    const result = updateCurrentCvStatus({
+      evidencePath: filePath,
+      status: 'PASS',
+      stageId: 'S01',
+      sliceId: 'S01-A',
+      deliveryRoot: tmpDir,
+      cvLevel: 'standard',
+      latestReceiptPath: fakeReceipt,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/symlink|immutable|escaping/i);
   });
 });
 

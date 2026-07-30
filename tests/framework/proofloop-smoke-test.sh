@@ -15,6 +15,7 @@ cleanup() {
   rm -rf "${ROOT_DIR:?}/${STAGE_DIR}"
   rm -f "${ROOT_DIR:?}/${MANIFEST_PATH}"
   rm -rf "${ROOT_DIR:?}/${GATE_OUTPUT_DIR}"
+  rm -f "${ROOT_DIR:?}/${GATE_OUTPUT_DIR}/slice-complete-facts.json"
 }
 trap cleanup EXIT
 
@@ -323,16 +324,22 @@ else
   step_fail "validate-stage"
 fi
 
+
+
 # ──────────────────────────────────────────────
-# Step 4: Run Stage Gate (runtime pipeline)
+# Step 4: Run Stage Gate (compiled CLI)
 # ──────────────────────────────────────────────
 echo ""
 echo "--- Step 4: Run Stage Gate ---"
-GATE_OUTPUT_DIR_ABS="${ROOT_DIR}/${GATE_OUTPUT_DIR}"
-COMMIT_SHA="$(git rev-parse --verify HEAD)"
-mkdir -p "${GATE_OUTPUT_DIR_ABS}/receipt" "${GATE_OUTPUT_DIR_ABS}/integration"
-for slice_id in S99-A S99-B; do
-  cat > "${GATE_OUTPUT_DIR_ABS}/receipt/${slice_id}.json" <<RECEIPT_EOF
+RUN_STAGE_CLI="${ROOT_DIR}/.agents/runtime/dist/run-stage.js"
+if [ ! -f "${RUN_STAGE_CLI}" ]; then
+  step_fail "run-stage dist not found at ${RUN_STAGE_CLI}"
+else
+  GATE_OUTPUT_DIR_ABS="${ROOT_DIR}/${GATE_OUTPUT_DIR}"
+  COMMIT_SHA="$(git rev-parse --verify HEAD)"
+  mkdir -p "${GATE_OUTPUT_DIR_ABS}/receipt" "${GATE_OUTPUT_DIR_ABS}/integration"
+  for slice_id in S99-A S99-B; do
+    cat > "${GATE_OUTPUT_DIR_ABS}/receipt/${slice_id}.json" <<RECEIPT_EOF
 {
   "slice_id": "${slice_id}",
   "stage_id": "${STAGE_ID}",
@@ -341,7 +348,7 @@ for slice_id in S99-A S99-B; do
   "verdict": "PASS"
 }
 RECEIPT_EOF
-  cat > "${GATE_OUTPUT_DIR_ABS}/integration/${slice_id}.json" <<INTEGRATION_EOF
+    cat > "${GATE_OUTPUT_DIR_ABS}/integration/${slice_id}.json" <<INTEGRATION_EOF
 {
   "stage_id": "${STAGE_ID}",
   "slice_id": "${slice_id}",
@@ -349,30 +356,43 @@ RECEIPT_EOF
   "status": "integrated"
 }
 INTEGRATION_EOF
-done
-if node --input-type=module - "${ROOT_DIR}/${MANIFEST_PATH}" "${GATE_OUTPUT_DIR_ABS}" "${COMMIT_SHA}" <<'NODE_EOF'
-import { runStageFromManifest } from './.agents/runtime/dist/run-stage.js';
+  done
 
-const manifestPath = process.argv[2];
-const outputDir = process.argv[3];
-const commitSha = process.argv[4];
-const facts = ['S99-A', 'S99-B'].map((sliceId) => ({
-  slice_id: sliceId,
-  cv: { verdict: 'PASS', receipt_ref: `receipt/${sliceId}.json` },
-  commit: { commit_sha: commitSha },
-  integration: { integration_ref: `integration/${sliceId}.json` },
-}));
-const result = await runStageFromManifest({ manifestPath, outputDir, sliceCompleteFacts: facts });
-if (!result.success) {
-  console.error(result.errors.join('\\n'));
-  process.exit(1);
-}
-console.log(`Stage Gate PASSED (${result.stepCount} steps)`);
-NODE_EOF
-then
-  step_pass "run-stage"
-else
-  step_fail "run-stage"
+  # Generate Slice COMPLETE facts JSON for the compiled CLI
+  FACTS_FILE="${GATE_OUTPUT_DIR_ABS}/slice-complete-facts.json"
+  cat > "${FACTS_FILE}" << FACTS_EOF
+[
+  {
+    "slice_id": "S99-A",
+    "cv": { "verdict": "PASS", "receipt_ref": "receipt/S99-A.json" },
+    "commit": { "commit_sha": "${COMMIT_SHA}" },
+    "integration": { "integration_ref": "integration/S99-A.json" }
+  },
+  {
+    "slice_id": "S99-B",
+    "cv": { "verdict": "PASS", "receipt_ref": "receipt/S99-B.json" },
+    "commit": { "commit_sha": "${COMMIT_SHA}" },
+    "integration": { "integration_ref": "integration/S99-B.json" }
+  }
+]
+FACTS_EOF
+
+  if node "${RUN_STAGE_CLI}"     "${ROOT_DIR}/${MANIFEST_PATH}"     "${FACTS_FILE}"     "${GATE_OUTPUT_DIR_ABS}" 2>&1; then
+    step_pass "run-stage CLI exit 0"
+    # Assert PASS receipt was written
+    GATE_RECEIPT_FILE="$(ls "${GATE_OUTPUT_DIR_ABS}"/stage-gate-*.json 2>/dev/null | head -1)"
+    if [ -n "${GATE_RECEIPT_FILE}" ]; then
+      if grep -q '"PASS"' "${GATE_RECEIPT_FILE}"; then
+        step_pass "run-stage PASS receipt verified"
+      else
+        step_fail "run-stage receipt missing PASS verdict"
+      fi
+    else
+      step_fail "run-stage receipt file not created"
+    fi
+  else
+    step_fail "run-stage CLI"
+  fi
 fi
 
 # ──────────────────────────────────────────────

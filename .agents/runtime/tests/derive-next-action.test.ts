@@ -425,6 +425,10 @@ describe('deriveNextAction', () => {
       slices: [makeSlice('S01-A', { cv_status: 'REPAIR', repair_attempt: 9, latest_cv_receipt: {
         stage_id: 'S01', slice_id: 'S01-A', snapshot: 'a'.repeat(16), cv_level: 'standard',
         verification_type: 'initial', verdict: 'REPAIR',
+        failed_criterion: 'requirement not met',
+        failure_signature: 'sig-001',
+        failed_po_ids: ['PO-1'],
+        required_recheck_scope: ['full'],
       } as any })],
     }));
     expect(result.action).toBe('repair');

@@ -64,6 +64,22 @@ function hasPersistedCommit(commitSha) {
         return false;
     }
 }
+/**
+ * Return the current HEAD commit SHA from the git repository.
+ * Returns null if git is unavailable or not in a repository.
+ */
+function getHeadSha() {
+    try {
+        return execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: process.cwd(),
+            stdio: 'pipe',
+            encoding: 'utf-8',
+        }).trim();
+    }
+    catch {
+        return null;
+    }
+}
 function hasPersistedIntegration(reference, stageId, sliceId, commitSha, outputDir) {
     const artifactPath = resolveEvidenceFile(reference, outputDir);
     if (!artifactPath)
@@ -95,12 +111,31 @@ function hasPersistedIntegration(reference, stageId, sliceId, commitSha, outputD
 function validatePersistedSliceFacts(facts, stageId, outputDir) {
     const errors = [];
     const persistedFacts = [];
+    // Resolve HEAD once for all fact validation in this batch.
+    const headSha = getHeadSha();
     for (const fact of facts) {
         const cvReceiptPath = hasPersistedCvReceipt(fact.cv.receipt_ref, stageId, fact.slice_id, outputDir);
-        const commitValid = hasPersistedCommit(fact.commit.commit_sha);
+        const commitExists = hasPersistedCommit(fact.commit.commit_sha);
+        // Validate commit both exists AND equals HEAD.
+        let commitIsHead = false;
+        if (!commitExists) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id} references non-existent commit ${fact.commit.commit_sha}.`);
+        }
+        else if (headSha === null) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: cannot determine HEAD commit (git rev-parse HEAD failed).`);
+        }
+        else if (fact.commit.commit_sha !== headSha) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id} references commit ${fact.commit.commit_sha} which is not the current HEAD (${headSha}).`);
+        }
+        else {
+            commitIsHead = true;
+        }
         const integrationPath = hasPersistedIntegration(fact.integration.integration_ref, stageId, fact.slice_id, fact.commit.commit_sha, outputDir);
-        if (!cvReceiptPath || !commitValid || !integrationPath) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id} must reference persisted CV PASS, commit, and integration evidence.`);
+        if (!cvReceiptPath || !commitIsHead || !integrationPath) {
+            // Add a generic error only when no slice-specific error was already emitted.
+            if (!errors.some(e => e.includes(fact.slice_id))) {
+                errors.push(`Slice COMPLETE fact for ${fact.slice_id} must reference persisted CV PASS, commit, and integration evidence.`);
+            }
             continue;
         }
         // Store canonical paths in the gate receipt so later readers can verify the
@@ -667,31 +702,52 @@ export async function runProjectAcceptance(manifest, outputDir, projectRoot) {
 }
 // ── CLI entry point ────────────────────────────────────────────────────────────
 /**
- * CLI usage: `node dist/run-stage.js <manifest-path> [output-dir]`
+ * CLI handler for run-stage command.
  *
- * Exits with code 0 on PASS, 1 on FAIL/error.
+ * Usage: `run-stage <manifest-path> <slice-complete-facts-path> [output-dir]`
+ *
+ * Reads a JSON array of SliceCompleteFacts from `<slice-complete-facts-path>`
+ * and passes it to runStageFromManifest.  Exits with code 0 on PASS, 1 on
+ * FAIL/error.  Missing, malformed, or non-array facts exit with code 1 and
+ * a clear error message before calling runStageFromManifest.
  */
-function isScriptEntry() {
-    const scriptPath = process.argv[1];
-    if (!scriptPath)
-        return false;
-    const base = path.basename(scriptPath);
-    return base === 'run-stage.js' || base === 'run-stage.ts';
-}
-if (isScriptEntry()) {
-    const manifestPath = process.argv[2];
-    const outputDir = process.argv[3];
-    if (!manifestPath) {
-        console.error('Usage: run-stage <manifest-path> [output-dir]');
-        process.exit(1);
+export async function runStageCli(argv) {
+    const [manifestPath, factsPath, outputDir] = argv;
+    if (!manifestPath || !factsPath) {
+        console.error('Usage: run-stage <manifest-path> <slice-complete-facts-path> [output-dir]');
+        return 1;
     }
-    runStageFromManifest({ manifestPath, outputDir })
-        .then((result) => {
+    // ── Validate Slice COMPLETE facts file ──
+    if (!existsSync(factsPath)) {
+        console.error(`Slice COMPLETE facts file not found: ${factsPath}`);
+        return 1;
+    }
+    let parsedFacts;
+    try {
+        const content = readFileSync(factsPath, 'utf-8');
+        parsedFacts = JSON.parse(content);
+    }
+    catch (err) {
+        console.error(`Failed to parse Slice COMPLETE facts file: ${err instanceof Error ? err.message : String(err)}`);
+        return 1;
+    }
+    if (!Array.isArray(parsedFacts)) {
+        console.error('Slice COMPLETE facts file must contain a JSON array.');
+        return 1;
+    }
+    // The array elements are validated by runStageFromManifest via schema
+    // parsing inside the function — we do not duplicate that validation here.
+    try {
+        const result = await runStageFromManifest({
+            manifestPath,
+            outputDir,
+            sliceCompleteFacts: parsedFacts,
+        });
         if (result.success) {
             console.log(`Stage Gate PASSED.`);
             console.log(`  Steps executed: ${result.stepCount}`);
             console.log(`  Receipt: ${result.receiptPath}`);
-            process.exit(0);
+            return 0;
         }
         else {
             console.error(`Stage Gate FAILED.`);
@@ -702,12 +758,22 @@ if (isScriptEntry()) {
             if (result.receiptPath) {
                 console.error(`  Receipt: ${result.receiptPath}`);
             }
-            process.exit(1);
+            return 1;
         }
-    })
-        .catch((err) => {
-        console.error('Fatal error:', err);
-        process.exit(1);
-    });
+    }
+    catch (err) {
+        console.error('Fatal error:', err instanceof Error ? err.message : String(err));
+        return 1;
+    }
+}
+function isScriptEntry() {
+    const scriptPath = process.argv[1];
+    if (!scriptPath)
+        return false;
+    const base = path.basename(scriptPath);
+    return base === 'run-stage.js' || base === 'run-stage.ts';
+}
+if (isScriptEntry()) {
+    runStageCli(process.argv.slice(2)).then((code) => process.exit(code));
 }
 //# sourceMappingURL=run-stage.js.map

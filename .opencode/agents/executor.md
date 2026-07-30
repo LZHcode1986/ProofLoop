@@ -284,13 +284,29 @@ When all slices are COMPLETE:
 2. Record HEAD commit as snapshot reference
 3. Compute content snapshot digest
 4. Verify all expected CV receipts exist
-5. Run Stage Gate via `node .agents/runtime/dist/run-stage.js <manifest-path>`
-   (this executes all Runtime Proof steps and writes the Stage Gate receipt
-   internally via `writeGateReceipt`)
-6. Verify the persisted Stage Gate Receipt exists and validates against the
-   stage ID, Manifest digest, integrated snapshot, and all Slice IDs.
-7. If the persisted Stage Gate Receipt is PASS → return `STAGE_GATE_PASSED`.
-8. If Stage Gate FAIL or the receipt is absent/invalid → return appropriate
+5. Prepare the Slice COMPLETE facts JSON file — a JSON array with exactly one
+   `SliceCompleteFacts` entry per Manifest slice, each containing:
+   - `cv`: `{ verdict: "PASS", receipt_ref: "<persisted CV PASS receipt path>" }`
+   - `commit`: `{ commit_sha: "<40-char hex SHA>" }`
+   - `integration`: `{ integration_ref: "<persisted integration artifact path>" }`
+6. Run Stage Gate via:
+   ```
+   node .agents/runtime/dist/run-stage.js <manifest-path> <slice-complete-facts-path> [output-dir]
+   ```
+   - `<manifest-path>` — path to compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`)
+   - `<slice-complete-facts-path>` — path to the JSON array from step 5
+   - `[output-dir]` — optional output directory (defaults to `.proofloop/receipts/stage-gate/`)
+
+   The entry point validates the facts array against the `SliceCompleteFacts` schema,
+   resolves canonical paths for CV and integration artifacts, then executes the Runtime
+   Proof steps defined in the Manifest and writes the Stage Gate Receipt via
+   `writeGateReceipt`. On PASS (exit 0) the receipt path is printed; on FAIL (exit 1)
+   errors are listed.
+7. Verify the persisted Stage Gate Receipt exists and validates against the
+   stage ID, Manifest digest, integrated snapshot, and the `slice_complete_facts`
+   array in the receipt (covers every Manifest Slice).
+8. If the persisted Stage Gate Receipt is PASS → return `STAGE_GATE_PASSED`.
+9. If Stage Gate FAIL or the receipt is absent/invalid → return appropriate
    route code.
 
 Executor does NOT dispatch Stage Reviewer. Brain handles that.

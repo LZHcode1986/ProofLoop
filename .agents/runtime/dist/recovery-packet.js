@@ -7,6 +7,14 @@ function nonEmptyString(value, field) {
         return fail(field);
     return value;
 }
+function failRecover(field) {
+    throw new TypeError(`Cannot construct recovery packet: missing or invalid field "${field}"`);
+}
+function nonEmptyRecover(value, field) {
+    if (typeof value !== 'string' || value.trim().length === 0)
+        return failRecover(field);
+    return value;
+}
 function stringList(value, field) {
     if (!Array.isArray(value) || value.some(item => typeof item !== 'string'))
         return fail(field);
@@ -61,6 +69,10 @@ function receipt(value) {
     if (typeof facts.failure_signature !== 'string' || facts.failure_signature.trim().length === 0) {
         return fail('cv_failure_receipt.failure_signature');
     }
+    // fail-closed: affected_task_ids must be present and array-valued
+    if (!Array.isArray(facts.affected_task_ids) || facts.affected_task_ids.some((id) => typeof id !== 'string')) {
+        return fail('cv_failure_receipt.affected_task_ids');
+    }
     return value;
 }
 function sameStrings(left, right) {
@@ -80,6 +92,7 @@ export function buildRepairPacket(state, cvFailure) {
     const failedPoIds = stringList(state.failed_po_ids, 'failed_po_ids');
     const counterexamples = stringList(state.counterexamples, 'counterexamples');
     const scope = stringList(state.required_recheck_scope, 'required_recheck_scope');
+    const affectedTaskIds = stringList(state.affected_task_ids, 'affected_task_ids');
     const preservedReceipt = receipt(cvFailure);
     const receiptWithFacts = preservedReceipt;
     if (receiptWithFacts.failed_po_ids !== undefined && !sameStrings(failedPoIds, receiptWithFacts.failed_po_ids)) {
@@ -90,6 +103,9 @@ export function buildRepairPacket(state, cvFailure) {
     }
     if (receiptWithFacts.required_recheck_scope !== undefined && !sameStrings(scope, receiptWithFacts.required_recheck_scope)) {
         throw new TypeError('Cannot construct repair packet: required recheck scope differs from immutable CV failure receipt');
+    }
+    if (!sameStrings(affectedTaskIds, receiptWithFacts.affected_task_ids)) {
+        throw new TypeError('Cannot construct repair packet: affected_task_ids differ from immutable CV failure receipt');
     }
     return {
         mode: 'repair',
@@ -102,6 +118,29 @@ export function buildRepairPacket(state, cvFailure) {
         failed_po_ids: failedPoIds,
         counterexamples,
         required_recheck_scope: scope,
+        affected_task_ids: affectedTaskIds,
+    };
+}
+/**
+ * Constructs a fresh recovery dispatch packet for a recover-task that
+ * occurs before any CV-failure receipt exists.  Requires a valid current
+ * task and code snapshot; permits an initially empty completed-task set.
+ */
+export function buildRecoveryPacket(params) {
+    if (params === null || typeof params !== 'object')
+        return failRecover('params');
+    const completed = completedTaskIds(params.completed_task_ids);
+    const refs = evidenceRefs(params.task_evidence_refs, completed);
+    const sliceEvidence = nonEmptyRecover(params.current_slice_evidence_ref, 'current_slice_evidence_ref');
+    const currentTask = nonEmptyRecover(params.current_task, 'current_task');
+    const codeSnapshot = nonEmptyRecover(params.current_code_snapshot, 'current_code_snapshot');
+    return {
+        mode: 'recover',
+        completed_task_ids: completed,
+        task_evidence_refs: refs,
+        current_slice_evidence_ref: sliceEvidence,
+        current_task: currentTask,
+        current_code_snapshot: codeSnapshot,
     };
 }
 //# sourceMappingURL=recovery-packet.js.map

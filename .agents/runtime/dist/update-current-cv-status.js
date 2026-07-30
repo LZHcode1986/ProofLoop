@@ -100,35 +100,44 @@ export function updateCurrentCvStatus(options) {
     // ── Canonical path verification ──
     // Verify the evidence path resolves to the expected canonical location
     // delivery/stages/<stageId>/evidence/<sliceId>.md
-    const canonicalEvidencePath = path.resolve(deliveryRoot, 'delivery', 'stages', stageId, 'evidence', `${sliceId}.md`);
+    //
+    // The deliveryRoot parameter is a trusted boundary; system symlinks that
+    // resolve at or above it (e.g. macOS /var -> /private/var) are accepted.
+    // Any symlink strictly below the deliveryRoot remains forbidden.
+    const resolvedDeliveryRoot = path.resolve(deliveryRoot);
+    const realRoot = fs.realpathSync(resolvedDeliveryRoot);
+    const canonicalEvidencePath = path.resolve(resolvedDeliveryRoot, 'delivery', 'stages', stageId, 'evidence', `${sliceId}.md`);
+    const realCanonicalEvidencePath = path.resolve(realRoot, 'delivery', 'stages', stageId, 'evidence', `${sliceId}.md`);
     const resolvedEvidencePath = path.resolve(evidencePath);
-    // Check every existing ancestor directory for symlinks.
-    // This catches symlink escapes even when the target file itself doesn't exist.
-    const realRoot = fs.realpathSync(path.resolve(deliveryRoot));
+    // Check every existing ancestor directory for symlinks that are strictly
+    // *below* the deliveryRoot.  Any symlink below the trusted boundary is
+    // rejected regardless of where its target resolves.  Symlinks at or above
+    // the trusted deliveryRoot boundary (e.g. macOS /var -> /private/var) are
+    // accepted because the ancestor walk stops at the deliveryRoot.
     let current = resolvedEvidencePath;
-    while (current.length >= path.resolve(deliveryRoot).length) {
+    while (current.length > resolvedDeliveryRoot.length) {
         try {
             const stat = fs.lstatSync(current);
             if (stat.isSymbolicLink()) {
-                const resolvedLink = fs.realpathSync(current);
-                if (!resolvedLink.startsWith(realRoot + path.sep) && resolvedLink !== realRoot) {
-                    return {
-                        success: false,
-                        error: `Evidence path component "${current}" is a symlink resolving outside the project root. Rejected.`,
-                        modified: false,
-                    };
-                }
+                return {
+                    success: false,
+                    error: `Evidence path component "${current}" is a symlink below the trusted delivery root. Rejected.`,
+                    modified: false,
+                };
             }
         }
         catch {
             // Path component doesn't exist — continue checking existing parents
         }
         const parent = path.dirname(current);
-        if (parent === current)
+        if (parent === current || parent.length <= resolvedDeliveryRoot.length)
             break;
         current = parent;
     }
-    // Reject symlinked paths — the resolved path must equal the canonical path exactly
+    // Compare paths in their real-root-resolved form so that a trusted
+    // deliveryRoot that goes through a system symlink (e.g. /var -> /private/var
+    // on macOS) is accepted, while any symlink below the root is still caught
+    // above or by the real-path mismatch below.
     let realEvidencePath;
     try {
         realEvidencePath = fs.realpathSync(evidencePath);
@@ -136,7 +145,7 @@ export function updateCurrentCvStatus(options) {
     catch {
         realEvidencePath = resolvedEvidencePath;
     }
-    if (realEvidencePath !== canonicalEvidencePath && resolvedEvidencePath !== canonicalEvidencePath) {
+    if (realEvidencePath !== realCanonicalEvidencePath && resolvedEvidencePath !== canonicalEvidencePath) {
         return {
             success: false,
             error: `Evidence path "${evidencePath}" (resolved: "${resolvedEvidencePath}") ` +
@@ -150,9 +159,17 @@ export function updateCurrentCvStatus(options) {
     // caller-provided path (or volatile boolean) is never sufficient.
     if (latestReceiptPath) {
         const resolvedReceiptPath = path.resolve(latestReceiptPath);
-        const expectedReceiptDir = path.resolve(deliveryRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
+        const resolvedDeliveryRoot = path.resolve(deliveryRoot);
+        const realRoot = fs.realpathSync(resolvedDeliveryRoot);
+        const expectedReceiptDir = path.resolve(resolvedDeliveryRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
+        const realExpectedReceiptDir = path.resolve(realRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
         const receiptDir = path.dirname(resolvedReceiptPath);
-        if (receiptDir !== expectedReceiptDir) {
+        // Accept either the lexical canonical receipt dir or its real-root
+        // canonical equivalent.  This permits a deliveryRoot that is a system
+        // symlink alias (e.g. macOS /var -> /private/var) while the caller's
+        // receipt path uses the real or aliased root — whichever is natural
+        // for the environment.
+        if (receiptDir !== expectedReceiptDir && receiptDir !== realExpectedReceiptDir) {
             return { success: false, error: `Receipt path must reside in canonical CV receipt root "${expectedReceiptDir}".`, modified: false };
         }
         const name = path.basename(resolvedReceiptPath);
@@ -162,24 +179,26 @@ export function updateCurrentCvStatus(options) {
         if (!fs.existsSync(resolvedReceiptPath))
             return { success: false, error: `CV receipt does not exist: "${resolvedReceiptPath}".`, modified: false };
         try {
-            // Reject symlinks in the receipt itself and in any existing parent.  A
-            // lexical path can still point outside the canonical root through a
-            // symlinked stage/slice directory.
+            // Reject symlinks in the receipt itself and in any existing parent
+            // *strictly below* the deliveryRoot.  System symlinks at or above the
+            // trusted deliveryRoot boundary (e.g. macOS /var -> /private/var) are
+            // accepted.
             let current = resolvedReceiptPath;
-            while (current.length >= expectedReceiptDir.length) {
+            while (current.length > resolvedDeliveryRoot.length) {
                 const stat = fs.lstatSync(current);
                 if (stat.isSymbolicLink())
                     return { success: false, error: 'CV receipt must be a regular immutable file, not a symlink.', modified: false };
-                if (current === expectedReceiptDir)
+                if (current.length <= resolvedDeliveryRoot.length)
                     break;
                 const parent = path.dirname(current);
-                if (parent === current)
+                if (parent === current || parent.length <= resolvedDeliveryRoot.length)
                     break;
                 current = parent;
             }
             const realReceiptPath = fs.realpathSync(resolvedReceiptPath);
-            if (realReceiptPath !== resolvedReceiptPath) {
-                return { success: false, error: 'CV receipt path resolves through a symlink and is rejected.', modified: false };
+            const realReceiptDir = path.dirname(realReceiptPath);
+            if (realReceiptDir !== realExpectedReceiptDir) {
+                return { success: false, error: 'CV receipt path resolves through a symlink escaping the canonical receipt root.', modified: false };
             }
             const stat = fs.lstatSync(resolvedReceiptPath);
             if (!stat.isFile())

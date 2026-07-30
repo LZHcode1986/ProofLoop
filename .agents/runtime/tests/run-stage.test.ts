@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runStageFromManifest } from '../src/run-stage.js';
+import { jest } from '@jest/globals';
+import { runStageFromManifest, runStageCli } from '../src/run-stage.js';
 import { cleanupServices } from '../src/process-manager.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -388,6 +389,206 @@ describe('runStageFromManifest', () => {
       const receipt = readReceipt(result.receiptPath!);
       expect(receipt.verdict).toBe('FAIL');
     }, 15000);
+  });
+
+describe('CLI — runStageCli facts file validation', () => {
+    let logSpy: jest.SpyInstance;
+    let errorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    test('missing facts path argument → exit 1 with usage error', async () => {
+      const code = await runStageCli(['manifest.json']);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Usage/));
+    });
+
+    test('facts file not found → exit 1 with clear error', async () => {
+      const code = await runStageCli(['manifest.json', join(tmpDir, 'nonexistent-facts.json'), tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/not found/));
+    });
+
+    test('malformed JSON in facts file → exit 1 with clear error', async () => {
+      const factsPath = join(tmpDir, 'bad-facts.json');
+      writeFileSync(factsPath, 'not json', 'utf-8');
+      const code = await runStageCli(['manifest.json', factsPath, tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Failed to parse/));
+    });
+
+    test('non-array facts file → exit 1 with clear error', async () => {
+      const factsPath = join(tmpDir, 'scalar-facts.json');
+      writeFileSync(factsPath, '"just a string"', 'utf-8');
+      const code = await runStageCli(['manifest.json', factsPath, tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/must contain a JSON array/));
+    });
+
+    test('object instead of array → exit 1 with clear error', async () => {
+      const factsPath = join(tmpDir, 'object-facts.json');
+      writeFileSync(factsPath, JSON.stringify({ slice_id: 'x' }), 'utf-8');
+      const code = await runStageCli(['manifest.json', factsPath, tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/must contain a JSON array/));
+    });
+  });
+
+  describe('CLI — runStageCli one-slice PASS with persisted evidence', () => {
+    let logSpy: jest.SpyInstance;
+    let errorSpy: jest.SpyInstance;
+    const stageId = 'S99-CLIPASS';
+    const sliceId = 'S99-A';
+
+    beforeEach(() => {
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    });
+
+    test('one-slice PASS via CLI — exit 0 with receipt on disk', async () => {
+      // ── Write manifest ──
+      const manifest = {
+        ...BASE_MANIFEST,
+        stage_id: stageId,
+        slices: [{ slice_id: sliceId, goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      };
+      const manifestPath = writeManifest('cli-pass-manifest.json', manifest);
+
+      // ── Write persisted evidence artifacts ──
+      const commitSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const cvPath = join(tmpDir, 'cli-cv-pass.json');
+      const integrationPath = join(tmpDir, 'cli-integration.json');
+      writeFileSync(cvPath, JSON.stringify({
+        stage_id: stageId, slice_id: sliceId, snapshot: 'a'.repeat(16), cv_level: 'standard',
+        verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
+      }));
+      writeFileSync(integrationPath, JSON.stringify({ stage_id: stageId, slice_id: sliceId, commit_sha: commitSha, status: 'integrated' }));
+
+      // ── Write facts file ──
+      const factsPath = join(tmpDir, 'cli-pass-facts.json');
+      writeFileSync(factsPath, JSON.stringify([{
+        slice_id: sliceId,
+        cv: { verdict: 'PASS', receipt_ref: cvPath },
+        commit: { commit_sha: commitSha },
+        integration: { integration_ref: integrationPath },
+      }]));
+
+      // ── Run CLI handler ──
+      const code = await runStageCli([manifestPath, factsPath, tmpDir]);
+      expect(code).toBe(0);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/Stage Gate PASSED/));
+
+      // ── Verify receipt on disk with correct verdict and persisted fact paths ──
+      const dirFiles = readdirSync(tmpDir);
+      const receiptFile = dirFiles.find((f: string) => f.startsWith('stage-gate-'));
+      expect(receiptFile).toBeDefined();
+      const receipt = JSON.parse(readFileSync(join(tmpDir, receiptFile!), 'utf-8'));
+      expect(receipt.verdict).toBe('PASS');
+      expect(receipt.stage_id).toBe(stageId);
+      expect(receipt.slice_complete_facts).toHaveLength(1);
+      expect(receipt.slice_complete_facts[0].slice_id).toBe(sliceId);
+    }, 30000);
+
+    test('missing facts entries for manifest slice → exit 1 with FAIL verdict', async () => {
+      // One-slice manifest but empty facts array
+      const manifest = {
+        ...BASE_MANIFEST,
+        stage_id: 'S99-CLIFAIL1',
+        slices: [{ slice_id: 'S99-A', goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      };
+      const manifestPath = writeManifest('cli-fail-empty-facts-manifest.json', manifest);
+      const factsPath = join(tmpDir, 'cli-fail-empty-facts.json');
+      writeFileSync(factsPath, JSON.stringify([]));
+
+      const code = await runStageCli([manifestPath, factsPath, tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Stage Gate FAILED/));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Slice COMPLETE facts must contain exactly one fact/));
+    }, 30000);
+
+    test('invalid SliceCompleteFacts entry in file → exit 1 with FAIL', async () => {
+      const manifest = {
+        ...BASE_MANIFEST,
+        stage_id: 'S99-CLIFAIL2',
+        slices: [{ slice_id: 'S99-A', goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      };
+      const manifestPath = writeManifest('cli-fail-bad-fact-manifest.json', manifest);
+      // Facts array with an entry that has wrong shape (missing commit field)
+      const factsPath = join(tmpDir, 'cli-fail-bad-fact.json');
+      writeFileSync(factsPath, JSON.stringify([{
+        slice_id: 'S99-A',
+        cv: { verdict: 'PASS', receipt_ref: 'some-path' },
+        // Missing commit and integration
+      }]));
+
+      const code = await runStageCli([manifestPath, factsPath, tmpDir]);
+      expect(code).toBe(1);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Stage Gate FAILED/));
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/invalid/));
+    }, 30000);
+  });
+
+  describe('Commit MUST be HEAD validation', () => {
+    test('Gate FAIL when commit_sha is a valid historical commit but not HEAD', async () => {
+      const stageId = 'S99-HEADCHECK';
+      const sliceId = 'S99-A';
+
+      // Obtain a valid historical commit that is guaranteed different from HEAD.
+      const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const historicalSha = execFileSync('git', ['rev-parse', 'HEAD~1'], { encoding: 'utf8' }).trim();
+      expect(historicalSha).not.toBe(headSha);
+
+      const manifestPath = writeManifest('historical-commit-fail.json', {
+        ...BASE_MANIFEST,
+        stage_id: stageId,
+        slices: [{ slice_id: sliceId, goal: 'x', observable_outcome: 'x', public_seam: 'x', evidence_path: 'x' }],
+        runtime_proof: [{ id: 'proof', type: 'probe', executable: 'node', args: ['-e', 'console.log("ok")'] }],
+      });
+
+      // Valid CV receipt (all fields match).
+      const cvPath = join(tmpDir, 'cv-historical.json');
+      writeFileSync(cvPath, JSON.stringify({
+        stage_id: stageId, slice_id: sliceId, snapshot: 'a'.repeat(16), cv_level: 'standard',
+        verification_type: 'initial', verdict: 'PASS', failed_po_ids: [],
+      }));
+
+      // Integration artifact identity-bound to the historical commit.
+      const integrationPath = join(tmpDir, 'integration-historical.json');
+      writeFileSync(integrationPath, JSON.stringify({
+        stage_id: stageId, slice_id: sliceId, commit_sha: historicalSha, status: 'integrated',
+      }));
+
+      const result = await runStageFromManifest({
+        manifestPath, outputDir: tmpDir,
+        sliceCompleteFacts: [{
+          slice_id: sliceId,
+          cv: { verdict: 'PASS', receipt_ref: cvPath },
+          commit: { commit_sha: historicalSha },
+          integration: { integration_ref: integrationPath },
+        }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors.join(' ')).toMatch(/not the current HEAD/i);
+      const receipt = readReceipt(result.receiptPath!);
+      expect(receipt.verdict).toBe('FAIL');
+    });
   });
 
   describe('边界情况', () => {

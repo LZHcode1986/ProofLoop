@@ -20,7 +20,7 @@ A Stage plan is ready (SPV PLAN_READY), all blocking Hard Parts are VALIDATED or
 
 **New required fields for Stage Gate:**
 
-- **Manifest path** — path to the compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`). The Manifest declares per-Slice `evidence_path` entries and their corresponding CV Receipt refs.
+- **Manifest path** — path to the compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`). The Manifest declares per-Slice `evidence_path` entries and `cv_minimum_level`. CV PASS receipt refs, commit SHAs, and integration refs are supplied via Slice COMPLETE facts (a separate JSON array passed to `run-stage.js`), not embedded in the Manifest itself.
 - **Manifest digest** — SHA-256 digest of the Manifest file, for integrity verification against tasks.md
 - **CV Risk Policy version** — version identifier of the Risk Policy used to determine CV minimum levels
 - **Stage Runtime Proof structured plan** — the array of `RuntimeProofStep` objects from the Manifest, defining the Stage Gate execution sequence

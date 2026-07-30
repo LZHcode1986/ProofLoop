@@ -85,7 +85,14 @@ describe('writeCvReceipt', () => {
 
   test('global sequence across interleaved prefixes', () => {
     const p = makeCvData({ verdict: 'PASS' });
-    const r = makeCvData({ verdict: 'REPAIR', verification_type: 'recheck' });
+    const r = makeCvData({
+      verdict: 'REPAIR',
+      verification_type: 'recheck',
+      failed_po_ids: ['PO-S01-A-01'],
+      failed_criterion: 'output_matches failed',
+      failure_signature: 'sha256:abc',
+      required_recheck_scope: ['S01-A-T1'],
+    });
 
     // initial-001
     expect(writeCvReceipt(p as any, tmpDir)).toContain('initial-001.json');
@@ -231,8 +238,16 @@ describe('writeCvReceipt', () => {
     const r1 = writeCvReceipt(makeCvData({ verdict: 'PASS' }) as any, tmpDir);
     expect(r1).toContain('initial-003.json');
 
-    // Next: 004
-    const r2 = writeCvReceipt(makeCvData({ verdict: 'REPAIR', verification_type: 'recheck' }) as any, tmpDir);
+    // Next: 004 — provide valid REPAIR fields
+    const repairData = makeCvData({
+      verdict: 'REPAIR',
+      verification_type: 'recheck',
+      failed_po_ids: ['PO-S01-A-01'],
+      failed_criterion: 'output_matches failed',
+      failure_signature: 'sha256:abc',
+      required_recheck_scope: ['S01-A-T1'],
+    });
+    const r2 = writeCvReceipt(repairData as any, tmpDir);
     expect(r2).toContain('recheck-004.json');
   });
 
@@ -280,9 +295,10 @@ describe('readCvReceipt', () => {
 describe('CvReceipt schema', () => {
 
   test('CvReceipt uses cv_ prefix fields, not legacy alternatives', () => {
-    // Verify the receipt schema contains the standard 'cv_' prefixed fields
-    // and does not contain any legacy-named fields.
-    const shape = CvReceipt._def?.shape() ?? {};
+    // After .superRefine(), CvReceipt is a ZodEffects wrapping a ZodObject.
+    // Unwrap to the inner zod object to access .shape (a property getter).
+    const innerSchema = (CvReceipt._def as any)?.schema ?? CvReceipt._def;
+    const shape = innerSchema?.shape ?? {};
     const allKeys = Object.keys(shape);
     // The cv-level field must be present (not a legacy name)
     expect(allKeys).toContain('cv_level');
@@ -330,5 +346,162 @@ describe('CvReceipt schema', () => {
     const parsed = CvReceipt.parse(data);
     expect(Array.isArray(parsed.required_recheck_scope)).toBe(true);
     expect(parsed.required_recheck_scope).toHaveLength(2);
+  });
+
+  // ── REPAIR verdict validation ───────────────────────────────────────────────
+
+  describe('REPAIR verdict validation', () => {
+
+    function makeRepairData(overrides?: Record<string, unknown>): Record<string, unknown> {
+      return {
+        slice_id: 'S01-A',
+        stage_id: 'S01',
+        snapshot: 'a1b2c3d4e5f6a7b8',
+        cv_level: 'standard',
+        verification_type: 'recheck',
+        verdict: 'REPAIR',
+        failed_po_ids: ['PO-S01-A-01'],
+        affected_task_ids: ['S01-A-T1'],
+        invalid_tests: ['test-xyz'],
+        counterexamples: ['Input X → Output Y (expected Z)'],
+        scope_violations: ['Modified file outside slice boundary'],
+        failed_criterion: 'output_matches: expected pattern not found',
+        failure_signature: 'sha256:abc123def456',
+        required_recheck_scope: ['S01-A-T1', 'PO-S01-A-01'],
+        timestamp: new Date().toISOString(),
+        ...overrides,
+      };
+    }
+
+    test('accepts valid minimal REPAIR receipt', () => {
+      const data = makeRepairData({
+        // Minimal: only required locator is failed_po_ids
+        affected_task_ids: [],
+        counterexamples: [],
+        invalid_tests: [],
+        scope_violations: [],
+      });
+      const parsed = CvReceipt.parse(data);
+      expect(parsed.verdict).toBe('REPAIR');
+      expect(parsed.failed_criterion).toBe('output_matches: expected pattern not found');
+      expect(parsed.failure_signature).toBe('sha256:abc123def456');
+      expect(parsed.failed_po_ids).toEqual(['PO-S01-A-01']);
+      expect(parsed.required_recheck_scope).toEqual(['S01-A-T1', 'PO-S01-A-01']);
+    });
+
+    test('rejects REPAIR with blank failed_criterion', () => {
+      const data = makeRepairData({ failed_criterion: '' });
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('failed_criterion'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR with missing failed_criterion', () => {
+      const data = makeRepairData();
+      delete data.failed_criterion;
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('failed_criterion'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR with blank failure_signature', () => {
+      const data = makeRepairData({ failure_signature: '' });
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('failure_signature'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR with missing failure_signature', () => {
+      const data = makeRepairData();
+      delete data.failure_signature;
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('failure_signature'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR with empty required_recheck_scope', () => {
+      const data = makeRepairData({ required_recheck_scope: [] });
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('required_recheck_scope'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR with missing required_recheck_scope', () => {
+      const data = makeRepairData();
+      delete data.required_recheck_scope;
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('required_recheck_scope'))).toBe(true);
+      }
+    });
+
+    test('rejects REPAIR without any actionable failure locator', () => {
+      const data = makeRepairData({
+        failed_po_ids: [],
+        affected_task_ids: [],
+        counterexamples: [],
+      });
+      expect(() => CvReceipt.parse(data)).toThrow();
+      try {
+        CvReceipt.parse(data);
+      } catch (err: any) {
+        const issues = err.issues ?? [];
+        expect(issues.some((i: any) => i.path.includes('failed_po_ids'))).toBe(true);
+      }
+    });
+
+    test('accepts REPAIR with only affected_task_ids as locator', () => {
+      const data = makeRepairData({
+        failed_po_ids: [],
+        affected_task_ids: ['S01-A-T1'],
+        counterexamples: [],
+      });
+      const parsed = CvReceipt.parse(data);
+      expect(parsed.verdict).toBe('REPAIR');
+    });
+
+    test('accepts REPAIR with only counterexamples as locator', () => {
+      const data = makeRepairData({
+        failed_po_ids: [],
+        affected_task_ids: [],
+        counterexamples: ['Input X fails'],
+      });
+      const parsed = CvReceipt.parse(data);
+      expect(parsed.verdict).toBe('REPAIR');
+    });
+
+    test('PASS receipts are not affected by REPAIR validation rules', () => {
+      const data = makeCvData({ verdict: 'PASS' });
+      // PASS with empty failure fields should still pass
+      delete data.failed_criterion;
+      delete data.failure_signature;
+      const parsed = CvReceipt.parse(data);
+      expect(parsed.verdict).toBe('PASS');
+      expect(parsed.failed_criterion).toBeUndefined();
+      expect(parsed.failure_signature).toBeUndefined();
+    });
   });
 });
