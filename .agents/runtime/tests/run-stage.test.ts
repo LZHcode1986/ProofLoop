@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -33,7 +33,7 @@ const BASE_MANIFEST = {
 };
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'run-stage-test-'));
+  tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'run-stage-test-')));
 });
 
 afterEach(async () => {
