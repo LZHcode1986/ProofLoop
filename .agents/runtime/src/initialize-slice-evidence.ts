@@ -26,12 +26,12 @@ import { computeCanonicalJsonDigest } from './canonical-digest.js';
  *
  * This rejects:
  *  - Path traversal via ".." components
- *  - Symlinks that resolve outside the project root (when the file exists)
+ *  - Any symbolic-link component along the target path, including links that
+ *    resolve within the project root
  *  - Symlinks in any existing parent directory (even if the target file does not exist)
- *  - Any path where a parent directory is a symlink pointing outside the project root
  *
  * It does NOT reject Windows 8.3 short-name aliases or benign directory junctions
- * that resolve within the project root.
+ * that are not reported as symbolic links by lstat.
  */
 function checkPathWithinProject(targetPath: string, projectRoot: string): string | null {
   const normalizedTarget = path.normalize(path.resolve(targetPath));
@@ -46,11 +46,8 @@ function checkPathWithinProject(targetPath: string, projectRoot: string): string
     try {
       const stat = fs.lstatSync(current);
       if (stat.isSymbolicLink()) {
-        // Parent directory is a symlink — resolve it and check it stays within project root
-        const resolvedLink = fs.realpathSync(current);
-        if (!resolvedLink.startsWith(realRoot + path.sep) && resolvedLink !== realRoot) {
-          return null;
-        }
+        // Reject every symbolic link, even when it resolves within the project root.
+        return null;
       }
     } catch {
       // Path component doesn't exist yet — that's fine, continue checking existing parents
