@@ -295,7 +295,7 @@ describe('runStageFromManifest', () => {
           sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: cvPath }, commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' }, integration: { integration_ref: integrationPath } }],
         });
         expect(result.success).toBe(false);
-        expect(result.errors.join(' ')).toMatch(/no valid Committer Receipt found/i);
+        expect(result.errors.join(' ')).toMatch(/invalid Committer Receipt at/i);
 
         // Set up canonical receipts, but overwrite the integration receipt with a wrong
         // slice_commit_sha so findLatestIntegrationReceipt refuses it.
@@ -321,7 +321,7 @@ describe('runStageFromManifest', () => {
         rmSync(join(intDir, 'integration-001.json'));
         const mismatched = await runStageFromManifest({
           manifestPath, outputDir: tmpDir, projectRoot: repoDir,
-          sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: boundary.cvPath }, commit: { commit_sha: sliceCommitSha, receipt_ref: 'ignore' }, integration: { integration_ref: join(intDir, 'integration-002.json') } }],
+          sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: boundary.cvPath }, commit: { commit_sha: sliceCommitSha, receipt_ref: boundary.commitReceiptPath }, integration: { integration_ref: join(intDir, 'integration-002.json') } }],
         });
         expect(mismatched.success).toBe(false);
         expect(mismatched.errors.join(' ')).toMatch(/no valid Integration Receipt found/i);
@@ -344,7 +344,7 @@ describe('runStageFromManifest', () => {
 
         const result = await runStageFromManifest({
           manifestPath, outputDir: tmpDir, projectRoot: repoDir,
-          sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: boundary.cvPath }, commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' }, integration: { integration_ref: boundary.integrationReceiptPath } }],
+          sliceCompleteFacts: [{ slice_id: sliceId, cv: { verdict: 'PASS', receipt_ref: boundary.cvPath }, commit: { commit_sha: sliceCommitSha, receipt_ref: boundary.commitReceiptPath }, integration: { integration_ref: boundary.integrationReceiptPath } }],
         });
         expect(result.success).toBe(true);
         const receipt = readReceipt(result.receiptPath!);
@@ -625,7 +625,7 @@ describe('CLI — runStageCli facts file validation', () => {
         writeFileSync(factsPath, JSON.stringify([{
           slice_id: sliceId,
           cv: { verdict: 'PASS', receipt_ref: boundary.cvPath },
-          commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' },
+          commit: { commit_sha: sliceCommitSha, receipt_ref: boundary.commitReceiptPath },
           integration: { integration_ref: boundary.integrationReceiptPath },
         }]));
 
@@ -722,14 +722,14 @@ describe('CLI — runStageCli facts file validation', () => {
           sliceCompleteFacts: [{
             slice_id: sliceId,
             cv: { verdict: 'PASS', receipt_ref: boundary.cvPath },
-            commit: { commit_sha: nonHeadSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: nonHeadSha, receipt_ref: boundary.commitReceiptPath },
             integration: { integration_ref: boundary.integrationReceiptPath },
           }],
         });
 
         expect(result.success).toBe(false);
-        // The committer receipt's slice_commit_sha doesn't match the fact's commit_sha
-        expect(result.errors.join(' ')).toMatch(/commit SHA mismatch/i);
+        // validateFactCommitReceipt checks slice_commit_sha mismatch and returns null
+        expect(result.errors.join(' ')).toMatch(/invalid Committer Receipt at/i);
         const receipt = readReceipt(result.receiptPath!);
         expect(receipt.verdict).toBe('FAIL');
       } finally {
@@ -769,7 +769,7 @@ describe('CLI — runStageCli facts file validation', () => {
           sliceCompleteFacts: [{
             slice_id: sliceId,
             cv: { verdict: 'PASS', receipt_ref: boundary.cvPath },
-            commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: sliceCommitSha, receipt_ref: boundary.commitReceiptPath },
             integration: { integration_ref: boundary.integrationReceiptPath },
           }],
         });
@@ -813,7 +813,8 @@ describe('CLI — runStageCli facts file validation', () => {
         // Create committer receipt with DIFFERENT snapshot (verified_snapshot: 'bbbbbbbbbbbbbbbb')
         const committerDir = join(repoDir, '.proofloop', 'receipts', 'committer', stageId, sliceId);
         mkdirSync(committerDir, { recursive: true });
-        writeFileSync(join(committerDir, 'slice-output-001.json'), JSON.stringify({
+        const commitReceiptPath = join(committerDir, 'slice-output-001.json');
+        writeFileSync(commitReceiptPath, JSON.stringify({
           stage_id: stageId, slice_id: sliceId, status: 'committed',
           pre_commit_head: execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: repoDir, encoding: 'utf8' }).trim(),
           slice_commit_sha: sliceCommitSha,
@@ -847,15 +848,15 @@ describe('CLI — runStageCli facts file validation', () => {
           sliceCompleteFacts: [{
             slice_id: sliceId,
             cv: { verdict: 'PASS', receipt_ref: cvPath },
-            commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: sliceCommitSha, receipt_ref: commitReceiptPath },
             integration: { integration_ref: join(intDir, 'integration-001.json') },
           }],
         });
 
         expect(result.success).toBe(false);
-        // findLatestSliceCommitReceipt validates snapshot match and will reject this receipt.
-        // So the error should be about no valid Committer Receipt.
-        expect(result.errors.join(' ')).toMatch(/no valid Committer Receipt found/i);
+        // validateFactCommitReceipt does not check snapshot; it accepts the receipt.
+        // findLatestIntegrationReceipt validates snapshot and rejects the integration.
+        expect(result.errors.join(' ')).toMatch(/no valid Integration Receipt found/i);
         const receipt = readReceipt(result.receiptPath!);
         expect(receipt.verdict).toBe('FAIL');
       } finally {
@@ -887,14 +888,14 @@ describe('CLI — runStageCli facts file validation', () => {
           sliceCompleteFacts: [{
             slice_id: sliceId,
             cv: { verdict: 'PASS', receipt_ref: boundary.cvPath },
-            commit: { commit_sha: wrongSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: wrongSha, receipt_ref: boundary.commitReceiptPath },
             integration: { integration_ref: boundary.integrationReceiptPath },
           }],
         });
 
         expect(result.success).toBe(false);
-        // The committer receipt's slice_commit_sha (sliceCommitSha) !== fact's commit_sha (wrongSha)
-        expect(result.errors.join(' ')).toMatch(/commit SHA mismatch/i);
+        // validateFactCommitReceipt checks slice_commit_sha mismatch and returns null
+        expect(result.errors.join(' ')).toMatch(/invalid Committer Receipt at/i);
         const receipt = readReceipt(result.receiptPath!);
         expect(receipt.verdict).toBe('FAIL');
       } finally {
@@ -941,7 +942,7 @@ describe('CLI — runStageCli facts file validation', () => {
           sliceCompleteFacts: [{
             slice_id: sliceId,
             cv: { verdict: 'PASS', receipt_ref: boundary.cvPath },
-            commit: { commit_sha: sliceCommitSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: sliceCommitSha, receipt_ref: boundary.commitReceiptPath },
             integration: { integration_ref: join(intDir, 'integration-002.json') },
           }],
         });
@@ -1092,7 +1093,7 @@ describe('CLI — runStageCli facts file validation', () => {
       sliceId: string,
       commitSha: string,
       preCommitHead: string,
-    ): { cvPath: string; integrationReceiptPath: string } {
+    ): { cvPath: string; commitReceiptPath: string; integrationReceiptPath: string } {
       const snapshot = 'a'.repeat(16);
       // CV receipt
       const cvDir = join(baseDir, '.proofloop', 'receipts', 'cv', stageId, sliceId);
@@ -1109,8 +1110,9 @@ describe('CLI — runStageCli facts file validation', () => {
       // Committer receipt
       const committerDir = join(baseDir, '.proofloop', 'receipts', 'committer', stageId, sliceId);
       mkdirSync(committerDir, { recursive: true });
+      const commitReceiptPath = join(committerDir, 'slice-output-001.json');
       const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: baseDir, encoding: 'utf8' }).trim();
-      writeFileSync(join(committerDir, 'slice-output-001.json'), JSON.stringify({
+      writeFileSync(commitReceiptPath, JSON.stringify({
         stage_id: stageId, slice_id: sliceId, status: 'committed',
         pre_commit_head: preCommitHead,
         slice_commit_sha: commitSha,
@@ -1140,7 +1142,7 @@ describe('CLI — runStageCli facts file validation', () => {
         created_at: new Date().toISOString(),
       }));
 
-      return { cvPath, integrationReceiptPath };
+      return { cvPath, commitReceiptPath, integrationReceiptPath };
     }
 
     /**
@@ -1185,12 +1187,12 @@ describe('CLI — runStageCli facts file validation', () => {
         const sliceId = sliceIds[i];
         const commitSha = commitShas[i];
         const preCommitHead = preCommitHeads[i];
-        const { cvPath, integrationReceiptPath } = buildSliceReceipts(baseDir, stageId, sliceId, commitSha, preCommitHead);
+        const { cvPath, commitReceiptPath, integrationReceiptPath } = buildSliceReceipts(baseDir, stageId, sliceId, commitSha, preCommitHead);
 
         facts.push({
           slice_id: sliceId,
           cv: { verdict: 'PASS', receipt_ref: cvPath },
-          commit: { commit_sha: commitSha, receipt_ref: 'committer/slice-output-001.json' },
+          commit: { commit_sha: commitSha, receipt_ref: commitReceiptPath },
           integration: { integration_ref: integrationReceiptPath },
         });
       }
@@ -1255,7 +1257,7 @@ describe('CLI — runStageCli facts file validation', () => {
       // Switch back to main — unrelated branch is never merged
       execFileSync('git', ['checkout', 'main'], { stdio: 'pipe' });
 
-      // Create receipts for the unrelated commit. findLatestSliceCommitReceipt will
+      // Create receipts for the unrelated commit. validateFactCommitReceipt will
       // reject it because it's not an ancestor of HEAD, so the gate fails.
       const { manifestPath, facts } = buildCanonicalManifestAndFacts(repoDir, 'S99-GITC', ['S99-D'], [unrelatedSha], [unrelatedParent]);
 
@@ -1267,7 +1269,7 @@ describe('CLI — runStageCli facts file validation', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.errors.join(' ')).toMatch(/no valid Committer Receipt found/i);
+      expect(result.errors.join(' ')).toMatch(/invalid Committer Receipt at/i);
       const receipt = readReceipt(result.receiptPath!);
       expect(receipt.verdict).toBe('FAIL');
     }, 30000);

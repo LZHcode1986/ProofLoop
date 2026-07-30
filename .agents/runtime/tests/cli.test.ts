@@ -590,7 +590,7 @@ describe('CLI Integration Tests', () => {
           cv_receipt_ref: cvReceiptPath,
           verified_snapshot: snapshot,
           post_merge_snapshot: 'b'.repeat(16),
-          post_merge_checks: [],
+          post_merge_checks: [{ id: 'test-check', exit_code: 0 }],
           created_at: new Date().toISOString(),
         });
 
@@ -601,7 +601,7 @@ describe('CLI Integration Tests', () => {
           sliceCompleteFacts: [{
             slice_id: 'S01-A',
             cv: { verdict: 'PASS', receipt_ref: cvReceiptPath },
-            commit: { commit_sha: commitSha, receipt_ref: 'committer/slice-output-001.json' },
+            commit: { commit_sha: commitSha, receipt_ref: '.proofloop/receipts/committer/S01/S01-A/slice-output-001.json' },
             integration: { integration_ref: integrationPath },
           }],
         });

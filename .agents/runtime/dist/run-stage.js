@@ -1,14 +1,14 @@
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { CvReceipt as CvReceiptSchema, Manifest as ManifestSchema, ProjectAcceptanceManifestSchema, SliceCompleteFacts as SliceCompleteFactsSchema } from './schemas.js';
+import { CvReceipt as CvReceiptSchema, Manifest as ManifestSchema, ProjectAcceptanceManifestSchema, SliceCompleteFacts as SliceCompleteFactsSchema, SliceCommitReceipt as SliceCommitReceiptSchema } from './schemas.js';
 import { validateRuntimeProofTopology } from './validate-topology.js';
 import { runProcess, spawnService, registerService, getRegisteredService, stopRegisteredService, waitForReadiness, cleanupServices, cleanupProcesses, checkPortsFree, validateSpawnOptions, } from './process-manager.js';
 import { writeGateReceipt, writeProjectE2EReceipt, computeSnapshot } from './receipt-writer.js';
 import { getPlatformInfo } from './platform-adapter.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
 import { resolveCanonicalArtifact } from './canonical-artifact-path.js';
-import { findLatestSliceCommitReceipt, findLatestIntegrationReceipt } from './slice-boundary-receipts.js';
+import { findLatestIntegrationReceipt } from './slice-boundary-receipts.js';
 // ── Persisted Slice COMPLETE evidence ──────────────────────────────────────────
 /**
  * Resolve a persisted evidence reference without treating the reference itself
@@ -123,6 +123,42 @@ function hasPersistedIntegration(reference, stageId, sliceId, commitSha, trustRo
         return null;
     }
 }
+/**
+ * Validate that fact.commit.receipt_ref points to a valid Committer Receipt
+ * that matches the fact's commit_sha, the CV receipt, etc.
+ * Returns the canonical path of the Committer Receipt, or null if invalid.
+ */
+function validateFactCommitReceipt(projectRoot, stageId, sliceId, commitSha, receiptRef, cvReceiptPath) {
+    // 1. Resolve the specific receipt ref through canonical path
+    const resolvedPath = resolveCanonicalArtifact(receiptRef, projectRoot);
+    if (!resolvedPath)
+        return null;
+    // 2. Parse and validate
+    try {
+        const content = readFileSync(resolvedPath, 'utf-8');
+        const parsed = SliceCommitReceiptSchema.parse(JSON.parse(content));
+        // 3. Match stage/slice
+        if (parsed.stage_id !== stageId || parsed.slice_id !== sliceId)
+            return null;
+        if (parsed.status !== 'committed')
+            return null;
+        // 4. Match commit_sha
+        if (parsed.slice_commit_sha !== commitSha)
+            return null;
+        // 5. Verify commit is an ancestor of HEAD
+        const { exists, ancestor } = hasCommitAncestor(commitSha, projectRoot);
+        if (!exists || !ancestor)
+            return null;
+        // 6. Match CV receipt — resolve both to canonical paths for comparison
+        const canonicalCvInReceipt = resolveCanonicalArtifact(parsed.cv_receipt_ref, projectRoot);
+        if (!canonicalCvInReceipt || canonicalCvInReceipt !== cvReceiptPath)
+            return null;
+        return resolvedPath;
+    }
+    catch {
+        return null;
+    }
+}
 function validatePersistedSliceFacts(facts, stageId, trustRoot) {
     const errors = [];
     const persistedFacts = [];
@@ -156,32 +192,10 @@ function validatePersistedSliceFacts(facts, stageId, trustRoot) {
             errors.push(`Slice COMPLETE fact for ${fact.slice_id}: CV receipt stage/slice mismatch.`);
             continue;
         }
-        // ── 2. Find and validate Committer Receipt ─────────────────────────────
-        const commitResult = findLatestSliceCommitReceipt(trustRoot, stageId, fact.slice_id);
-        if (!commitResult) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: no valid Committer Receipt found.`);
-            continue;
-        }
-        const commitReceipt = commitResult.receipt;
-        // 3. Committer Receipt.slice_commit_sha === fact.commit.commit_sha
-        if (commitReceipt.slice_commit_sha !== fact.commit.commit_sha) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: commit SHA mismatch (fact: ${fact.commit.commit_sha}, receipt: ${commitReceipt.slice_commit_sha}).`);
-            continue;
-        }
-        // 4. Committer Receipt.cv_receipt_ref (canonical) === fact.cv.receipt_ref (canonical)
-        const canonicalCvRef = resolveCanonicalArtifact(fact.cv.receipt_ref, trustRoot);
-        const canonicalCommitCvRef = resolveCanonicalArtifact(commitReceipt.cv_receipt_ref, trustRoot);
-        if (!canonicalCvRef || !canonicalCommitCvRef) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: cannot resolve CV receipt refs for comparison.`);
-            continue;
-        }
-        if (canonicalCvRef !== canonicalCommitCvRef) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: CV receipt ref mismatch between fact and Committer Receipt.`);
-            continue;
-        }
-        // 5. Committer Receipt.verified_snapshot === CV Receipt.snapshot
-        if (commitReceipt.verified_snapshot !== cvReceipt.snapshot) {
-            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: snapshot mismatch (CV: ${cvReceipt.snapshot}, Committer: ${commitReceipt.verified_snapshot}).`);
+        // ── 2. Validate the specific Committer Receipt referenced by fact.commit.receipt_ref ──
+        const commitPath = validateFactCommitReceipt(trustRoot, stageId, fact.slice_id, fact.commit.commit_sha, fact.commit.receipt_ref, cvReceiptPath);
+        if (!commitPath) {
+            errors.push(`Slice COMPLETE fact for ${fact.slice_id}: invalid Committer Receipt at ${fact.commit.receipt_ref}.`);
             continue;
         }
         // ── 6. Find and validate Integration Receipt ───────────────────────────
@@ -198,7 +212,7 @@ function validatePersistedSliceFacts(facts, stageId, trustRoot) {
         }
         // 8. Integration Receipt.cv_receipt_ref (canonical) === fact.cv.receipt_ref (canonical)
         const canonicalIntegrationCvRef = resolveCanonicalArtifact(integrationReceipt.cv_receipt_ref, trustRoot);
-        if (!canonicalIntegrationCvRef || canonicalIntegrationCvRef !== canonicalCvRef) {
+        if (!canonicalIntegrationCvRef || canonicalIntegrationCvRef !== cvReceiptPath) {
             errors.push(`Slice COMPLETE fact for ${fact.slice_id}: CV receipt ref mismatch between fact and Integration Receipt.`);
             continue;
         }
@@ -218,6 +232,7 @@ function validatePersistedSliceFacts(facts, stageId, trustRoot) {
         persistedFacts.push({
             ...fact,
             cv: { ...fact.cv, receipt_ref: cvReceiptPath },
+            commit: { ...fact.commit, receipt_ref: commitPath },
             integration: { ...fact.integration, integration_ref: integrationResult.path },
         });
     }
@@ -607,8 +622,8 @@ export async function runStageFromManifest(options) {
         };
     }
     const steps = manifest.runtime_proof ?? [];
-    const resolvedOutputDir = outputDir ?? path.resolve(process.cwd(), '.proofloop', 'receipts', 'stage-gate', manifest.stage_id);
     const resolvedProjectRoot = projectRoot ?? path.resolve(process.cwd());
+    const resolvedOutputDir = outputDir ?? path.resolve(resolvedProjectRoot, '.proofloop', 'receipts', 'stage-gate', manifest.stage_id);
     const suppliedFacts = options.sliceCompleteFacts ?? [];
     const parsedFacts = suppliedFacts.map(fact => SliceCompleteFactsSchema.safeParse(fact));
     const factErrors = [];
@@ -640,7 +655,7 @@ export async function runStageFromManifest(options) {
         errors.push(...factErrors);
         const receiptPath = writeGateReceipt(resolvedOutputDir, {
             stage_id: manifest.stage_id,
-            snapshot: computeSnapshot(process.cwd()),
+            snapshot: computeSnapshot(resolvedProjectRoot),
             manifest_digest: manifestDigest,
             completed_slice_ids: validFacts.map(fact => fact.slice_id),
             slice_complete_facts: validFacts,

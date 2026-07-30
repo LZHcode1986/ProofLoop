@@ -395,7 +395,7 @@ COMMITTER_EOF
   "cv_receipt_ref": ".proofloop/receipts/cv/${STAGE_ID}/${slice_id}/initial-001.json",
   "verified_snapshot": "smoke-snapshot-001",
   "post_merge_snapshot": "smoke-post-merge",
-  "post_merge_checks": [],
+  "post_merge_checks": [{"id": "smoke-check", "exit_code": 0}],
   "created_at": "2024-01-01T00:00:00.000Z"
 }
 INTEGRATION_EOF

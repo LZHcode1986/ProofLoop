@@ -318,37 +318,24 @@ After each slice completes (or returns to stage loop), select the next slice:
 
 ### Stage Gate
 
-When all slices are COMPLETE:
+Executor 不得手工构造 SliceCompleteFacts JSON。
+Facts 由 Runtime 自动生成：
 
-1. Confirm working tree is clean
-2. Record HEAD commit as snapshot reference
-3. Compute content snapshot digest
-4. Verify all expected CV receipts exist
-5. Prepare the Slice COMPLETE facts JSON file — a JSON array with exactly one
-   `SliceCompleteFacts` entry per Manifest slice, each containing:
-   - `cv`: `{ verdict: "PASS", receipt_ref: "<persisted CV PASS receipt path>" }`
-   - `commit`: `{ commit_sha: "<40-char hex SHA>" }`
-   - `integration`: `{ integration_ref: "<persisted integration artifact path>" }`
-6. Run Stage Gate via:
+1. Prepare facts:
    ```
-   node .agents/runtime/dist/run-stage.js <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]
+   node .agents/runtime/dist/prepare-stage-gate-facts.js <reconcile-input.json>
    ```
-   - `<manifest-path>` — path to compiled Stage Manifest (`.proofloop/manifests/<stage-id>.json`)
-   - `<slice-complete-facts-path>` — path to the JSON array from step 5
-   - `[output-dir]` — optional output directory (defaults to `.proofloop/receipts/stage-gate/`)
-   - `[project-root]` — optional project root for Git/Snapshot operations (defaults to `process.cwd()`)
+   → 输出 `{ "success": true, "path": "<facts-file-path>" }`
 
-   The entry point validates the facts array against the `SliceCompleteFacts` schema,
-   resolves canonical paths for CV and integration artifacts, then executes the Runtime
-   Proof steps defined in the Manifest and writes the Stage Gate Receipt via
-   `writeGateReceipt`. On PASS (exit 0) the receipt path is printed; on FAIL (exit 1)
-   errors are listed.
-7. Verify the persisted Stage Gate Receipt exists and validates against the
-   stage ID, Manifest digest, integrated snapshot, and the `slice_complete_facts`
-   array in the receipt (covers every Manifest Slice).
-8. If the persisted Stage Gate Receipt is PASS → return `STAGE_GATE_PASSED`.
-9. If Stage Gate FAIL or the receipt is absent/invalid → return appropriate
-   route code.
+2. Execute Stage Gate:
+   ```
+   node .agents/runtime/dist/run-stage.js <manifest-path> <facts-file-path> <output-dir> <project-root>
+   ```
+
+3. Verify:
+   - 返回 exit 0 且 PASS
+   - 检查 Gate Receipt 的 verdict 为 PASS
+   - 验证 `slice_complete_facts` 中的 `commit.receipt_ref` 指向合法 Committer Receipt
 
 Executor does NOT dispatch Stage Reviewer. Brain handles that.
 

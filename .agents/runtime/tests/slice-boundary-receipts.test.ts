@@ -8,6 +8,7 @@ import {
   findLatestIntegrationReceipt,
   findLatestCvPassReceipt,
   resolveSliceBoundary,
+  collectAllCvReceipts,
   type ResolvedSliceBoundary,
 } from '../src/slice-boundary-receipts.js';
 import { writeCvReceipt } from '../src/receipt-writer.js';
@@ -182,14 +183,14 @@ function computeSha256(filePath: string): string {
 describe('findLatestSliceCommitReceipt', () => {
 
   test('returns null when no committer directory exists', () => {
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
   test('returns null when directory is empty', () => {
     const dir = path.join(tmpDir, '.proofloop', 'receipts', 'committer', 'S01', 'S01-A');
     fs.mkdirSync(dir, { recursive: true });
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
@@ -211,7 +212,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: snapshot,
     }, 1);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).not.toBeNull();
     expect(result!.receipt.slice_id).toBe('S01-A');
     expect(result!.receipt.stage_id).toBe('S01');
@@ -245,7 +246,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: snapshot,
     }, 2);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).not.toBeNull();
     expect(result!.receipt.slice_commit_sha).toBe(sliceCommit2);
   });
@@ -263,7 +264,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: snapshot,
     }, 1);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
@@ -280,7 +281,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: 'a1b2c3d4e5f6a7b8',
     }, 1);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
@@ -298,7 +299,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: 'mismatched-snapshot',
     }, 1);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
@@ -337,7 +338,7 @@ describe('findLatestSliceCommitReceipt', () => {
       return;
     }
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
 
     // Cleanup
@@ -360,7 +361,7 @@ describe('findLatestSliceCommitReceipt', () => {
       verified_snapshot: snapshot,
     }, 1);
 
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
   });
 
@@ -395,7 +396,7 @@ describe('findLatestSliceCommitReceipt', () => {
     fs.writeFileSync(path.join(dir, `slice-output-${seqStr}.json`), 'not-json', 'utf-8');
 
     // Should fall back to seq 2
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).not.toBeNull();
     expect(result!.receipt.slice_commit_sha).toBe(sliceCommit2);
   });
@@ -424,10 +425,93 @@ describe('findLatestSliceCommitReceipt', () => {
     fs.writeFileSync(outsidePath, JSON.stringify(data, null, 2), 'utf-8');
 
     // Try to find it — it's not under tmpDir/.proofloop/...
-    const result = findLatestSliceCommitReceipt(tmpDir, 'S01', 'S01-A');
+    const result = findLatestSliceCommitReceipt({ projectRoot: tmpDir, stageId: 'S01', sliceId: 'S01-A' });
     expect(result).toBeNull();
 
     fs.rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  // ── P0-3: Tests for expected-param validation ───────────────────────────
+
+  test('rejects when expectedCvReceiptPath does not match', () => {
+    const { ref, path: cvPath, snapshot } = createCvReceiptFile(1);
+    const cvDigest = computeSha256(cvPath);
+    const preHead = createCommit('file1.txt', 'v1');
+    const sliceCommit = createCommit('file2.txt', 'v2');
+
+    createCommitterReceipt({
+      pre_commit_head: preHead,
+      slice_commit_sha: sliceCommit,
+      cv_receipt_ref: ref,
+      cv_receipt_digest: cvDigest,
+      verified_snapshot: snapshot,
+    }, 1);
+
+    // Pass a non-matching expectedCvReceiptPath
+    const result = findLatestSliceCommitReceipt({
+      projectRoot: tmpDir,
+      stageId: 'S01',
+      sliceId: 'S01-A',
+      expectedCvReceiptPath: '/nonexistent/path.json',
+    });
+    expect(result).toBeNull();
+  });
+
+  test('rejects when expectedManifestDigest does not match', () => {
+    const { ref, path: cvPath, snapshot } = createCvReceiptFile(1);
+    const cvDigest = computeSha256(cvPath);
+    const preHead = createCommit('file1.txt', 'v1');
+    const sliceCommit = createCommit('file2.txt', 'v2');
+
+    createCommitterReceipt({
+      pre_commit_head: preHead,
+      slice_commit_sha: sliceCommit,
+      cv_receipt_ref: ref,
+      cv_receipt_digest: cvDigest,
+      verified_snapshot: snapshot,
+      manifest_digest: 'expected-digest',
+    }, 1);
+
+    // Pass a different expectedManifestDigest
+    const result = findLatestSliceCommitReceipt({
+      projectRoot: tmpDir,
+      stageId: 'S01',
+      sliceId: 'S01-A',
+      expectedManifestDigest: 'wrong-digest',
+    });
+    expect(result).toBeNull();
+  });
+
+  test('accepts when all expected params match', () => {
+    const { ref, path: cvPath, snapshot } = createCvReceiptFile(1);
+    const cvDigest = computeSha256(cvPath);
+    const preHead = createCommit('file1.txt', 'v1');
+    const sliceCommit = createCommit('file2.txt', 'v2');
+
+    createCommitterReceipt({
+      pre_commit_head: preHead,
+      slice_commit_sha: sliceCommit,
+      cv_receipt_ref: ref,
+      cv_receipt_digest: cvDigest,
+      verified_snapshot: snapshot,
+      manifest_digest: 'abc123',
+      tasks_path: 'delivery/stages/S01/tasks.md',
+      evidence_path: 'delivery/stages/S01/evidence/S01-A.md',
+    }, 1);
+
+    const result = findLatestSliceCommitReceipt({
+      projectRoot: tmpDir,
+      stageId: 'S01',
+      sliceId: 'S01-A',
+      expectedCvReceiptPath: cvPath,
+      expectedCvReceiptDigest: cvDigest,
+      expectedVerifiedSnapshot: snapshot,
+      expectedManifestDigest: 'abc123',
+      expectedTasksPath: 'delivery/stages/S01/tasks.md',
+      expectedEvidencePath: 'delivery/stages/S01/evidence/S01-A.md',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.receipt.slice_commit_sha).toBe(sliceCommit);
   });
 });
 
@@ -610,9 +694,10 @@ describe('findLatestIntegrationReceipt', () => {
 
 describe('findLatestCvPassReceipt', () => {
 
-  test('returns null when no CV directory', () => {
+  test('returns empty result when no CV directory', () => {
     const result = findLatestCvPassReceipt(tmpDir, 'S01', 'S01-A');
-    expect(result).toBeNull();
+    expect(result.latest).toBeNull();
+    expect(result.invalidFiles).toEqual([]);
   });
 
   test('finds the latest PASS receipt', () => {
@@ -620,16 +705,56 @@ describe('findLatestCvPassReceipt', () => {
     const { snapshot } = createCvReceiptFile(2, { snapshot: 'snap2' });
 
     const result = findLatestCvPassReceipt(tmpDir, 'S01', 'S01-A');
-    expect(result).not.toBeNull();
-    expect(result!.receipt.snapshot).toBe('snap2');
-    expect(result!.receipt.verdict).toBe('PASS');
+    expect(result.latest).not.toBeNull();
+    expect(result.latest!.receipt.snapshot).toBe('snap2');
+    expect(result.latest!.receipt.verdict).toBe('PASS');
+    expect(result.latest!.path).toBeTruthy();
+    expect(result.latest!.digest).toBeTruthy();
+    expect(result.invalidFiles).toEqual([]);
   });
 
-  test('returns null when no PASS receipt exists', () => {
+  test('returns null latest when no PASS receipt exists', () => {
     createCvReceiptFile(1, { verdict: 'REPAIR', failed_po_ids: ['PO-01'], failed_criterion: 'x', failure_signature: 'sha256:x', required_recheck_scope: ['S01-A-T1'] });
 
     const result = findLatestCvPassReceipt(tmpDir, 'S01', 'S01-A');
-    expect(result).toBeNull();
+    expect(result.latest).toBeNull();
+  });
+});
+
+// ── Tests: collectAllCvReceipts ───────────────────────────────────────────────
+
+describe('collectAllCvReceipts', () => {
+
+  test('returns empty when no CV directory', () => {
+    const result = collectAllCvReceipts(tmpDir, 'S01', 'S01-A');
+    expect(result.receipts).toEqual([]);
+    expect(result.invalidFiles).toEqual([]);
+  });
+
+  test('collects receipts oldest to newest', () => {
+    createCvReceiptFile(1, { snapshot: 'snap1' });
+    createCvReceiptFile(2, { snapshot: 'snap2' });
+
+    const result = collectAllCvReceipts(tmpDir, 'S01', 'S01-A');
+    expect(result.receipts).toHaveLength(2);
+    expect(result.receipts[0].snapshot).toBe('snap1');
+    expect(result.receipts[1].snapshot).toBe('snap2');
+    expect(result.invalidFiles).toEqual([]);
+  });
+
+  test('tracks invalid files', () => {
+    // Create a valid receipt
+    createCvReceiptFile(1, { snapshot: 'snap1' });
+
+    // Create an invalid file (not valid JSON schema)
+    const cvDir = path.join(tmpDir, '.proofloop', 'receipts', 'cv', 'S01', 'S01-A');
+    fs.writeFileSync(path.join(cvDir, 'initial-002.json'), '{"invalid": true}', 'utf-8');
+
+    const result = collectAllCvReceipts(tmpDir, 'S01', 'S01-A');
+    expect(result.receipts).toHaveLength(1);
+    expect(result.receipts[0].snapshot).toBe('snap1');
+    expect(result.invalidFiles).toHaveLength(1);
+    expect(result.invalidFiles[0]).toContain('initial-002.json');
   });
 });
 
@@ -648,6 +773,7 @@ describe('resolveSliceBoundary', () => {
     const result = resolveSliceBoundary(tmpDir, 'S01', 'S01-A');
     expect(result).not.toBeNull();
     expect(result!.cvReceipt.verdict).toBe('PASS');
+    expect(result!.cvReceiptDigest).toBeTruthy();
     expect(result!.commitReceipt).toBeNull();
     expect(result!.integrationReceipt).toBeNull();
   });
@@ -681,6 +807,7 @@ describe('resolveSliceBoundary', () => {
     const result = resolveSliceBoundary(tmpDir, 'S01', 'S01-A');
     expect(result).not.toBeNull();
     expect(result!.cvReceipt.verdict).toBe('PASS');
+    expect(result!.cvReceiptDigest).toBeTruthy();
     expect(result!.commitReceipt).not.toBeNull();
     expect(result!.commitReceipt!.slice_commit_sha).toBe(sliceCommit);
     expect(result!.integrationReceipt).not.toBeNull();

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   StageGateReceipt,
@@ -224,7 +225,12 @@ export function getDefaultIntegrationReceiptRoot(projectRoot = process.cwd()): s
 
 // ── Sequenced JSON receipt writer ─────────────────────────────────────────────
 
-const SEQUENCE_FILE_RE = /^(\w+)-(\d{3})\.json$/;
+/**
+ * Escape special regex characters in a string.
+ */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
  * Write an immutable sequenced JSON receipt to a directory.
@@ -246,14 +252,17 @@ function writeSequencedJsonReceipt(
 ): string {
   fs.mkdirSync(receiptDir, { recursive: true });
 
+  // Build prefix-specific regex to match <prefix>-NNN.json
+  const seqPattern = new RegExp(`^${escapeRegex(prefix)}-(\\d{3})\\.json$`);
+
   // Scan existing files to find the global max sequence number
   let globalMaxSeq = 0;
   try {
     const existingFiles = fs.readdirSync(receiptDir);
     for (const f of existingFiles) {
-      const m = f.match(SEQUENCE_FILE_RE);
+      const m = f.match(seqPattern);
       if (m) {
-        const seq = parseInt(m[2], 10);
+        const seq = parseInt(m[1], 10);
         if (seq > globalMaxSeq) globalMaxSeq = seq;
       }
     }
@@ -281,9 +290,9 @@ function writeSequencedJsonReceipt(
         try {
           const updatedFiles = fs.readdirSync(receiptDir);
           for (const uf of updatedFiles) {
-            const um = uf.match(SEQUENCE_FILE_RE);
+            const um = uf.match(seqPattern);
             if (um) {
-              const seq = parseInt(um[2], 10);
+              const seq = parseInt(um[1], 10);
               if (seq > globalMaxSeq) globalMaxSeq = seq;
             }
           }
@@ -323,6 +332,51 @@ export function writeSliceCommitReceipt(
   return writeSequencedJsonReceipt(dir, 'slice-output', parsed);
 }
 
+/**
+ * Validate and write a SliceCommitReceipt.
+ *
+ * Extends writeSliceCommitReceipt with pre-write validation:
+ * - slice_commit_sha must be a valid Git commit object
+ * - CV receipt at cv_receipt_ref must exist on disk
+ * - cv_receipt_digest must match the actual file's SHA-256
+ *
+ * @param data        - The receipt data (validated against SliceCommitReceipt).
+ * @param projectRoot - The project root for Git validation (defaults to cwd()).
+ * @param receiptRoot - Override root directory; defaults to getDefaultCommitterReceiptRoot().
+ * @returns The absolute path of the written receipt file.
+ */
+export function validateAndWriteSliceCommitReceipt(
+  data: z.infer<typeof SliceCommitReceipt>,
+  projectRoot: string = process.cwd(),
+  receiptRoot?: string,
+): string {
+  const parsed = SliceCommitReceipt.parse(data);
+
+  // Validate Git: slice_commit_sha exists and != pre_commit_head
+  try {
+    execFileSync('git', ['cat-file', '-e', `${parsed.slice_commit_sha}^{commit}`], {
+      cwd: projectRoot, stdio: 'ignore',
+    });
+  } catch {
+    throw new Error(`slice_commit_sha ${parsed.slice_commit_sha} is not a valid Git commit`);
+  }
+
+  // Validate CV receipt exists at the referenced path
+  const cvPath = path.resolve(projectRoot, parsed.cv_receipt_ref);
+  if (!fs.existsSync(cvPath)) {
+    throw new Error(`CV receipt not found at ${parsed.cv_receipt_ref}`);
+  }
+
+  // Validate CV receipt digest matches
+  const actualDigest = crypto.createHash('sha256').update(fs.readFileSync(cvPath)).digest('hex');
+  if (actualDigest !== parsed.cv_receipt_digest) {
+    throw new Error(`CV receipt digest mismatch`);
+  }
+
+  // Write using existing writeSliceCommitReceipt
+  return writeSliceCommitReceipt(parsed, receiptRoot);
+}
+
 // ── Slice Integration Receipt writer ───────────────────────────────────────────
 
 /**
@@ -341,6 +395,44 @@ export function writeSliceIntegrationReceipt(
   const parsed = SliceIntegrationReceipt.parse(data);
   const dir = path.join(receiptRoot, parsed.stage_id, parsed.slice_id);
   return writeSequencedJsonReceipt(dir, 'integration', parsed);
+}
+
+/**
+ * Validate and write a SliceIntegrationReceipt.
+ *
+ * Extends writeSliceIntegrationReceipt with pre-write validation:
+ * - slice_commit_sha must be a valid Git commit object
+ * - CV receipt at cv_receipt_ref must exist on disk
+ *
+ * @param data        - The receipt data (validated against SliceIntegrationReceipt).
+ * @param projectRoot - The project root for Git validation (defaults to cwd()).
+ * @param receiptRoot - Override root directory; defaults to getDefaultIntegrationReceiptRoot().
+ * @returns The absolute path of the written receipt file.
+ */
+export function validateAndWriteSliceIntegrationReceipt(
+  data: z.infer<typeof SliceIntegrationReceipt>,
+  projectRoot: string = process.cwd(),
+  receiptRoot?: string,
+): string {
+  const parsed = SliceIntegrationReceipt.parse(data);
+
+  // Validate Git: slice_commit_sha exists
+  try {
+    execFileSync('git', ['cat-file', '-e', `${parsed.slice_commit_sha}^{commit}`], {
+      cwd: projectRoot, stdio: 'ignore',
+    });
+  } catch {
+    throw new Error(`slice_commit_sha ${parsed.slice_commit_sha} is not a valid Git commit`);
+  }
+
+  // Validate CV receipt exists at the referenced path
+  const cvPath = path.resolve(projectRoot, parsed.cv_receipt_ref);
+  if (!fs.existsSync(cvPath)) {
+    throw new Error(`CV receipt not found at ${parsed.cv_receipt_ref}`);
+  }
+
+  // Write using existing writeSliceIntegrationReceipt
+  return writeSliceIntegrationReceipt(parsed, receiptRoot);
 }
 
 // ── CV Receipt writer ──────────────────────────────────────────────────────────

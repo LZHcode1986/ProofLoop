@@ -132,6 +132,12 @@ export interface StageGateState {
   receipt?: StageGateReceipt | null;
   /** Absolute or repository-relative path of the persisted receipt. */
   receipt_path?: string;
+  /**
+   * Files found in the CV receipt directory that failed to parse.
+   * Populated by reconcile-stage-state when invalid CV receipt files are detected.
+   * When non-empty, derive-next-action should escalate rather than silently proceeding.
+   */
+  cv_receipt_invalid_files?: string[];
 }
 
 export interface PersistedStageFacts {

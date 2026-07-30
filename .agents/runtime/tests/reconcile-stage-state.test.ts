@@ -13,6 +13,8 @@ import {
   deriveAuthoritativeCvStatus,
   type ReconcileStageStateInput,
 } from '../src/reconcile-stage-state.js';
+import { computeCanonicalJsonDigest } from '../src/canonical-digest.js';
+import { Manifest as ManifestSchema } from '../src/schemas.js';
 import type { DeriveNextActionInput } from '../src/derive-next-action.js';
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -74,6 +76,15 @@ function createManifest(
 
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+}
+
+/**
+ * Compute the canonical manifest digest the same way reconcileStageState does.
+ */
+function getManifestDigest(manifestPath: string): string {
+  const content = fs.readFileSync(manifestPath, 'utf-8');
+  const parsed = JSON.parse(content);
+  return computeCanonicalJsonDigest(ManifestSchema, parsed);
 }
 
 /**
@@ -1041,6 +1052,9 @@ describe('committed/integrated/complete from authoritative receipts', () => {
       fs.readFileSync(cvReceiptPath),
     ).digest('hex');
 
+    // Compute the actual manifest digest to match reconcileStageState's computation
+    const manifestDigest = getManifestDigest(manifestPath);
+
     // Create valid committer receipt with sliceCommitSha
     const commitReceiptPath = path.join(committerReceiptRoot, stageId, 'S01-A', 'slice-output-001.json');
     createCommitReceipt(commitReceiptPath, {
@@ -1048,6 +1062,7 @@ describe('committed/integrated/complete from authoritative receipts', () => {
       stage_id: stageId,
       pre_commit_head: preCommitHead,
       slice_commit_sha: sliceCommitSha,
+      manifest_digest: manifestDigest,
       cv_receipt_ref: '.proofloop/receipts/cv/S01/S01-A/initial-001.json',
       cv_receipt_digest: cvDigest,
       verified_snapshot: 'snapshot-001',
@@ -1144,6 +1159,9 @@ describe('committed/integrated/complete from authoritative receipts', () => {
       fs.readFileSync(cvReceiptPath),
     ).digest('hex');
 
+    // Compute the actual manifest digest to match reconcileStageState's computation
+    const manifestDigest = getManifestDigest(manifestPath);
+
     // Create valid committer receipt
     const commitReceiptPath = path.join(committerReceiptRoot, stageId, 'S01-A', 'slice-output-001.json');
     createCommitReceipt(commitReceiptPath, {
@@ -1151,6 +1169,7 @@ describe('committed/integrated/complete from authoritative receipts', () => {
       stage_id: stageId,
       pre_commit_head: preCommitHead,
       slice_commit_sha: sliceCommitSha,
+      manifest_digest: manifestDigest,
       cv_receipt_ref: '.proofloop/receipts/cv/S01/S01-A/initial-001.json',
       cv_receipt_digest: cvDigest,
       verified_snapshot: 'snapshot-001',
