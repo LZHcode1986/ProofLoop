@@ -1,4 +1,4 @@
-# Stage S00-nopo — Missing Observable Outcomes Fixture
+# Stage S00-NOPO — Missing Observable Outcomes Fixture
 
 ## Stage Goal
 

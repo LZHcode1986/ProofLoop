@@ -549,10 +549,15 @@ describe('CLI — runStageCli facts file validation', () => {
       const stageId = 'S99-HEADCHECK';
       const sliceId = 'S99-A';
 
-      // Obtain a valid historical commit that is guaranteed different from HEAD.
+      // Create a valid non-HEAD commit object portably using commit-tree.
+      // This avoids the HEAD~1 assumption which fails in shallow checkouts.
       const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-      const historicalSha = execFileSync('git', ['rev-parse', 'HEAD~1'], { encoding: 'utf8' }).trim();
-      expect(historicalSha).not.toBe(headSha);
+      const treeSha = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+      const nonHeadSha = execFileSync('git', ['commit-tree', treeSha, '-m', 'temp non-HEAD commit for test'], {
+        encoding: 'utf8',
+        env: { ...process.env, GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@test.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@test.com' },
+      }).trim();
+      expect(nonHeadSha).not.toBe(headSha);
 
       const manifestPath = writeManifest('historical-commit-fail.json', {
         ...BASE_MANIFEST,
@@ -571,7 +576,7 @@ describe('CLI — runStageCli facts file validation', () => {
       // Integration artifact identity-bound to the historical commit.
       const integrationPath = join(tmpDir, 'integration-historical.json');
       writeFileSync(integrationPath, JSON.stringify({
-        stage_id: stageId, slice_id: sliceId, commit_sha: historicalSha, status: 'integrated',
+        stage_id: stageId, slice_id: sliceId, commit_sha: nonHeadSha, status: 'integrated',
       }));
 
       const result = await runStageFromManifest({
@@ -579,7 +584,7 @@ describe('CLI — runStageCli facts file validation', () => {
         sliceCompleteFacts: [{
           slice_id: sliceId,
           cv: { verdict: 'PASS', receipt_ref: cvPath },
-          commit: { commit_sha: historicalSha },
+          commit: { commit_sha: nonHeadSha },
           integration: { integration_ref: integrationPath },
         }],
       });

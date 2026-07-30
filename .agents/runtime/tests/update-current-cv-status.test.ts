@@ -568,27 +568,37 @@ describe('updateCurrentCvStatus', () => {
     expect(result.error).toMatch(/symlink/i);
   });
 
-  test('still rejects symlink in receipt path below deliveryRoot', () => {
-    // Receipt path using a symlinked directory below deliveryRoot must be rejected
-    const realDir = path.join(tmpDir, 'receipt-real');
-    fs.mkdirSync(realDir, { recursive: true });
-    const linkDir = path.join(tmpDir, 'receipt-link');
-    try { fs.symlinkSync(realDir, linkDir, 'dir'); } catch { return; }
-
-    const filePath = path.join(tmpDir, canonicalEvidencePath());
-    fs.writeFileSync(filePath, EVIDENCE_WITH_CV_SECTION, 'utf-8');
-
-    // Create a receipt that looks canonical but lives through a symlink
-    const fakeReceiptDir = path.join(linkDir, '.proofloop', 'receipts', 'cv', 'S01', 'S01-A');
-    fs.mkdirSync(fakeReceiptDir, { recursive: true });
-    const fakeReceipt = path.join(fakeReceiptDir, 'initial-001.json');
-    fs.writeFileSync(fakeReceipt, JSON.stringify({
+  test('rejects receipt when .proofloop component is a symlink below deliveryRoot', () => {
+    // Create a genuine canonical lexical receipt path where the .proofloop
+    // component itself is a symlink below deliveryRoot. This proves that
+    // updateCurrentCvStatus rejects the internal symlink via the ancestor
+    // walk (lines 249-257), rather than failing on the earlier lexical
+    // canonical-root directory check (line 237).
+    const realProofloopTarget = path.join(tmpDir, 'proofloop-real');
+    const receiptDir = path.join(realProofloopTarget, 'receipts', 'cv', 'S01', 'S01-A');
+    fs.mkdirSync(receiptDir, { recursive: true });
+    const realReceipt = path.join(receiptDir, 'initial-001.json');
+    fs.writeFileSync(realReceipt, JSON.stringify({
       slice_id: 'S01-A', stage_id: 'S01', snapshot: 'x',
       cv_level: 'standard', verification_type: 'initial',
       verdict: 'PASS', failed_po_ids: [], affected_task_ids: [],
       invalid_tests: [], counterexamples: [], scope_violations: [],
       required_recheck_scope: [], timestamp: new Date().toISOString(),
     }), 'utf-8');
+
+    // Symlink .proofloop -> proofloop-real (both strictly below deliveryRoot)
+    const proofloopLink = path.join(tmpDir, '.proofloop');
+    try { fs.symlinkSync(realProofloopTarget, proofloopLink, 'dir'); } catch { return; }
+
+    const filePath = path.join(tmpDir, canonicalEvidencePath());
+    fs.writeFileSync(filePath, EVIDENCE_WITH_CV_SECTION, 'utf-8');
+
+    // The receipt path is now lexically canonical:
+    //   <tmpDir>/.proofloop/receipts/cv/S01/S01-A/initial-001.json
+    // The directory check (line 237) passes because receiptDir matches
+    // expectedReceiptDir lexically. The symlink walk then catches
+    // .proofloop as a symlink below deliveryRoot.
+    const canonicalReceiptPath = path.join(tmpDir, '.proofloop', 'receipts', 'cv', 'S01', 'S01-A', 'initial-001.json');
 
     const result = updateCurrentCvStatus({
       evidencePath: filePath,
@@ -597,11 +607,12 @@ describe('updateCurrentCvStatus', () => {
       sliceId: 'S01-A',
       deliveryRoot: tmpDir,
       cvLevel: 'standard',
-      latestReceiptPath: fakeReceipt,
+      latestReceiptPath: canonicalReceiptPath,
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/symlink|immutable|escaping/i);
+    // Must be rejected for the symlink, not for a lexical directory mismatch
+    expect(result.error).toMatch(/symlink|immutable/i);
   });
 });
 
