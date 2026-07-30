@@ -20,7 +20,7 @@ import type { DeriveNextActionInput } from '../src/derive-next-action.js';
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-reconcile-test-'));
+  tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-reconcile-test-')));
 });
 
 afterEach(() => {
