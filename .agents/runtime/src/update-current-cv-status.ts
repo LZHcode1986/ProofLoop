@@ -229,14 +229,28 @@ export function updateCurrentCvStatus(options: UpdateCvStatusOptions): UpdateCvS
     const expectedReceiptDir = path.resolve(resolvedDeliveryRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
     const realExpectedReceiptDir = path.resolve(realRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
     const receiptDir = path.dirname(resolvedReceiptPath);
-    // Accept either the lexical canonical receipt dir or its real-root
-    // canonical equivalent.  This permits a deliveryRoot that is a system
-    // symlink alias (e.g. macOS /var -> /private/var) while the caller's
-    // receipt path uses the real or aliased root — whichever is natural
-    // for the environment.
-    if (receiptDir !== expectedReceiptDir && receiptDir !== realExpectedReceiptDir) {
+    // A trusted delivery root can have multiple OS-level spellings (for
+    // example macOS /var and /private/var).  Accept only a spelling whose
+    // receipt directory resolves to the real canonical directory.
+    let receiptDirIsCanonical = receiptDir === expectedReceiptDir || receiptDir === realExpectedReceiptDir;
+    if (!receiptDirIsCanonical) {
+      try {
+        receiptDirIsCanonical = fs.realpathSync(receiptDir) === realExpectedReceiptDir;
+      } catch {
+        receiptDirIsCanonical = false;
+      }
+    }
+    if (!receiptDirIsCanonical) {
       return { success: false, error: `Receipt path must reside in canonical CV receipt root "${expectedReceiptDir}".`, modified: false };
     }
+    // Walk only as far as the same lexical spelling of deliveryRoot used by
+    // the supplied receipt path.  This trusts aliases at/above deliveryRoot,
+    // but still examines every component below it (such as .proofloop).
+    const receiptRoot = receiptDir === expectedReceiptDir
+      ? resolvedDeliveryRoot
+      : receiptDir === realExpectedReceiptDir
+        ? realRoot
+        : path.resolve(receiptDir, '..', '..', '..', '..', '..');
     const name = path.basename(resolvedReceiptPath);
     const match = /^(initial|recheck)-\d{3}\.json$/.exec(name);
     if (!match) return { success: false, error: 'CV receipt must use immutable initial-NNN.json or recheck-NNN.json naming.', modified: false };
@@ -247,12 +261,11 @@ export function updateCurrentCvStatus(options: UpdateCvStatusOptions): UpdateCvS
       // trusted deliveryRoot boundary (e.g. macOS /var -> /private/var) are
       // accepted.
       let current = resolvedReceiptPath;
-      while (current.length > resolvedDeliveryRoot.length) {
+      while (current.length > receiptRoot.length) {
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink()) return { success: false, error: 'CV receipt must be a regular immutable file, not a symlink.', modified: false };
-        if (current.length <= resolvedDeliveryRoot.length) break;
         const parent = path.dirname(current);
-        if (parent === current || parent.length <= resolvedDeliveryRoot.length) break;
+        if (parent === current || parent.length <= receiptRoot.length) break;
         current = parent;
       }
       const realReceiptPath = fs.realpathSync(resolvedReceiptPath);

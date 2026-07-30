@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   deriveNextAction,
@@ -68,7 +67,7 @@ describe('deriveNextAction', () => {
   });
 
   test('STAGE_GATE_PASSED requires persisted receipt matching stage and manifest', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'derive-gate-'));
+    const dir = fs.mkdtempSync(path.join(process.cwd(), '.derive-gate-'));
     try {
       const receiptPath = path.join(dir, 'gate.json');
       fs.writeFileSync(receiptPath, JSON.stringify({
