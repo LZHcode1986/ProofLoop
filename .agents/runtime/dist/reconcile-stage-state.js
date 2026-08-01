@@ -23,7 +23,7 @@ import { Manifest as ManifestSchema, CvReceipt as CvReceiptSchema, StageGateRece
 import { canonicalCvStatus, } from './derive-next-action.js';
 import { assertRegularFileBelowTrustedRoot } from './canonical-artifact-path.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
-import { findLatestCvPassReceipt, collectAllCvReceipts as collectAllCvReceiptsFromBoundary, findLatestSliceCommitReceipt, findLatestIntegrationReceipt, } from './slice-boundary-receipts.js';
+import { findLatestCvReceipt as findLatestCvReceiptFromBoundary, collectAllCvReceipts as collectAllCvReceiptsFromBoundary, findLatestSliceCommitReceipt, findLatestIntegrationReceipt, } from './slice-boundary-receipts.js';
 // ── tasks.md parsing ──────────────────────────────────────────────────────────
 /**
  * Parse a tasks.md file and extract checkbox states for the given slice's tasks.
@@ -550,7 +550,7 @@ export function reconcileStageState(input) {
             }
         }
         // ── Read CV receipts ──
-        const cvLookup = findLatestCvPassReceipt(resolvedProjectRoot, stage_id, slice_id);
+        const cvLookup = findLatestCvReceiptFromBoundary(resolvedProjectRoot, stage_id, slice_id);
         const sliceReceiptResult = collectAllCvReceiptsFromBoundary(resolvedProjectRoot, stage_id, slice_id);
         allCvReceipts.push(...sliceReceiptResult.receipts);
         // P1-2: 损坏的 Receipt → 无法安全推导 → 记录到 stageGateState

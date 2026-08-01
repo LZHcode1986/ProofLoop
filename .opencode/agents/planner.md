@@ -1,8 +1,8 @@
 ---
 description: Planner — creates Stage→Slice→Task decomposition and TDD Proof Plans.
 mode: subagent
-model: openai/gpt-5.6-terra
-variant: xhigh
+model: openai/gpt-5.6-luna
+variant: max
 hidden: true
 color: "#bb9af7"
 permission:

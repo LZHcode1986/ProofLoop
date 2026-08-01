@@ -164,6 +164,74 @@ function validatePathBelowRoot(filePath: string, projectRoot: string): string | 
 // ── CV receipt lookup ─────────────────────────────────────────────────────────
 
 /**
+ * Find the latest CV receipt (any verdict) for a given stage/slice by scanning
+ * the canonical CV receipt directory.
+ *
+ * Returns a CvReceiptLookupResult containing the latest valid receipt (if found),
+ * its canonical path and digest, and a list of files that failed to parse.
+ * Invalid files are tracked even when a valid receipt exists, so callers
+ * can detect and escalate corrupted history.
+ *
+ * Unlike findLatestCvPassReceipt, this does NOT filter by verdict — it returns
+ * the newest receipt regardless of PASS, REPAIR, or any other verdict.
+ */
+export function findLatestCvReceipt(
+  projectRoot: string,
+  stageId: string,
+  sliceId: string,
+): CvReceiptLookupResult {
+  const result: CvReceiptLookupResult = { latest: null, invalidFiles: [] };
+
+  const cvDir = path.join(projectRoot, '.proofloop', 'receipts', 'cv', stageId, sliceId);
+  if (!directoryExists(cvDir)) return result;
+
+  const CV_FILE_RE = /^(initial|recheck)-(\d{3})\.json$/;
+  let files: string[];
+  try {
+    files = fs.readdirSync(cvDir);
+  } catch {
+    return result;
+  }
+
+  // Filter matching files, sort by sequence number descending
+  const matching = files
+    .filter(f => CV_FILE_RE.test(f))
+    .sort()
+    .reverse(); // highest seq first
+
+  for (const f of matching) {
+    const filePath = path.join(cvDir, f);
+    const canonical = validatePathBelowRoot(filePath, projectRoot);
+    if (!canonical) {
+      result.invalidFiles.push(filePath);
+      continue;
+    }
+
+    const data = readJsonFile<Record<string, unknown>>(filePath);
+    if (!data) {
+      result.invalidFiles.push(filePath);
+      continue;
+    }
+
+    try {
+      const parsed = CvReceipt.parse(data);
+      // Accept any verdict — not just PASS
+      if (parsed.stage_id === stageId && parsed.slice_id === sliceId) {
+        const digest = sha256Digest(filePath) ?? '';
+        result.latest = { receipt: parsed, path: canonical, digest };
+        return result;
+      }
+    } catch {
+      // Invalid CV receipt — record as invalid
+      result.invalidFiles.push(filePath);
+      continue;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Find the latest CV PASS receipt for a given stage/slice by scanning the
  * canonical CV receipt directory.
  *

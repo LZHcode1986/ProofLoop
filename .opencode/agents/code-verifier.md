@@ -2,7 +2,7 @@
 description: Code Verifier (CV) — adversarial slice verification agent.
 mode: subagent
 model: openai/gpt-5.6-luna
-variant: xhigh
+variant: high
 hidden: true
 permission:
   edit: deny

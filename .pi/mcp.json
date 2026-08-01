@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp",
+        "--path",
+        "D:/software-dev/proofloopv2"
+      ],
+      "cwd": "D:/software-dev/proofloopv2",
+      "lifecycle": "keep-alive",
+      "directTools": true
+    }
+  }
+}

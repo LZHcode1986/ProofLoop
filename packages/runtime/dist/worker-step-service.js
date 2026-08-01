@@ -1,0 +1,70 @@
+"use strict";
+/**
+ * worker-step-service.ts — WorkerStepService (PO-S02-B-02 / PO-S02-B-03)
+ *
+ * The runtime's ONLY worker step execution seam (AWI-021): the Executor hands
+ * a worker action indication plus the caller-supplied dispatch context, and
+ * the service builds the canonical `WorkerDispatchPacket` (protocolVersion: 1,
+ * resultContract.schemaVersion: 1 — Blueprint §12) and relays it through the
+ * constructor-injected `WorkerRelayPort` (executeStep exactly once / signal
+ * passthrough / invalidateSlice verbatim forward).
+ *
+ * Zero host imports (ADR-012 / AWI-024 / HP-010): the service depends only on
+ * the abstract port types from ./relay-contract — it never imports or
+ * references any host (pi-subagents) implementation, never touches relay
+ * internals (no filesystem reads, no parsing of host run/session identifiers;
+ * relay diagnostics stay opaque per Blueprint #9.6 / #11 / #22).
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.WorkerStepService = void 0;
+/**
+ * WorkerStepService — executes worker steps ONLY through the injected
+ * `WorkerRelayPort`.
+ *
+ * - `executeStep` constructs the protocolVersion-1 `WorkerDispatchPacket` and
+ *   calls the port's `executeStep` exactly once (there is no fallback path
+ *   and no direct success return), passing the caller's `AbortSignal`
+ *   through; the port's normalized `WorkerRelayStepResult` is returned
+ *   unchanged.
+ * - `invalidateSlice` forwards projectRoot / parentSessionId / stageId /
+ *   sliceId to the port verbatim; the service itself never holds or parses
+ *   any host run/session identifier.
+ */
+class WorkerStepService {
+    port;
+    constructor(port) {
+        this.port = port;
+    }
+    executeStep(input, signal) {
+        const packet = {
+            protocolVersion: 1,
+            actionToken: input.actionToken,
+            stageId: input.stageId,
+            sliceId: input.sliceId,
+            taskId: input.taskId,
+            mode: input.mode,
+            authorityRefs: input.authorityRefs,
+            git: input.git,
+            scope: input.scope,
+            resultContract: input.resultContract,
+        };
+        const relayInput = {
+            projectRoot: input.projectRoot,
+            parentSessionId: input.parentSessionId,
+            stageId: input.stageId,
+            sliceId: input.sliceId,
+            taskId: input.taskId,
+            mode: input.mode,
+            actionToken: input.actionToken,
+            packet,
+            continuation: input.continuation,
+            timeoutMs: input.timeoutMs,
+        };
+        return this.port.executeStep(relayInput, signal);
+    }
+    invalidateSlice(input) {
+        return this.port.invalidateSlice(input);
+    }
+}
+exports.WorkerStepService = WorkerStepService;
+//# sourceMappingURL=worker-step-service.js.map

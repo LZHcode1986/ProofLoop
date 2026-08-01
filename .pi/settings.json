@@ -1,0 +1,16 @@
+{
+  "packages": [
+    "npm:pi-observational-memory@3.0.3"
+  ],
+  "observational-memory": {
+    "observeAfterTokens": 15000,
+    "reflectAfterTokens": 30000,
+    "compactAfterTokensMode": "ratio",
+    "compactAfterTokensRatio": 0.55,
+    "agentMaxTurns": 8,
+    "debugLog": false
+  },
+  "subagents": {
+ "disableBuiltins": true
+  }
+}

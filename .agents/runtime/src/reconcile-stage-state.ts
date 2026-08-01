@@ -35,7 +35,7 @@ import {
 import { assertRegularFileBelowTrustedRoot } from './canonical-artifact-path.js';
 import { computeCanonicalJsonDigest } from './canonical-digest.js';
 import {
-  findLatestCvPassReceipt,
+  findLatestCvReceipt as findLatestCvReceiptFromBoundary,
   collectAllCvReceipts as collectAllCvReceiptsFromBoundary,
   findLatestSliceCommitReceipt,
   findLatestIntegrationReceipt,
@@ -688,7 +688,7 @@ export function reconcileStageState(input: ReconcileStageStateInput): DeriveNext
     }
 
     // ── Read CV receipts ──
-    const cvLookup = findLatestCvPassReceipt(resolvedProjectRoot, stage_id, slice_id);
+    const cvLookup = findLatestCvReceiptFromBoundary(resolvedProjectRoot, stage_id, slice_id);
     const sliceReceiptResult = collectAllCvReceiptsFromBoundary(resolvedProjectRoot, stage_id, slice_id);
     allCvReceipts.push(...sliceReceiptResult.receipts);
 

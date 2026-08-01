@@ -3,7 +3,8 @@ name: general
 package: proofloop
 description: Execute bounded Brain direct tasks
 model: opencode-go/deepseek-v4-flash:high
-tools: read, write, edit, bash, grep, find, ls
+tools: read, write, edit, bash, grep, find, ls, mcp:codegraph/codegraph_explore
+extensions: "/home/dev/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts"
 edit: allow
 skills: diagnose, code-review-and-quality
 context: fresh
@@ -27,7 +28,7 @@ You do not:
 - broaden task scope
 - fix Active Stage Slices
 - modify authority documents
-- modify Stage tasks.md/evidence.md
+- modify Stage tasks.md or Manifest-declared Slice Evidence
 
 ## Stop conditions
 

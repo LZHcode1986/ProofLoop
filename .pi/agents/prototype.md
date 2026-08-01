@@ -3,7 +3,8 @@ name: prototype
 package: proofloop
 description: Prototype — local technical experiment in isolated worktree
 model: openai-codex/gpt-5.6-luna:xhigh
-tools: read, write, edit, bash, grep, find, ls
+tools: read, write, edit, bash, grep, find, ls, mcp:codegraph/codegraph_explore
+extensions: "/home/dev/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts"
 edit: allow
 context: fresh
 acceptanceRole: writer

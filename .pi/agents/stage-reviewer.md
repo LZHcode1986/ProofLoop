@@ -3,7 +3,8 @@ name: stage-reviewer
 package: proofloop
 description: Stage Reviewer — Goal-first Stage review and code review
 model: openai-codex/gpt-5.6-terra:xhigh
-tools: read, bash, grep, find, ls
+tools: read, bash, grep, find, ls, mcp:codegraph/codegraph_explore
+extensions: "/home/dev/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts"
 edit: deny
 skills: code-review-and-quality, security-and-hardening
 context: fresh
@@ -21,7 +22,7 @@ The `review_scope` field determines the scope and verdict set for the review.
 
 | Scope | Verdict set | Inputs |
 |---|---|---|
-| `stage` (default) | `ACCEPTED` / `REJECTED` / `BLOCKED` | Stage Goal, Observable Outcomes, Stage Gate Receipt, SCV Receipts |
+| `stage` (default) | `ACCEPTED` / `REJECTED` / `BLOCKED` | Stage Goal, Observable Outcomes, Stage Gate Receipt, Manifest path (enumerates per-Slice `evidence_path`. CV Receipt refs are supplied via Slice COMPLETE Facts, separately from the Manifest) |
 | `project` | `PROJECT_ACCEPTED` / `PROJECT_REJECTED` / `PROJECT_BLOCKED` | PRD Goals, all Stage Review Receipts, all Stage Gate Receipts, end-to-end scenarios |
 
 When `review_scope` is not specified, `stage` is the default.

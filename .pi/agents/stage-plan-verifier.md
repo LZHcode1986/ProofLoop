@@ -3,7 +3,8 @@ name: stage-plan-verifier
 package: proofloop
 description: Stage Plan Verifier — reverse-validates Planner output before execution
 model: opencode-go/deepseek-v4-flash:max
-tools: read, bash, grep, find, ls
+tools: read, bash, grep, find, ls, mcp:codegraph/codegraph_explore
+extensions: "/home/dev/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts"
 edit: deny
 context: fresh
 ---
@@ -116,18 +117,18 @@ For each PO in the Proof Plan:
 
 **PLAN_DEFECT if:** An obvious risk fact is missing for any Slice.
 
-### H. SCV Minimum Level
+### H. CV Minimum Level
 
-1. Is the SCV Minimum Level (if specified) commensurate with the declared Risk Facts?
-   - `public_api_change` → at minimum SCV 3 (real environment)
-   - `persistent_state` → at minimum SCV 3 (real database)
-   - `authorization` → at minimum SCV 3 (real auth system)
-   - `external_side_effect` → at minimum SCV 3 (real integration)
-2. Does the Planner correctly defer SCV selection to Validator tooling (not hand-picking it)?
+1. Is the CV Minimum Level (if specified) commensurate with the declared Risk Facts?
+   - `public_api_change` → at minimum CV level 3 (real environment)
+   - `persistent_state` → at minimum CV level 3 (real database)
+   - `authorization` → at minimum CV level 3 (real auth system)
+   - `external_side_effect` → at minimum CV level 3 (real integration)
+2. Does the Planner correctly defer CV level selection to Validator tooling (not hand-picking it)?
 
 **PLAN_DEFECT if:**
-- SCV level is too low for the declared risks.
-- Planner hand-selected an SCV level instead of leaving it to tooling.
+- CV level is too low for the declared risks.
+- Planner hand-selected a CV level instead of leaving it to tooling.
 
 ### I. Stage Runtime Proof Sufficiency
 
@@ -168,7 +169,7 @@ Each PLAN_DEFECT finding must be structured as YAML:
 
 ```yaml
 finding_id: <unique-id>
-category: GOAL_COVERAGE | SEAM_VALIDITY | ORACLE_INDEPENDENCE | TASK_CLOSURE | STAGE_CLOSURE | PROOF_PLAN_SEAM_MISMATCH | RISK_FACTS_GAP | SCV_LEVEL_INADEQUATE | RUNTIME_PROOF_GAP
+category: GOAL_COVERAGE | SEAM_VALIDITY | ORACLE_INDEPENDENCE | TASK_CLOSURE | STAGE_CLOSURE | PROOF_PLAN_SEAM_MISMATCH | RISK_FACTS_GAP | CV_LEVEL_INADEQUATE | RUNTIME_PROOF_GAP
 affected_outcome: <OUT-xx-yy | null>
 affected_slice: <Slice ID | null>
 contradictory_scenario: <concrete counterexample description>

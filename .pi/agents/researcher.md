@@ -3,7 +3,8 @@ name: researcher
 package: proofloop
 description: Researcher — external technical solution research
 model: opencode-go/deepseek-v4-flash:max
-tools: read, bash, grep, find, ls
+tools: read, bash, grep, find, ls, mcp:codegraph/codegraph_explore
+extensions: "/home/dev/.pi/agent/npm/node_modules/pi-mcp-adapter/index.ts"
 edit: deny
 context: fresh
 ---

@@ -1,8 +1,8 @@
 ---
 description: Stage Reviewer — Goal-first Stage review and code review.
 mode: subagent
-model: openai/gpt-5.6-terra
-variant: xhigh
+model: openai/gpt-5.6-luna
+variant: max
 hidden: true
 color: "#9ece6a"
 permission:
