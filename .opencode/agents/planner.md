@@ -15,10 +15,10 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "node .agents/runtime/dist/*": allow
-    "node .agents/runtime/dist/compile-manifest *": allow
-    "node .agents/runtime/dist/initialize-slice-evidence *": allow
-    "node .agents/runtime/dist/validate-stage *": allow
+    "node packages/runtime/dist/cli/*": allow
+    "node packages/runtime/dist/cli/compile-manifest *": allow
+    "node packages/runtime/dist/cli/initialize-slice-evidence *": allow
+    "node packages/runtime/dist/cli/validate-stage *": allow
   question: deny
   webfetch: deny
   skill:
@@ -27,6 +27,7 @@ permission:
   task:
     "*": deny
     "stage-plan-verifier": allow
+  external_directory: deny
 ---
 
 # Planner Agent
