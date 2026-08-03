@@ -288,10 +288,13 @@ CV may:
 - Run existing project commands (test, build, lint)
 
 Executor persists the CV verdict via:
-1. `node .agents/runtime/dist/receipt-writer.js cv '<json with data and optional receiptRoot>'`
+1. `node packages/runtime/dist/cli/admit.js --json '<cv_result AdmissionRequest>' [project-root]`
    — writes an immutable CV Receipt JSON
-2. `node .agents/runtime/dist/update-current-cv-status.js <options.json>`
-   — updates `## Current CV Status` in the Slice Evidence file
+   (AdmissionRequest: `type: 'cv_result'`, `stageId`, `sliceId`,
+   `verdict: 'PASS' | 'REPAIR'`, `snapshotDigest`, `summary`)
+2. `node packages/runtime/dist/cli/sync-cv-status.js <options.json>`
+   — derives the current CV status (read-only); Executor writes the derived
+   status into `## Current CV Status` in the Slice Evidence file
 
 ## Proof Profiles
 
