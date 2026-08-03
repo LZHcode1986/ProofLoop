@@ -702,6 +702,24 @@ describe('no direct file writes outside the ReceiptWriterPort (AWI-006)', () => 
     expect(pipelineCalls).toBe(7);
   });
 
+  it('every admit method propagates projectRoot to the pipeline (S3-REVIEW-003 rollback containment root)', () => {
+    // S3-REVIEW-003: `AdmitPipelineInput.projectRoot` must be passed on EVERY
+    // admit call chain (not just SPV/GATE) so the post-write rollback
+    // containment always uses the caller's projectRoot as the trust root —
+    // never a targetDir substitute. Each of the 7 `runAdmitPipeline({` blocks
+    // must contain the standalone `projectRoot: deps.projectRoot,` member.
+    const src = fs.readFileSync(path.join(__dirname, 'admission.ts'), 'utf8');
+    const blocks = src.split('runAdmitPipeline({').slice(1);
+    expect(blocks).toHaveLength(7);
+    for (const block of blocks) {
+      const member = block.slice(0, block.indexOf('}'));
+      expect(
+        member.includes('projectRoot: deps.projectRoot,'),
+        `every admit method must propagate projectRoot; missing in: ${member.split('\n')[0]}`,
+      ).toBe(true);
+    }
+  });
+
   it('defaultReceiptWriter delegates to the kernel ReceiptWriter seam (real write + chain verify)', () => {
     const root = makeTempRoot();
     const dir = path.join(root, 'plan', STAGE_ID);

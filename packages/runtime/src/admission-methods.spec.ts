@@ -35,13 +35,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { writeReceipt, verifyReceiptChain, StageState, ProjectState } from '@proofloop/kernel';
-import type { Manifest, ManifestSlice } from '@proofloop/kernel';
+import type { Manifest, ManifestSlice, ReceiptWriterOptions } from '@proofloop/kernel';
 import { SliceState, CVStatus } from '@proofloop/kernel';
 import {
   reconcileStage,
   receiptCategoryDir,
   admitWorkerResult,
   admitCVResult,
+  admitSliceCommit,
   reduceRuntimeAction,
   type AdmissionDeps,
   type AdmitReduceFn,
@@ -51,6 +52,7 @@ import {
   type CVResultAdmissionRequest,
   type WorkerResultAdmissionRequest,
   type ReceiptContentCategory,
+  type ReceiptWriterPort,
 } from '@proofloop/runtime';
 
 // ============================================================
@@ -862,5 +864,121 @@ describe('admitCVResult (PO-S02-E-03)', () => {
     expect(result.receipt_ref).toBeNull();
     expect(result.findings[0].code).toBe('DOMAIN.STAGE_NOT_FOUND');
     expect(fs.existsSync(readCvDir(fx))).toBe(false);
+  });
+});
+
+// ============================================================
+// S3-REVIEW-003 — projectRoot propagation for EVERY real admission path.
+// The rollback containment must use the caller's projectRoot as the trust
+// root (never fall back to targetDir as a substitute root): a Receipt PARENT
+// replaced with a symlink pointing OUTSIDE the root must fail closed (no
+// delete outside the root, honest declaration, outside directory untouched).
+// ============================================================
+
+describe('S3-REVIEW-003: projectRoot propagation — real admission paths fail closed on an outside parent swap', () => {
+  /**
+   * Writer: real kernel write, then the Receipt PARENT is replaced with a
+   * symlink pointing OUTSIDE the project root (with this run's receipt copied
+   * out as bait); the post-write verify fails → the rollback runs. With
+   * projectRoot propagated, containment resolves the swap OUTSIDE the root
+   * and fails closed — the outside bait is never deleted.
+   */
+  function makeParentSwapWriter(outsideCat: string): ReceiptWriterPort {
+    let verifyCount = 0;
+    return {
+      write: (data, options: ReceiptWriterOptions) => {
+        const result = writeReceipt(data, options);
+        fs.mkdirSync(outsideCat, { recursive: true });
+        fs.copyFileSync(result.path, path.join(outsideCat, path.basename(result.path)));
+        fs.renameSync(options.receiptDir, `${options.receiptDir}-orig`);
+        fs.symlinkSync(outsideCat, options.receiptDir);
+        return result;
+      },
+      verifyChain: (receiptDir) => {
+        verifyCount += 1;
+        if (verifyCount >= 2) {
+          return {
+            valid: false,
+            receipts: [],
+            brokenLink: { index: 0, expected: '(expected digest)', actual: '(tampered digest)' },
+          };
+        }
+        return verifyReceiptChain(receiptDir);
+      },
+    };
+  }
+
+  /** A temp dir OUTSIDE the project root with the canonical category rel-path. */
+  function makeOutsideDir(rel: string): string {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-s3rev3-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(outside, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    });
+    return path.join(outside, rel);
+  }
+
+  function assertFailClosedOutside(
+    result: {
+      accepted: boolean;
+      receipt_ref: string | null;
+      readonly findings: ReadonlyArray<{ code: string; message: string }>;
+    },
+    outsideCat: string,
+  ): void {
+    expect(result.accepted).toBe(false);
+    expect(result.receipt_ref).toBeNull();
+    expect(result.findings[0].code).toBe('RUNTIME.RECEIPT_CHAIN_BROKEN');
+    // Honest residual-window declaration (containment escape).
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[1].message).toContain('receipt persisted but chain verify failed and rollback incomplete');
+    expect(result.findings[1].message).toContain('escapes the trust boundary');
+    // The OUTSIDE bait was never deleted — the trust boundary held.
+    expect(fs.readdirSync(outsideCat).filter((f) => f.endsWith('.json'))).toHaveLength(1);
+  }
+
+  it('worker_result: swapped Receipt PARENT outside the root fails closed (outside bait untouched)', () => {
+    const fx = fxInProgress();
+    const outsideCat = makeOutsideDir(path.join('tasks', STAGE_ID, SLICE_ID));
+    const result = admitWorkerResult(
+      makeWorkerRequest({ mode: 'implement-task' }),
+      depsFor(fx, { writer: makeParentSwapWriter(outsideCat) }),
+    );
+    assertFailClosedOutside(result, outsideCat);
+  });
+
+  it('cv_result: swapped Receipt PARENT outside the root fails closed (outside bait untouched)', () => {
+    const fx = fxReadyForCvInitial();
+    const outsideCat = makeOutsideDir(path.join('cv', STAGE_ID, SLICE_ID));
+    const result = admitCVResult(
+      makeCvRequest({ snapshotDigest: COMMIT_SHA }),
+      depsFor(fx, { writer: makeParentSwapWriter(outsideCat) }),
+    );
+    assertFailClosedOutside(result, outsideCat);
+  });
+
+  it('slice_commit: swapped Receipt PARENT outside the root fails closed (outside bait untouched)', () => {
+    const fx = fxCvPassed();
+    const cvDir = readCvDir(fx);
+    const cvFiles = fs.readdirSync(cvDir).filter((f) => f.endsWith('.json'));
+    expect(cvFiles).toHaveLength(1);
+    const cvDigest = (
+      JSON.parse(fs.readFileSync(path.join(cvDir, cvFiles[0]), 'utf-8')) as { digest: string }
+    ).digest;
+    const outsideCat = makeOutsideDir(path.join('committer', STAGE_ID, SLICE_ID));
+    const result = admitSliceCommit(
+      {
+        type: 'slice_commit',
+        stageId: STAGE_ID,
+        sliceId: SLICE_ID,
+        commitSha: COMMIT_SHA,
+        cvReceiptDigest: cvDigest,
+      },
+      depsFor(fx, { writer: makeParentSwapWriter(outsideCat) }),
+    );
+    assertFailClosedOutside(result, outsideCat);
   });
 });

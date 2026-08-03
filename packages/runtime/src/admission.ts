@@ -174,6 +174,7 @@ export function admitWorkerResult(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: workerResultSteps(request, deps),
   });
@@ -371,6 +372,7 @@ export function admitCVResult(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: cvResultSteps(request, deps),
   });
@@ -488,6 +490,7 @@ export function admitSliceCommit(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: sliceCommitSteps(request, deps),
   });
@@ -581,6 +584,7 @@ export function admitIntegration(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: integrationSteps(request, deps),
   });
@@ -764,6 +768,7 @@ export function admitStageReview(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: stageReviewSteps(request, deps),
   });
@@ -847,6 +852,7 @@ export function admitProjectReview(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: projectReviewSteps(request, deps),
   });
@@ -935,6 +941,7 @@ export function admitStagePlan(
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: stagePlanSteps(request, deps),
   });

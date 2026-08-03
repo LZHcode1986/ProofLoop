@@ -17,8 +17,17 @@
  *   - a broken target category chain blocks the admit
  *     (RUNTIME.RECEIPT_CHAIN_BROKEN);
  *   - persistence ONLY through the writer port — this module performs no
- *     direct file writes (directory scaffolding via mkdir and read-only
- *     chain-tip resolution are the only fs access).
+ *     direct file writes (directory scaffolding via mkdir, read-only
+ *     chain-tip resolution, and the post-write ROLLBACK delete of a
+ *     digest-verified receipt on chain failure are the only fs access);
+ *   - when the post-write chain verification fails AFTER the receipt was
+ *     persisted, the just-written receipt is ROLLED BACK — bound to the
+ *     verified category directory inode (S03-A dirfd precedent, no parent
+ *     swap can redirect the unlink) and only when it is STILL the category
+ *     chain tip, re-confirmed THROUGH THE SAME BOUND DIRFD immediately before
+ *     the unlink (round-3 last-moment re-validation) so a successor appended
+ *     between the checks is never orphaned; a failed/skipped rollback is
+ *     honestly declared in the reject findings (S3-REVIEW-002 / OUT-S3-04).
  *
  * The `AdmissionRequest` union is open for S03/S04/S05 extension (SPV /
  * GATE / GATE_INTERRUPTED / SLICE_PLAN kinds); the pipeline accepts any
@@ -31,6 +40,7 @@ import { execFileSync } from 'node:child_process';
 import {
   writeReceipt,
   verifyReceiptChain,
+  verifyReceiptDigest,
   ReceiptChainError,
   SchemaValidationError,
   StageState,
@@ -56,6 +66,7 @@ import type {
   GateResultAdmissionRequest,
   GateInterruptedAdmissionRequest,
 } from './admission-request';
+import { canonicalPathWithinRoot } from './path-guard';
 
 // ============================================================
 // Receipt persistence seam — the ONLY write path (AWI-006)
@@ -114,7 +125,7 @@ export type AdmitPrecheckResult =
  * target category chain tip).
  */
 export interface ReceiptBuild {
-  /** Kernel canonical 12-type literal — never an open string. */
+  /** Kernel canonical 16-type literal — never an open string. */
   readonly type: ReceiptType;
   readonly stage_id: string;
   readonly slice_id?: string;
@@ -145,6 +156,14 @@ export interface AdmitPipelineInput {
   readonly steps: AdmitPipelineSteps;
   /** Persistence port — defaults to the kernel ReceiptWriter. */
   readonly writer?: ReceiptWriterPort;
+  /**
+   * Canonical project root (S3-REVIEW-002). When supplied, the post-write
+   * rollback re-verifies the just-written receipt file's canonical path
+   * against THIS trust boundary (the stronger S03-A boundary). When absent,
+   * the rollback falls back to the category directory the pipeline wrote
+   * into (`steps.targetDir`) as the containment boundary.
+   */
+  readonly projectRoot?: string;
 }
 
 /**
@@ -192,6 +211,429 @@ function chainFailureDetail(result: ChainVerificationResult): string {
     return `duplicate digests: ${result.duplicateDigests.map((d) => d.digest).join(', ')}`;
   }
   return 'chain verification failed';
+}
+
+// ============================================================
+// Post-write rollback (S3-REVIEW-002 / OUT-S3-04)
+// ============================================================
+
+/**
+ * Outcome of a post-write rollback attempt.
+ *
+ * `ok: true` — the just-written receipt was deleted (or was already gone);
+ * the reject below is then semantically equivalent to "no Receipt written".
+ * `ok: false` — the rollback did NOT complete; `reason` explains why
+ * (path-escape / digest-identity mismatch / category swap / successor
+ * reference / IO failure). The reject MUST then honestly declare the
+ * residual persisted receipt.
+ */
+export type ReceiptRollbackResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Documented test-only hooks for the post-write rollback (round-2/3, following
+ * the S03-A `beforeDirOpen` pattern). Production callers never pass them;
+ * tests use them to deterministically inject a concurrent parent swap / a
+ * concurrent successor at the exact TOCTOU windows:
+ *
+ *  - `beforeDirOpen`: called immediately AFTER the containment check + the
+ *    expected category dev/ino capture and IMMEDIATELY BEFORE the category
+ *    dirfd is opened — a parent swap injected here is caught by the dirfd
+ *    dev/ino cross-check (the opened fd fstats to a different inode);
+ *  - `beforeUnlink` (round-3): called immediately AFTER the first chain-tip
+ *    check and IMMEDIATELY BEFORE the last-moment tip re-validation (which
+ *    runs immediately before the unlink). A successor receipt appended here
+ *    (referencing this run's receipt) must be caught by the last-moment
+ *    re-validation → the rollback SKIPS the delete and the reject honestly
+ *    declares the successor reference (never break a successor chain).
+ */
+export interface RollbackTestHooks {
+  readonly beforeDirOpen?: () => void;
+  readonly beforeUnlink?: () => void;
+}
+
+/** True when `/proc/self/fd/<dirfd>` is usable for fd-relative operations. */
+function procSelfFdReachable(dirfd: number): boolean {
+  try {
+    fs.realpathSync(`/proc/self/fd/${dirfd}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Counterexample 2 (concurrent successor): only delete this run's receipt
+ * when it is STILL the current category chain tip — i.e. no other receipt in
+ * the category references it as `previous_digest`. Deleting a referenced
+ * predecessor would break the successor's chain. Reads the category through
+ * the bound dirfd (`/proc/self/fd/<fd>`) when available, else the lexical
+ * category path. Returns false (fail closed — never delete) when the category
+ * cannot be read or the receipt is referenced as a predecessor.
+ */
+function isStillChainTip(
+  categoryPath: string,
+  ourDigest: string,
+  procAvailable: boolean,
+): boolean {
+  let entries: string[];
+  try {
+    entries = procAvailable
+      ? fs.readdirSync(`${categoryPath}/`)
+      : fs.readdirSync(categoryPath);
+  } catch {
+    return false;
+  }
+  const digests = new Set<string>();
+  const referenced = new Set<string>();
+  for (const file of entries.filter((f) => f.endsWith('.json')).sort()) {
+    const p = procAvailable ? `${categoryPath}/${file}` : path.join(categoryPath, file);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as {
+        digest?: unknown;
+        previous_digest?: unknown;
+      };
+      if (typeof parsed.digest === 'string' && parsed.digest.length > 0) {
+        digests.add(parsed.digest);
+      }
+      if (typeof parsed.previous_digest === 'string' && parsed.previous_digest.length > 0) {
+        referenced.add(parsed.previous_digest);
+      }
+    } catch {
+      // Unreadable entries are the (failed) post-write verify's concern; the
+      // tip decision only needs the readable graph.
+    }
+  }
+  return digests.has(ourDigest) && !referenced.has(ourDigest);
+}
+
+/**
+ * Round-3/4 last-moment tip + identity re-validation (counterexamples
+ * S3-B-RECHECK-ROLLBACK-TIP-TOCTOU-001 and S3-REVIEW-004): a successor can be
+ * appended AFTER `isStillChainTip()` returns true but BEFORE `fs.unlinkSync()`,
+ * and the rollback target can be replaced by a symlink pointing at a
+ * PRE-EXISTING, content-identical, SAME-DIGEST receipt elsewhere.
+ *
+ * Immediately before the unlink, re-confirm THROUGH THE SAME BOUND DIRFD that:
+ *   (b) the file at our path still exists with our digest (a file swap /
+ *       removal since the identity check → never delete a foreign file),
+ *   (c) the file is the ORIGINAL inode THIS run wrote — its dev/ino still
+ *       equals the identity captured right after `writer.write`, the entry
+ *       basename equals the captured ORIGINAL basename (a post-capture rename
+ *       plus same-inode replacement under a DIFFERENT basename is caught), and
+ *       the link count is unchanged (a same-inode HARDLINK under a different
+ *       basename increments nlink and is caught), and
+ *   (a) this run's receipt is STILL the category chain tip (no successor
+ *       references it).
+ * If any changed → `ok:false` with the honest reason; the caller SKIPS the
+ * delete (never break a successor chain, never delete a foreign, pre-existing,
+ * or same-inode/different-basename receipt) and the reject honestly declares it.
+ *
+ * The double-check narrows the window to the microsecond between this
+ * re-validation and the unlink itself. That remaining check-then-act window is
+ * a Node/OS inherent limitation under a malicious-concurrency attacker model
+ * (atomic compare-and-delete does not exist in Node; the kernel ReceiptWriter
+ * lock is kernel-owned and out of scope) — recorded honestly as the residual
+ * window (same convergence precedent as S03-A PO-S03-A-03).
+ */
+function revalidateRollbackTarget(
+  categoryPath: string,
+  opPath: string,
+  ourDigest: string,
+  procAvailable: boolean,
+  writtenFileIdentity?: {
+    dev: number;
+    ino: number;
+    name: string;
+    nlink: number;
+  } | null,
+): ReceiptRollbackResult {
+  // (b) the file at our path still exists with our digest.
+  let storedDigest: string | null = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(opPath, 'utf-8')) as {
+      digest?: unknown;
+    };
+    storedDigest = typeof parsed.digest === 'string' ? parsed.digest : null;
+  } catch {
+    storedDigest = null;
+  }
+  if (storedDigest !== ourDigest || !verifyReceiptDigest(opPath)) {
+    return {
+      ok: false,
+      reason: `digest identity mismatch (file at ${opPath} is not this run's receipt)`,
+    };
+  }
+  // (c) ORIGINAL-IDENTITY (S3-REVIEW-004 round-4/5): the entry at our path must
+  //     STILL be the file THIS run wrote — same dev/ino (a symlink to a
+  //     PRE-EXISTING same-digest receipt elsewhere has a different inode), the
+  //     ORIGINAL basename (a post-capture rename + same-inode replacement under
+  //     a DIFFERENT basename fails the canonical-path basename), and the same
+  //     link count (a same-inode HARDLINK under a different basename
+  //     increments nlink). ANY mismatch → never delete.
+  if (writtenFileIdentity === null || writtenFileIdentity === undefined) {
+    return {
+      ok: false,
+      reason:
+        'rollback skipped: target identity mismatch — a pre-existing receipt may be present ' +
+        '(write-time identity was not captured)',
+    };
+  }
+  try {
+    const st = fs.lstatSync(opPath);
+    const entryBasename = path.basename(opPath);
+    if (
+      st.dev !== writtenFileIdentity.dev ||
+      st.ino !== writtenFileIdentity.ino ||
+      entryBasename !== writtenFileIdentity.name ||
+      st.nlink !== writtenFileIdentity.nlink
+    ) {
+      return {
+        ok: false,
+        reason:
+          'rollback skipped: target identity mismatch — a pre-existing receipt may be present',
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `rollback skipped: target identity cannot be verified before delete — ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  // (a) still the category chain tip.
+  if (!isStillChainTip(categoryPath, ourDigest, procAvailable)) {
+    return {
+      ok: false,
+      reason:
+        'rollback skipped because a successor receipt now references the chain ' +
+        '(receipt is no longer the category chain tip); the successor chain is preserved',
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Roll back the receipt written by THIS run when the post-write chain
+ * verification fails (S3-REVIEW-002: chain failure → 不写 Receipt — a reject
+ * must not leave the just-written Receipt file on disk).
+ *
+ * Safety contract (round-3, closing the recheck counterexamples):
+ *   1. CONTAINMENT — the file is deleted ONLY when its canonical realpath
+ *      stays inside the trust boundary. `boundaryRoot` is the caller-supplied
+ *      project root when provided (the stronger S03-A boundary), else the
+ *      category directory this run wrote into. The S03-A component-wise
+ *      realpath walk (`canonicalPathWithinRoot`) rejects a lexical escape.
+ *   2. DIRFD BINDING (counterexample 1 — deletion TOCTOU): the deletion is
+ *      bound to the VERIFIED category DIRECTORY inode (S03-A dirfd
+ *      precedent): the category is opened as a dirfd
+ *      (`O_RDONLY | O_DIRECTORY | O_NOFOLLOW`), its fstat dev/ino is
+ *      cross-checked against the pre-captured identity (a parent swap between
+ *      capture and open fails closed), and every read + the unlink go through
+ *      `/proc/self/fd/<fd>/<name>` — a parent rename/swap AFTER the open
+ *      cannot redirect the unlink (the fd keeps the inode binding). When
+ *      `/proc/self/fd` is unavailable the rollback falls back to path-based
+ *      operations plus a per-operation parent identity re-verification
+ *      immediately before the unlink (honest residual window documented).
+ *   3. IDENTITY — the file is deleted ONLY when it is a self-consistent
+ *      receipt (`verifyReceiptDigest`) whose stored digest equals
+ *      `writeResult.digest`. A missing file is treated as success (nothing to
+ *      roll back); a present-but-unverifiable / digest-mismatched file is
+ *      NEVER deleted (never remove someone else's receipt).
+ *   4. TIP CHECK (counterexample 2 — concurrent successor): the file is
+ *      deleted ONLY when this run's receipt is STILL the current category
+ *      chain tip — no successor receipt references it as predecessor. If a
+ *      successor exists, the rollback SKIPS the delete (never break a
+ *      successor chain) and the reject honestly declares it.
+ *   5. LAST-MOMENT RE-VALIDATION (round-3/4, counterexamples
+ *      S3-B-RECHECK-ROLLBACK-TIP-TOCTOU-001 + S3-REVIEW-004): a successor can
+ *      be appended between the first tip check and the unlink, and the target
+ *      can be replaced by a symlink to a pre-existing same-digest receipt.
+ *      Immediately before the unlink the digest, the ORIGINAL inode identity
+ *      (dev/ino captured right after write) and the chain tip are re-confirmed
+ *      THROUGH THE SAME BOUND DIRFD; if any changed the delete is SKIPPED with
+ *      the honest declaration. This narrows the window to the microsecond
+ *      between the re-validation and the unlink itself (Node/OS inherent
+ *      check-then-act window under a malicious-concurrency attacker model).
+ *   6. ORIGINAL-IDENTITY PRESERVATION (S3-REVIEW-004): the pipeline captures
+ *      the just-written file's dev/ino, ORIGINAL basename and link count
+ *      immediately after `writer.write` returns; the rollback never deletes an
+ *      entry whose dev/ino, basename or nlink differ (a symlink-replaced
+ *      pre-existing same-digest receipt, a renamed same-inode entry reached
+ *      under a different basename, or a same-inode hardlink is never deleted).
+ *   7. The rollback targets ONLY the digest-verified file from THIS run — no
+ *      other receipt in the category directory is ever touched.
+ */
+function rollbackWrittenReceipt(
+  writeResult: WriteReceiptResult,
+  targetDir: string,
+  projectRoot: string | undefined,
+  testHooks?: RollbackTestHooks,
+  writtenFileIdentity?: {
+    dev: number;
+    ino: number;
+    name: string;
+    nlink: number;
+  } | null,
+): ReceiptRollbackResult {
+  const boundaryRoot = projectRoot ?? targetDir;
+  const canonicalFile = canonicalPathWithinRoot(boundaryRoot, writeResult.path);
+  if (canonicalFile === null) {
+    return {
+      ok: false,
+      reason: `canonical path escapes the trust boundary: ${writeResult.path}`,
+    };
+  }
+  const name = path.basename(canonicalFile);
+  const canonicalParent = path.dirname(canonicalFile);
+
+  // Expected identity of the category directory captured BEFORE the dirfd
+  // open (S03-A precedent): the opened fd must fstat to this dev/ino — a
+  // parent swap between capture and open is detected and fails closed.
+  let expected: fs.Stats | null = null;
+  try {
+    expected = fs.statSync(canonicalParent);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `category directory unreadable: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // Documented test-only seam: inject a parent swap here — the dirfd dev/ino
+  // cross-check must catch it (fail closed, never delete outside).
+  testHooks?.beforeDirOpen?.();
+
+  let dirfd: number;
+  try {
+    dirfd = fs.openSync(
+      canonicalParent,
+      fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `cannot open category directory for rollback: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  try {
+    const st = fs.fstatSync(dirfd);
+    if (st.dev !== expected.dev || st.ino !== expected.ino) {
+      return {
+        ok: false,
+        reason:
+          'category directory was swapped between verification and open (dev/ino mismatch); ' +
+          'refusing to delete outside the trust boundary',
+      };
+    }
+
+    // /proc/self/fd mechanism (Linux): all reads and the unlink bind to the
+    // opened inode — a parent rename/swap AFTER the open cannot redirect any
+    // operation (the fd keeps the inode binding). When /proc/self/fd is
+    // unavailable the rollback falls back to path-based operations plus a
+    // per-operation parent identity re-verification immediately before the
+    // unlink (honest residual window documented).
+    const procAvailable = procSelfFdReachable(dirfd);
+    const opPath = procAvailable ? `/proc/self/fd/${dirfd}/${name}` : canonicalFile;
+    const categoryPath = procAvailable ? `/proc/self/fd/${dirfd}` : targetDir;
+
+    // Already gone → nothing to roll back (equivalent to "no receipt written").
+    let present = true;
+    try {
+      fs.lstatSync(opPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') present = false;
+    }
+    if (!present) {
+      return { ok: true };
+    }
+
+    // Identity: only delete the digest-verified file from THIS run.
+    let storedDigest: string | null = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(opPath, 'utf-8')) as {
+        digest?: unknown;
+      };
+      storedDigest = typeof parsed.digest === 'string' ? parsed.digest : null;
+    } catch {
+      storedDigest = null;
+    }
+    if (storedDigest !== writeResult.digest || !verifyReceiptDigest(opPath)) {
+      return {
+        ok: false,
+        reason: `digest identity mismatch (file at ${opPath} is not this run's receipt)`,
+      };
+    }
+
+    // Tip check (counterexample 2): never delete a receipt a successor now
+    // references — that would break the successor's chain.
+    if (!isStillChainTip(categoryPath, writeResult.digest, procAvailable)) {
+      return {
+        ok: false,
+        reason:
+          'rollback skipped because a successor receipt now references the chain ' +
+          '(receipt is no longer the category chain tip); the successor chain is preserved',
+      };
+    }
+
+    // Round-3 last-moment re-validation (counterexample
+    // S3-B-RECHECK-ROLLBACK-TIP-TOCTOU-001): a successor can be appended
+    // between the first tip check and the unlink. Re-confirm THROUGH THE SAME
+    // BOUND DIRFD immediately before the unlink that (a) our receipt is still
+    // the chain tip and (b) our file still exists with our digest. If the tip
+    // or the file changed → SKIP the delete with the honest declaration (never
+    // break a successor chain, never delete a foreign file).
+    // Documented test-only seam: inject a successor here — the last-moment
+    // re-validation must catch it (delete skipped, honest declaration present).
+    testHooks?.beforeUnlink?.();
+    const lastMoment = revalidateRollbackTarget(
+      categoryPath,
+      opPath,
+      writeResult.digest,
+      procAvailable,
+      writtenFileIdentity,
+    );
+    if (!lastMoment.ok) {
+      return lastMoment;
+    }
+
+    // Fallback path (no /proc/self/fd): re-verify the parent identity
+    // immediately before the unlink (check-then-use residual window).
+    if (!procAvailable) {
+      try {
+        const now = fs.statSync(canonicalParent);
+        if (now.dev !== expected.dev || now.ino !== expected.ino) {
+          return {
+            ok: false,
+            reason:
+              'category directory identity changed before delete (dev/ino mismatch); ' +
+              'refusing to delete outside the trust boundary',
+          };
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          reason: `category directory unreadable before delete: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    try {
+      fs.unlinkSync(opPath);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `delete failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  } finally {
+    try {
+      fs.closeSync(dirfd);
+    } catch {
+      // best-effort
+    }
+  }
+  return { ok: true };
 }
 
 /**
@@ -287,7 +729,10 @@ function resolveCategoryChainTip(receiptDir: string): string | undefined {
  * `accepted: false`, `receipt_ref: null` and a canonical Finding — no
  * Receipt is ever produced for an invalid input or an unsatisfied state.
  */
-export function runAdmitPipeline(input: AdmitPipelineInput): AdmitResult {
+export function runAdmitPipeline(
+  input: AdmitPipelineInput,
+  rollbackTestHooks?: RollbackTestHooks,
+): AdmitResult {
   const writer = input.writer ?? defaultReceiptWriter;
 
   // ── 1. Request schema validation — fail closed (AWI-006: 验证输入) ──
@@ -418,14 +863,82 @@ export function runAdmitPipeline(input: AdmitPipelineInput): AdmitResult {
     );
   }
 
-  // ── 7. Post-write chain verification ──
+  // ── 6b. Capture the ORIGINAL identity of the just-written receipt ──
+  //        (S3-REVIEW-004 round-4/5): the dev/ino, ORIGINAL basename and link
+  //        count of the file THIS run wrote, captured immediately after
+  //        `writer.write` returns and BEFORE any rollback can be triggered.
+  //        The rollback re-verifies this identity through the bound dirfd
+  //        immediately before the unlink:
+  //          - dev/ino — a path replaced by a symlink pointing at a
+  //            PRE-EXISTING, content-identical, SAME-DIGEST receipt elsewhere
+  //            has a different inode (round-4);
+  //          - basename — a post-capture rename plus symlink replacement to
+  //            the SAME INODE under a DIFFERENT basename is caught by the
+  //            canonical-path basename mismatch (round-5);
+  //          - link count — a same-inode entry under a DIFFERENT basename via
+  //            a HARDLINK increments nlink and is caught (round-5).
+  //        A failed capture (unreadable path) fails closed in the rollback
+  //        (identity unverifiable → never delete).
+  let writtenFileIdentity: {
+    dev: number;
+    ino: number;
+    name: string;
+    nlink: number;
+  } | null = null;
+  try {
+    const st = fs.lstatSync(writeResult.path);
+    writtenFileIdentity = {
+      dev: st.dev,
+      ino: st.ino,
+      name: path.basename(writeResult.path),
+      nlink: st.nlink,
+    };
+  } catch {
+    writtenFileIdentity = null;
+  }
+
+  // ── 7. Post-write chain verification + rollback (S3-REVIEW-002) ──
+  //        A post-write verify failure MUST NOT leave the just-written
+  //        Receipt on disk (OUT-S3-04 "chain failure → 不写 Receipt"): the
+  //        digest-verified file from THIS run is rolled back first — bound to
+  //        the verified category directory inode (S03-A dirfd precedent,
+  //        counterexample 1) and only when it is STILL the category chain tip
+  //        (counterexample 2). On rollback success the ORIGINAL reject is
+  //        returned (equivalent to "no Receipt written"); on rollback failure
+  //        the reject is still returned but the findings honestly declare the
+  //        residual persisted receipt (digest + rollback failure reason) —
+  //        fail-closed plus honest residual-window recording.
   const postChain = writer.verifyChain(targetDir);
   if (!postChain.valid) {
-    return reject(
+    const rejectResult = reject(
       'RUNTIME.RECEIPT_CHAIN_BROKEN',
       `receipt chain broken in ${targetDir} after admit: ${chainFailureDetail(postChain)}`,
       pre.nextState,
     );
+    const rollback = rollbackWrittenReceipt(
+      writeResult,
+      targetDir,
+      input.projectRoot,
+      rollbackTestHooks,
+      writtenFileIdentity,
+    );
+    if (rollback.ok) {
+      return rejectResult;
+    }
+    return {
+      ...rejectResult,
+      findings: [
+        ...rejectResult.findings,
+        {
+          code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          severity: 'error',
+          message:
+            `receipt persisted but chain verify failed and rollback incomplete: ` +
+            `receipt digest ${writeResult.digest} at ${writeResult.path} remains on disk — ` +
+            `rollback failed: ${rollback.reason}`,
+        },
+      ],
+    };
   }
 
   // ── 8. Result ──
@@ -577,6 +1090,7 @@ export function admitSpvResult(
     request,
     reconcile:
       deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: spvResultSteps(request, deps),
   });
@@ -666,6 +1180,7 @@ export function admitGateResult(
     request,
     reconcile:
       deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: gateResultSteps(request, deps),
   });
@@ -777,7 +1292,7 @@ function gateResultPrecheck(
 
 /**
  * Admit an INTERRUPTED Stage Gate run: `GATE_INTERRUPTED` Receipt to
- * `stage-gate/<stage>/` (additive 13th ReceiptType). The gate run was
+ * `stage-gate/<stage>/` (additive 11th ReceiptType). The gate run was
  * cancelled or timed out — this is NOT a verdict: no PASS/FAIL is ever
  * written, the payload carries `reason: 'cancelled' | 'timeout'` and
  * `duration_ms`, and the receipt never blocks the next action like
@@ -812,6 +1327,7 @@ export function admitGateInterrupted(
     request,
     reconcile:
       deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+    projectRoot: deps.projectRoot,
     writer: deps.writer,
     steps: gateInterruptedSteps(request, deps),
   });

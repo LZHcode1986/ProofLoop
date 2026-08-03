@@ -13,7 +13,8 @@
  *   integration/<stage>/<slice>/ INTEGRATION_PASS
  *   stage-gate/<stage>/      GATE_PASS, GATE_FAIL, GATE_INTERRUPTED
  *   review/<stage>/          STAGE_REVIEW_PASS
- *   project/                 PROJECT_REVIEW_PASS
+ *   project/                 PROJECT_REVIEW_PASS, PROJECT_E2E_PASS,
+ *                            PROJECT_E2E_FAIL, PROJECT_E2E_BLOCKED
  *   .tmp/                    scratch — never a receipt source
  *
  * Reconcile (S02-C-T03) reads ONLY this layout; the kernel ReceiptWriter
@@ -248,12 +249,20 @@ export function receiptLayout(
 // ============================================================
 
 /**
- * Canonical mapping from each of the 13 receipt types to the content category
+ * Canonical mapping from each of the 16 receipt types to the content category
  * directory that may hold it. This is the closed-set classification used to
  * detect misplaced receipts (type/category mismatch → RUNTIME.SCHEMA_MISMATCH).
  *
- * The mapping is total: every one of the 13 receipt types maps to exactly one
+ * The mapping is total: every one of the 16 receipt types maps to exactly one
  * content category, and no type maps to the `.tmp` scratch directory.
+ *
+ * B1c (blueprint §6.4 `run_e2e`): PROJECT_E2E_PASS / PROJECT_E2E_FAIL /
+ * PROJECT_E2E_BLOCKED are the additive project-level E2E gate verdict
+ * receipts. They live in the shared `project/` category (alongside
+ * PROJECT_REVIEW_PASS) but are EVIDENCE-only artifacts: finalize reads and
+ * cross-validates them; reconcile never derives project_state from them (only
+ * PROJECT_REVIEW_PASS triggers COMPLETED — a FAILED E2E run can never
+ * prematurely complete the project).
  */
 export const RECEIPT_TYPE_CATEGORY: Readonly<Record<ReceiptType, ReceiptContentCategory>> = {
   SLICE_PLAN: 'plan',
@@ -269,6 +278,9 @@ export const RECEIPT_TYPE_CATEGORY: Readonly<Record<ReceiptType, ReceiptContentC
   GATE_INTERRUPTED: 'stage-gate',
   STAGE_REVIEW_PASS: 'review',
   PROJECT_REVIEW_PASS: 'project',
+  PROJECT_E2E_PASS: 'project',
+  PROJECT_E2E_FAIL: 'project',
+  PROJECT_E2E_BLOCKED: 'project',
 };
 
 /**

@@ -738,6 +738,26 @@ describe('row 0: error-level inconsistency → VALIDATE (real fixtures)', () => 
     ).toBe(true);
   });
 
+  it('GATE_FAIL + GATE_PASS both present → NOT VALIDATE (GATE_PASS post-supplants GATE_FAIL)', () => {
+    const { fx } = integratedFx();
+    fx.writeReceipt('stage-gate', undefined, {
+      type: 'GATE_FAIL',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-07T00:00:00.000Z',
+      payload: { verdict: 'FAIL' },
+    });
+    fx.writeReceipt('stage-gate', undefined, {
+      type: 'GATE_PASS',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-08T00:00:00.000Z',
+    });
+    const out = pipeline(fx, fx.stageId);
+    // GATE_PASS post-supplants GATE_FAIL — no longer blocking.
+    expect(out.action).not.toBe('VALIDATE');
+    expect(out.action).toBe('FINALIZE_STAGE_REVIEW');
+    expect(out.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(false);
+  });
+
   it('kitchen-sink inconsistency (reusing S02-C constructions) → VALIDATE, all findings, no execution action', () => {
     // Reuses the S02-C inconsistency fixture kinds on the S02-A slice:
     // unknown-slice dir, invalid JSON, tampered chain, checked-without-evidence warn.
@@ -1078,7 +1098,7 @@ describe('row 12: UNDER_REVIEW + GATE_PASS → FINALIZE_STAGE_REVIEW (real fixtu
 });
 
 // ============================================================
-// GATE_INTERRUPTED — additive 13th receipt type retry semantics (PO-S05-A-06)
+// GATE_INTERRUPTED — additive 11th receipt type retry semantics (PO-S05-A-06)
 // ============================================================
 
 describe('GATE_INTERRUPTED: retryable gate, never GATE_FAIL/GATE_PASS (PO-S05-A-06)', () => {
@@ -1130,7 +1150,7 @@ describe('GATE_INTERRUPTED: retryable gate, never GATE_FAIL/GATE_PASS (PO-S05-A-
     expect(out.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(true);
   });
 
-  it('old 12-type receipts keep the derivation unchanged: GATE_PASS still → FINALIZE_STAGE_REVIEW', () => {
+  it('baseline receipts keep the derivation unchanged: GATE_PASS still → FINALIZE_STAGE_REVIEW', () => {
     const { fx } = gateFx();
     const out = pipeline(fx, fx.stageId);
     expect(out.action).toBe('FINALIZE_STAGE_REVIEW');

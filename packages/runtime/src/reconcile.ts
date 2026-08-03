@@ -76,6 +76,7 @@ import type {
 } from './receipt-reader';
 import { receiptsRoot } from './receipt-layout';
 import type { ReceiptContentCategory } from './receipt-layout';
+import { canonicalPathWithinRoot } from './path-guard';
 import { deriveStageState, StageStateDerivationError } from './stage-state';
 import type { StageReceiptSummary } from './stage-state';
 import type {
@@ -311,6 +312,12 @@ function isCommitAncestorOfHead(projectRoot: string, sha: string, head: string):
 /**
  * Directories under slice-level category stage dirs that the manifest does
  * not declare → receipts exist for an unknown slice (PO-S02-C-02).
+ *
+ * Trust-root boundary (S2-F-003): the receipts root is verified per category
+ * stage dir; a stage dir whose canonical path escapes the project root is
+ * NEVER listed (skipped) — the category reads already fail closed
+ * (`chainValid: false`), and an escaped dir must not contribute outside-derived
+ * "unknown slice" findings either.
  */
 function findUnknownSliceDirs(
   projectRoot: string,
@@ -320,6 +327,9 @@ function findUnknownSliceDirs(
   const out: string[] = [];
   for (const category of SLICE_LEVEL_CATEGORIES) {
     const stageDir = path.join(receiptsRoot(projectRoot), category, stageId);
+    if (canonicalPathWithinRoot(projectRoot, stageDir) === null) {
+      continue;
+    }
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(stageDir, { withFileTypes: true });
@@ -864,6 +874,14 @@ export function reconcileStage(input: ReconcileStageInput): ReconcileStageResult
  *     completed its stage review;
  *   - else → IN_PROGRESS (safe default; a missing manifest keeps the
  *     emptyResult default IN_PROGRESS — no facts to judge on).
+ *
+ * B1c semantics (blueprint §6.4 `run_e2e`): PROJECT_E2E_PASS /
+ * PROJECT_E2E_FAIL / PROJECT_E2E_BLOCKED receipts (the project-level E2E gate
+ * verdicts in the shared `project/` category) are EVIDENCE-only and NEVER
+ * participate in this derivation — only PROJECT_REVIEW_PASS triggers
+ * COMPLETED, so a FAILED E2E run can never prematurely complete the project.
+ * The check below matches only PROJECT_REVIEW_PASS by construction, so the
+ * E2E verdict receipts fall through to the stage-state branch unchanged.
  */
 function deriveProjectState(
   validReads: readonly ReadReceiptResult[],

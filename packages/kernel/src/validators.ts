@@ -344,6 +344,13 @@ const RECEIPT_TYPES = [
   'GATE_INTERRUPTED',
   'STAGE_REVIEW_PASS',
   'PROJECT_REVIEW_PASS',
+  // B1c additive project-level E2E gate verdict types (blueprint §6.4
+  // run_e2e). Evidence-only receipts in the `project/` category — read by
+  // finalize-project-review, never project_state facts (only
+  // PROJECT_REVIEW_PASS triggers COMPLETED).
+  'PROJECT_E2E_PASS',
+  'PROJECT_E2E_FAIL',
+  'PROJECT_E2E_BLOCKED',
 ] as const;
 
 // ============================================================
@@ -382,7 +389,7 @@ function validateReceiptData(data: unknown, path: string, errors: FieldError[]):
   // version: must be literal 1
   expectLiteral(obj.version, 1, `${path}.version`, errors);
 
-  // type: must be one of the 13 receipt types (closed set)
+  // type: must be one of the 16 receipt types (closed set)
   expectStringLiteral(obj.type, RECEIPT_TYPES, `${path}.type`, errors);
 
   // stage_id: required string

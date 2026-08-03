@@ -41,6 +41,7 @@ import { reconcileStage } from './reconcile';
 import type { ReconcileStageResult } from './reconcile';
 import { manifestSource, ManifestSourceError } from './manifest-source';
 import { readReceiptCategory } from './receipt-reader';
+import { canonicalPathWithinRoot, openNoFollowRead } from './path-guard';
 import { validateWorkerResultEnvelope } from './relay-contract';
 import type { WorkerResultEnvelope } from './relay-contract';
 import { deriveNextAction } from './derive-next-action';
@@ -230,6 +231,17 @@ function readPendingWorkerEnvelopes(
   stageId: string,
 ): WorkerResultEnvelope[] {
   const dir = path.join(projectRoot, ...PENDING_RESULTS_REL);
+  // Trust-root boundary (S2-F-003): a pending-results directory whose
+  // canonical path escapes the project root is NEVER read. Pending results
+  // are optional facts, but an escape is a trust violation — not an absence —
+  // so this fails closed (structured Error) and the plugin stageNextHandler
+  // error boundary maps it to a canonical Finding instead of deriving state
+  // from outside files.
+  if (canonicalPathWithinRoot(projectRoot, dir) === null) {
+    throw new Error(
+      `pending worker results directory escapes the project root trust boundary: ${dir}`,
+    );
+  }
   let names: string[];
   try {
     names = fs.readdirSync(dir);
@@ -239,11 +251,24 @@ function readPendingWorkerEnvelopes(
   const envelopes: WorkerResultEnvelope[] = [];
   for (const name of [...names].sort()) {
     if (!name.endsWith('.json')) continue;
+    const filePath = path.join(dir, name);
+    // Trust-root boundary (S2-F-003 round 3, atomic no-follow boundary): the
+    // envelope is read through an O_NOFOLLOW fd against its canonical parent —
+    // a symlink replacement between any pre-check and the read cannot redirect
+    // the read outside the root. Escaping or unreadable files are skipped
+    // (fail-closed): they never become a pending fact, so they can never drive
+    // ADMIT_WORKER_RESULT.
+    const opened = openNoFollowRead(projectRoot, filePath);
+    if (!opened.ok) {
+      continue;
+    }
     let raw: string;
     try {
-      raw = fs.readFileSync(path.join(dir, name), 'utf-8');
+      raw = fs.readFileSync(opened.fd, 'utf-8');
     } catch {
       continue;
+    } finally {
+      fs.closeSync(opened.fd);
     }
     let data: unknown;
     try {

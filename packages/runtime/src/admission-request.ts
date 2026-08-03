@@ -56,7 +56,7 @@ export type GateVerdict = (typeof GATE_VERDICTS)[number];
  * Gate interruption reasons — closed 2-value set (S05-A-T05, HP-004/AWI-015).
  *
  * A gate interruption is NOT a gate verdict: `GATE_INTERRUPTED` is a
- * separate 13th ReceiptType whose payload carries `reason` from this closed
+ * separate 11th ReceiptType whose payload carries `reason` from this closed
  * set plus `duration_ms`. GATE_VERDICTS intentionally stays {PASS, FAIL} —
  * an interrupted gate is never admitted as a verdict receipt.
  */
@@ -174,7 +174,7 @@ export interface GateResultAdmissionRequest {
 
 /**
  * Gate interruption admit (S05-A-T05, HP-004/AWI-015) — `GATE_INTERRUPTED`
- * receipt to `stage-gate/<stage>/`. Additive 13th ReceiptType: the gate run
+ * receipt to `stage-gate/<stage>/`. Additive 11th ReceiptType: the gate run
  * was cancelled or timed out. `reason` is the closed {cancelled, timeout}
  * set (NOT a verdict — GATE_VERDICTS stays {PASS, FAIL}); `durationMs` is
  * the bounded run duration; `manifestDigest` / `snapshotDigest` bind the

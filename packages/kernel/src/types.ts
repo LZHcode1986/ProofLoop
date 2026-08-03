@@ -144,14 +144,17 @@ export interface Finding {
 // ============================================================
 
 /**
- * Immutable receipt artifact.
+ * Legacy receipt artifact shape retained only for migration/reference code.
  *
- * See §4 File / Artifact Contracts — `.proofloop/receipts/*.json`.
+ * @deprecated Use the canonical `Receipt` exported from `contracts.ts`.
+ * The canonical type has a 16-value `ReceiptType` union, including the
+ * PROJECT_E2E_* receipt types. This legacy shape is not exported by the public
+ * kernel index and must not be used for new receipts.
  */
-export interface Receipt {
+export interface LegacyReceipt {
   /** Schema version (must be 1). */
   version: 1;
-  /** Receipt type literal (13-type closed set incl. GATE_INTERRUPTED). */
+  /** Legacy receipt type literal (13-value pre-project-E2E shape). */
   type:
     | 'SLICE_PLAN'
     | 'STAGE_PLAN'

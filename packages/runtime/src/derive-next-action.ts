@@ -289,9 +289,13 @@ export function deriveNextAction(state: DeriveNextActionInput): DerivedNextActio
   const chainValid = state.receipt_chain_valid ?? true;
 
   // ── Row 0: any error-level inconsistency → VALIDATE with all findings ──
+  // GATE_FAIL blocking is post-supplanted by GATE_PASS: a retry-passed gate
+  // (GATE_PASS after GATE_FAIL) means the latest verdict overrides the old
+  // failure — no longer blocking. Both receipts remain immutable; only the
+  // derivation semantics change.
   const hasErrorFinding = state.findings.some((f) => f.severity === 'error');
   const chainInvalid = !chainValid;
-  const gateFailed = state.gate_fail_present === true;
+  const gateFailed = state.gate_fail_present === true && state.gate_pass_present !== true;
   if (hasErrorFinding || chainInvalid || gateFailed) {
     const synthesized: Finding[] = [];
     if (gateFailed) {

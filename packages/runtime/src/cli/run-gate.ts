@@ -1,9 +1,9 @@
 /**
  * run-gate — new runtime CLI entry (PO-S03-H-01, S03-H-T01)
  *
- * Stage Gate execution, minimal version (HP-004: per-step timeout +
- * exit-code checks; no cancellation / process-tree cleanup /
- * GATE_INTERRUPTED — those are S04/AWI-015). Legacy-compatible contract:
+ * Stage Gate execution over the B1a Process Runner (blueprint §11), with
+ * service lifecycle implemented (B1b) — parity with the legacy runtime's
+ * `run-stage.ts` executeRuntimeProof (behavior authority):
  *
  *   node packages/runtime/dist/cli/run-gate.js <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]
  *
@@ -12,13 +12,27 @@
  *  2. load the Slice COMPLETE Facts (JSON array) — every manifest slice must
  *     carry a fact with `integrated: true`; facts for undeclared slices are
  *     refused (stale-fact guard);
- *  3. execute the manifest `runtime_proof` steps: `command`/`probe` steps run
- *     synchronously with per-step timeout and `expected.exit_code` check
- *     (absent expected → 0; `exit_code: null` → any exit accepted);
- *     `not_applicable` steps are skipped; `service_start`/`service_stop`
- *     steps that are NOT marked not_applicable fail the gate (service
- *     lifecycle execution is deferred to S04 — honest fail-closed);
- *  4. write the gate result JSON to `<output-dir>/gate-result.json`
+ *  3. execute the manifest `runtime_proof` steps sequentially:
+ *     - `command`/`probe` steps run through `runProcess` (bounded output,
+ *       per-step timeout with process-tree cleanup) with the `expected`
+ *       oracle — `expected.exit_code` absent → 0; `exit_code: null` → any
+ *       exit accepted; timeout always FAILs;
+ *     - `service_start` steps `spawnService` (cwd resolved under
+ *       projectRoot), `registerService(step.id, handle)` and, when a
+ *       `readiness_signal` is declared, `waitForReadiness(handle, signal,
+ *       step.timeout_ms)` — ready → pass; early exit → FAIL (exit code
+ *       recorded); timeout → FAIL. In BOTH failure cases the service is
+ *       stopped (stopService) so it cannot leak;
+ *     - `service_stop` steps look up the registry by `service_ref` (or
+ *       step.id) and `stopService` the tree; an unknown ref FAILs the step;
+ *     - `not_applicable` steps are skipped;
+ *     - execution stops at the first failed step (legacy parity);
+ *  4. mandatory cleanup at Gate end (PASS or FAIL): `cleanupServices()` stops
+ *     every still-registered service; a service that was stopped by cleanup
+ *     but has a DECLARED service_stop step counts as "explicit stop was
+ *     missed" → Gate FAIL (legacy semantics); cleanup failures / remaining
+ *     PIDs also FAIL the gate;
+ *  5. write the gate result JSON to `<output-dir>/gate-result.json`
  *     (default `<projectRoot>/.proofloop/runtime/<stageId>/`).
  *
  * Output: JSON `{ success, gate, stage_id, steps, errors, output_path }`;
@@ -26,14 +40,33 @@
  * the unified admit pipeline (S03-H-T02 `admitGateResult`) — run-gate never
  * writes receipts itself.
  *
+ * Behaviour differences vs. the legacy runtime's run-stage.ts (deliberate):
+ *   - readiness timeout / early-exit FAILs now STOP the service immediately
+ *     (the legacy runner left it running and relied on final cleanup);
+ *   - command/probe steps use `runProcess` which ENFORCES the shell
+ *     prohibition rules (legacy pre-validated every step up front with
+ *     validateSpawnOptions; here a rejected step fails at execution with the
+ *     SpawnValidationError message);
+ *   - service steps are NOT shell-prohibited-validated (spawnService parity:
+ *     the spawn failure path covers ENOENT etc.).
+ *
  * Zero host dependencies.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { validateManifest } from '@proofloop/kernel';
 import type { Manifest, RuntimeProofStep } from '@proofloop/kernel';
+import {
+  runProcess,
+  spawnService,
+  registerService,
+  getRegisteredService,
+  stopService,
+  waitForReadiness,
+  cleanupServices,
+} from '../process-runner';
+import type { ServiceCleanupResult } from '../process-runner';
 
 // ============================================================
 // Shapes
@@ -53,6 +86,8 @@ export interface GateStepResult {
   readonly passed: boolean;
   readonly skipped?: boolean;
   readonly error?: string;
+  /** Human-readable observations (stdout/stderr snippets, service PIDs). */
+  readonly observations?: string;
 }
 
 export interface RunGateResult {
@@ -118,7 +153,7 @@ function validateFacts(
 }
 
 // ============================================================
-// Step execution (minimal — HP-004)
+// Step execution (service lifecycle B1b + command/probe via runProcess)
 // ============================================================
 
 function expectedExitCode(step: RuntimeProofStep): number | null {
@@ -129,60 +164,264 @@ function expectedExitCode(step: RuntimeProofStep): number | null {
   return typeof value === 'number' ? value : 0;
 }
 
-function executeStep(
+/**
+ * Execute one runtime_proof step.
+ *
+ * - `not_applicable` → skipped (PASS, skipped: true);
+ * - `service_start` → spawn + register + (readiness wait), stop on failure;
+ * - `service_stop` → registry lookup by service_ref (or step id) + stop;
+ * - `command` / `probe` → `runProcess` with the expected.exit_code oracle.
+ */
+async function executeStepAsync(
   step: RuntimeProofStep,
   projectRoot: string,
-): GateStepResult {
+): Promise<GateStepResult> {
   // not_applicable steps are skipped by declaration.
   if (step.not_applicable !== undefined) {
     return { id: step.id, type: step.type, exit_code: null, passed: true, skipped: true };
   }
-  // Service lifecycle steps without not_applicable are deferred to S04
-  // (HP-004) — fail the gate honestly instead of silently skipping.
-  if (step.type === 'service_start' || step.type === 'service_stop') {
+
+  const cwd = path.resolve(projectRoot, step.cwd ?? '.');
+
+  if (step.type === 'service_start') {
+    return executeServiceStart(step, cwd);
+  }
+  if (step.type === 'service_stop') {
+    return executeServiceStop(step);
+  }
+  return executeCommandStep(step, cwd);
+}
+
+/**
+ * service_start: spawnService → registerService(step.id) → waitForReadiness
+ * (when declared). Readiness timeout / early exit FAIL the step AND stop the
+ * service (no process leaks); spawn failure FAILs the step.
+ */
+async function executeServiceStart(
+  step: RuntimeProofStep,
+  cwd: string,
+): Promise<GateStepResult> {
+  const startTime = Date.now();
+  try {
+    const handle = await spawnService({
+      executable: step.executable,
+      args: step.args ?? [],
+      cwd,
+    });
+    registerService(step.id, handle);
+
+    let readinessMs = 0;
+    if (step.readiness_signal) {
+      const readyStart = Date.now();
+      const readiness = await waitForReadiness(handle, step.readiness_signal, step.timeout_ms);
+      readinessMs = Date.now() - readyStart;
+
+      if (!readiness.ready) {
+        // The service must not leak — stop it in BOTH failure cases
+        // (hardening over the legacy runner, which left it running).
+        try {
+          await stopService(handle);
+        } catch {
+          // best-effort; the readiness failure below is the primary error
+        }
+        if (readiness.exited) {
+          return {
+            id: step.id,
+            type: step.type,
+            exit_code: readiness.exitCode,
+            passed: false,
+            error:
+              `Step "${step.id}" (service_start) process exited (code ${readiness.exitCode}) ` +
+              `before readiness signal "${step.readiness_signal}" was found. ` +
+              `Stdout: ${handle.getStdout().slice(0, 500)}`,
+          };
+        }
+        return {
+          id: step.id,
+          type: step.type,
+          exit_code: null,
+          passed: false,
+          error:
+            `Step "${step.id}" (service_start) readiness signal "${step.readiness_signal}" ` +
+            `not found within ${step.timeout_ms}ms. ` +
+            `Stdout: ${handle.getStdout().slice(0, 500)}`,
+        };
+      }
+    }
+
+    const observations = [
+      `Service started, PID ${handle.pid}`,
+      step.readiness_signal ? `Readiness signal found after ${readinessMs}ms` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+    return { id: step.id, type: step.type, exit_code: 0, passed: true, observations };
+  } catch (err) {
     return {
       id: step.id,
       type: step.type,
       exit_code: null,
       passed: false,
       error:
-        `service lifecycle step "${step.id}" is not marked not_applicable — ` +
-        `service lifecycle execution is deferred to S04 (HP-004)`,
+        `Step "${step.id}" (service_start) failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
-  const cwd = path.resolve(projectRoot, step.cwd ?? '.');
-  const expected = expectedExitCode(step);
+}
+
+/**
+ * service_stop: look up the registered service by `service_ref` (or step.id)
+ * and stop it (tree kill). An unknown ref FAILs the step (legacy semantics).
+ */
+async function executeServiceStop(step: RuntimeProofStep): Promise<GateStepResult> {
+  const ref = step.service_ref ?? step.id;
+  const service = getRegisteredService(ref);
+  if (service === undefined) {
+    return {
+      id: step.id,
+      type: step.type,
+      exit_code: null,
+      passed: false,
+      error:
+        `Step "${step.id}" (service_stop): no registered service found for ref "${ref}". ` +
+        `Ensure the corresponding service_start step ran successfully.`,
+    };
+  }
   try {
-    execFileSync(step.executable, step.args ?? [], {
-      cwd,
-      timeout: step.timeout_ms,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const passed = expected === null || expected === 0;
-    return { id: step.id, type: step.type, exit_code: 0, passed };
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException & { status?: number };
-    if (e.code === 'ETIMEDOUT') {
+    const stopped = await stopService(ref);
+    if (!stopped) {
       return {
         id: step.id,
         type: step.type,
         exit_code: null,
         passed: false,
-        error: `step "${step.id}" timed out after ${step.timeout_ms}ms`,
+        error:
+          `Step "${step.id}" (service_stop): registered service "${ref}" not found or already stopped`,
       };
     }
-    const actual = e.status ?? 1;
-    const passed = expected === null || actual === expected;
     return {
       id: step.id,
       type: step.type,
-      exit_code: actual,
-      passed,
-      error: passed
-        ? undefined
-        : `step "${step.id}" exited ${actual}, expected ${expected === null ? 'any' : expected}`,
+      exit_code: 0,
+      passed: true,
+      observations: `Service stopped (PID ${service.pid})`,
     };
+  } catch (err) {
+    return {
+      id: step.id,
+      type: step.type,
+      exit_code: null,
+      passed: false,
+      error:
+        `Step "${step.id}" (service_stop) failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * command / probe: one-shot runProcess (bounded output, per-step timeout with
+ * process-tree cleanup, shell-prohibition enforcement) + expected.exit_code
+ * oracle (`null` = any exit accepted; absent = 0; timeout always FAILs).
+ */
+async function executeCommandStep(
+  step: RuntimeProofStep,
+  cwd: string,
+): Promise<GateStepResult> {
+  const expected = expectedExitCode(step);
+  try {
+    const result = await runProcess({
+      executable: step.executable,
+      args: step.args ?? [],
+      cwd,
+      timeoutMs: step.timeout_ms,
+    });
+
+    const observations = [
+      result.stdout.length > 0 ? `stdout: ${result.stdout.slice(0, 1000)}` : '',
+      result.stderr.length > 0 ? `stderr: ${result.stderr.slice(0, 1000)}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ')
+      .slice(0, 2000) || undefined;
+
+    if (result.timedOut) {
+      return {
+        id: step.id,
+        type: step.type,
+        exit_code: null,
+        passed: false,
+        error:
+          `step "${step.id}" timed out after ${step.timeout_ms}ms` +
+          (result.stderr ? ` — stderr: ${result.stderr.slice(0, 500)}` : ''),
+      };
+    }
+
+    const passed = expected === null || result.exitCode === expected;
+    if (!passed) {
+      return {
+        id: step.id,
+        type: step.type,
+        exit_code: result.exitCode,
+        passed: false,
+        error:
+          `step "${step.id}" exited ${result.exitCode}, ` +
+          `expected ${expected === null ? 'any' : expected}` +
+          (result.stderr ? ` — stderr: ${result.stderr.slice(0, 500)}` : ''),
+      };
+    }
+    return { id: step.id, type: step.type, exit_code: result.exitCode, passed: true, observations };
+  } catch (err) {
+    // SpawnValidationError (shell prohibition) or unexpected runner failure.
+    return {
+      id: step.id,
+      type: step.type,
+      exit_code: null,
+      passed: false,
+      error: `step "${step.id}" failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Mandatory Gate-end cleanup (PASS or FAIL): stop every still-registered
+ * service. A service that was stopped by cleanup but has a DECLARED
+ * service_stop step means the explicit stop was missed → Gate FAIL (legacy
+ * run-stage.ts semantics); cleanup failures / remaining PIDs also FAIL.
+ */
+async function finalizeCleanup(
+  steps: readonly RuntimeProofStep[],
+  errors: string[],
+): Promise<void> {
+  // Services with a declared service_stop step in the manifest.
+  const serviceStopRefs = new Set(
+    steps
+      .filter((s) => s.type === 'service_stop')
+      .map((s) => s.service_ref ?? s.id),
+  );
+
+  const serviceCleanup: ServiceCleanupResult = await cleanupServices();
+
+  // Cleanup stopped a service that had an explicit service_stop declared —
+  // the explicit stop was missed. This is a Gate FAIL.
+  const missedExplicitStops = serviceCleanup.cleaned.filter((name) => serviceStopRefs.has(name));
+  for (const name of missedExplicitStops) {
+    errors.push(
+      `Service "${name}" was still running at final cleanup but has a declared ` +
+      `service_stop step. The explicit stop was missed. This is a Gate FAIL.`,
+    );
+  }
+
+  if (serviceCleanup.failed.length > 0) {
+    errors.push(
+      `Service cleanup failures: ${serviceCleanup.failed
+        .map((f) => `${f.service} (PID ${f.pid}): ${f.reason}`)
+        .join('; ')}`,
+    );
+  }
+  if (serviceCleanup.remainingPids.length > 0) {
+    errors.push(
+      `Services still running after cleanup: PIDs ${serviceCleanup.remainingPids.join(', ')}. ` +
+      `Cleanup failure counts as Gate FAIL.`,
+    );
   }
 }
 
@@ -191,11 +430,13 @@ function executeStep(
 // ============================================================
 
 /**
- * Run the Stage Gate (minimal version) over a manifest + Slice COMPLETE
- * facts, executing the manifest runtime_proof steps with per-step timeout
- * and exit-code checks.
+ * Run the Stage Gate over a manifest + Slice COMPLETE facts, executing the
+ * manifest runtime_proof steps sequentially (service lifecycle + command /
+ * probe with per-step timeout and exit-code checks) and enforcing mandatory
+ * service cleanup at the end. Async because service readiness waits and
+ * cleanup are asynchronous.
  */
-export function runGate(input: RunGateInput): RunGateResult {
+export async function runGate(input: RunGateInput): Promise<RunGateResult> {
   const projectRoot = path.resolve(input.projectRoot ?? '.');
   const errors: string[] = [];
 
@@ -229,13 +470,21 @@ export function runGate(input: RunGateInput): RunGateResult {
   const steps: GateStepResult[] = [];
   if (facts !== null) {
     for (const step of manifest.runtime_proof ?? []) {
-      steps.push(executeStep(step, projectRoot));
+      const result = await executeStepAsync(step, projectRoot);
+      steps.push(result);
+      // Legacy parity: execution stops at the first failed step (a later
+      // service_stop then counts as a missed explicit stop at cleanup).
+      if (!result.passed && !result.skipped) {
+        break;
+      }
     }
     for (const step of steps) {
       if (!step.passed && step.error !== undefined) {
         errors.push(step.error);
       }
     }
+    // Mandatory cleanup at Gate end — runs on PASS and FAIL alike.
+    await finalizeCleanup(manifest.runtime_proof ?? [], errors);
   }
 
   const gate: 'PASS' | 'FAIL' = errors.length === 0 ? 'PASS' : 'FAIL';
@@ -280,13 +529,14 @@ export function runGate(input: RunGateInput): RunGateResult {
  * Legacy-compatible CLI:
  *   node dist/cli/run-gate.js <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]
  */
-export function runGateCli(argv: readonly string[]): number {
+export async function runGateCli(argv: readonly string[]): Promise<number> {
   const [manifestPath, factsPath, outputDir, projectRoot] = argv;
   if (!manifestPath || !factsPath) {
     console.error('Usage: node dist/cli/run-gate.js <manifest-path> <slice-complete-facts-path> [output-dir] [project-root]');
     console.error('');
-    console.error('Executes the Stage Gate (runtime_proof steps with per-step');
-    console.error('timeout + exit-code checks) and writes gate-result.json.');
+    console.error('Executes the Stage Gate (runtime_proof steps incl. service');
+    console.error('lifecycle, per-step timeout + exit-code checks) and writes');
+    console.error('gate-result.json.');
     console.error('Outputs the gate result JSON to stdout; exit 0 on PASS, 1 on FAIL.');
     return 1;
   }
@@ -298,7 +548,7 @@ export function runGateCli(argv: readonly string[]): number {
     console.error(`Slice COMPLETE facts file not found: ${factsPath}`);
     return 1;
   }
-  const result = runGate({
+  const result = await runGate({
     manifestPath,
     factsPath,
     outputDir: outputDir || undefined,
@@ -309,5 +559,7 @@ export function runGateCli(argv: readonly string[]): number {
 }
 
 if (require.main === module) {
-  process.exitCode = runGateCli(process.argv.slice(2));
+  runGateCli(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }

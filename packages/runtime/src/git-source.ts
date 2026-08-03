@@ -34,6 +34,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { canonicalPathWithinRoot } from './path-guard';
 
 // ============================================================
 // Result types
@@ -371,6 +372,14 @@ export function gitSource(input: GitSourceInput): GitSourceResult {
 
   // 3. tasks.md work-tree facts — missing file fails closed (never guess).
   const tasksMdPath = input.tasksMdPath ?? defaultTasksMdPath(projectRoot, stageId);
+  // Trust-root boundary (S2-F-003): a tasks.md path whose canonical path
+  // escapes the project root is NEVER read (fail-closed, same structured
+  // GitSourceError as an unavailable Git source).
+  if (canonicalPathWithinRoot(projectRoot, tasksMdPath) === null) {
+    throw new GitSourceError(
+      `tasks.md path escapes the project root trust boundary: ${tasksMdPath}`,
+    );
+  }
   let tasksMdContent: string;
   try {
     tasksMdContent = fs.readFileSync(tasksMdPath, 'utf-8');
@@ -382,8 +391,17 @@ export function gitSource(input: GitSourceInput): GitSourceResult {
 
   // 4. Evidence-file work-tree facts — a missing file is NOT fatal; every
   //    evidence fact stays false and the reconcile layer derives the
-  //    recoverable warn Finding (PO-S02-C-02).
+  //    recoverable warn Finding (PO-S02-C-02). An ESCAPE is fatal: an
+  //    evidence file whose canonical path escapes the project root must never
+  //    be read (S2-F-003) — unlike a missing file (reported as
+  //    evidence_file_present:false), an escape is a trust violation and no
+  //    outside file may masquerade as slice evidence.
   const evidenceFilePath = path.join(projectRoot, input.evidencePath);
+  if (canonicalPathWithinRoot(projectRoot, evidenceFilePath) === null) {
+    throw new GitSourceError(
+      `evidence file path escapes the project root trust boundary: ${evidenceFilePath}`,
+    );
+  }
   let evidenceContent: string | null = null;
   try {
     evidenceContent = fs.readFileSync(evidenceFilePath, 'utf-8');

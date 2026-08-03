@@ -39,6 +39,7 @@ import {
   RECEIPT_TYPE_CATEGORY,
 } from './receipt-layout';
 import type { ReceiptContentCategory } from './receipt-layout';
+import { canonicalPathWithinRoot, openNoFollowRead } from './path-guard';
 
 // ============================================================
 // Result types
@@ -126,6 +127,34 @@ function emptyResult(
   };
 }
 
+/**
+ * Fail-closed trust-root escape result (S2-F-003): a category directory whose
+ * canonical path escapes the project root is NEVER read — an escaped directory
+ * could otherwise redirect the receipt read to files outside the worktree and
+ * derive state from them. The result reports an error-level
+ * RUNTIME.RECEIPT_CHAIN_BROKEN chain condition so reconcile's
+ * `handleCategoryRead` blocks every fact of that category (PO-S02-C-03 fact
+ * blocking) without changing the reader's API shape.
+ */
+function trustRootEscapeResult(
+  category: ReceiptContentCategory,
+  dir: string,
+): ReceiptCategoryReadResult {
+  return {
+    category,
+    dir,
+    chainValid: false,
+    chainCondition: {
+      code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+      reason: `receipt category directory escapes the project root trust boundary: ${dir}`,
+    },
+    receipts: [],
+    latest: null,
+    invalidFiles: [],
+    misplaced: [],
+  };
+}
+
 // ============================================================
 // Reader
 // ============================================================
@@ -142,6 +171,13 @@ function emptyResult(
 export function readReceiptCategory(options: ReadReceiptCategoryOptions): ReceiptCategoryReadResult {
   const { projectRoot, category } = options;
   const dir = receiptCategoryDir(projectRoot, category, options.stageId, options.sliceId);
+
+  // Trust-root boundary (S2-F-003): a category directory whose canonical path
+  // escapes the project root is NEVER read. An escape surfaces as a broken
+  // chain so no fact can be derived from outside files (fail-closed).
+  if (canonicalPathWithinRoot(projectRoot, dir) === null) {
+    return trustRootEscapeResult(category, dir);
+  }
 
   let filenames: string[];
   try {
@@ -163,86 +199,102 @@ export function readReceiptCategory(options: ReadReceiptCategoryOptions): Receip
   for (const filename of jsonFiles) {
     const filePath = path.join(dir, filename);
 
-    // Directories named `*.json` are never receipts (PO-S02-C-05).
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(filePath);
-    } catch {
+    // Trust-root boundary (S2-F-003 round 3, atomic no-follow boundary): the
+    // candidate file is opened with O_NOFOLLOW against its canonical parent,
+    // so a symlink replacement between any pre-check and the read cannot
+    // redirect the open/read outside the root (a symlink at the final
+    // component — in-root or external — fails closed with ELOOP). The escaped
+    // file is reported as an invalid file and never read / never enters the
+    // receipt list / derivation (fail-closed, PO-S02-C-03 fact blocking).
+    const opened = openNoFollowRead(projectRoot, filePath);
+    if (!opened.ok) {
       invalidFiles.push({
         filePath,
         code: 'RUNTIME.SCHEMA_MISMATCH',
-        reason: 'cannot stat receipt file',
+        reason:
+          opened.reason === 'escape' || opened.reason === 'inode-mismatch'
+            ? 'receipt file path escapes the project root trust boundary'
+            : 'cannot stat receipt file',
       });
       continue;
     }
-    if (!stat.isFile()) {
-      continue;
-    }
-
-    // Read + parse.
-    let raw: string;
     try {
-      raw = fs.readFileSync(filePath, 'utf-8');
-    } catch {
-      invalidFiles.push({
-        filePath,
-        code: 'RUNTIME.SCHEMA_MISMATCH',
-        reason: 'cannot read receipt file',
-      });
-      continue;
-    }
+      // Directories named `*.json` are never receipts (PO-S02-C-05).
+      if (!fs.fstatSync(opened.fd).isFile()) {
+        continue;
+      }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      invalidFiles.push({
-        filePath,
-        code: 'RUNTIME.SCHEMA_MISMATCH',
-        reason: `invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
-      });
-      continue;
-    }
+      // Read via the no-follow fd (content identical to `readFileSync(path)`),
+      // then parse.
+      let raw: string;
+      try {
+        raw = fs.readFileSync(opened.fd, 'utf-8');
+      } catch {
+        invalidFiles.push({
+          filePath,
+          code: 'RUNTIME.SCHEMA_MISMATCH',
+          reason: 'cannot read receipt file',
+        });
+        continue;
+      }
 
-    // Kernel schema validation (RUNTIME.SCHEMA_MISMATCH on failure).
-    let validated: Receipt;
-    try {
-      validated = validateReceipt(parsed);
-    } catch (err) {
-      const reason =
-        err instanceof SchemaValidationError ? err.message : String(err);
-      invalidFiles.push({ filePath, code: 'RUNTIME.SCHEMA_MISMATCH', reason });
-      continue;
-    }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        invalidFiles.push({
+          filePath,
+          code: 'RUNTIME.SCHEMA_MISMATCH',
+          reason: `invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        continue;
+      }
 
-    // Type/category classification (PO-S02-C-05): a receipt whose type does
-    // not belong to this category directory is a misplacement — reported and
-    // never used as a fact.
-    const expectedCategory = RECEIPT_TYPE_CATEGORY[validated.type];
-    if (expectedCategory !== category) {
-      misplaced.push({
-        filePath,
-        receiptType: validated.type,
-        expectedCategory,
-        foundInCategory: category,
-        code: 'RUNTIME.SCHEMA_MISMATCH',
-      });
-      continue;
-    }
+      // Kernel schema validation (RUNTIME.SCHEMA_MISMATCH on failure).
+      let validated: Receipt;
+      try {
+        validated = validateReceipt(parsed);
+      } catch (err) {
+        const reason =
+          err instanceof SchemaValidationError ? err.message : String(err);
+        invalidFiles.push({ filePath, code: 'RUNTIME.SCHEMA_MISMATCH', reason });
+        continue;
+      }
 
-    // Self-digest integrity (tampered content). A stored digest that does not
-    // match the file content is a chain-integrity problem (RUNTIME.RECEIPT_CHAIN_BROKEN)
-    // and the file is excluded from facts (PO-S02-C-03 fact blocking).
-    if (!verifyReceiptDigest(filePath)) {
-      invalidFiles.push({
-        filePath,
-        code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
-        reason: 'stored digest does not match computed digest',
-      });
-      continue;
-    }
+      // Type/category classification (PO-S02-C-05): a receipt whose type does
+      // not belong to this category directory is a misplacement — reported and
+      // never used as a fact.
+      const expectedCategory = RECEIPT_TYPE_CATEGORY[validated.type];
+      if (expectedCategory !== category) {
+        misplaced.push({
+          filePath,
+          receiptType: validated.type,
+          expectedCategory,
+          foundInCategory: category,
+          code: 'RUNTIME.SCHEMA_MISMATCH',
+        });
+        continue;
+      }
 
-    receipts.push({ filePath, receipt: validated });
+      // Self-digest integrity (tampered content). A stored digest that does not
+      // match the file content is a chain-integrity problem (RUNTIME.RECEIPT_CHAIN_BROKEN)
+      // and the file is excluded from facts (PO-S02-C-03 fact blocking).
+      // The kernel re-reads by path — a residual kernel-side window, noted in
+      // the round-3 limitations; the fact content itself comes from the
+      // no-follow fd read above.
+      if (!verifyReceiptDigest(opened.filePath)) {
+        invalidFiles.push({
+          filePath,
+          code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          reason: 'stored digest does not match computed digest',
+        });
+        continue;
+      }
+
+      receipts.push({ filePath, receipt: validated });
+    } finally {
+      fs.closeSync(opened.fd);
+    }
   }
 
   // Deterministic ordering: (timestamp, digest) ascending — locale-independent

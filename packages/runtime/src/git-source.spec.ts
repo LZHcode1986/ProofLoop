@@ -336,6 +336,141 @@ describe('gitSource — Git source unavailable (PO-S02-C-02)', () => {
 });
 
 // ============================================================
+// Trust-root boundary (S2-F-003) — symlink / traversal escapes fail closed
+// ============================================================
+
+describe('gitSource — trust-root boundary (S2-F-003)', () => {
+  function expectTrustBoundaryError(fn: () => GitSourceResult): GitSourceError {
+    let thrown: unknown;
+    try {
+      fn();
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(GitSourceError);
+    const err = thrown as GitSourceError;
+    expect(err.code).toBe('RUNTIME.SCHEMA_MISMATCH');
+    expect(err.message).toMatch(/trust boundary/);
+    return err;
+  }
+
+  it('throws GitSourceError when the tasks.md file is a symlink to an outside file', () => {
+    const fx = makeGitFixture();
+    writeFile(fx.root, `delivery/stages/S02/tasks.md`, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'));
+    writeFile(fx.root, `delivery/stages/S02/evidence/S02-C.md`, happyEvidence('S02-C', 'S02-C-T01'));
+    commitAll(fx);
+
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-git-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const outsideTasks = path.join(external, 'tasks.md');
+    fs.writeFileSync(outsideTasks, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'), 'utf-8');
+    // Replace the tasks.md FILE with a symlink pointing outside the root.
+    const tasksMdPath = path.join(fx.root, 'delivery', 'stages', 'S02', 'tasks.md');
+    fs.rmSync(tasksMdPath);
+    fs.symlinkSync(outsideTasks, tasksMdPath);
+
+    expectTrustBoundaryError(() => readGitSource(fx, ['S02-C-T01', 'S02-C-T02']));
+  });
+
+  it('throws GitSourceError when the evidence file is a symlink to an outside file', () => {
+    const fx = makeGitFixture();
+    writeFile(fx.root, `delivery/stages/S02/tasks.md`, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'));
+    writeFile(fx.root, `delivery/stages/S02/evidence/S02-C.md`, happyEvidence('S02-C', 'S02-C-T01'));
+    commitAll(fx);
+
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-git-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const outsideEvidence = path.join(external, 'evidence.md');
+    fs.writeFileSync(outsideEvidence, happyEvidence('S02-C', 'S02-C-T01'), 'utf-8');
+    const evidencePath = path.join(fx.root, 'delivery', 'stages', 'S02', 'evidence', 'S02-C.md');
+    fs.rmSync(evidencePath);
+    fs.symlinkSync(outsideEvidence, evidencePath);
+
+    expectTrustBoundaryError(() => readGitSource(fx, ['S02-C-T01', 'S02-C-T02']));
+  });
+
+  it('throws GitSourceError when the tasks.md parent directory is a symlink to an outside dir', () => {
+    const fx = makeGitFixture();
+    writeFile(fx.root, `delivery/stages/S02/tasks.md`, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'));
+    writeFile(fx.root, `delivery/stages/S02/evidence/S02-C.md`, happyEvidence('S02-C', 'S02-C-T01'));
+    commitAll(fx);
+
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-git-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    // The canonical tasks.md lives in external/<stage>/tasks.md.
+    fs.mkdirSync(path.join(external, 'S02'), { recursive: true });
+    fs.writeFileSync(path.join(external, 'S02', 'tasks.md'), happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'), 'utf-8');
+    // Replace the stage dir with a symlink to the external stage dir.
+    const stageDir = path.join(fx.root, 'delivery', 'stages', 'S02');
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    fs.symlinkSync(path.join(external, 'S02'), stageDir, 'dir');
+
+    expectTrustBoundaryError(() => readGitSource(fx, ['S02-C-T01', 'S02-C-T02']));
+  });
+
+  it('throws GitSourceError when the evidence path traverses outside the root via ..', () => {
+    const fx = makeGitFixture();
+    writeFile(fx.root, `delivery/stages/S02/tasks.md`, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'));
+    commitAll(fx);
+
+    const outsideEvidence = path.join(
+      path.dirname(fx.root),
+      `escape-${path.basename(fx.root)}.md`,
+    );
+    fs.writeFileSync(outsideEvidence, happyEvidence('S02-C', 'S02-C-T01'), 'utf-8');
+    cleanups.push(() => {
+      try {
+        fs.rmSync(outsideEvidence, { force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+
+    expectTrustBoundaryError(() =>
+      gitSource({
+        projectRoot: fx.root,
+        stageId: 'S02',
+        sliceId: 'S02-C',
+        taskIds: ['S02-C-T01', 'S02-C-T02'],
+        evidencePath: `../${path.basename(outsideEvidence)}`,
+      }),
+    );
+  });
+
+  it('legal default paths remain fully functional (no symlink)', () => {
+    const fx = makeGitFixture();
+    writeFile(fx.root, `delivery/stages/S02/tasks.md`, happyTasksMd('S02-C', 'S02-C-T01', 'S02-C-T02'));
+    writeFile(fx.root, `delivery/stages/S02/evidence/S02-C.md`, happyEvidence('S02-C', 'S02-C-T01'));
+    commitAll(fx);
+
+    const result = readGitSource(fx, ['S02-C-T01', 'S02-C-T02']);
+    expect(result.tasks).toEqual([
+      { task_id: 'S02-C-T01', checked: true },
+      { task_id: 'S02-C-T02', checked: false },
+    ]);
+    expect(result.evidence_file_present).toBe(true);
+  });
+});
+
+// ============================================================
 // Evidence file edge cases
 // ============================================================
 

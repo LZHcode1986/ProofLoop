@@ -16,7 +16,7 @@
  *   - all slices integrated +
  *     STAGE_REVIEW_PASS                → COMPLETED
  *
- * READY folding rule: the 12-type receipt closed set (§5 Receipt.type) has no
+ * READY folding rule: the canonical ReceiptType closed set (§5 Receipt.type) has no
  * `stage_activated` receipt, so under receipts-only reconciliation READY and
  * EXECUTING are indistinguishable — READY is a transient state that collapses
  * into EXECUTING. SPV_PASS present ⇒ EXECUTING by default; UNDER_REVIEW and

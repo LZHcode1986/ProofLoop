@@ -720,13 +720,23 @@ describe('module-level dependency scan (PO-S02-A-04)', () => {
    * NextActionService full pipeline, and with ./admission-request +
    * ./admit-pipeline when S02-E-T01 added the 7 AdmissionRequest types and
    * the unified admit pipeline, and with ./admission when S02-E-T02 added
-   * the admitWorkerResult / admitCVResult slice-boundary admit methods).
+   * the admitWorkerResult / admitCVResult slice-boundary admit methods, and
+   *    with ./project-acceptance when B1c added the Project Acceptance pipeline
+   *    (compile / run E2E / finalize review), and with ./cli/validate-stage.js
+   *    when S02-B-T01 re-exported the Planner validate library seam
+   *    (proofloop_plan(validate) consumes validateStage in-process; the CLI
+   *    canonical payload is the parity baseline, never shelled), and with
+   *    ./cli/compile-manifest.js + ./cli/initialize-slice-evidence.js when
+   *    S03-A-T01 re-exported the Planner compile/initialize library seams
+   *    (proofloop_plan(compile) / proofloop_plan(initialize_evidence) consume
+   *    compileManifest / initializeSliceEvidence in-process; the CLI dist
+   *    entries stay test-only parity oracles, never shelled)).
    */
   const EXPECTED_IMPORT_SETS: Readonly<Record<string, ReadonlySet<string>>> = {
     'state-model.ts': new Set(['@proofloop/kernel']),
     'reducer.ts': new Set(['@proofloop/kernel', './state-model']),
     'stage-state.ts': new Set(['@proofloop/kernel', './state-model']),
-    'index.ts': new Set(['@proofloop/kernel', './state-model', './reducer', './stage-state', './relay-contract', './worker-step-service', './receipt-layout', './receipt-reader', './git-source', './manifest-source', './reconcile', './derive-next-action', './next-action-service', './admission-request', './admit-pipeline', './admission']),
+    'index.ts': new Set(['@proofloop/kernel', './state-model', './reducer', './stage-state', './relay-contract', './worker-step-service', './receipt-layout', './receipt-reader', './git-source', './manifest-source', './reconcile', './derive-next-action', './next-action-service', './admission-request', './admit-pipeline', './admission', './process-runner', './platform-adapter', './project-acceptance', './cli/validate-stage.js', './cli/compile-manifest.js', './cli/initialize-slice-evidence.js']),
   };
 
   /** Extract all `import … from '…'` / `export … from '…'` / `import '…'` specifiers. */

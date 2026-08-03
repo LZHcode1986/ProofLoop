@@ -23,6 +23,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { validateManifest } from '@proofloop/kernel';
 import type { Manifest } from '@proofloop/kernel';
+import { canonicalPathWithinRoot } from './path-guard';
 
 export interface ManifestSourceInput {
   readonly projectRoot: string;
@@ -106,6 +107,15 @@ export function manifestFileDigest(input: ManifestSourceInput): string {
   const { projectRoot, stageId } = input;
   const manifestPath = input.manifestPath ?? defaultManifestPath(projectRoot, stageId);
 
+  // Trust-root boundary (S2-F-003): a manifest path whose canonical path
+  // escapes the project root is NEVER read (fail-closed, same structured
+  // ManifestSourceError as an unreadable manifest).
+  if (canonicalPathWithinRoot(projectRoot, manifestPath) === null) {
+    throw new ManifestSourceError(
+      `manifest path escapes the project root trust boundary: ${manifestPath}`,
+    );
+  }
+
   let raw: string;
   try {
     raw = fs.readFileSync(manifestPath, 'utf-8');
@@ -139,6 +149,15 @@ export function manifestFileDigest(input: ManifestSourceInput): string {
 export function manifestSource(input: ManifestSourceInput): ManifestSourceResult {
   const { projectRoot, stageId } = input;
   const manifestPath = input.manifestPath ?? defaultManifestPath(projectRoot, stageId);
+
+  // Trust-root boundary (S2-F-003): a manifest path whose canonical path
+  // escapes the project root is NEVER read (fail-closed, same structured
+  // ManifestSourceError as an unreadable manifest).
+  if (canonicalPathWithinRoot(projectRoot, manifestPath) === null) {
+    throw new ManifestSourceError(
+      `manifest path escapes the project root trust boundary: ${manifestPath}`,
+    );
+  }
 
   let raw: string;
   try {

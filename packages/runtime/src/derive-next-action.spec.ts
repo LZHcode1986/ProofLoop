@@ -165,6 +165,25 @@ describe('row 0: error-level inconsistency → VALIDATE with all findings', () =
     expect(r.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(true);
   });
 
+  it('GATE_FAIL + GATE_PASS both present → NOT VALIDATE (GATE_PASS post-supplants GATE_FAIL)', () => {
+    const state = makeState({
+      gate_fail_present: true,
+      gate_pass_present: true,
+      slices: [
+        makeSlice({
+          slice_state: SliceState.READY_FOR_CV,
+          cv_status: CVStatus.NOT_STARTED,
+          slice_evidence_finalized: true,
+          tasks: [{ task_id: 'S02-A-T01', checked: true, evidence_written: true }],
+        }),
+      ],
+    });
+    const r = deriveNextAction(state);
+    // GATE_PASS presence post-supplants GATE_FAIL — no longer a blocking gate.
+    expect(r.action).not.toBe('VALIDATE');
+    expect(r.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(false);
+  });
+
   it('receipt_chain_valid=false → VALIDATE and output reflects the broken chain', () => {
     const state = makeState({ receipt_chain_valid: false });
     const r = deriveNextAction(state);

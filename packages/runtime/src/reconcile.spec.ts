@@ -682,6 +682,55 @@ describe('reconcileStage — RUNTIME.RECEIPT_CHAIN_BROKEN (PO-S02-C-02/03)', () 
     expect(result.slices[0].latest_cv_receipt).toBeNull();
   });
 
+  it('receipts root symlink escape → receipt_chain_valid false + error finding, no outside-derived findings (S2-F-003)', () => {
+    const { fx } = baseFx();
+    // An external receipts dir holding a fake unknown-slice subdir and a valid
+    // receipt — the runtime MUST never read it (not even for "unknown slice"
+    // detection).
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-reconcile-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const externalDir = path.join(external, 'cv', fx.stageId, 'S02-Z');
+    fs.mkdirSync(externalDir, { recursive: true });
+    writeReceipt(
+      {
+        version: 1,
+        type: 'CV_PASS',
+        stage_id: fx.stageId,
+        slice_id: 'S02-Z',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        payload: {},
+      },
+      { receiptDir: externalDir, tempDir: externalDir },
+    );
+    // Replace the canonical receipts root with a symlink to the external dir.
+    const receiptsDir = path.join(fx.root, '.proofloop', 'receipts');
+    fs.rmSync(receiptsDir, { recursive: true, force: true });
+    fs.symlinkSync(external, receiptsDir, 'dir');
+
+    const result = fx.reconcile();
+    const broken = findingsByCode(result).get('RUNTIME.RECEIPT_CHAIN_BROKEN') ?? [];
+
+    // Every category read fails closed → chain invalid + error finding.
+    expect(result.receipt_chain_valid).toBe(false);
+    expect(broken.length).toBeGreaterThan(0);
+    expect(broken.some((f) => f.message.includes('trust boundary'))).toBe(true);
+    expect(broken.every((f) => f.severity === 'error')).toBe(true);
+
+    // The external fake slice dir must NOT be reported as an "unknown slice"
+    // (findUnknownSliceDirs skips escaped dirs) — no outside-derived finding.
+    expect(
+      result.findings.some((f) => f.message.includes('unknown slice "S02-Z"')),
+    ).toBe(false);
+    // No cv fact may be derived from the escaped chain (fact blocking).
+    expect(result.slices[0].latest_cv_receipt).toBeNull();
+  });
+
   it('tampered committer chain → chain broken + committed fact blocked, cv chain unaffected (PO-S02-C-03, T05)', () => {
     const { fx, head } = baseFx();
     const cvPass = fx.writeReceipt('cv', 'S02-C', {
@@ -1554,5 +1603,45 @@ describe('reconcileStage — per-slice/stage authoritative derivation (PO-S02-C-
     expect(result.findings).toEqual([]);
     expect(result.stage_state).toBe(StageState.COMPLETED);
     expect(result.project_state).toBe('COMPLETED');
+  });
+
+  it('project_state: a PROJECT_E2E_PASS receipt in project/ is EVIDENCE-only → never COMPLETED (B1c)', () => {
+    const { fx } = completedFx();
+    fx.writeReceipt('project', undefined, {
+      type: 'PROJECT_E2E_PASS',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-05T00:00:00.000Z',
+      payload: { project_id: 'project-x', verdict: 'PASS' },
+    });
+    const result = fx.reconcile();
+    expect(result.findings).toEqual([]);
+    expect(result.stage_state).toBe(StageState.COMPLETED);
+    expect(result.project_state).toBe('UNDER_REVIEW');
+  });
+
+  it('project_state: a PROJECT_E2E_FAIL receipt in project/ can never prematurely complete the project (B1c)', () => {
+    const { fx } = completedFx();
+    fx.writeReceipt('project', undefined, {
+      type: 'PROJECT_E2E_FAIL',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-05T00:00:00.000Z',
+      payload: { project_id: 'project-x', verdict: 'FAIL' },
+    });
+    const result = fx.reconcile();
+    expect(result.findings).toEqual([]);
+    expect(result.stage_state).toBe(StageState.COMPLETED);
+    expect(result.project_state).toBe('UNDER_REVIEW');
+
+    // The failed E2E run alone (no stage boundary facts) must not flip the
+    // project either — still the safe IN_PROGRESS default.
+    const bare = makeFx('S02');
+    bare.writeManifest([makeSliceDef('S02-C', ['S02-C-T01'])]);
+    bare.writeReceipt('project', undefined, {
+      type: 'PROJECT_E2E_FAIL',
+      stage_id: bare.stageId,
+      timestamp: '2025-01-05T00:00:00.000Z',
+      payload: { project_id: 'project-x', verdict: 'FAIL' },
+    });
+    expect(bare.reconcile().project_state).toBe('IN_PROGRESS');
   });
 });

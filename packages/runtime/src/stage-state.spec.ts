@@ -9,7 +9,7 @@
  *   - no STAGE_PLAN receipt            → UNINITIALIZED
  *   - STAGE_PLAN, no SPV_PASS          → PLANNING
  *   - SPV_PASS, some slice not
- *     integrated                       → EXECUTING (READY folded: the 12-type
+ *     integrated                       → EXECUTING (READY folded: the canonical
  *                                        receipt closed set has no
  *                                        `stage_activated` receipt, so READY
  *                                        is a transient state that collapses
@@ -191,7 +191,7 @@ describe('deriveStageState — deterministic fact→StageState mapping (PO-S02-A
 
 describe('deriveStageState — READY folding counterexample (PO-S02-A-05)', () => {
   it('derives EXECUTING, not READY, when SPV_PASS exists with no activation receipt', () => {
-    // Counterexample: the 12-type receipt closed set has no `stage_activated`
+    // Counterexample: the canonical receipt closed set has no `stage_activated`
     // receipt, so after SPV_PASS the slice-level facts belong to EXECUTING
     // semantics. READY is a transient state that must be folded into
     // EXECUTING — it must never be derived from any fact combination.

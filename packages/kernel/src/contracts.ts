@@ -59,14 +59,24 @@ export interface Finding {
 /**
  * Canonical Receipt type literal union.
  *
- * See §4 File / Artifact Contracts — 13 receipt types.
+ * See §4 File / Artifact Contracts — 16 receipt types.
  *
- * `GATE_INTERRUPTED` is the additive 13th type (HP-004 / AWI-015 / S05): a
+ * `GATE_INTERRUPTED` is the additive 11th type (HP-004 / AWI-015 / S05): a
  * stage gate run that was cancelled or timed out. It is NEVER a gate
  * verdict receipt (no PASS/FAIL verdict; the payload carries
  * `reason: 'cancelled' | 'timeout'` and `duration_ms`), never blocks the
  * next action like GATE_FAIL, and never passes the gate like GATE_PASS —
- * the interrupted gate is retryable. The existing 12 types are unchanged.
+ * the interrupted gate is retryable. The existing 10 types are unchanged.
+ *
+ * `PROJECT_E2E_PASS` / `PROJECT_E2E_FAIL` / `PROJECT_E2E_BLOCKED` are the
+ * additive 14th–16th types (B1c, blueprint §6.4 `run_e2e`): the project-level
+ * E2E gate verdict receipts written by `run-project-acceptance`. They live in
+ * the shared `project/` category (alongside PROJECT_REVIEW_PASS) but are
+ * EVIDENCE artifacts only: they are read and cross-validated by
+ * `finalize-project-review` and never participate in project_state
+ * derivation — only PROJECT_REVIEW_PASS triggers COMPLETED, so a FAILED E2E
+ * run can never prematurely complete the project. Style is aligned with
+ * GATE_PASS/GATE_FAIL/GATE_INTERRUPTED. The existing 13 types are unchanged.
  */
 export type ReceiptType =
   | 'SLICE_PLAN'
@@ -81,7 +91,10 @@ export type ReceiptType =
   | 'GATE_FAIL'
   | 'GATE_INTERRUPTED'
   | 'STAGE_REVIEW_PASS'
-  | 'PROJECT_REVIEW_PASS';
+  | 'PROJECT_REVIEW_PASS'
+  | 'PROJECT_E2E_PASS'
+  | 'PROJECT_E2E_FAIL'
+  | 'PROJECT_E2E_BLOCKED';
 
 // ============================================================
 // 4. File / Artifact Contracts — Receipt
@@ -104,7 +117,7 @@ export type ReceiptType =
 export interface Receipt {
   /** Schema version (must be 1). */
   version: 1;
-  /** Receipt type literal (13-type closed set incl. GATE_INTERRUPTED). */
+  /** Receipt type literal (16-type closed set). */
   type: ReceiptType;
   /** Owning stage identifier. */
   stage_id: string;

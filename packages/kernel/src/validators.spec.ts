@@ -92,7 +92,12 @@ describe('validateReceipt', () => {
     expect(result.signature).toBeUndefined();
   });
 
-  it('accepts all 12 receipt types', () => {
+  // Legacy pre-project-E2E regression fixture: the 12 pre-gate receipt types.
+  // The canonical set is now the 16-type closed set (incl. GATE_INTERRUPTED
+  // and PROJECT_E2E_*); full 16-type coverage lives in the dedicated
+  // `RECEIPT_TYPES_16` describe block below. This fixture is intentionally
+  // kept as the old-12 regression, not updated to the new count.
+  it('accepts the 12 legacy pre-project-E2E receipt types (old-12 regression fixture)', () => {
     const types = [
       'SLICE_PLAN', 'STAGE_PLAN', 'SPV_PASS', 'TASK_COMPLETE',
       'CV_PASS', 'CV_REPAIR', 'SLICE_COMMIT', 'INTEGRATION_PASS',
@@ -891,7 +896,8 @@ describe('fail-closed behavior', () => {
 //     wrong primitive types, bad enum literals, empty-string
 //     boundaries)
 //   - JSON round-trip tests for all 4 types
-//   - All 12 Receipt types and all 9 Finding codes in round-trip
+//   - All 12 legacy pre-project-E2E Receipt types (old-12 regression fixture)
+//     and all 9 Finding codes in round-trip
 // ============================================================
 
 // -----------------------------------------------------------------
@@ -1445,7 +1451,11 @@ describe('JSON round-trip', () => {
       expect(result).toEqual(input);
     });
 
-    it('round-trips all 12 receipt types', () => {
+    // Legacy pre-project-E2E regression fixture: the 12 pre-gate receipt
+    // types. The canonical set is now 16 (incl. GATE_INTERRUPTED and
+    // PROJECT_E2E_*); the dedicated `RECEIPT_TYPES_16` block covers the full
+    // set. Kept intentionally as the old-12 regression.
+    it('round-trips the 12 legacy pre-project-E2E receipt types (old-12 regression fixture)', () => {
       const types = [
         'SLICE_PLAN', 'STAGE_PLAN', 'SPV_PASS', 'TASK_COMPLETE',
         'CV_PASS', 'CV_REPAIR', 'SLICE_COMMIT', 'INTEGRATION_PASS',
@@ -1620,16 +1630,16 @@ describe('JSON round-trip', () => {
 });
 
 // ============================================================
-// GATE_INTERRUPTED — additive 13th receipt type (PO-S05-A-06, HP-004/AWI-015)
+// GATE_INTERRUPTED — additive 11th receipt type (PO-S05-A-06, HP-004/AWI-015)
 //
 // S05-A-T05: the kernel contract adds exactly ONE additive ReceiptType,
-// `GATE_INTERRUPTED`. The validator closed set accepts it; the existing 12
-// types keep identical validation / chain / digest behavior (the untouched
-// 12-type fixtures above remain the old-12 regression).
+// `GATE_INTERRUPTED`. The validator closed set accepts it; the existing 10
+// pre-gate types keep identical validation / chain / digest behavior (the
+// untouched 12-type pre-project-E2E fixtures above remain the regression).
 // ============================================================
 
-describe('GATE_INTERRUPTED — additive 13th receipt type (PO-S05-A-06)', () => {
-  /** Closed 13-type set — the canonical §4 receipt enumeration after S05. */
+describe('GATE_INTERRUPTED — additive 11th receipt type (PO-S05-A-06)', () => {
+  /** Closed 13-type pre-project-E2E set — current canonical set is 16 types. */
   const RECEIPT_TYPES_13 = [
     'SLICE_PLAN',
     'STAGE_PLAN',
@@ -1654,7 +1664,7 @@ describe('GATE_INTERRUPTED — additive 13th receipt type (PO-S05-A-06)', () => 
     payload: {},
   };
 
-  it('accepts the exact 13-type closed set (12 existing + GATE_INTERRUPTED)', () => {
+  it('accepts the exact 13-type pre-project-E2E set (12 existing + GATE_INTERRUPTED)', () => {
     expect(RECEIPT_TYPES_13).toHaveLength(13);
     expect(new Set(RECEIPT_TYPES_13).size).toBe(13); // no alias / duplicate
     for (const type of RECEIPT_TYPES_13) {
@@ -1699,7 +1709,7 @@ describe('GATE_INTERRUPTED — additive 13th receipt type (PO-S05-A-06)', () => 
     }
   });
 
-  it('rejects a 14th alias / misspelled interruption type (fail closed, no silent widening)', () => {
+  it('rejects unknown aliases / misspelled interruption types (fail closed, no silent widening)', () => {
     expect(() =>
       validateReceipt({ ...base, type: 'GATE_INTERRUPT' }),
     ).toThrow(SchemaValidationError);
@@ -1708,6 +1718,127 @@ describe('GATE_INTERRUPTED — additive 13th receipt type (PO-S05-A-06)', () => 
     ).toThrow(SchemaValidationError);
     expect(() =>
       validateReceipt({ ...base, type: 'GATE_ABORTED' }),
+    ).toThrow(SchemaValidationError);
+  });
+});
+
+// ============================================================
+// PROJECT_E2E_PASS / PROJECT_E2E_FAIL / PROJECT_E2E_BLOCKED — additive
+// 14th–16th receipt types (B1c, blueprint §6.4 `run_e2e`)
+//
+// B1c-A-T0X: the kernel contract adds exactly THREE additive ReceiptTypes for
+// the project-level E2E gate verdict (style aligned with
+// GATE_PASS/GATE_FAIL/GATE_INTERRUPTED). The validator closed set accepts
+// them; the existing 13 types keep identical validation / chain / digest
+// behavior (the untouched fixtures above remain the old-13 regression).
+// Semantics: PROJECT_E2E_* are EVIDENCE-only receipts in the `project/`
+// category — they are consumed by finalize-project-review and never
+// participate in project_state derivation (only PROJECT_REVIEW_PASS triggers
+// COMPLETED; a FAILED E2E run can never prematurely complete the project).
+// ============================================================
+
+describe('PROJECT_E2E_* — additive project-level E2E gate receipt types (B1c)', () => {
+  /** Closed 16-type set — the canonical §4 receipt enumeration after B1c. */
+  const RECEIPT_TYPES_16 = [
+    'SLICE_PLAN',
+    'STAGE_PLAN',
+    'SPV_PASS',
+    'TASK_COMPLETE',
+    'CV_PASS',
+    'CV_REPAIR',
+    'SLICE_COMMIT',
+    'INTEGRATION_PASS',
+    'GATE_PASS',
+    'GATE_FAIL',
+    'GATE_INTERRUPTED',
+    'STAGE_REVIEW_PASS',
+    'PROJECT_REVIEW_PASS',
+    'PROJECT_E2E_PASS',
+    'PROJECT_E2E_FAIL',
+    'PROJECT_E2E_BLOCKED',
+  ] as const;
+
+  const base = {
+    version: 1 as const,
+    stage_id: 'project-x',
+    timestamp: '2026-08-01T00:00:00.000Z',
+    digest: 'project-e2e-digest',
+    payload: {},
+  };
+
+  it('accepts the exact 16-type closed set (13 existing + PROJECT_E2E_*)', () => {
+    expect(RECEIPT_TYPES_16).toHaveLength(16);
+    expect(new Set(RECEIPT_TYPES_16).size).toBe(16); // no alias / duplicate
+    for (const type of RECEIPT_TYPES_16) {
+      const result = validateReceipt({ ...base, type });
+      expect(result.type).toBe(type);
+    }
+  });
+
+  it('accepts a PROJECT_E2E_PASS receipt carrying the canonical E2E payload (project_id + verdict + per-step results + service_cleanup)', () => {
+    const pass = validateReceipt({
+      ...base,
+      type: 'PROJECT_E2E_PASS',
+      payload: {
+        project_id: 'project-x',
+        verdict: 'PASS',
+        snapshot: 'a1b2c3d4e5f6a7b8',
+        manifest_digest: 'a1b2c3d4e5f6a7b8',
+        expected_snapshot: 'a1b2c3d4e5f6a7b8',
+        executed_snapshot: 'a1b2c3d4e5f6a7b8',
+        steps: [{ step_id: 'smoke-1', exit_code: 0 }],
+        service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
+        created_at: '2026-08-01T00:00:00.000Z',
+      },
+    });
+    expect(pass.type).toBe('PROJECT_E2E_PASS');
+    expect(pass.payload.project_id).toBe('project-x');
+    expect(pass.payload.verdict).toBe('PASS');
+
+    const fail = validateReceipt({
+      ...base,
+      type: 'PROJECT_E2E_FAIL',
+      payload: { project_id: 'project-x', verdict: 'FAIL' },
+    });
+    expect(fail.type).toBe('PROJECT_E2E_FAIL');
+    expect(fail.payload.verdict).toBe('FAIL');
+
+    const blocked = validateReceipt({
+      ...base,
+      type: 'PROJECT_E2E_BLOCKED',
+      payload: { project_id: 'project-x', verdict: 'BLOCKED' },
+    });
+    expect(blocked.type).toBe('PROJECT_E2E_BLOCKED');
+    expect(blocked.payload.verdict).toBe('BLOCKED');
+  });
+
+  it('old-13 regression: every pre-B1c receipt type validates byte-identically (round-trip)', () => {
+    const old13 = RECEIPT_TYPES_16.filter((t) => !t.startsWith('PROJECT_E2E_'));
+    expect(old13).toHaveLength(13);
+    for (const type of old13) {
+      const input = {
+        version: 1 as const,
+        type,
+        stage_id: 'S01',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        digest: `digest-for-${type}`,
+        payload: {},
+      };
+      const json = JSON.stringify(input);
+      const result = validateReceipt(JSON.parse(json));
+      expect(result).toEqual(input);
+    }
+  });
+
+  it('rejects a misspelled project E2E type (fail closed, no silent widening)', () => {
+    expect(() =>
+      validateReceipt({ ...base, type: 'PROJECT_E2E' }),
+    ).toThrow(SchemaValidationError);
+    expect(() =>
+      validateReceipt({ ...base, type: 'PROJECT_E2E_PASSED' }),
+    ).toThrow(SchemaValidationError);
+    expect(() =>
+      validateReceipt({ ...base, type: 'PROJECT_E2E_RUN' }),
     ).toThrow(SchemaValidationError);
   });
 });

@@ -23,6 +23,7 @@ import * as path from 'node:path';
 import {
   manifestSource,
   ManifestSourceError,
+  manifestFileDigest,
   defaultManifestPath,
   type ManifestSourceResult,
 } from '@proofloop/runtime';
@@ -209,6 +210,113 @@ describe('manifestSource — structured errors (PO-S02-C-02)', () => {
       JSON.stringify(makeManifest({ stage_id: 'S99' }), null, 2),
     );
     expectStageNotFound(() => readCanonical(fx), /stage_id/);
+  });
+});
+
+// ============================================================
+// Trust-root boundary (S2-F-003) — symlink / absolute escapes fail closed
+// ============================================================
+
+describe('manifestSource — trust-root boundary (S2-F-003)', () => {
+  function expectTrustBoundaryError(fn: () => ManifestSourceResult): void {
+    let thrown: unknown;
+    try {
+      fn();
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ManifestSourceError);
+    const err = thrown as ManifestSourceError;
+    expect(err.code).toBe('DOMAIN.STAGE_NOT_FOUND');
+    expect(err.source).toBe('manifest');
+    expect(err.message).toMatch(/trust boundary/);
+  }
+
+  it('fails closed when the default manifest path is a symlink to an outside file', () => {
+    const fx = makeFixture();
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-manifest-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const outsideManifest = path.join(external, 'S02.json');
+    fs.writeFileSync(outsideManifest, JSON.stringify(makeManifest(), null, 2), 'utf-8');
+    // Replace the manifest FILE with a symlink pointing outside the root.
+    const manifestPath = path.join(fx.root, '.proofloop', 'manifests', 'S02.json');
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    fs.symlinkSync(outsideManifest, manifestPath);
+
+    expectTrustBoundaryError(() => readCanonical(fx));
+  });
+
+  it('fails closed when a custom manifestPath escapes the trust root', () => {
+    const fx = makeFixture();
+    const outsideManifest = path.join(
+      path.dirname(fx.root),
+      `escape-${path.basename(fx.root)}.json`,
+    );
+    fs.writeFileSync(outsideManifest, JSON.stringify(makeManifest(), null, 2), 'utf-8');
+    cleanups.push(() => {
+      try {
+        fs.rmSync(outsideManifest, { force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+
+    expectTrustBoundaryError(() =>
+      manifestSource({ projectRoot: fx.root, stageId: 'S02', manifestPath: outsideManifest }),
+    );
+  });
+
+  it('manifestFileDigest fails closed on a trust-root escape', () => {
+    const fx = makeFixture();
+    const outsideManifest = path.join(
+      path.dirname(fx.root),
+      `escape-digest-${path.basename(fx.root)}.json`,
+    );
+    fs.writeFileSync(outsideManifest, JSON.stringify(makeManifest(), null, 2), 'utf-8');
+    cleanups.push(() => {
+      try {
+        fs.rmSync(outsideManifest, { force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+
+    let thrown: unknown;
+    try {
+      manifestFileDigest({
+        projectRoot: fx.root,
+        stageId: 'S02',
+        manifestPath: outsideManifest,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ManifestSourceError);
+    expect((thrown as ManifestSourceError).code).toBe('DOMAIN.STAGE_NOT_FOUND');
+    expect((thrown as ManifestSourceError).message).toMatch(/trust boundary/);
+  });
+
+  it('legal default and custom paths remain fully functional', () => {
+    const fx = makeFixture();
+    fx.write(`.proofloop/manifests/S02.json`, JSON.stringify(makeManifest(), null, 2));
+    expect(readCanonical(fx).manifest.stage_id).toBe('S02');
+    expect(manifestFileDigest({ projectRoot: fx.root, stageId: 'S02' })).toMatch(/^[0-9a-f]{64}$/);
+
+    const fx2 = makeFixture();
+    fx2.write(`custom/manifest.json`, JSON.stringify(makeManifest(), null, 2));
+    expect(
+      manifestSource({
+        projectRoot: fx2.root,
+        stageId: 'S02',
+        manifestPath: path.join(fx2.root, 'custom', 'manifest.json'),
+      }).manifest.stage_id,
+    ).toBe('S02');
   });
 });
 

@@ -313,6 +313,195 @@ describe('readReceiptCategory — deterministic (timestamp, digest) ordering (PO
 });
 
 // ============================================================
+// Trust-root boundary (S2-F-003) — symlink escapes fail closed
+// ============================================================
+
+describe('readReceiptCategory — trust-root boundary (S2-F-003)', () => {
+  /** Create a root whose canonical receipts root is replaced by a symlink to `external`. */
+  function makeEscapeFixture(
+    linkRel: string,
+  ): { fx: Fixture; external: string } {
+    const fx = makeFixture();
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-outside-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    // A valid-looking external receipt that MUST never be read.
+    const externalReceiptDir = path.join(external, 'cv', fx.stageId, fx.sliceId);
+    fs.mkdirSync(externalReceiptDir, { recursive: true });
+    writeReceiptFile(externalReceiptDir, {
+      type: 'CV_PASS',
+      stage_id: fx.stageId,
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+    // Replace the target dir (or an ancestor) with a symlink to the external dir.
+    const target = path.join(fx.root, linkRel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+    fs.symlinkSync(external, target, 'dir');
+    return { fx, external };
+  }
+
+  it('fail-closed when the receipts root is a symlink to an external dir (chain broken, outside not read)', () => {
+    const { fx } = makeEscapeFixture(path.join('.proofloop', 'receipts'));
+
+    const result = readCategory(fx, 'cv');
+
+    expect(result.chainValid).toBe(false);
+    expect(result.chainCondition).not.toBeNull();
+    expect(result.chainCondition?.code).toBe('RUNTIME.RECEIPT_CHAIN_BROKEN');
+    expect(result.chainCondition?.reason).toMatch(/trust boundary/);
+    // The external fake receipt must never become a fact.
+    expect(result.receipts).toHaveLength(0);
+    expect(result.latest).toBeNull();
+    expect(result.invalidFiles).toHaveLength(0);
+    expect(result.misplaced).toHaveLength(0);
+  });
+
+  it('fail-closed when a deeper category subdirectory is a symlink to an external dir', () => {
+    const { fx } = makeEscapeFixture(path.join('.proofloop', 'receipts', 'cv'));
+
+    const result = readCategory(fx, 'cv');
+
+    expect(result.chainValid).toBe(false);
+    expect(result.chainCondition?.code).toBe('RUNTIME.RECEIPT_CHAIN_BROKEN');
+    expect(result.chainCondition?.reason).toMatch(/trust boundary/);
+    expect(result.receipts).toHaveLength(0);
+  });
+
+  it('fail-closed at the stage-level when the stage-gate dir escapes (all stages guarded)', () => {
+    const { fx } = makeEscapeFixture(path.join('.proofloop', 'receipts', 'stage-gate'));
+
+    const result = readReceiptCategory({
+      projectRoot: fx.root,
+      category: 'stage-gate',
+      stageId: fx.stageId,
+    });
+
+    expect(result.chainValid).toBe(false);
+    expect(result.chainCondition?.code).toBe('RUNTIME.RECEIPT_CHAIN_BROKEN');
+    expect(result.receipts).toHaveLength(0);
+  });
+
+  it('fail-closed when a single receipt file is a symlink to an external valid receipt (S2-F-003 round 2)', () => {
+    const fx = makeFixture();
+    // A valid-looking external receipt that MUST never be read as a fact.
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-file-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const outside = writeReceiptFile(external, {
+      type: 'CV_PASS',
+      stage_id: fx.stageId,
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+    // Plant a `.json` symlink inside the (legal, in-root) category dir pointing
+    // at the external valid receipt.
+    const cvDir = cvReceiptDir(fx.root, fx.stageId, fx.sliceId);
+    fs.mkdirSync(cvDir, { recursive: true });
+    fs.symlinkSync(outside.path, path.join(cvDir, 'fake.json'));
+
+    const result = readCategory(fx, 'cv');
+
+    // The escaped file is reported invalid and NEVER read as a fact.
+    expect(result.invalidFiles).toHaveLength(1);
+    expect(result.invalidFiles[0].filePath.endsWith('fake.json')).toBe(true);
+    expect(result.invalidFiles[0].code).toBe('RUNTIME.SCHEMA_MISMATCH');
+    expect(result.invalidFiles[0].reason).toMatch(/trust boundary/);
+    expect(result.receipts).toHaveLength(0);
+    expect(result.latest).toBeNull();
+  });
+
+  it('a legal receipt next to an escaped symlink still reads normally (S2-F-003 round 2)', () => {
+    const fx = makeFixture();
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-file-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const outside = writeReceiptFile(external, {
+      type: 'CV_PASS',
+      stage_id: fx.stageId,
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+    const cvDir = cvReceiptDir(fx.root, fx.stageId, fx.sliceId);
+    const legal = writeReceiptFile(cvDir, {
+      type: 'CV_PASS',
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-02T00:00:00.000Z',
+    });
+    fs.symlinkSync(outside.path, path.join(cvDir, 'fake.json'));
+
+    const result = readCategory(fx, 'cv');
+
+    expect(result.receipts.map((r) => r.filePath)).toEqual([legal.path]);
+    expect(result.latest?.receipt.type).toBe('CV_PASS');
+    expect(
+      result.invalidFiles.some(
+        (f) => f.filePath.endsWith('fake.json') && /trust boundary/.test(f.reason),
+      ),
+    ).toBe(true);
+  });
+
+  it('fail-closed when a single receipt file is an IN-ROOT symlink (no-follow rejects any symlink final component, S2-F-003 round 3)', () => {
+    const fx = makeFixture();
+    const cvDir = cvReceiptDir(fx.root, fx.stageId, fx.sliceId);
+    // A legal valid receipt.
+    const legal = writeReceiptFile(cvDir, {
+      type: 'CV_PASS',
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+    // An in-root symlink pointing at the legal receipt's file: the O_NOFOLLOW
+    // open refuses it even though its target is inside the root (path
+    // ownership of a symlink cannot be proven atomically).
+    fs.symlinkSync(legal.path, path.join(cvDir, 'alias.json'));
+
+    const result = readCategory(fx, 'cv');
+
+    expect(
+      result.invalidFiles.some(
+        (f) =>
+          f.filePath.endsWith('alias.json') && /trust boundary/.test(f.reason),
+      ),
+    ).toBe(true);
+    // The legal real file is unaffected; the symlink never becomes a fact.
+    expect(result.receipts.map((r) => r.filePath)).toEqual([legal.path]);
+  });
+
+  it('legal paths are unaffected: an in-root directory is read normally (no symlink)', () => {
+    const fx = makeFixture();
+    const dir = cvReceiptDir(fx.root, fx.stageId, fx.sliceId);
+    const valid = writeReceiptFile(dir, {
+      type: 'CV_PASS',
+      slice_id: fx.sliceId,
+      timestamp: '2025-01-01T00:00:00.000Z',
+    });
+
+    const result = readCategory(fx, 'cv');
+    expect(result.chainValid).toBe(true);
+    expect(result.chainCondition).toBeNull();
+    expect(result.receipts.map((r) => r.filePath)).toEqual([valid.path]);
+  });
+});
+
+// ============================================================
 // All categories (PO-S02-C-03 — per category dir chain verification)
 // ============================================================
 

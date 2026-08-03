@@ -9,7 +9,8 @@
  *   sync-cv-status             — reconcile-derived CV status (read-only)
  *   admit                      — 7 S02 admit operations through the pipeline
  *   prepare-gate-facts         — reconcile + git clean + HEAD + integrated
- *   run-gate                   — runtime_proof step execution (minimal, HP-004)
+ *   run-gate                   — runtime_proof step execution incl. service
+ *                                lifecycle (B1b) + command/probe oracles
  *
  * plus the dist-script usage matrix for all eight entries (callable via
  * `node packages/runtime/dist/cli/<tool>.js` with the legacy arg contract).
@@ -553,8 +554,8 @@ function gateManifest(steps: Array<Record<string, unknown>>): Manifest {
   };
 }
 
-describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
-  it('PASSes when every slice fact is present and every step exits as expected', () => {
+describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
+  it('PASSes when every slice fact is present and every step exits as expected', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifest = gateManifest([
@@ -585,7 +586,7 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
       JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]),
       'utf-8',
     );
-    const result = runGate({ manifestPath, factsPath, outputDir: path.join(dir, 'out'), projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, outputDir: path.join(dir, 'out'), projectRoot: dir });
     expect(result.gate).toBe('PASS');
     expect(result.success).toBe(true);
     expect(result.errors).toEqual([]);
@@ -597,7 +598,7 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
     expect(written.gate).toBe('PASS');
   });
 
-  it('FAILs when a step exits with a non-expected code', () => {
+  it('FAILs when a step exits with a non-expected code', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifest = gateManifest([
@@ -615,26 +616,26 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
     const factsPath = path.join(dir, 'facts.json');
     fs.writeFileSync(factsPath, JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
-    const result = runGate({ manifestPath, factsPath, outputDir: path.join(dir, 'out'), projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, outputDir: path.join(dir, 'out'), projectRoot: dir });
     expect(result.gate).toBe('FAIL');
     expect(result.success).toBe(false);
     expect(result.steps[0].exit_code).toBe(3);
     expect(result.errors.join(' ')).toContain('exited 3');
   });
 
-  it('FAILs when a manifest slice has no integrated fact', () => {
+  it('FAILs when a manifest slice has no integrated fact', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifestPath = path.join(dir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(makeManifest(), null, 2), 'utf-8');
     const factsPath = path.join(dir, 'facts.json');
     fs.writeFileSync(factsPath, JSON.stringify([]), 'utf-8');
-    const result = runGate({ manifestPath, factsPath, projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, projectRoot: dir });
     expect(result.gate).toBe('FAIL');
     expect(result.errors.join(' ')).toContain('no COMPLETE fact');
   });
 
-  it('FAILs on a fact for an undeclared slice (stale facts refused)', () => {
+  it('FAILs on a fact for an undeclared slice (stale facts refused)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifestPath = path.join(dir, 'manifest.json');
@@ -645,20 +646,20 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
       JSON.stringify([{ slice_id: SLICE_ID, integrated: true }, { slice_id: 'S03-OLD', integrated: true }]),
       'utf-8',
     );
-    const result = runGate({ manifestPath, factsPath, projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, projectRoot: dir });
     expect(result.gate).toBe('FAIL');
     expect(result.errors.join(' ')).toContain('undeclared slice');
   });
 
-  it('FAILs on an active service step (deferred to S04, honest fail-closed)', () => {
+  it('FAILs when a service_start cannot be spawned (service lifecycle implemented)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifest = gateManifest([
       {
         id: 'svc',
         type: 'service_start',
-        executable: 'node',
-        args: ['server.js'],
+        executable: 'definitely-not-a-real-binary-xyz',
+        args: [],
         cwd: '.',
         timeout_ms: 10000,
       },
@@ -667,12 +668,14 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
     const factsPath = path.join(dir, 'facts.json');
     fs.writeFileSync(factsPath, JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
-    const result = runGate({ manifestPath, factsPath, projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, projectRoot: dir });
     expect(result.gate).toBe('FAIL');
-    expect(result.errors.join(' ')).toContain('HP-004');
+    expect(result.steps[0].passed).toBe(false);
+    expect(result.errors.join(' ')).toContain('service_start');
+    expect(result.errors.join(' ')).toContain('failed');
   });
 
-  it('FAILs closed when the manifest or facts file is unreadable/invalid', () => {
+  it('FAILs closed when the manifest or facts file is unreadable/invalid', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const badManifest = { ...makeManifest(), stage_id: 42 };
@@ -680,7 +683,7 @@ describe('run-gate (PO-S03-H-01, minimal HP-004)', () => {
     fs.writeFileSync(manifestPath, JSON.stringify(badManifest), 'utf-8');
     const factsPath = path.join(dir, 'facts.json');
     fs.writeFileSync(factsPath, JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
-    const result = runGate({ manifestPath, factsPath, projectRoot: dir });
+    const result = await runGate({ manifestPath, factsPath, projectRoot: dir });
     expect(result.gate).toBe('FAIL');
     expect(result.errors.join(' ')).toMatch(/manifest/i);
   });

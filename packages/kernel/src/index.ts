@@ -3,7 +3,7 @@
  *
  * This package has zero workspace dependencies and provides the foundational
  * type definitions and state machine logic consumed by @proofloop/runtime
- * and @proofloop/pi-extension.
+ * and downstream host-adapter packages.
  */
 
 // Canonical type surface (§5 Canonical Type Registry) — non-contract types

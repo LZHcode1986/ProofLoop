@@ -775,6 +775,216 @@ describe('NextActionService — persisted extras change the derivation only with
 });
 
 // ============================================================
+// Trust-root boundary (S2-F-003) — symlink escapes fail closed
+// ============================================================
+
+describe('NextActionService — trust-root boundary (S2-F-003)', () => {
+  it('throws a structured error when the pending-results directory escapes the trust root via a symlink', () => {
+    const { fx } = partialFx();
+    // External dir containing a valid-looking envelope that MUST never be read.
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-pi-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const resultsDir = path.join(external, 'results');
+    fs.mkdirSync(resultsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(resultsDir, 'tok-ext.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        actionToken: 'tok-ext',
+        stageId: fx.stageId,
+        sliceId: 'S02-C',
+        taskId: 'S02-C-T01',
+        mode: 'implement-task',
+        outcome: 'completed',
+        evidenceRef: 'delivery/stages/S02/evidence/S02-C.md',
+        changedFiles: [],
+        verificationRuns: [],
+        summary: 'done',
+      }),
+      'utf-8',
+    );
+    // Replace .pi with a symlink to the external dir.
+    const piDir = path.join(fx.root, '.pi');
+    fs.rmSync(piDir, { recursive: true, force: true });
+    fs.symlinkSync(external, piDir, 'dir');
+
+    const service = new NextActionService();
+    let thrown: unknown;
+    try {
+      service.nextAction({ projectRoot: fx.root, stageId: fx.stageId });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/escapes the project root trust boundary/);
+  });
+
+  it('skips a pending envelope file that is a symlink to an external file (S2-F-003 round 2)', () => {
+    const { fx } = partialFx();
+    // A valid-looking external envelope that MUST never become a pending fact.
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-pi-file-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const externalEnvelope = path.join(external, 'tok-ext.json');
+    fs.writeFileSync(
+      externalEnvelope,
+      JSON.stringify({
+        schemaVersion: 1,
+        actionToken: 'tok-ext',
+        stageId: fx.stageId,
+        sliceId: 'S02-C',
+        taskId: 'S02-C-T01',
+        mode: 'implement-task',
+        outcome: 'completed',
+        evidenceRef: 'delivery/stages/S02/evidence/S02-C.md',
+        changedFiles: [],
+        verificationRuns: [],
+        summary: 'done',
+      }),
+      'utf-8',
+    );
+    // Plant a `.json` symlink inside the (legal, in-root) results dir pointing
+    // at the external envelope.
+    const resultsDir = path.join(fx.root, '.pi', 'proofloop-runtime', 'results');
+    fs.mkdirSync(resultsDir, { recursive: true });
+    fs.symlinkSync(externalEnvelope, path.join(resultsDir, 'tok-ext.json'));
+
+    const service = new NextActionService();
+    const out = service.nextAction({ projectRoot: fx.root, stageId: fx.stageId });
+
+    // The escaped envelope is skipped (fail-closed, no throw) and never drives
+    // ADMIT_WORKER_RESULT — the first unchecked task is dispatched instead.
+    expectContract(out);
+    expect(out.action).toBe('DISPATCH_WORKER');
+    expect(out.action_detail).toContain('implement-task');
+    expect(out.action_detail).not.toContain('tok-ext');
+  });
+
+  it('a legal envelope next to an escaped symlink still becomes a pending fact (S2-F-003 round 2)', () => {
+    const { fx } = partialFx();
+    const external = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-runtime-pi-file-out-'));
+    cleanups.push(() => {
+      try {
+        fs.rmSync(external, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    });
+    const externalEnvelope = path.join(external, 'tok-ext.json');
+    fs.writeFileSync(
+      externalEnvelope,
+      JSON.stringify({
+        schemaVersion: 1,
+        actionToken: 'tok-ext',
+        stageId: fx.stageId,
+        sliceId: 'S02-C',
+        taskId: 'S02-C-T01',
+        mode: 'implement-task',
+        outcome: 'completed',
+        evidenceRef: 'delivery/stages/S02/evidence/S02-C.md',
+        changedFiles: [],
+        verificationRuns: [],
+        summary: 'done',
+      }),
+      'utf-8',
+    );
+    const resultsDir = path.join(fx.root, '.pi', 'proofloop-runtime', 'results');
+    fs.mkdirSync(resultsDir, { recursive: true });
+    // Legal in-root envelope.
+    fs.writeFileSync(
+      path.join(resultsDir, 'tok-legal.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        actionToken: 'tok-legal',
+        stageId: fx.stageId,
+        sliceId: 'S02-C',
+        taskId: 'S02-C-T01',
+        mode: 'implement-task',
+        outcome: 'completed',
+        evidenceRef: 'delivery/stages/S02/evidence/S02-C.md',
+        changedFiles: [],
+        verificationRuns: [],
+        summary: 'done',
+      }),
+      'utf-8',
+    );
+    // Escaped symlink alongside the legal envelope.
+    fs.symlinkSync(externalEnvelope, path.join(resultsDir, 'tok-ext.json'));
+
+    const out = new NextActionService().nextAction({
+      projectRoot: fx.root,
+      stageId: fx.stageId,
+    });
+
+    // Only the legal in-root envelope becomes a pending fact.
+    expectContract(out);
+    expect(out.action).toBe('ADMIT_WORKER_RESULT');
+    expect(out.action_detail).toContain('tok-legal');
+    expect(out.action_detail).not.toContain('tok-ext');
+  });
+
+  it('skips an IN-ROOT symlinked envelope file too (no-follow rejects any symlink final component, S2-F-003 round 3)', () => {
+    const { fx } = partialFx();
+    const resultsDir = path.join(fx.root, '.pi', 'proofloop-runtime', 'results');
+    fs.mkdirSync(resultsDir, { recursive: true });
+    // A legal in-root envelope.
+    const legalEnvelope = path.join(resultsDir, 'tok-legal.json');
+    fs.writeFileSync(
+      legalEnvelope,
+      JSON.stringify({
+        schemaVersion: 1,
+        actionToken: 'tok-legal',
+        stageId: fx.stageId,
+        sliceId: 'S02-C',
+        taskId: 'S02-C-T01',
+        mode: 'implement-task',
+        outcome: 'completed',
+        evidenceRef: 'delivery/stages/S02/evidence/S02-C.md',
+        changedFiles: [],
+        verificationRuns: [],
+        summary: 'done',
+      }),
+      'utf-8',
+    );
+    // An in-root symlink pointing at the legal envelope: O_NOFOLLOW skips it
+    // even though its target is inside the root.
+    fs.symlinkSync(legalEnvelope, path.join(resultsDir, 'tok-alias.json'));
+
+    const out = new NextActionService().nextAction({
+      projectRoot: fx.root,
+      stageId: fx.stageId,
+    });
+
+    // Only the legal real file becomes a pending fact.
+    expectContract(out);
+    expect(out.action).toBe('ADMIT_WORKER_RESULT');
+    expect(out.action_detail).toContain('tok-legal');
+    expect(out.action_detail).not.toContain('tok-alias');
+  });
+
+  it('legal pending-results and evidence paths are unaffected', () => {
+    const { fx } = envelopeFx();
+    const out = new NextActionService().nextAction({
+      projectRoot: fx.root,
+      stageId: fx.stageId,
+    });
+    expectContract(out);
+    expect(out.action).toBe('ADMIT_WORKER_RESULT');
+  });
+});
+
+// ============================================================
 // GATE_INTERRUPTED — retry semantics (PO-S05-A-06, HP-004/AWI-015)
 // ============================================================
 
@@ -807,6 +1017,29 @@ describe('NextActionService — GATE_INTERRUPTED is retryable, never GATE_FAIL/G
     expectContract(out);
     expect(out.action).toBe('VALIDATE');
     expect(out.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(true);
+  });
+
+  it('GATE_FAIL + GATE_PASS → not VALIDATE (GATE_PASS post-supplants GATE_FAIL)', () => {
+    const { fx } = gateInterruptedFx();
+    fx.writeReceipt('stage-gate', undefined, {
+      type: 'GATE_FAIL',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-07T00:00:00.000Z',
+      payload: { verdict: 'FAIL' },
+    });
+    fx.writeReceipt('stage-gate', undefined, {
+      type: 'GATE_PASS',
+      stage_id: fx.stageId,
+      timestamp: '2025-01-08T00:00:00.000Z',
+    });
+    const out = new NextActionService().nextAction({
+      projectRoot: fx.root,
+      stageId: fx.stageId,
+    });
+    expectContract(out);
+    // GATE_PASS post-supplants GATE_FAIL — no longer blocking.
+    expect(out.action).not.toBe('VALIDATE');
+    expect(out.findings.some((f) => /GATE_FAIL/.test(f.message))).toBe(false);
   });
 
   it('GATE_INTERRUPTED is never derived as GATE_PASS: no FINALIZE_STAGE_REVIEW without a real GATE_PASS', () => {

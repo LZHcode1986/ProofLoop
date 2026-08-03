@@ -16,7 +16,7 @@
  *     .tmp/                    scratch — never a receipt source
  *
  * Expected path segments are written as known-good literals (independent of
- * the implementation). The type→category classification is the closed 12-type
+ * the implementation). The type→category classification is the closed 16-type
  * receipt set mapped onto the 8 content categories — every type belongs to
  * exactly one category, no category is empty.
  *
@@ -51,7 +51,7 @@ const ROOT = '/fixture/project';
 const STAGE = 'S02';
 const SLICE = 'S02-C';
 
-/** The closed 13-type receipt set (§4 / §5 canonical type registry, incl. the S05 additive GATE_INTERRUPTED). */
+/** The closed 16-type receipt set (§4 / §5 canonical type registry, incl. the S05 additive GATE_INTERRUPTED and the B1c additive PROJECT_E2E_*). */
 const ALL_RECEIPT_TYPES: readonly ReceiptType[] = [
   'SLICE_PLAN',
   'STAGE_PLAN',
@@ -66,6 +66,9 @@ const ALL_RECEIPT_TYPES: readonly ReceiptType[] = [
   'GATE_INTERRUPTED',
   'STAGE_REVIEW_PASS',
   'PROJECT_REVIEW_PASS',
+  'PROJECT_E2E_PASS',
+  'PROJECT_E2E_FAIL',
+  'PROJECT_E2E_BLOCKED',
 ];
 
 describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', () => {
@@ -126,7 +129,7 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
     expect(receiptCategoryDir(ROOT, 'tmp')).toBe(tmpReceiptDir(ROOT));
   });
 
-  it('classifies every one of the 13 receipt types into exactly one content category', () => {
+  it('classifies every one of the 16 receipt types into exactly one content category', () => {
     const seen = new Map<ReceiptType, string>();
     for (const type of ALL_RECEIPT_TYPES) {
       const category = RECEIPT_TYPE_CATEGORY[type];
@@ -147,6 +150,9 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
     expect(seen.get('GATE_INTERRUPTED')).toBe('stage-gate');
     expect(seen.get('STAGE_REVIEW_PASS')).toBe('review');
     expect(seen.get('PROJECT_REVIEW_PASS')).toBe('project');
+    expect(seen.get('PROJECT_E2E_PASS')).toBe('project');
+    expect(seen.get('PROJECT_E2E_FAIL')).toBe('project');
+    expect(seen.get('PROJECT_E2E_BLOCKED')).toBe('project');
   });
 
   it('derives RECEIPT_TYPES_BY_CATEGORY as the inverse of the type→category map', () => {
@@ -170,14 +176,25 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
     }
   });
 
-  it('GATE_INTERRUPTED (S05 additive 13th type) belongs to stage-gate alongside GATE_PASS/GATE_FAIL', () => {
+  it('GATE_INTERRUPTED (S05 additive 11th type) belongs to stage-gate alongside GATE_PASS/GATE_FAIL', () => {
     expect(RECEIPT_TYPE_CATEGORY['GATE_INTERRUPTED']).toBe('stage-gate');
     expect(RECEIPT_TYPES_BY_CATEGORY['stage-gate']).toContain('GATE_INTERRUPTED');
-    // the existing 12-type membership is unchanged
+    // the existing 10-type membership is unchanged
     expect(RECEIPT_TYPES_BY_CATEGORY['stage-gate']).toContain('GATE_PASS');
     expect(RECEIPT_TYPES_BY_CATEGORY['stage-gate']).toContain('GATE_FAIL');
     // no type maps to two categories and no category holds a foreign type
     const all = RECEIPT_CONTENT_CATEGORIES.flatMap((c) => [...RECEIPT_TYPES_BY_CATEGORY[c]]);
-    expect(new Set(all).size).toBe(13);
+    expect(new Set(all).size).toBe(16);
+  });
+
+  it('PROJECT_E2E_* (B1c additive 14th–16th types) belong to the shared project/ category alongside PROJECT_REVIEW_PASS', () => {
+    expect(RECEIPT_TYPE_CATEGORY['PROJECT_E2E_PASS']).toBe('project');
+    expect(RECEIPT_TYPE_CATEGORY['PROJECT_E2E_FAIL']).toBe('project');
+    expect(RECEIPT_TYPE_CATEGORY['PROJECT_E2E_BLOCKED']).toBe('project');
+    expect(RECEIPT_TYPES_BY_CATEGORY['project']).toContain('PROJECT_E2E_PASS');
+    expect(RECEIPT_TYPES_BY_CATEGORY['project']).toContain('PROJECT_E2E_FAIL');
+    expect(RECEIPT_TYPES_BY_CATEGORY['project']).toContain('PROJECT_E2E_BLOCKED');
+    // PROJECT_REVIEW_PASS keeps its exclusive project-completion semantics.
+    expect(RECEIPT_TYPES_BY_CATEGORY['project']).toContain('PROJECT_REVIEW_PASS');
   });
 });
