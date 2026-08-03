@@ -20,7 +20,7 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "Test-Path *": allow
-    "node .agents/runtime/dist/*": allow
+    "node packages/runtime/dist/cli/*": allow
     "python -m pytest *": allow
     "npm test *": allow
   task:
@@ -32,6 +32,7 @@ permission:
   question: deny
   webfetch: deny
   websearch: deny
+  external_directory: deny
 ---
 
 # Stage Reviewer Agent
