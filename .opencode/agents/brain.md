@@ -18,11 +18,11 @@ permission:
     "Select-String *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
-    "node .agents/runtime/dist/receipt-writer.js *": allow
-    "node .agents/runtime/dist/run-stage.js *": allow
-    "node .agents/runtime/dist/run-project-acceptance.js *": allow
-    "node .agents/runtime/dist/compile-project-acceptance.js *": allow
-    "node .agents/runtime/dist/finalize-project-review.js *": allow
+    "node packages/runtime/dist/cli/admit.js *": allow
+    "node packages/runtime/dist/cli/run-gate.js *": allow
+    "node packages/runtime/dist/cli/run-project-acceptance.js *": allow
+    "node packages/runtime/dist/cli/compile-project-acceptance.js *": allow
+    "node packages/runtime/dist/cli/finalize-project-review.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny
@@ -208,7 +208,10 @@ After the Stage Reviewer returns a verdict (ACCEPTED / REJECTED / BLOCKED), Brai
 
 ```text
 Stage Reviewer returns structured verdict
-→ Brain calls .agents/runtime/src/receipt-writer.ts writeStageReviewReceipt()
+→ Brain invokes `node packages/runtime/dist/cli/admit.js --json '<stage_review AdmissionRequest>'`
+   to write the Stage Review Receipt
+   (AdmissionRequest: `type: 'stage_review'`, `stageId`, `verdict: 'ACCEPTED' | 'REPAIR'`,
+   `summary`)
    Receipt written to .proofloop/receipts/stage-review-<stage-id>.json
 → RECOMPUTE → STAGE_CLOSE (if ACCEPTED) or typed recovery
 ```
@@ -541,7 +544,7 @@ PROJECT_ACCEPTANCE
 
 2. E2E EXECUTION
    → Brain directly calls run-project-acceptance CLI:
-      node .agents/runtime/dist/run-project-acceptance.js <manifest-path> [output-dir]
+      node packages/runtime/dist/cli/run-project-acceptance.js <manifest-path> [output-dir] [project-root]
    → Runner executes E2E steps, writes Project E2E Gate Receipt
       (.proofloop/receipts/project-e2e-<attempt>.json)
    → Receipt contains: project_id, verdict (PROJECT_ACCEPTED / PROJECT_REJECTED / PROJECT_BLOCKED),
