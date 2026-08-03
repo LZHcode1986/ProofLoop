@@ -10,11 +10,11 @@
             "command": [
                 "codegraph-mcp",
                 "--workspace",
-                "D:/software-dev/proofloopv2",
+                ".",
                 "--profile",
                 "graph"
             ],
-            "cwd": "D:/software-dev/proofloopv2",
+            "cwd": ".",
             "enabled": true
         },
         "playwright": {
