@@ -1,9 +1,17 @@
 ---
 name: codebase-design
-description: Deep module principles, seam identification, and domain-driven design for AI coding agents.
+description: STAGE_SELECTION support skill: use when deep module principles, seam identification, or domain modeling is needed to select Stage Goals and Work Items.
 ---
 
 # Codebase Design Skill
+
+## Phase ownership
+
+- Phase: STAGE_SELECTION — support skill, loaded on demand (not a standalone phase)
+- Prerequisite: architecture package ready (`ARCHITECTURE_READY`) and a stage goal must be selected
+- Completion: stage goal and work items selected (`STAGE_GOAL_SELECTED`)
+- Handoff: the selected stage goal goes to `proofloop-plan`
+- Rollback: if the user later changes the stage goal, Brain reloads this skill
 
 Deep module design principles from "A Philosophy of Software Design" adapted for AI coding agents.
 

@@ -1,9 +1,17 @@
 ---
 name: prd-to-ai-architecture
-description: Use when a user provides an approved PRD and wants an AI-coding-ready technical architecture brief before implementation — architecture, contracts and state matrices, hard-part risks, and task acceptance matrices. Use when another skill needs pre-code architecture artifacts.
+description: ARCHITECTURE phase skill: use after the PRD is confirmed (and required clarification resolved); produce an AI-coding-ready architecture package under tech-spec/ (contracts, state matrices, hard parts, task acceptance matrix), confirming artifact by artifact (ARCHITECTURE_READY).
 ---
 
 # PRD to AI Architecture
+
+## Phase ownership
+
+- Phase: ARCHITECTURE
+- Prerequisite: PRD confirmed by the user (`PRD_CONFIRMED`); required technical clarification resolved (`TECHNICAL_CLARIFICATION_READY` when the conditional phase ran)
+- Completion: architecture package confirmed artifact by artifact, then the phase checkpoint confirmed by the user (`ARCHITECTURE_READY`)
+- Handoff: the architecture package goes to stage selection and planning (`codebase-design` when needed, then `proofloop-plan`); Brain loads the next skill only after user confirmation
+- Rollback: if the user later requests architecture changes, Brain reloads this skill; upstream changes reload `prd-to-tech-design-prep` or `ai-structured-prd`
 
 ## Purpose
 
@@ -97,6 +105,14 @@ The skill may reason about the whole package internally, but user-facing confirm
 If a later artifact exposes a necessary change to an earlier artifact, Brain must confirm the revision with the user before updating the earlier file, and check consistency against previously confirmed artifacts.
 
 Brain records the durable workflow checkpoint in progress.md after each confirmed artifact.
+
+### Phase checkpoint
+
+After the last artifact is confirmed, present the phase checkpoint:
+
+1. Show the user: what this phase produced (2-3 plain-language sentences), where the artifacts live, and the key decisions made.
+2. Preview the next phase: which skill will be loaded (stage selection, with `codebase-design` when needed, then `proofloop-plan`) and what it will produce.
+3. Wait for the user's explicit confirmation (`ARCHITECTURE_READY`) before loading the next phase's skill. If the user asks for changes, continue in this phase, or return to an upstream phase's skill as directed.
 
 ## Required Outputs
 

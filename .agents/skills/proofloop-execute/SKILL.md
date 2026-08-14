@@ -1,9 +1,17 @@
 ---
 name: proofloop-execute
-description: ProofLoop 的执行指导：以 Runtime Primary Next Action 驱动 Worker、CV、Committer、Gate 与 Stage Review 的可恢复 Stage Delivery Loop。
+description: STAGE_EXECUTION 阶段技能：ProofLoop 的执行指导：以 Runtime Primary Next Action 驱动 Worker、CV、Committer、Gate 与 Stage Review 的可恢复 Stage Delivery Loop。
 ---
 
 # proofloop-execute
+
+## Phase ownership
+
+- 阶段：STAGE_EXECUTION（Brain + `proofloop-execute` + Runtime）
+- 进入条件：admitted Manifest、有效 Evidence paths、Runtime 入口 Gate 通过
+- 完成信号：所有 Slice 集成且持久化 Stage Gate PASS，随后 Stage Review（`brain/stage-review.md`）
+- 交接：Stage Review ACCEPTED 后进入 Stage Close（Committer）；阶段切换由 Runtime admission 与 Stage Review 驱动
+- 回退：Stage Review REPAIR 或 Gate FAIL 时，Brain 按 Runtime 指引回到本技能派发 repair；计划变更则回到 `proofloop-plan`
 
 本技能是 Brain 的 Stage Delivery 指导。Runtime 是唯一状态
 权威；本技能不替代任何 Agent 的语义判断。

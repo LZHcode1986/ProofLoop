@@ -1,9 +1,17 @@
 ---
 name: prd-to-tech-design-prep
-description: Prepare an approved PRD for technical design by resolving terminology, scenarios, and missing technical inputs.
+description: CONDITIONAL_TECHNICAL_CLARIFICATION phase skill (conditional): use only when the PRD is confirmed and product-level technical questions block architecture; produce plain-language clarification questions and a technical design input brief (TECHNICAL_CLARIFICATION_READY).
 ---
 
 # prd-to-tech-design-prep
+
+## Phase ownership
+
+- Phase: CONDITIONAL_TECHNICAL_CLARIFICATION (conditional — runs only when required)
+- Prerequisite: PRD confirmed by the user (`PRD_CONFIRMED`) and product-level technical questions blocking architecture
+- Completion: clarification ready and confirmed by the user (`TECHNICAL_CLARIFICATION_READY`)
+- Handoff: the clarification brief goes to `prd-to-ai-architecture`; Brain loads the next skill only after user confirmation
+- Rollback: if the user later requests clarification changes, Brain reloads this skill; if the PRD itself must change, Brain reloads `ai-structured-prd`
 
 Prepare the transition from a confirmed PRD to technical design without forcing non-technical users to write architecture. Convert product facts into plain-language technical clarification questions, glossary explanations, and a clean handoff brief for a later technical design workflow.
 
@@ -64,6 +72,11 @@ Do not:
    - Use `references/technical-design-input-brief.md`.
    - Summarize decisions, open questions, accepted defaults, constraints, risks, and non-goals.
    - This is not an architecture document; it is input for one.
+
+7. **Phase checkpoint**
+   - Show the user: what this phase produced (2-3 plain-language sentences), where the artifacts live, and the key decisions made.
+   - Preview the next phase: `prd-to-ai-architecture` will be loaded to produce the architecture package under `tech-spec/`.
+   - Wait for the user's explicit confirmation before loading the next phase's skill. If the user asks for changes, continue in this phase, or return to the upstream phase's skill as directed.
 
 ## Output options
 

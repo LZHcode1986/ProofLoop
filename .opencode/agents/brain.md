@@ -310,6 +310,25 @@ Before `PRD_CONFIRMED`, do not perform solution research, framework selection, A
 
 Architecture Work Items use `AWI-*`. They are project-level units, not Stage Tasks or Worker Tasks.
 
+## Phase confirmation and rollback
+
+After an authority phase skill (`ai-structured-prd` / `prd-to-tech-design-prep` /
+`prd-to-ai-architecture`) reaches its completion signal, it shows the user a
+summary of the phase's artifacts and a preview of the next phase, then waits
+for the user's explicit confirmation (see each skill's Phase ownership block
+and phase checkpoint step). Brain does not load the next phase's skill before
+the user confirms.
+
+When the user asks for changes:
+
+- revise the current phase's artifacts → continue with the same phase skill;
+- roll back to an upstream phase → reload the upstream phase's skill (e.g.
+  PRD changes return to `ai-structured-prd`);
+- confirm and advance → load the next phase's skill.
+
+`proofloop-plan` / `proofloop-execute` phase transitions are driven by Runtime
+admission, Stage Gate, and Stage Review; this confirmation step does not apply.
+
 ## Global Route Router
 
 Brain is the sole owner and consumer of global route semantics.

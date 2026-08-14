@@ -1,9 +1,17 @@
 ---
 name: ai-structured-prd
-description: Use when the user has a rough product idea to shape into a structured PRD, or an existing PRD to review, before technical design.
+description: PRODUCT_DEFINITION phase skill: use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD and wait for user confirmation (PRD_CONFIRMED).
 ---
 
 # ai-structured-prd
+
+## Phase ownership
+
+- Phase: PRODUCT_DEFINITION
+- Prerequisite: user has a rough idea, or an existing PRD to review
+- Completion: PRD confirmed by the user (`PRD_CONFIRMED`)
+- Handoff: confirmed PRD goes to `prd-to-tech-design-prep` (only when technical clarification is needed) or `prd-to-ai-architecture`; Brain loads the next skill only after user confirmation
+- Rollback: if the user later requests PRD changes, Brain reloads this skill
 
 Create and maintain a structured product requirements document for AI-assisted development. Optimize for non-technical users, but do not make the PRD shallow: capture all product facts that affect implementation, using plain language and short explanations for necessary terms.
 
@@ -75,8 +83,10 @@ Use the smallest mode that fits the request:
    - Output stage candidates only after PRD review is `ready` or `mostly ready`, or when Brain explicitly needs dispatch preparation.
    - Optional reference: `references/prd-template.md` section "Optional: Product Stage Candidates".
 
-7. **Confirm handoff**
-   - Ask the user to confirm the PRD before any technical design.
+7. **Phase checkpoint**
+   - Show the user: what this phase produced (2-3 plain-language sentences), where the artifacts live, and the key decisions made.
+   - Preview the next phase: which skill will be loaded (`prd-to-tech-design-prep` only when technical clarification is needed, otherwise `prd-to-ai-architecture`) and what it will produce.
+   - Wait for the user's explicit confirmation before loading the next phase's skill. If the user asks for changes, continue in this phase or return to an upstream phase as directed.
    - If the PRD is confirmed, it is ready for downstream dispatch (technical handoff, stage candidates, or Propose).
 
 ## Clarification question format

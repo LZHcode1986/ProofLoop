@@ -1,9 +1,17 @@
 ---
 name: proofloop-plan
-description: ProofLoop active planning 指导：调用 `plan materialize` 生成或更新 candidate tasks.md、调度 stage-plan-verifier（SPV）、处理 PLAN_GAP 或 SPV finding、重启后恢复 planning 时使用。
+description: STAGE_PLANNING 阶段技能：ProofLoop active planning 指导：调用 `plan materialize` 生成或更新 candidate tasks.md、调度 stage-plan-verifier（SPV）、处理 PLAN_GAP 或 SPV finding、重启后恢复 planning 时使用。
 ---
 
 # proofloop-plan
+
+## Phase ownership
+
+- 阶段：STAGE_PLANNING（Brain + `proofloop-plan` + Runtime）
+- 进入条件：Stage Goal 与 Work Items 已选定（STAGE_GOAL_SELECTED）；Authority 就绪
+- 完成信号：candidate Plan/Evidence 最终 Git boundary、Validator PASS、fresh SPV `PLAN_READY`，随后 Runtime Stage Plan admission
+- 交接：admitted Manifest 交给 `proofloop-execute`（STAGE_EXECUTION）；阶段切换由 Runtime admission 驱动
+- 回退：用户要求修改计划时，Brain 重新加载本技能；Authority 变更则回到对应权威阶段技能
 
 本 Skill 是 Brain 的 active planning 方法。
 
