@@ -4,6 +4,9 @@
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "proofloop": "dist/cli/proofloop.js"
+  },
   "scripts": {
     "build": "tsc"
   },

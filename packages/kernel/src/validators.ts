@@ -13,8 +13,10 @@
  */
 
 import type {
+  CanonicalRuntimeProofStep,
   FindingCode,
   ReceiptType,
+  RuntimeProofStepType,
 } from './contracts';
 
 // ============================================================
@@ -311,6 +313,43 @@ function expectISODateTime(value: unknown, path: string, errors: FieldError[]): 
 }
 
 // ============================================================
+// Canonical Stage ID guard (S09-C-T03)
+// ============================================================
+
+/**
+ * Canonical Stage ID grammar: `S` followed by one or more decimal digits.
+ *
+ * This is the SINGLE shared rule for candidate parser, compiler, Mechanical
+ * Validator, plan/stage/review status and every admission seam.  Legacy
+ * parked labels such as `S08B0` / `S08B` do not match and fail closed before
+ * any Runtime read/write.
+ */
+export const CANONICAL_STAGE_ID_RE: RegExp = /^S\d+$/;
+
+/**
+ * True when `value` is a canonical Stage ID string (matches `^S\d+$`).
+ */
+export function isCanonicalStageId(value: unknown): value is string {
+  return typeof value === 'string' && CANONICAL_STAGE_ID_RE.test(value);
+}
+
+/**
+ * Fail-closed canonical Stage ID assertion.
+ *
+ * @throws {SchemaValidationError} (RUNTIME.SCHEMA_MISMATCH) when the value
+ *         is not a canonical Stage ID.
+ */
+export function assertCanonicalStageId(value: unknown, path = 'stage_id'): string {
+  if (!isCanonicalStageId(value)) {
+    throw new SchemaValidationError(
+      `Schema validation failed: ${path} must match the canonical Stage ID grammar /^S\\d+$/ (e.g. S09); legacy labels such as S08B0/S08B are rejected`,
+      [{ path, message: 'Expected a canonical Stage ID matching /^S\\d+$/' }],
+    );
+  }
+  return value;
+}
+
+// ============================================================
 // Finding Code literals (§7 Error Contracts)
 // ============================================================
 
@@ -392,7 +431,9 @@ function validateReceiptData(data: unknown, path: string, errors: FieldError[]):
   // type: must be one of the 16 receipt types (closed set)
   expectStringLiteral(obj.type, RECEIPT_TYPES, `${path}.type`, errors);
 
-  // stage_id: required string
+  // stage_id: required string (v1 legacy receipts keep the v1 contract; the
+  // shared canonical Stage ID grammar ^S\d+$ is enforced at every vNext
+  // Runtime boundary — S09-C-T03)
   expectString(obj.stage_id, `${path}.stage_id`, errors);
 
   // slice_id: optional string
@@ -506,6 +547,8 @@ const PROOF_STEP_KNOWN_FIELDS = new Set([
   'expected', 'not_applicable', 'service_ref', 'readiness_signal',
 ]);
 
+const NOT_APPLICABLE_KNOWN_FIELDS = new Set(['reason']);
+
 function validateRuntimeProofStepData(data: unknown, path: string, errors: FieldError[]): Record<string, unknown> | undefined {
   const obj = expectObject(data, path, errors);
   if (!obj) return undefined;
@@ -578,6 +621,83 @@ function validateRuntimeProofSteps(data: unknown, path: string, errors: FieldErr
 }
 
 // ============================================================
+// Canonical executable Runtime Proof step validation (S09-C-T01)
+// ============================================================
+
+/**
+ * Canonical closed validation for ONE Runtime Proof step (vNext seam).
+ *
+ * Each step is either a canonical executable step (`id`, `type`,
+ * `executable`, `args`, `cwd`, `timeout_ms`, `expected`, optional
+ * `service_ref` / `readiness_signal`) or an explicit
+ * `not_applicable{reason}` boundary — never both, never a mixture.
+ *
+ * The type set is closed: `command | service_start | service_stop | probe`.
+ * Unknown fields, unknown types, empty executables, non-string args,
+ * non-positive timeout and missing required fields all fail closed.
+ *
+ * @throws {SchemaValidationError} on any violation.
+ */
+export function validateRuntimeProofStep(data: unknown): CanonicalRuntimeProofStep {
+  return collectErrors('RuntimeProofStep', (errors) => {
+    const obj = expectObject(data, 'step', errors);
+    if (!obj) return undefined;
+
+    checkUnknownFields(obj, PROOF_STEP_KNOWN_FIELDS, 'step', errors);
+
+    if (obj.not_applicable !== undefined) {
+      // Explicit not-applicable boundary: the step must carry ONLY
+      // `not_applicable{reason}`.
+      if (Object.keys(obj).some((key) => key !== 'not_applicable')) {
+        errors.push({
+          path: 'step',
+          message: 'A not_applicable step must not carry executable fields',
+        });
+      }
+      const naObj = expectObject(obj.not_applicable, 'step.not_applicable', errors);
+      if (naObj) {
+        checkUnknownFields(naObj, NOT_APPLICABLE_KNOWN_FIELDS, 'step.not_applicable', errors);
+        expectString(naObj.reason, 'step.not_applicable.reason', errors);
+      }
+      return obj;
+    }
+
+    // Canonical executable step — every required field must be present.
+    expectString(obj.id, 'step.id', errors);
+    expectStringLiteral(obj.type, PROOF_STEP_TYPES, 'step.type', errors);
+    expectString(obj.executable, 'step.executable', errors);
+    const args = expectArray(obj.args, 'step.args', errors);
+    if (args) {
+      for (let i = 0; i < args.length; i++) {
+        if (!isString(args[i])) {
+          errors.push({ path: `step.args[${i}]`, message: `Expected string, got ${typeof args[i]}` });
+        }
+      }
+    }
+    expectString(obj.cwd, 'step.cwd', errors);
+    const timeoutMs = expectNumber(obj.timeout_ms, 'step.timeout_ms', errors);
+    if (timeoutMs !== undefined) {
+      if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+        errors.push({ path: 'step.timeout_ms', message: `Expected positive integer, got ${timeoutMs}` });
+      }
+    }
+    const expected = expectObject(obj.expected, 'step.expected', errors);
+    if (expected && expected.exit_code !== undefined && expected.exit_code !== null) {
+      if (typeof expected.exit_code !== 'number' || Number.isNaN(expected.exit_code)) {
+        errors.push({ path: 'step.expected.exit_code', message: `Expected number or null, got ${typeof expected.exit_code}` });
+      }
+    }
+    if (obj.service_ref !== undefined) {
+      expectString(obj.service_ref, 'step.service_ref', errors);
+    }
+    if (obj.readiness_signal !== undefined) {
+      expectString(obj.readiness_signal, 'step.readiness_signal', errors);
+    }
+    return obj;
+  }) as unknown as CanonicalRuntimeProofStep;
+}
+
+// ============================================================
 // Manifest validation
 // ============================================================
 
@@ -593,6 +713,9 @@ function validateManifestData(data: unknown, path: string, errors: FieldError[])
 
   checkUnknownFields(obj, MANIFEST_KNOWN_FIELDS, path, errors);
 
+  // stage_id: required string (v1 legacy manifests keep the v1 contract; the
+  // shared canonical Stage ID grammar ^S\d+$ is enforced at every vNext
+  // Runtime boundary — S09-C-T03)
   expectString(obj.stage_id, `${path}.stage_id`, errors);
   expectString(obj.source_path, `${path}.source_path`, errors);
   expectString(obj.source_digest, `${path}.source_digest`, errors);
@@ -761,7 +884,7 @@ export type ValidatedManifest = {
   risk_facts: string[];
   runtime_proof?: Array<{
     id: string;
-    type: string;
+    type: RuntimeProofStepType;
     executable: string;
     args: string[];
     cwd: string;

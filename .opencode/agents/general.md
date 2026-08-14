@@ -1,7 +1,8 @@
 ---
 description: Execute bounded Brain direct tasks.
 mode: subagent
-model: opencode/deepseek-v4-flash-free
+model: opencode-go/deepseek-v4-flash
+variant: max
 hidden: true
 color: "#7aa2f7"
 permission:

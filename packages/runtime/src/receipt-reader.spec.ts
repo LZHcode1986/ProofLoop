@@ -23,7 +23,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { writeReceipt } from '@proofloop/kernel';
+import { writeReceipt, computeReceiptDigest } from '@proofloop/kernel';
 import {
   readReceiptCategory,
   readAllReceiptCategories,
@@ -39,6 +39,10 @@ import {
   tmpReceiptDir,
   type ReceiptCategoryReadResult,
 } from '@proofloop/runtime';
+// P-11: `stageCloseReceiptDir` is not part of the package index (the vNext
+// stage-close seam is not a legacy layout export) — import it from the source
+// module directly.
+import { stageCloseReceiptDir } from './receipt-layout';
 
 // ============================================================
 // Fixture helpers (real temp dirs, real files)
@@ -99,6 +103,45 @@ function writeReceiptFile(
     },
     { receiptDir: dir, tempDir: dir },
   );
+}
+
+/**
+ * P-11 fixture seam: write a schema-closed v2 STAGE_CLOSE_PASS envelope into
+ * the stage-close category directory. The envelope is vNext-owned — its type
+ * is deliberately NOT a kernel `ReceiptType` (the kernel 16-type union stays
+ * closed), so the kernel ReceiptWriter must not be used; the self-digest is
+ * computed the same way the vNext admission writer does
+ * (`computeReceiptDigest` over the content without `digest`).
+ */
+function writeStageCloseReceiptFile(dir: string, stageId: string): string {
+  const content = {
+    version: 1,
+    type: 'STAGE_CLOSE_PASS',
+    stage_id: stageId,
+    timestamp: '2025-01-01T00:00:00.000Z',
+    payload: {
+      schema_version: 2,
+      type: 'STAGE_CLOSE_RESULT',
+      action: 'STAGE_CLOSE',
+      stage_id: stageId,
+      close_type: 'full',
+      reason: 'stage closed (fixture)',
+      manifest_digest: 'a'.repeat(64),
+      plan_digest: 'b'.repeat(64),
+      snapshot_digest: 'c'.repeat(40),
+      stage_plan_receipt_digest: 'd'.repeat(64),
+      spv_receipt_digest: 'e'.repeat(64),
+      receipt_chain_valid: true,
+    },
+  };
+  const digest = computeReceiptDigest(content);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${digest}.json`),
+    JSON.stringify({ ...content, digest }, null, 2),
+    'utf8',
+  );
+  return digest;
 }
 
 function readCategory(
@@ -519,6 +562,7 @@ describe('readAllReceiptCategories — every canonical category directory (PO-S0
     writeReceiptFile(stageGateReceiptDir(fx.root, stage), { type: 'GATE_PASS', stage_id: stage });
     writeReceiptFile(reviewReceiptDir(fx.root, stage), { type: 'STAGE_REVIEW_PASS', stage_id: stage });
     writeReceiptFile(projectReceiptDir(fx.root), { type: 'PROJECT_REVIEW_PASS', stage_id: stage });
+    writeStageCloseReceiptFile(stageCloseReceiptDir(fx.root, stage), stage);
 
     const all = readAllReceiptCategories({ projectRoot: fx.root, stageId: stage, sliceId: slice });
 
@@ -532,6 +576,25 @@ describe('readAllReceiptCategories — every canonical category directory (PO-S0
     expect(all.project.latest?.receipt.type).toBe('PROJECT_REVIEW_PASS');
 
     for (const category of RECEIPT_CONTENT_CATEGORIES) {
+      if (category === 'stage-close') {
+        // P-11: `stage-close` is the vNext-only content category. The persisted
+        // STAGE_CLOSE_PASS envelope is deliberately NOT a kernel ReceiptType,
+        // so the legacy reader seam fail-closes on it: the envelope is reported
+        // as a schema-mismatch invalid file and never becomes a fact, and the
+        // kernel chain verifier treats the vNext-only directory as not a valid
+        // kernel chain. The directory is still scanned (per-category coverage);
+        // the stage-close chain itself is read by the vNext chain reader
+        // (vnext/stage-close-admission.ts), not by this legacy seam.
+        expect(all[category].dir).toBe(stageCloseReceiptDir(fx.root, stage));
+        expect(all[category].chainValid).toBe(false);
+        expect(all[category].chainCondition?.code).toBe('RUNTIME.RECEIPT_CHAIN_BROKEN');
+        expect(all[category].receipts).toHaveLength(0);
+        expect(all[category].latest).toBeNull();
+        expect(all[category].misplaced).toHaveLength(0);
+        expect(all[category].invalidFiles).toHaveLength(1);
+        expect(all[category].invalidFiles[0].code).toBe('RUNTIME.SCHEMA_MISMATCH');
+        continue;
+      }
       expect(all[category].chainValid).toBe(true);
       expect(all[category].chainCondition).toBeNull();
       expect(all[category].misplaced).toHaveLength(0);

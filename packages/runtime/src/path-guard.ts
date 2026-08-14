@@ -1,13 +1,13 @@
 /**
  * @proofloop/runtime — shared trust-root path boundary helpers (S2-F-003)
  *
- * Runtime-owned mirror of the plugin `path-boundary.ts` semantics (CV
- * S02-B-INITIAL-PO01-SYMLINK, S02-B-RECHECK-PO01): resolve a path against the
- * canonical project-root trust boundary and enforce the boundary at EVERY
+ * Runtime-owned mirror of the retired plugin's `path-boundary.ts` semantics
+ * (CV S02-B-INITIAL-PO01-SYMLINK, S02-B-RECHECK-PO01): resolve a path against
+ * the canonical project-root trust boundary and enforce the boundary at EVERY
  * existing ancestor component — not just at the final target.
  *
- * The runtime package is independent and cannot import the plugin
- * (`@proofloop/opencode-plugin`), so this module re-implements the SAME
+ * The runtime package is independent (the plugin package was retired with the
+ * OpenCode plugin, 2026-08-14), so this module re-implements the SAME
  * component-wise walk semantics:
  *
  *   - walks the raw path component-by-component WITHOUT pre-collapsing `..`
@@ -29,9 +29,10 @@
  *     existing targets) when every component stays inside the root, else
  *     `null` — callers map `null` to their own fail-closed condition.
  *
- * Root canonicalization: the plugin's callers always pass an already-canonical
- * root (the plugin realpaths the worktree in `createRuntimeContext`), but the
- * runtime receives `projectRoot` from arbitrary callers. The root is therefore
+ * Root canonicalization: the retired plugin's callers always passed an
+ * already-canonical root (the plugin realpathed the worktree in
+ * `createRuntimeContext`), but the runtime receives `projectRoot` from
+ * arbitrary callers. The root is therefore
  * canonicalized first (realpath when it resolves) so a symlinked root (e.g.
  * macOS `/tmp` → `/private/tmp`) can neither cause false escapes nor hide an
  * escape. Existing legal-path read semantics are unchanged: the guard is a

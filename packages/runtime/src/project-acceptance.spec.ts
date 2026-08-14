@@ -23,8 +23,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { validateManifest, validateReceipt, verifyReceiptChain } from '@proofloop/kernel';
-import type { Manifest, ManifestSlice } from '@proofloop/kernel';
+import { validateVNextManifest, validateReceipt, verifyReceiptChain, computeDigest, computeReceiptDigest } from '@proofloop/kernel';
 import {
   compileProjectAcceptance,
   runProjectAcceptanceE2E,
@@ -48,6 +47,10 @@ afterEach(() => {
 });
 
 const SNAPSHOT_HEX16 = 'a1b2c3d4e5f6a7b8';
+/** vNext stage snapshot digest shape: 40-hex (git commit sha). */
+const SNAPSHOT_HEX40 = '15d873a0d06831be3f11fccd8042b536fd4f04d0';
+
+const HEX64_FILL = (seed: string): string => seed.repeat(64).slice(0, 64);
 
 interface RepoFx {
   /** Git repo root (project_root) — must stay clean between compile and E2E. */
@@ -104,39 +107,105 @@ function makeRepoFx(): RepoFx {
   return fx;
 }
 
-function makeStageManifest(): Manifest {
-  const slice: ManifestSlice = {
-    slice_id: 'S01-A',
-    goal: 'Stage fixture',
-    observable_outcome: 'gate evidence exists',
-    public_seam: 'fixture',
-    dependencies: [],
-    proof_obligations: [
+/** Minimal kernel-valid vNext stage manifest (version 2). */
+function makeVNextStageManifest(stageId: string): Record<string, unknown> {
+  return {
+    version: 2,
+    stage_id: stageId,
+    plan: {
+      ref: `delivery/stages/${stageId}/tasks.md`,
+      plan_digest: HEX64_FILL('a'),
+      schema_version: 2,
+    },
+    reference_index: {
+      'REF-GOAL': {
+        kind: 'goal',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/goal`,
+        file_digest: HEX64_FILL('b'),
+        section_digest: HEX64_FILL('c'),
+      },
+      'REF-TASK': {
+        kind: 'task',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/slice-task`,
+        file_digest: HEX64_FILL('d'),
+        section_digest: HEX64_FILL('e'),
+      },
+      'REF-ACCEPT': {
+        kind: 'acceptance',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/acceptance`,
+        file_digest: HEX64_FILL('f'),
+        section_digest: HEX64_FILL('a'),
+      },
+      'REF-SEAM': {
+        kind: 'seam',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/seam`,
+        file_digest: HEX64_FILL('b'),
+        section_digest: HEX64_FILL('c'),
+      },
+      'REF-ORACLE': {
+        kind: 'oracle',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/oracle`,
+        file_digest: HEX64_FILL('d'),
+        section_digest: HEX64_FILL('e'),
+      },
+    },
+    slices: [
       {
-        po_id: 'PO-S01-A-01',
-        behavior: 'fixture behavior',
-        public_seam: 'fixture',
-        oracle_source: 'fixture oracle',
-        success_criteria: 'fixture passes',
-        required_observation: 'fixture observation',
-        applicable_risk_facts: ['none'],
+        slice_id: `${stageId}-A`,
+        proof_index: {
+          slice_id: `${stageId}-A`,
+          goal_ref: 'REF-GOAL',
+          task_refs: ['REF-TASK'],
+          acceptance_refs: ['REF-ACCEPT'],
+          seam_refs: ['REF-SEAM'],
+          oracle_refs: ['REF-ORACLE'],
+          risk_refs: [],
+        },
+        required_skills: ['typescript'],
+        depends_on: [],
+        evidence_path: `delivery/stages/${stageId}/evidence/${stageId}-A.md`,
       },
     ],
-    tasks: ['S01-A-T01'],
-    risk_facts: ['none'],
-    evidence_path: `delivery/stages/S01/evidence/S01-A.md`,
-    cv_minimum_level: 'lite',
+    task_scopes: {
+      'slice-task': {
+        task_ref: `delivery/stages/${stageId}/tasks.md#/entities/slice-task`,
+        execution_scope: { kind: 'implementation', code_paths: ['src'], test_paths: ['test'], forbidden_paths: [] },
+      },
+    },
   };
-  return {
-    stage_id: 'S01',
-    source_path: 'delivery/stages/S01/tasks.md',
-    source_digest: 'f'.repeat(64),
-    stage_goal: 'Stage fixture goal',
-    outcomes: ['gate evidence exists'],
-    slices: [slice],
-    dependencies: [],
-    risk_facts: ['none'],
+}
+
+/** Build a vNext stage evidence envelope (STAGE_REVIEW_PASS / GATE_PASS) with a valid self-digest. */
+function makeVNextEnvelope(opts: {
+  type: 'STAGE_REVIEW_PASS' | 'GATE_PASS';
+  stageId: string;
+  verdict: string;
+  manifestDigest: string;
+  snapshotDigest: string;
+  stageGateReceiptDigest?: string;
+  timestamp?: string;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    action: opts.type === 'STAGE_REVIEW_PASS' ? 'STAGE_REVIEW' : 'GATE',
+    type: opts.type === 'STAGE_REVIEW_PASS' ? 'STAGE_REVIEW_RESULT' : 'GATE_RESULT',
+    schema_version: 2,
+    verdict: opts.verdict,
+    stage_id: opts.stageId,
+    manifest_digest: opts.manifestDigest,
+    snapshot_digest: opts.snapshotDigest,
+    receipt_chain_valid: true,
   };
+  if (opts.stageGateReceiptDigest !== undefined) {
+    payload['stage_gate_receipt_digest'] = opts.stageGateReceiptDigest;
+  }
+  const envelope = {
+    version: 1,
+    type: opts.type,
+    stage_id: opts.stageId,
+    timestamp: opts.timestamp ?? '2025-01-01T00:00:00.000Z',
+    payload,
+  };
+  return { ...envelope, digest: computeReceiptDigest(envelope as never) };
 }
 
 interface StageEvidence {
@@ -148,46 +217,41 @@ interface StageEvidence {
   readonly gateDigest: string;
 }
 
-/** Write stage manifest + review + gate with full triple-binding consistency. */
+/** Write vNext stage manifest + review + gate with full triple-binding consistency. */
 function writeStageEvidence(fx: RepoFx): StageEvidence {
-  // a. Stage manifest (kernel-valid; canonical digest binding).
-  const stageManifest = makeStageManifest();
+  // a. Stage manifest (v2 vNext manifest; canonical 64-hex digest binding).
+  const stageManifest = makeVNextStageManifest('S01');
   const stageManifestPath = path.join(fx.artifacts, 'stage-manifest-S01.json');
   fs.writeFileSync(stageManifestPath, JSON.stringify(stageManifest, null, 2), 'utf-8');
-  validateManifest(JSON.parse(fs.readFileSync(stageManifestPath, 'utf-8')));
-  const stageManifestDigest = computeCanonicalJsonDigest(
-    JSON.parse(fs.readFileSync(stageManifestPath, 'utf-8')),
-  );
+  const parsedManifest = JSON.parse(fs.readFileSync(stageManifestPath, 'utf-8'));
+  validateVNextManifest(parsedManifest);
+  const stageManifestDigest = computeDigest(parsedManifest);
 
-  // b. Stage gate receipt (PASS, manifest_digest bound).
-  const gate = {
-    stage_id: 'S01',
-    snapshot: SNAPSHOT_HEX16,
-    manifest_digest: stageManifestDigest,
-    platform: 'linux',
+  // b. Stage gate receipt: GATE_PASS envelope (PASS, manifest_digest bound).
+  const gate = makeVNextEnvelope({
+    type: 'GATE_PASS',
+    stageId: 'S01',
     verdict: 'PASS',
-    steps: [{ id: 'build', exit_code: 0 }],
-    service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
-    timestamps: { started_at: '2025-01-01T00:00:00.000Z', completed_at: '2025-01-01T00:00:05.000Z' },
-  };
+    manifestDigest: stageManifestDigest,
+    snapshotDigest: SNAPSHOT_HEX40,
+  });
   const gatePath = path.join(fx.artifacts, 'stage-gate-S01.json');
   fs.writeFileSync(gatePath, JSON.stringify(gate, null, 2), 'utf-8');
-  const gateDigest = fileDigest16(gatePath);
+  const gateDigest = gate['digest'] as string;
 
-  // c. Stage review receipt (ACCEPTED; stage_gate_receipt triple-bound).
-  const review = {
-    stage_id: 'S01',
+  // c. Stage review receipt: STAGE_REVIEW_PASS envelope (ACCEPTED;
+  //    stage_gate_receipt_digest triple-bound to the gate envelope digest).
+  const review = makeVNextEnvelope({
+    type: 'STAGE_REVIEW_PASS',
+    stageId: 'S01',
     verdict: 'ACCEPTED',
-    snapshot: SNAPSHOT_HEX16,
-    manifest_digest: stageManifestDigest,
-    stage_gate_receipt: { path: gatePath, digest: gateDigest },
-    findings: [],
-    reviewer: 'stage-reviewer',
-    reviewed_at: '2025-01-01T00:00:10.000Z',
-  };
+    manifestDigest: stageManifestDigest,
+    snapshotDigest: SNAPSHOT_HEX40,
+    stageGateReceiptDigest: gateDigest,
+  });
   const reviewPath = path.join(fx.artifacts, 'stage-review-S01.json');
   fs.writeFileSync(reviewPath, JSON.stringify(review, null, 2), 'utf-8');
-  const reviewDigest = fileDigest16(reviewPath);
+  const reviewDigest = review['digest'] as string;
 
   return { stageManifestPath, stageManifestDigest, reviewPath, reviewDigest, gatePath, gateDigest };
 }
@@ -665,7 +729,19 @@ describe('finalizeProjectReview (FINALIZE_PROJECT_REVIEW)', () => {
     expect(validated.payload.criteria_results).toHaveLength(2);
     const payloadStageReceipts = (validated.payload as { stage_receipts?: unknown[] }).stage_receipts ?? [];
     expect(payloadStageReceipts).toHaveLength(1);
-    expect((payloadStageReceipts[0] as { stage_id: string }).stage_id).toBe('S01');
+    const sr = payloadStageReceipts[0] as {
+      stage_id: string;
+      review: { digest: string };
+      gate: { digest: string };
+      stage_manifest: { digest: string };
+      snapshot: string;
+    };
+    expect(sr.stage_id).toBe('S01');
+    // vNext stage digests: manifest/review/gate are 64-hex, snapshot is 40-hex.
+    expect(sr.stage_manifest.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(sr.review.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(sr.gate.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(sr.snapshot).toMatch(/^[a-f0-9]{40}$/);
     const payloadE2ERef = validated.payload.project_e2e_receipt as { path: string; digest: string };
     expect(payloadE2ERef.path).toBe(path.resolve(e2e.receiptPath!));
     expect(payloadE2ERef.digest).toBe(fileDigest16(e2e.receiptPath!));
@@ -774,13 +850,14 @@ describe('finalizeProjectReview (FINALIZE_PROJECT_REVIEW)', () => {
     expect(result.errors.join('\n')).toContain('Manifest not found');
   });
 
-  it('rejects a tampered stage gate triple-binding (digest mismatch)', async () => {
+  it('rejects a tampered stage gate envelope (self-digest broken, digest-addressed)', async () => {
     const { fx, manifestPath, e2e, reviewerPath } = await buildChain();
-    // Tamper the stage gate file AFTER the manifest was bound → triple binding breaks.
+    // Tamper the stage gate payload AFTER the manifest was bound → the
+    // envelope self-digest no longer matches its content → fail closed.
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
     const gatePath = manifest.stage_receipts[0].gate_receipt.path;
     const gate = JSON.parse(fs.readFileSync(gatePath, 'utf-8'));
-    gate.steps = [{ id: 'tampered', exit_code: 0 }];
+    (gate.payload as Record<string, unknown>)['summary'] = 'tampered';
     fs.writeFileSync(gatePath, JSON.stringify(gate, null, 2), 'utf-8');
 
     const result = finalizeProjectReview({
@@ -790,7 +867,185 @@ describe('finalizeProjectReview (FINALIZE_PROJECT_REVIEW)', () => {
       outputDir: fx.receiptsDir,
     });
     expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('self-digest mismatch');
+    expect(result.receiptPath).toBeUndefined();
+  });
+
+  /** Compile → run-e2e → reviewer → finalize over an arbitrary (possibly mutated) stage evidence set. */
+  async function finalizeWithStage(fx: RepoFx, stage: StageEvidence) {
+    const manifestPath = path.join(fx.artifacts, 'project-manifest.json');
+    const compiled = compileProjectAcceptance(compileInput(fx, stage, passingSteps()), manifestPath);
+    expect(compiled.success).toBe(true);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    const e2e = await runProjectAcceptanceE2E(manifest, {
+      projectRoot: fx.root,
+      receiptDir: fx.receiptsDir,
+    });
+    expect(e2e.success).toBe(true);
+    const reviewerPath = writeReviewerResult(
+      fx,
+      manifestPath,
+      computeCanonicalJsonDigest(manifest),
+      e2e.receiptPath!,
+      fileDigest16(e2e.receiptPath!),
+      manifest.expected_snapshot,
+      manifest.acceptance_criteria,
+    );
+    return finalizeProjectReview({
+      manifestPath,
+      e2eReceiptPath: e2e.receiptPath!,
+      reviewerResultPath: reviewerPath,
+      outputDir: fx.receiptsDir,
+    });
+  }
+
+  it('rejects a stage manifest digest mismatch (vNext canonical digest binding)', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    // Tamper the stage manifest AFTER binding: the canonical digest changes
+    // while the declared digest stays the original → mismatch.
+    const manifest = JSON.parse(fs.readFileSync(stage.stageManifestPath, 'utf-8'));
+    (manifest.plan as Record<string, unknown>)['plan_digest'] = 'f'.repeat(64);
+    fs.writeFileSync(stage.stageManifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, stage);
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('declared digest');
+    expect(result.receiptPath).toBeUndefined();
+  });
+
+  it('rejects a review verdict other than ACCEPTED', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    const review = makeVNextEnvelope({
+      type: 'STAGE_REVIEW_PASS',
+      stageId: 'S01',
+      verdict: 'REJECTED',
+      manifestDigest: stage.stageManifestDigest,
+      snapshotDigest: SNAPSHOT_HEX40,
+      stageGateReceiptDigest: stage.gateDigest,
+    });
+    fs.writeFileSync(stage.reviewPath, JSON.stringify(review, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, { ...stage, reviewDigest: review['digest'] as string });
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('expected "ACCEPTED"');
+  });
+
+  it('rejects a gate verdict other than PASS', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    const gate = makeVNextEnvelope({
+      type: 'GATE_PASS',
+      stageId: 'S01',
+      verdict: 'FAIL',
+      manifestDigest: stage.stageManifestDigest,
+      snapshotDigest: SNAPSHOT_HEX40,
+    });
+    fs.writeFileSync(stage.gatePath, JSON.stringify(gate, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, { ...stage, gateDigest: gate['digest'] as string });
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('expected "PASS"');
+  });
+
+  it('rejects a review↔gate snapshot mismatch', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    const review = makeVNextEnvelope({
+      type: 'STAGE_REVIEW_PASS',
+      stageId: 'S01',
+      verdict: 'ACCEPTED',
+      manifestDigest: stage.stageManifestDigest,
+      snapshotDigest: '9'.repeat(40),
+      stageGateReceiptDigest: stage.gateDigest,
+    });
+    fs.writeFileSync(stage.reviewPath, JSON.stringify(review, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, { ...stage, reviewDigest: review['digest'] as string });
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('Review snapshot');
+    expect(result.errors.join('\n')).toContain('Gate snapshot');
+  });
+
+  it('rejects a stage_id mismatch between the review/gate and the manifest entry', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    const review = makeVNextEnvelope({
+      type: 'STAGE_REVIEW_PASS',
+      stageId: 'S99',
+      verdict: 'ACCEPTED',
+      manifestDigest: stage.stageManifestDigest,
+      snapshotDigest: SNAPSHOT_HEX40,
+      stageGateReceiptDigest: stage.gateDigest,
+    });
+    fs.writeFileSync(stage.reviewPath, JSON.stringify(review, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, { ...stage, reviewDigest: review['digest'] as string });
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('Review stage_id "S99" != manifest entry "S01"');
+  });
+
+  it('rejects a broken review→gate triple binding (stage_gate_receipt_digest mismatch)', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    const review = makeVNextEnvelope({
+      type: 'STAGE_REVIEW_PASS',
+      stageId: 'S01',
+      verdict: 'ACCEPTED',
+      manifestDigest: stage.stageManifestDigest,
+      snapshotDigest: SNAPSHOT_HEX40,
+      stageGateReceiptDigest: 'f'.repeat(64),
+    });
+    fs.writeFileSync(stage.reviewPath, JSON.stringify(review, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, { ...stage, reviewDigest: review['digest'] as string });
+    expect(result.success).toBe(false);
     expect(result.errors.join('\n')).toContain('triple binding');
+  });
+
+  it('rejects legacy/v1 stage manifests (archived stages are not part of acceptance)', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    // Strip the version discriminator → v1 legacy manifest → fail closed.
+    const legacy = JSON.parse(fs.readFileSync(stage.stageManifestPath, 'utf-8'));
+    delete (legacy as Record<string, unknown>)['version'];
+    fs.writeFileSync(stage.stageManifestPath, JSON.stringify(legacy, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, stage);
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('not a vNext manifest');
+    expect(result.errors.join('\n')).toContain('archived and not part of acceptance');
+    expect(result.receiptPath).toBeUndefined();
+  });
+
+  it('rejects legacy flat review/gate receipts (envelope schema fail closed)', async () => {
+    const fx = makeRepoFx();
+    fx.commitAll();
+    const stage = writeStageEvidence(fx);
+    // Replace the review envelope with a legacy flat receipt (no envelope).
+    const legacyReview = {
+      stage_id: 'S01',
+      verdict: 'ACCEPTED',
+      snapshot: SNAPSHOT_HEX16,
+      manifest_digest: stage.stageManifestDigest.slice(0, 16),
+      stage_gate_receipt: { path: stage.gatePath, digest: stage.gateDigest.slice(0, 16) },
+      findings: [],
+      reviewer: 'stage-reviewer',
+      reviewed_at: '2025-01-01T00:00:10.000Z',
+    };
+    fs.writeFileSync(stage.reviewPath, JSON.stringify(legacyReview, null, 2), 'utf-8');
+
+    const result = await finalizeWithStage(fx, stage);
+    expect(result.success).toBe(false);
+    expect(result.errors.join('\n')).toContain('kernel envelope');
     expect(result.receiptPath).toBeUndefined();
   });
 

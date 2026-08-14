@@ -25,8 +25,8 @@
  *   Row 5  — pending CV result envelope → ADMIT_CV_RESULT
  *            (counterexample: never RUN_CV; S02 never guesses the S03 CV
  *            envelope schema — pipeline fail-closed pinned too)
- *   Row 6  — CV_REPAIR branch: 6c repair / 6d diagnose / 6b recheck / 6e
- *            UNRESOLVED_CV_FAILURE fallback (all four real fixtures)
+ *   Row 6  — CV_REPAIR branch: 6c repair / 6d repair (second) / 6b recheck /
+ *            6e UNRESOLVED_CV_FAILURE fallback (all four real fixtures)
  *   Row 7  — READY_FOR_CV without CV receipt → RUN_CV (initial)
  *   Row 8  — slice CV_PASSED without SLICE_COMMIT → ADMIT_SLICE_COMMIT
  *   Row 9  — slice committed without INTEGRATION_PASS → ADMIT_INTEGRATION
@@ -508,8 +508,8 @@ function repairFx(stageId = 'S02'): { fx: Fx; head: string } {
   return { fx, head };
 }
 
-/** Row 6d fixture: EXECUTING + CV_REPAIR×2 (count 2) → diagnose. */
-function diagnoseFx(stageId = 'S02'): { fx: Fx; head: string } {
+/** Row 6d fixture: EXECUTING + CV_REPAIR×2 (count 2) → repair (second). */
+function secondRepairFx(stageId = 'S02'): { fx: Fx; head: string } {
   const { fx, head } = planFx(stageId);
   const r1 = fx.writeReceipt('cv', 'S02-A', {
     type: 'CV_REPAIR',
@@ -926,10 +926,10 @@ describe('row 5: pending CV result envelope → ADMIT_CV_RESULT (real fixture)',
 });
 
 // ============================================================
-// Row 6 — READY_FOR_CV + latest CV fact CV_REPAIR (repair/diagnose/recheck)
+// Row 6 — READY_FOR_CV + latest CV fact CV_REPAIR (repair/recheck)
 // ============================================================
 
-describe('row 6: CV_REPAIR branch → repair / diagnose / recheck (real fixtures)', () => {
+describe('row 6: CV_REPAIR branch → repair / recheck (real fixtures)', () => {
   it('6c: CV_REPAIR count 1 → DISPATCH_WORKER mode=repair', () => {
     const { fx } = repairFx();
     const out = pipeline(fx, fx.stageId);
@@ -938,11 +938,11 @@ describe('row 6: CV_REPAIR branch → repair / diagnose / recheck (real fixtures
     expect(out.action_detail).toContain('S02-A');
   });
 
-  it('6d: CV_REPAIR count 2 → DISPATCH_WORKER mode=diagnose', () => {
-    const { fx } = diagnoseFx();
+  it('6d: CV_REPAIR count 2 → DISPATCH_WORKER mode=repair (second repair)', () => {
+    const { fx } = secondRepairFx();
     const out = pipeline(fx, fx.stageId);
     expect(out.action).toBe('DISPATCH_WORKER');
-    expect(out.action_detail).toContain('mode=diagnose');
+    expect(out.action_detail).toContain('mode=repair');
   });
 
   it('6e: CV_REPAIR count ≥ 3 → VALIDATE fallback UNRESOLVED_CV_FAILURE', () => {

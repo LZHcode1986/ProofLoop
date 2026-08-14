@@ -1,18 +1,16 @@
 /**
  * cli-entries.spec.ts — PO-S03-H-01 call matrix (S03-H-T01)
  *
- * Call matrix (success + failure case per entry) for the six remaining new
- * runtime CLI entries:
+ * Call matrix (success + failure case per entry) for the remaining runtime
+ * CLI entries:
  *
- *   initialize-slice-evidence  — skeleton creation, no-overwrite, traversal guard
- *   next-action                — path-only input → NextActionService output
- *   sync-cv-status             — reconcile-derived CV status (read-only)
- *   admit                      — 7 S02 admit operations through the pipeline
- *   prepare-gate-facts         — reconcile + git clean + HEAD + integrated
- *   run-gate                   — runtime_proof step execution incl. service
- *                                lifecycle (B1b) + command/probe oracles
+ *   next-action     — path-only input → NextActionService output
+ *   admit           — 7 S02 admit operations through the pipeline
+ *   run-gate        — Gate over v1 facts / vNext integration prefix (never
+ *                     executes runtime_proof steps; lifecycle (B1b) +
+ *                     command/probe oracles)
  *
- * plus the dist-script usage matrix for all eight entries (callable via
+ * plus the dist-script usage matrix for the remaining entries (callable via
  * `node packages/runtime/dist/cli/<tool>.js` with the legacy arg contract).
  *
  * No mocks: real temp dirs / real git repos / real receipts. Forbidden
@@ -21,7 +19,7 @@
  * verify the service-contract output shapes, not ad-hoc derivation.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -37,12 +35,9 @@ import {
 import type { Manifest, ManifestSlice } from '@proofloop/kernel';
 import { receiptCategoryDir, reconcileStage } from '@proofloop/runtime';
 import type { ReceiptContentCategory } from '@proofloop/runtime';
-import { initializeSliceEvidence } from './initialize-slice-evidence';
 import { nextActionFromInput } from './next-action';
-import { syncCvStatus } from './sync-cv-status';
 import { admitRequest } from './admit';
-import { prepareGateFacts } from './prepare-gate-facts';
-import { runGate } from './run-gate';
+import { runGate, runGateCli } from './run-gate';
 
 // ============================================================
 // Fixture helpers
@@ -233,65 +228,6 @@ function fxIntegrated(): Fx {
 }
 
 // ============================================================
-// initialize-slice-evidence
-// ============================================================
-
-describe('initialize-slice-evidence (PO-S03-H-01)', () => {
-  it('creates the standard evidence skeleton for every slice', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-init-ev-'));
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = makeManifest([sliceDef('S03-A', ['S03-A-T01']), sliceDef('S03-B', ['S03-B-T01'])]);
-    const result = initializeSliceEvidence({ manifest, deliveryRoot: dir });
-    expect(result.errors).toEqual([]);
-    expect(result.created).toHaveLength(2);
-    expect(result.skipped).toEqual([]);
-    for (const slice of manifest.slices) {
-      const p = path.join(dir, slice.evidence_path);
-      expect(fs.existsSync(p)).toBe(true);
-      const content = fs.readFileSync(p, 'utf-8');
-      expect(content).toContain(`# Slice ${slice.slice_id} Evidence`);
-      expect(content).toContain('## Current CV Status');
-      expect(content).toContain('## Task Evidence');
-    }
-  });
-
-  it('never overwrites an existing non-empty evidence file', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-init-ev-'));
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = makeManifest();
-    const evidencePath = path.join(dir, manifest.slices[0].evidence_path);
-    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    fs.writeFileSync(evidencePath, 'PRECIOUS CONTENT', 'utf-8');
-    const result = initializeSliceEvidence({ manifest, deliveryRoot: dir });
-    expect(result.created).toEqual([]);
-    expect(result.skipped).toHaveLength(1);
-    expect(fs.readFileSync(evidencePath, 'utf-8')).toBe('PRECIOUS CONTENT');
-  });
-
-  it('rejects evidence paths that escape the canonical evidence directory', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-init-ev-'));
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = makeManifest();
-    manifest.slices[0] = {
-      ...manifest.slices[0],
-      evidence_path: 'delivery/stages/S03/evidence/../S03-H.md',
-    };
-    const result = initializeSliceEvidence({ manifest, deliveryRoot: dir });
-    expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.created).toEqual([]);
-  });
-
-  it('rejects a non-canonical evidence_path pattern', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-init-ev-'));
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = makeManifest();
-    manifest.slices[0] = { ...manifest.slices[0], evidence_path: 'custom/path.md' };
-    const result = initializeSliceEvidence({ manifest, deliveryRoot: dir });
-    expect(result.errors.length).toBeGreaterThan(0);
-  });
-});
-
-// ============================================================
 // next-action
 // ============================================================
 
@@ -333,87 +269,6 @@ describe('next-action (PO-S03-H-01)', () => {
     expect(() => nextActionFromInput({ stage_id: STAGE_ID })).toThrow(/project_root/i);
     expect(() => nextActionFromInput({ project_root: '.' })).toThrow(/stage_id/i);
     expect(() => nextActionFromInput('nope')).toThrow(/object/i);
-  });
-});
-
-// ============================================================
-// sync-cv-status
-// ============================================================
-
-describe('sync-cv-status (PO-S03-H-01, read-only derive)', () => {
-  it('derives the CV status snapshot from reconcile without writing anything', () => {
-    const fx = makeFx();
-    fx.writeManifest();
-    fx.writeTasksMd([...TASKS]);
-    fx.writeEvidence(true);
-    fx.seedReceipt('tasks', { payload: { mode: 'finalize-slice' } });
-    fx.commitAll();
-    const evidenceContentBefore = fs.readFileSync(
-      path.join(fx.root, `delivery/stages/${STAGE_ID}/evidence/${SLICE_ID}.md`),
-      'utf-8',
-    );
-    const out = syncCvStatus({ stageId: STAGE_ID, sliceId: SLICE_ID, projectRoot: fx.root });
-    expect(out.success).toBe(true);
-    expect(out.stage_id).toBe(STAGE_ID);
-    expect(out.slice_id).toBe(SLICE_ID);
-    expect(out.slice_state).toBe(SliceState.READY_FOR_CV);
-    expect(out.cv_status).toBe(CVStatus.NOT_STARTED);
-    expect(out.latest_cv_receipt).toBeNull();
-    expect(out.cv_level).toBe('enhanced');
-    expect(out.evidence_file_present).toBe(true);
-    // read-only: the evidence file must be byte-identical
-    expect(
-      fs.readFileSync(path.join(fx.root, `delivery/stages/${STAGE_ID}/evidence/${SLICE_ID}.md`), 'utf-8'),
-    ).toBe(evidenceContentBefore);
-  });
-
-  it('reports CV_PASS receipt facts when a CV_PASS receipt exists', () => {
-    const fx = makeFx();
-    fx.writeManifest();
-    fx.writeTasksMd([...TASKS]);
-    fx.writeEvidence(true);
-    fx.seedReceipt('tasks', { payload: { mode: 'finalize-slice' } });
-    const cv = fx.seedReceipt('cv', {
-      type: 'CV_PASS',
-      timestamp: '2025-01-02T00:00:00.000Z',
-      payload: { verdict: 'PASS', snapshot_digest: FAKE_SHA, summary: 'pass' },
-    });
-    fx.commitAll();
-    const out = syncCvStatus({ stageId: STAGE_ID, sliceId: SLICE_ID, projectRoot: fx.root });
-    expect(out.success).toBe(true);
-    expect(out.cv_status).toBe(CVStatus.PASS);
-    expect(out.latest_cv_receipt?.type).toBe('CV_PASS');
-    expect(out.latest_cv_receipt?.digest).toBe(cv.digest);
-    expect(out.open_finding).toBeNull();
-  });
-
-  it('reports an open finding for a CV_REPAIR receipt', () => {
-    const fx = makeFx();
-    fx.writeManifest();
-    fx.writeTasksMd([...TASKS]);
-    fx.writeEvidence(true);
-    fx.seedReceipt('tasks', { payload: { mode: 'finalize-slice' } });
-    fx.seedReceipt('cv', {
-      type: 'CV_REPAIR',
-      timestamp: '2025-01-02T00:00:00.000Z',
-      payload: { verdict: 'REPAIR', snapshot_digest: FAKE_SHA, summary: 'scope gap' },
-    });
-    fx.commitAll();
-    const out = syncCvStatus({ stageId: STAGE_ID, sliceId: SLICE_ID, projectRoot: fx.root });
-    expect(out.success).toBe(true);
-    expect(out.cv_status).toBe(CVStatus.REPAIR);
-    expect(out.latest_cv_receipt?.type).toBe('CV_REPAIR');
-    expect(out.open_finding).toContain('scope gap');
-  });
-
-  it('fails closed for an unknown slice', () => {
-    const fx = makeFx();
-    fx.writeManifest();
-    fx.writeTasksMd([]);
-    fx.commitAll();
-    const out = syncCvStatus({ stageId: STAGE_ID, sliceId: 'S99-Z', projectRoot: fx.root });
-    expect(out.success).toBe(false);
-    expect(out.error).toMatch(/not found/i);
   });
 });
 
@@ -493,57 +348,6 @@ describe('admit (PO-S03-H-01, 7 S02 operations)', () => {
 });
 
 // ============================================================
-// prepare-gate-facts
-// ============================================================
-
-describe('prepare-gate-facts (PO-S03-H-01)', () => {
-  it('writes slice-complete facts for an all-integrated clean stage', () => {
-    const fx = fxIntegrated();
-    const input = {
-      stage_id: STAGE_ID,
-      project_root: fx.root,
-      manifest_path: `.proofloop/manifests/${STAGE_ID}.json`,
-      tasks_path: `delivery/stages/${STAGE_ID}/tasks.md`,
-    };
-    const result = prepareGateFacts(input);
-    expect(result.success).toBe(true);
-    expect(result.path).toContain(`.proofloop${path.sep}runtime${path.sep}${STAGE_ID}${path.sep}slice-complete-facts.json`);
-    expect(fs.existsSync(result.path as string)).toBe(true);
-    const facts = JSON.parse(fs.readFileSync(result.path as string, 'utf-8')) as Array<Record<string, unknown>>;
-    expect(facts).toHaveLength(1);
-    expect(facts[0]['slice_id']).toBe(SLICE_ID);
-    expect(facts[0]['integrated']).toBe(true);
-    expect(facts[0]['git_clean']).toBe(true);
-    expect(facts[0]['head_sha']).toBe(fx.head());
-  });
-
-  it('refuses when a slice is not integrated (no facts file written)', () => {
-    const fx = makeFx();
-    fx.writeManifest();
-    fx.writeTasksMd([...TASKS]);
-    fx.writeEvidence(true);
-    fx.commitAll();
-    const result = prepareGateFacts({ stage_id: STAGE_ID, project_root: fx.root });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/not every slice is integrated/i);
-    expect(fs.existsSync(path.join(fx.root, '.proofloop', 'runtime', STAGE_ID, 'slice-complete-facts.json'))).toBe(false);
-  });
-
-  it('refuses when the working tree is not clean', () => {
-    const fx = fxIntegrated();
-    fx.write('uncommitted.txt', 'dirty');
-    const result = prepareGateFacts({ stage_id: STAGE_ID, project_root: fx.root });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/not clean/i);
-  });
-
-  it('fails closed on missing identity fields', () => {
-    const result = prepareGateFacts({ stage_id: '', project_root: '' } as never);
-    expect(result.success).toBe(false);
-  });
-});
-
-// ============================================================
 // run-gate
 // ============================================================
 
@@ -554,30 +358,11 @@ function gateManifest(steps: Array<Record<string, unknown>>): Manifest {
   };
 }
 
-describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
-  it('PASSes when every slice fact is present and every step exits as expected', async () => {
+describe('run-gate (PO-S03-H-01, facts-only Gate; runtime_proof steps are never executed)', () => {
+  it('PASSes when every slice fact is present — no runtime_proof steps are executed (steps stay empty)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = gateManifest([
-      {
-        id: 'ok',
-        type: 'command',
-        executable: 'node',
-        args: ['-e', 'process.exit(0)'],
-        cwd: '.',
-        timeout_ms: 10000,
-        expected: { exit_code: 0 },
-      },
-      {
-        id: 'na',
-        type: 'service_start',
-        executable: 'node',
-        args: ['--version'],
-        cwd: '.',
-        timeout_ms: 10000,
-        not_applicable: { reason: 'library-only stage' },
-      },
-    ]);
+    const manifest = gateManifest([]);
     const manifestPath = path.join(dir, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
     const factsPath = path.join(dir, 'facts.json');
@@ -590,15 +375,14 @@ describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
     expect(result.gate).toBe('PASS');
     expect(result.success).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.steps[0]).toMatchObject({ id: 'ok', passed: true, exit_code: 0 });
-    expect(result.steps[1]).toMatchObject({ id: 'na', passed: true, skipped: true });
+    expect(result.steps).toEqual([]);
     // result file written
     expect(fs.existsSync(result.output_path as string)).toBe(true);
     const written = JSON.parse(fs.readFileSync(result.output_path as string, 'utf-8'));
     expect(written.gate).toBe('PASS');
   });
 
-  it('FAILs when a step exits with a non-expected code', async () => {
+  it('FAILs when a step in the (ignored) runtime_proof list would have failed — facts still decide', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const manifest = gateManifest([
@@ -617,10 +401,9 @@ describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
     const factsPath = path.join(dir, 'facts.json');
     fs.writeFileSync(factsPath, JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
     const result = await runGate({ manifestPath, factsPath, outputDir: path.join(dir, 'out'), projectRoot: dir });
-    expect(result.gate).toBe('FAIL');
-    expect(result.success).toBe(false);
-    expect(result.steps[0].exit_code).toBe(3);
-    expect(result.errors.join(' ')).toContain('exited 3');
+    expect(result.gate).toBe('PASS');
+    expect(result.success).toBe(true);
+    expect(result.steps).toEqual([]);
   });
 
   it('FAILs when a manifest slice has no integrated fact', async () => {
@@ -651,30 +434,6 @@ describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
     expect(result.errors.join(' ')).toContain('undeclared slice');
   });
 
-  it('FAILs when a service_start cannot be spawned (service lifecycle implemented)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
-    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const manifest = gateManifest([
-      {
-        id: 'svc',
-        type: 'service_start',
-        executable: 'definitely-not-a-real-binary-xyz',
-        args: [],
-        cwd: '.',
-        timeout_ms: 10000,
-      },
-    ]);
-    const manifestPath = path.join(dir, 'manifest.json');
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
-    const factsPath = path.join(dir, 'facts.json');
-    fs.writeFileSync(factsPath, JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
-    const result = await runGate({ manifestPath, factsPath, projectRoot: dir });
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0].passed).toBe(false);
-    expect(result.errors.join(' ')).toContain('service_start');
-    expect(result.errors.join(' ')).toContain('failed');
-  });
-
   it('FAILs closed when the manifest or facts file is unreadable/invalid', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-'));
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -691,24 +450,63 @@ describe('run-gate (PO-S03-H-01, runtime proof + service lifecycle)', () => {
   it('kernel oracle: gateManifest output is a valid Manifest', () => {
     expect(() => validateManifest(gateManifest([]))).not.toThrow();
   });
+
+  it('runGateCli routes a vNext Manifest to the canonical Gate (exit 1 without an integrated prefix, no gate result written)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-vnext-'));
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, '.proofloop/manifests/S04.json'), 'utf8'),
+    ) as Record<string, any>;
+    manifest.task_scopes = {
+      'S04-A-T01': {
+        task_ref: 'delivery/stages/S04/tasks.md#/entities/S04-A-T01',
+        execution_scope: {
+          kind: 'implementation',
+          code_paths: ['delivery/stages/S04/tasks.md'],
+          test_paths: ['packages/worker-test.ts'],
+          forbidden_paths: ['.proofloop/receipts', '.git'],
+        },
+      },
+    };
+    const manifestPath = path.join(dir, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf-8');
+    const outDir = path.join(dir, 'out');
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((message: unknown) => {
+      logs.push(String(message));
+    });
+    const code = await runGateCli([manifestPath, '', outDir, dir]);
+    logSpy.mockRestore();
+    expect(code).toBe(1);
+    // The Gate failed honestly on the missing integrated prefix — the gate
+    // result file may be written (honest FAIL); the verdict is not a PASS.
+    const written = fs.existsSync(path.join(outDir, 'gate-result.json'))
+      ? JSON.parse(fs.readFileSync(path.join(outDir, 'gate-result.json'), 'utf8')) as { gate: string }
+      : null;
+    expect(written === null || written.gate === 'FAIL').toBe(true);
+  });
 });
 
 // ============================================================
-// dist-script usage matrix — all 8 entries callable via dist
+// dist-script usage matrix — remaining entries callable via dist
 // ============================================================
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const DIST_CLI_DIR = path.join(REPO_ROOT, 'packages', 'runtime', 'dist', 'cli');
 
 const CLI_TOOLS = [
-  'compile-manifest',
-  'validate-stage',
-  'initialize-slice-evidence',
   'next-action',
-  'sync-cv-status',
   'admit',
-  'prepare-gate-facts',
   'run-gate',
+  // S10-A-T01: the public harness-neutral `proofloop` dispatcher joins the
+  // same dist callability matrix (no args → usage + exit 1).
+  'proofloop',
+  // S10-E-T02: the cutover domain entry joins the same dist callability
+  // matrix (no args → usage + exit 1).  Legacy entries removed by cutover /
+  // plugin retirement: compile-manifest / validate-stage /
+  // initialize-slice-evidence / sync-cv-status / prepare-gate-facts were
+  // deleted from the runtime CLI.
+  'proofloop-cutover',
 ] as const;
 
 describe('dist script callability matrix (PO-S03-H-01: node packages/runtime/dist/cli/<tool>.js)', () => {
@@ -782,5 +580,122 @@ describe('dist script callability matrix (PO-S03-H-01: node packages/runtime/dis
     const out = JSON.parse(res.stdout) as { action: string };
     expect(typeof out.action).toBe('string');
     expect(out.action.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================
+// S10-E-T02 repair: cutover 域 public dispatcher 路径（唯一 public seam）
+// ============================================================
+
+describe('proofloop cutover public dispatcher path (S10-E-T02 repair, REF-CLI-ACCEPTANCE F)', () => {
+  const PROOFLOOP_DIST = path.join(DIST_CLI_DIR, 'proofloop.js');
+
+  it('proofloop.js cutover status 经 public dispatcher 可达（exit 0 canonical envelope）', () => {
+    const fx = makeFx();
+    const res = spawnSync(process.execPath, [PROOFLOOP_DIST, 'cutover', 'status'], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: fx.root,
+    });
+    expect(res.status).toBe(0);
+    const envelope = JSON.parse(res.stdout) as {
+      ok: boolean;
+      command: { domain: string; operation: string };
+      result: { cutover_matrix: { delete_targets: string[] } };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.command).toEqual({ domain: 'cutover', operation: 'status' });
+    expect(Array.isArray(envelope.result.cutover_matrix.delete_targets)).toBe(true);
+  });
+
+  it('proofloop.js cutover execute 未确认 → exit 2 canonical Finding（不可逆保护）', () => {
+    const fx = makeFx();
+    const res = spawnSync(
+      process.execPath,
+      [PROOFLOOP_DIST, 'cutover', 'execute', '--json', JSON.stringify({ stage: 'S03' })],
+      { encoding: 'utf-8', timeout: 30000, cwd: fx.root },
+    );
+    expect(res.status).toBe(2);
+    const envelope = JSON.parse(res.stdout) as { ok: boolean; findings: Array<{ code: string }> };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.findings[0].code).toMatch(/CONFIRM|IRREVERSIBLE/);
+  });
+
+  it('proofloop.js cutover execute 未知 request 字段 → exit 2（closed request parser）', () => {
+    const fx = makeFx();
+    const res = spawnSync(
+      process.execPath,
+      [
+        PROOFLOOP_DIST,
+        'cutover',
+        'execute',
+        '--json',
+        JSON.stringify({ stage: 'S03', confirmed: true, delete_list: ['x'], bogus_field: 'nope' }),
+      ],
+      { encoding: 'utf-8', timeout: 30000, cwd: fx.root },
+    );
+    expect(res.status).toBe(2);
+    const envelope = JSON.parse(res.stdout) as { ok: boolean; findings: Array<{ code: string; message: string }> };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.findings[0].code).toBe('RUNTIME.INPUT_INVALID');
+    expect(envelope.findings[0].message).toContain('bogus_field');
+  });
+
+  it('proofloop.js cutover execute confirmed:true + delete_list 类型错误 → exit 2（closed request parser）', () => {
+    const fx = makeFx();
+    const res = spawnSync(
+      process.execPath,
+      [
+        PROOFLOOP_DIST,
+        'cutover',
+        'execute',
+        '--json',
+        JSON.stringify({ stage: 'S03', confirmed: 'yes', delete_list: ['x'] }),
+      ],
+      { encoding: 'utf-8', timeout: 30000, cwd: fx.root },
+    );
+    expect(res.status).toBe(2);
+    const envelope = JSON.parse(res.stdout) as { ok: boolean; findings: Array<{ code: string; message: string }> };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.findings[0].code).toBe('RUNTIME.INPUT_INVALID');
+    expect(envelope.findings[0].message).toContain('confirmed');
+  });
+});
+
+describe('run-gate built process no-execution (dual-path SG)', () => {
+  it('dist run-gate does not execute vNext runtime_proof steps (exit 1 on admission refusal without an integrated prefix)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-cli-rungate-bound-'));
+    cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, '.proofloop/manifests/S04.json'), 'utf8'),
+    ) as Record<string, any>;
+    manifest.task_scopes = {
+      'S04-A-T01': {
+        task_ref: 'delivery/stages/S04/tasks.md#/entities/S04-A-T01',
+        execution_scope: {
+          kind: 'implementation',
+          code_paths: ['delivery/stages/S04/tasks.md'],
+          test_paths: ['packages/worker-test.ts'],
+          forbidden_paths: ['.proofloop/receipts', '.git'],
+        },
+      },
+    };
+    const manifestPath = path.join(dir, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf-8');
+    const outDir = path.join(dir, 'out');
+    const distPath = path.join(REPO_ROOT, 'packages/runtime/dist/cli/run-gate.js');
+    const res = spawnSync(process.execPath, [distPath, manifestPath, '', outDir, dir], {
+      encoding: 'utf-8',
+      timeout: 30000,
+    });
+    expect(res.status).toBe(1);
+    const out = JSON.parse(res.stdout) as { steps: Array<{ id: string; passed: boolean }>; errors: string[] };
+    // Dual-path SG: runtime_proof commands are NEVER executed — the step list
+    // is empty and the Gate fails honestly (no git repo / no integrated
+    // prefix) without any Receipt write.
+    expect(out.steps).toEqual([]);
+    expect(out.errors.join(' ')).toMatch(/cannot resolve the current Git HEAD|Integration Receipt|authority is unavailable/i);
+    const gateResult = JSON.parse(fs.readFileSync(path.join(outDir, 'gate-result.json'), 'utf8')) as { gate: string };
+    expect(gateResult.gate).toBe('FAIL');
   });
 });

@@ -15,6 +15,16 @@
  *     STAGE_REVIEW_PASS                → UNDER_REVIEW
  *   - all slices integrated +
  *     STAGE_REVIEW_PASS                → COMPLETED
+ *   - STAGE_CLOSE receipt (P-11)       → COMPLETED — the explicit machine
+ *     authority that the Stage is closed. Placed after the R1/R2 planning
+ *     preconditions and before every later rule (explicit close wins): a
+ *     restricted close (e.g. S10 — user-adjudicated, no STAGE_REVIEW_PASS,
+ *     possibly unintegrated Slices) still derives COMPLETED so tools treat
+ *     the Stage as archived/closed. The STAGE_PLAN precondition is NOT
+ *     bypassed: a STAGE_CLOSE without STAGE_PLAN is a contradiction and is
+ *     rejected by R1 (fail-closed — the Close admission requires the
+ *     Stage Plan/SPV authority, so a close without a plan receipt is a
+ *     broken fact set, never silently guessed).
  *
  * READY folding rule: the canonical ReceiptType closed set (§5 Receipt.type) has no
  * `stage_activated` receipt, so under receipts-only reconciliation READY and
@@ -46,6 +56,8 @@ import type { ReconciledSliceState } from './state-model';
  * Produced by Reconcile (S02-C) from the classified receipt directories;
  * `deriveStageState` consumes only these three flags — the remaining receipt
  * types (TASK_COMPLETE, CV_PASS, ...) never influence the stage derivation.
+ * The P-11 Stage Close presence is carried as `DeriveStageStateInput
+ * .has_stage_close` (optional — legacy consumers never set it).
  */
 export interface StageReceiptSummary {
   /** A STAGE_PLAN receipt exists. */
@@ -66,12 +78,18 @@ export interface StageReceiptSummary {
  * slices: normalized per-slice states (Reconcile output) — only the
  *         `integrated` fact and `slice_id` (for rejection context) are read.
  * receipts: presence of the three stage-boundary receipt types.
+ * has_stage_close (P-11): presence of a vNext STAGE_CLOSE receipt — the
+ *         explicit machine authority that the Stage is closed. Optional and
+ *         additive: legacy consumers that never pass it keep the previous
+ *         derivation exactly (no stage-close fact ⇒ no close rule).
  */
 export interface DeriveStageStateInput {
   /** Normalized slice states in manifest declaration order. */
   readonly slices: readonly ReconciledSliceState[];
   /** Presence of the stage-boundary receipt types. */
   readonly receipts: StageReceiptSummary;
+  /** P-11: a vNext STAGE_CLOSE receipt exists for the Stage. */
+  readonly has_stage_close?: boolean;
 }
 
 // ============================================================
@@ -122,17 +140,20 @@ export class StageStateDerivationError extends Error {
  *         (code DOMAIN.INVALID_TRANSITION, with the conflicting facts).
  */
 export function deriveStageState(input: DeriveStageStateInput): StageState {
-  const { slices, receipts } = input;
+  const { slices, receipts, has_stage_close = false } = input;
   const { has_stage_plan, has_spv_pass, has_stage_review_pass } = receipts;
   const unintegrated = slices.filter(s => !s.integrated);
   const unintegratedSliceIds = unintegrated.map(s => s.slice_id);
 
   // R1: no STAGE_PLAN → UNINITIALIZED. Any downstream receipt without its
-  // STAGE_PLAN precondition is a contradiction — reject, never guess.
+  // STAGE_PLAN precondition is a contradiction — reject, never guess. P-11:
+  // a STAGE_CLOSE receipt is admitted ONLY against the Stage Plan/SPV
+  // authority, so a close without STAGE_PLAN is a broken fact set and is
+  // rejected exactly like SPV_PASS/STAGE_REVIEW_PASS without STAGE_PLAN.
   if (!has_stage_plan) {
-    if (has_spv_pass || has_stage_review_pass) {
+    if (has_spv_pass || has_stage_review_pass || has_stage_close) {
       throw new StageStateDerivationError(
-        `Contradictory stage facts: SPV_PASS/STAGE_REVIEW_PASS receipt present without STAGE_PLAN receipt — cannot derive StageState`,
+        `Contradictory stage facts: SPV_PASS/STAGE_REVIEW_PASS/STAGE_CLOSE receipt present without STAGE_PLAN receipt — cannot derive StageState`,
         receipts,
         unintegratedSliceIds,
       );
@@ -151,6 +172,15 @@ export function deriveStageState(input: DeriveStageStateInput): StageState {
       );
     }
     return StageState.PLANNING;
+  }
+
+  // R_CLOSE (P-11): a STAGE_CLOSE receipt is the explicit machine authority
+  // that the Stage is closed — derive COMPLETED regardless of slice
+  // integration and regardless of STAGE_REVIEW_PASS. Placed after the R1/R2
+  // planning preconditions and before every later rule (explicit close wins;
+  // a restricted close such as S10 closes without full execution).
+  if (has_stage_close) {
+    return StageState.COMPLETED;
   }
 
   // SPV_PASS present from here. READY folding: SPV_PASS ⇒ EXECUTING unless

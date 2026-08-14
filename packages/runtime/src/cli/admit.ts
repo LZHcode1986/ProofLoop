@@ -37,6 +37,10 @@ import {
   admitProjectReview,
   admitStagePlan,
 } from '../admission';
+import { detectPlanManifestRoute } from '../plan-services';
+import { defaultManifestPath } from '../manifest-source';
+import { admitVNextIntegration } from '../vnext/integration-admission';
+import { admitVNextGateResult } from '../vnext/gate-admission';
 import { admitSpvResult, admitGateResult, admitGateInterrupted } from '../admit-pipeline';
 import type { SpvGateAdmissionDeps } from '../admit-pipeline';
 import type { AdmissionDeps } from '../admission';
@@ -64,7 +68,43 @@ export function admitRequest(request: AdmissionRequest, projectRoot: string): Ad
     case 'slice_commit':
       return admitSliceCommit(request, deps);
     case 'integration':
-      return admitIntegration(request, deps);
+      // Select the vNext consumer explicitly at the CLI boundary.  The public
+      // `admitIntegration` seam still owns the same route check for direct
+      // Runtime callers, while v1 keeps the legacy consumer unchanged.
+      try {
+        const route = detectPlanManifestRoute(
+          projectRoot,
+          defaultManifestPath(projectRoot, request.stageId),
+        );
+        if (route === 'vnext') {
+          return admitVNextIntegration(request, { projectRoot }) as unknown as AdmitResult;
+        }
+        if (route === 'unknown') {
+          return {
+            accepted: false,
+            receipt_ref: null,
+            new_state: null,
+            findings: [{
+              code: 'RUNTIME.SCHEMA_MISMATCH',
+              severity: 'error',
+              message:
+                'admit: Integration requires an explicit paired v1/vNext Manifest route; unknown versions never fall back to the legacy consumer',
+            }],
+          };
+        }
+        return admitIntegration(request, { ...deps, manifestRouteBinding: route });
+      } catch (error) {
+        return {
+          accepted: false,
+          receipt_ref: null,
+          new_state: null,
+          findings: [{
+            code: 'RUNTIME.SCHEMA_MISMATCH',
+            severity: 'error',
+            message: `admit: Integration Manifest route could not be determined: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
+      }
     case 'stage_review':
       return admitStageReview(request, deps);
     case 'project_review':
@@ -73,8 +113,45 @@ export function admitRequest(request: AdmissionRequest, projectRoot: string): Ad
       return admitStagePlan(request, deps);
     case 'spv_result':
       return admitSpvResult(request, gateDeps);
-    case 'gate_result':
-      return admitGateResult(request, gateDeps);
+    case 'gate_result': {
+      // Select the vNext Gate consumer explicitly at the CLI boundary.
+      // `admitGateResult` owns the same route check for direct Runtime
+      // callers; v1 keeps the legacy admit pipeline unchanged.
+      try {
+        const route = detectPlanManifestRoute(
+          projectRoot,
+          defaultManifestPath(projectRoot, request.stageId),
+        );
+        if (route === 'vnext') {
+          return admitVNextGateResult(request, { projectRoot }) as unknown as AdmitResult;
+        }
+        if (route === 'unknown') {
+          return {
+            accepted: false,
+            receipt_ref: null,
+            new_state: null,
+            findings: [{
+              code: 'RUNTIME.SCHEMA_MISMATCH',
+              severity: 'error',
+              message:
+                'admit: gate_result requires an explicit paired v1/vNext Manifest route; unknown versions never fall back to the legacy consumer',
+            }],
+          };
+        }
+        return admitGateResult(request, gateDeps);
+      } catch (error) {
+        return {
+          accepted: false,
+          receipt_ref: null,
+          new_state: null,
+          findings: [{
+            code: 'RUNTIME.SCHEMA_MISMATCH',
+            severity: 'error',
+            message: `admit: gate_result Manifest route could not be determined: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+        };
+      }
+    }
     case 'gate_interrupted':
       return admitGateInterrupted(request, gateDeps);
     default: {

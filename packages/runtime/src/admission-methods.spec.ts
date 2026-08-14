@@ -13,7 +13,7 @@
  * Covered in this task:
  *  - admitWorkerResult (PO-S02-E-02): completed in the three modes
  *    implement / recover / finalize (evidence-finalized advance to
- *    READY_FOR_CV), repair / diagnose with the CV-REPAIR binding (cv
+ *    READY_FOR_CV), repair with the CV-REPAIR binding (cv
  *    FIX → PENDING_RECHECK), outcome blocked / needs-decision / failed
  *    refusal, wrong-state refusal (incl. repair without a CV_REPAIR
  *    binding), schema-invalid envelope refusal.
@@ -545,17 +545,17 @@ describe('admitWorkerResult (PO-S02-E-02)', () => {
     expect(reread.slices[0]?.cv_status).toBe('PENDING_RECHECK');
   });
 
-  it('completed diagnose: CV-REPAIR binding → TASK_COMPLETE (mode=diagnose + cv_receipt_digest), cv FIX → PENDING_RECHECK', () => {
+  it('completed repair (second repair): CV-REPAIR binding → TASK_COMPLETE (mode=repair + cv_receipt_digest), cv FIX → PENDING_RECHECK', () => {
     const { fx, cvRepairDigest } = fxCvRepair();
     const result = admitWorkerResult(
-      makeWorkerRequest({ mode: 'diagnose', taskId: TASKS[1], summary: 'diagnosed' }),
+      makeWorkerRequest({ mode: 'repair', taskId: TASKS[1], summary: 'repaired' }),
       depsFor(fx),
     );
 
     expect(result.accepted).toBe(true);
     expect(result.new_state?.slices[0]?.cv_status).toBe('PENDING_RECHECK');
     const receipt = readReceiptFile(readTasksDir(fx), result.receipt_ref as string);
-    expect(receipt.payload).toMatchObject({ mode: 'diagnose', cv_receipt_digest: cvRepairDigest });
+    expect(receipt.payload).toMatchObject({ mode: 'repair', cv_receipt_digest: cvRepairDigest });
     expect(verifyReceiptChain(readTasksDir(fx)).valid).toBe(true);
     expect(fx.reconcile().slices[0]?.cv_status).toBe('PENDING_RECHECK');
   });

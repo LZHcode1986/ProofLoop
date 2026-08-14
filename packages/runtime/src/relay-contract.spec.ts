@@ -290,16 +290,16 @@ describe('PO-S02-B-01 — WorkerRelayPort contract (fake port, zero Pi imports)'
 
 describe('PO-S02-B-01 — exported literal-set constants are the exact canonical closed sets', () => {
   /** Canonical closed sets (§3b / Blueprint §6 / §13) — known-good literals. */
-  const CANONICAL_MODES = ['implement-task', 'recover-task', 'finalize-slice', 'diagnose', 'repair'] as const;
+  const CANONICAL_MODES = ['implement-task', 'recover-task', 'finalize-slice', 'repair'] as const;
   const CANONICAL_CONTINUATIONS = ['prefer', 'fresh'] as const;
   const CANONICAL_EXECUTIONS = ['completed', 'needs-attention', 'failed', 'timed-out', 'cancelled'] as const;
   const CANONICAL_RELAYS = ['spawned', 'resumed', 'fresh-fallback'] as const;
   const CANONICAL_OUTCOMES = ['completed', 'blocked', 'needs-decision', 'failed'] as const;
   const CANONICAL_TERMINALS = ['observed', 'unknown', 'not-supported'] as const;
 
-  it('WORKER_STEP_MODES is exactly the 5 canonical mode literals (no extra/duplicate/missing)', () => {
+  it('WORKER_STEP_MODES is exactly the 4 canonical mode literals (no extra/duplicate/missing)', () => {
     expect(WORKER_STEP_MODES).toEqual(CANONICAL_MODES);
-    expect(new Set(WORKER_STEP_MODES).size).toBe(5);
+    expect(new Set(WORKER_STEP_MODES).size).toBe(4);
   });
 
   it('WORKER_CONTINUATIONS is exactly the 2 canonical continuation literals', () => {
@@ -331,7 +331,7 @@ describe('PO-S02-B-01 — exported literal-set constants are the exact canonical
 describe('PO-S02-B-01 — literal closures are exact at the type level', () => {
   it('accepts every canonical literal of each closed set', () => {
     const modes: WorkerStepMode[] = [
-      'implement-task', 'recover-task', 'finalize-slice', 'diagnose', 'repair',
+      'implement-task', 'recover-task', 'finalize-slice', 'repair',
     ];
     const continuations: WorkerContinuation[] = ['prefer', 'fresh'];
     const executions: WorkerExecution[] = [
@@ -345,7 +345,7 @@ describe('PO-S02-B-01 — literal closures are exact at the type level', () => {
       details: { retry: true },
     };
 
-    expect(modes).toHaveLength(5);
+    expect(modes).toHaveLength(4);
     expect(continuations).toHaveLength(2);
     expect(executions).toHaveLength(5);
     expect(relays).toHaveLength(3);
@@ -355,7 +355,7 @@ describe('PO-S02-B-01 — literal closures are exact at the type level', () => {
   });
 
   it('rejects non-canonical literals at compile time (closed sets, no open strings)', () => {
-    // @ts-expect-error — 'implement' is not a WorkerStepMode (closed 5-value set)
+    // @ts-expect-error — 'implement' is not a WorkerStepMode (closed 4-value set)
     const badMode: WorkerStepMode = 'implement';
     // @ts-expect-error — 'auto' is not a WorkerContinuation (closed 2-value set)
     const badContinuation: WorkerContinuation = 'auto';

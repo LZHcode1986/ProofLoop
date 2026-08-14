@@ -22,14 +22,16 @@
  */
 
 import { SchemaValidationError } from '@proofloop/kernel';
-import { validateWorkerResultEnvelope } from './relay-contract';
-import type { WorkerResultEnvelope } from './relay-contract';
+import { validateWorkerResultEnvelope, validateVNextWorkerResultEnvelope } from './relay-contract';
+import type { WorkerResultEnvelope, VNextWorkerResultEnvelope } from './relay-contract';
+import { validateVNextCVResultEnvelope } from './vnext/cv-admission';
+import type { VNextCvResultEnvelope } from './vnext/types';
 
 // ============================================================
 // Closed literal sets
 // ============================================================
 
-/** Request `type` discriminants — closed 10-value set (AWI-006 + PO-S03-H-02 + S05-A). */
+/** Legacy request `type` discriminants — closed 10-value set. */
 export const ADMISSION_REQUEST_TYPES = [
   'worker_result',
   'cv_result',
@@ -43,6 +45,13 @@ export const ADMISSION_REQUEST_TYPES = [
   'gate_interrupted',
 ] as const;
 export type AdmissionRequestType = (typeof ADMISSION_REQUEST_TYPES)[number];
+
+/** Full closed Runtime request set, including the additive vNext CV member. */
+export const RUNTIME_ADMISSION_REQUEST_TYPES = [
+  ...ADMISSION_REQUEST_TYPES,
+  'cv_result_vnext',
+] as const;
+export type RuntimeAdmissionRequestType = (typeof RUNTIME_ADMISSION_REQUEST_TYPES)[number];
 
 /** CV verdicts — closed 2-value set. */
 export const CV_VERDICTS = ['PASS', 'REPAIR'] as const;
@@ -78,7 +87,8 @@ export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
  */
 export interface WorkerResultAdmissionRequest {
   readonly type: 'worker_result';
-  readonly envelope: WorkerResultEnvelope;
+  /** Nested schema discriminator: 1 selects the legacy validator, 2 vNext. */
+  readonly envelope: WorkerResultEnvelope | VNextWorkerResultEnvelope;
 }
 
 /**
@@ -94,6 +104,19 @@ export interface CVResultAdmissionRequest {
   readonly snapshotDigest: string;
   readonly summary: string;
 }
+
+/**
+ * vNext CV result admit — the closed snake_case CV_RESULT envelope is the
+ * complete request payload. It is intentionally a distinct discriminant so a
+ * vNext result cannot enter the legacy CV reducer/writer path.
+ */
+export interface VNextCVResultAdmissionRequest {
+  readonly type: 'cv_result_vnext';
+  readonly envelope: VNextCvResultEnvelope;
+}
+
+/** Lower-case acronym alias for callers that use `Cv` in type names. */
+export type VNextCvResultAdmissionRequest = VNextCVResultAdmissionRequest;
 
 /**
  * Slice commit admit — `commitSha` binds the committed git SHA and
@@ -193,7 +216,7 @@ export interface GateInterruptedAdmissionRequest {
 }
 
 /**
- * Closed 10-member AdmissionRequest union (AWI-006 + PO-S03-H-02 + S05-A).
+ * Closed 10-member legacy AdmissionRequest union (AWI-006 + PO-S03-H-02 + S05-A).
  *
  * S05-A adds the `gate_interrupted` member (HP-004/AWI-015): an interrupted
  * gate run admits a GATE_INTERRUPTED receipt with a reason payload — never a
@@ -214,23 +237,40 @@ export type AdmissionRequest =
   | GateResultAdmissionRequest
   | GateInterruptedAdmissionRequest;
 
+/**
+ * Full Runtime request union, including the additive vNext CV consumer.
+ * Legacy callers retain the original `AdmissionRequest` type so their
+ * legacy-only dispatch tables cannot accidentally treat vNext facts as a
+ * legacy request.
+ */
+export type RuntimeAdmissionRequest = AdmissionRequest | VNextCVResultAdmissionRequest;
+
+/** Alias for callers that want to make the additive boundary explicit. */
+export type AdmissionRequestWithVNext = RuntimeAdmissionRequest;
+
 // ============================================================
 // Binding helpers
 // ============================================================
 
-/** Canonical stage id binding of a request (envelope for worker_result). */
-export function admissionRequestStageId(request: AdmissionRequest): string {
-  return request.type === 'worker_result' ? request.envelope.stageId : request.stageId;
+/** Canonical stage id binding of a request (envelope for worker/CV vNext). */
+export function admissionRequestStageId(request: RuntimeAdmissionRequest): string {
+  return request.type === 'worker_result'
+    ? request.envelope.stageId
+    : request.type === 'cv_result_vnext'
+      ? request.envelope.stage_id
+      : request.stageId;
 }
 
 /**
  * Canonical slice id binding of a request, or null for stage-level kinds
  * (reviews / project review / stage plan).
  */
-export function admissionRequestSliceId(request: AdmissionRequest): string | null {
+export function admissionRequestSliceId(request: RuntimeAdmissionRequest): string | null {
   switch (request.type) {
     case 'worker_result':
       return request.envelope.sliceId;
+    case 'cv_result_vnext':
+      return request.envelope.slice_id;
     case 'cv_result':
     case 'slice_commit':
     case 'integration':
@@ -255,6 +295,7 @@ const WORKER_RESULT_FIELDS = new Set(['type', 'envelope']);
 const CV_RESULT_FIELDS = new Set([
   'type', 'stageId', 'sliceId', 'verdict', 'snapshotDigest', 'summary',
 ]);
+const CV_RESULT_VNEXT_FIELDS = new Set(['type', 'envelope']);
 const SLICE_COMMIT_FIELDS = new Set([
   'type', 'stageId', 'sliceId', 'commitSha', 'cvReceiptDigest',
 ]);
@@ -347,15 +388,43 @@ function throwIfErrors(errors: FieldError[]): never | void {
 }
 
 /**
+ * Validate a Worker envelope through its explicit schemaVersion discriminator.
+ * Unknown or missing versions are rejected without entering either consumer;
+ * in particular, a schema-v2 envelope never falls through to the v1 validator.
+ */
+function validateWorkerEnvelopeBySchemaVersion(value: unknown): void {
+  if (!isRecord(value)) {
+    throw new SchemaValidationError(
+      'Schema validation failed: worker envelope must be a non-null, non-array object',
+      [{ path: '', message: 'Worker envelope must be a non-null, non-array object' }],
+    );
+  }
+
+  switch (value.schemaVersion) {
+    case 1:
+      validateWorkerResultEnvelope(value);
+      return;
+    case 2:
+      validateVNextWorkerResultEnvelope(value);
+      return;
+    default:
+      throw new SchemaValidationError(
+        `Schema validation failed: envelope.schemaVersion must be 1 or 2, got ${JSON.stringify(value.schemaVersion)}`,
+        [{ path: 'schemaVersion', message: 'Expected schemaVersion discriminator 1 or 2' }],
+      );
+  }
+}
+
+/**
  * Reject any value that is not a canonical `AdmissionRequest` member.
  *
  * Unknown type discriminant, unknown fields, missing fields and out-of-set
  * literals throw `SchemaValidationError` (canonical code
  * RUNTIME.SCHEMA_MISMATCH) with per-field errors — never partial acceptance,
- * never silent defaulting. The `worker_result` envelope is validated through
- * the canonical S02-B `validateWorkerResultEnvelope` seam.
+ * never silent defaulting. The `worker_result` envelope is routed by its
+ * explicit schemaVersion discriminator to exactly one versioned validator.
  */
-export function assertAdmissionRequest(value: unknown): asserts value is AdmissionRequest {
+export function assertAdmissionRequest(value: unknown): asserts value is RuntimeAdmissionRequest {
   if (!isRecord(value)) {
     throw new SchemaValidationError(
       `Schema validation failed: : Expected object, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}`,
@@ -367,12 +436,12 @@ export function assertAdmissionRequest(value: unknown): asserts value is Admissi
   const type = value.type;
   if (
     typeof type !== 'string' ||
-    !(ADMISSION_REQUEST_TYPES as readonly string[]).includes(type)
+    !(RUNTIME_ADMISSION_REQUEST_TYPES as readonly string[]).includes(type)
   ) {
     errors.push({
       path: 'type',
       message:
-        `type must be one of: ${ADMISSION_REQUEST_TYPES.map((t) => JSON.stringify(t)).join(', ')}`,
+        `type must be one of: ${RUNTIME_ADMISSION_REQUEST_TYPES.map((t) => JSON.stringify(t)).join(', ')}`,
     });
     throwIfErrors(errors);
   }
@@ -384,7 +453,7 @@ export function assertAdmissionRequest(value: unknown): asserts value is Admissi
       // field-located errors; re-prefix them under `envelope.` so the
       // request-level error locates the offending envelope field.
       try {
-        validateWorkerResultEnvelope(value.envelope);
+        validateWorkerEnvelopeBySchemaVersion(value.envelope);
       } catch (err) {
         if (err instanceof SchemaValidationError) {
           for (const fe of err.fieldErrors) {
@@ -406,6 +475,24 @@ export function assertAdmissionRequest(value: unknown): asserts value is Admissi
       expectStringLiteral(value.verdict, CV_VERDICTS, 'verdict', errors);
       expectString(value.snapshotDigest, 'snapshotDigest', errors);
       expectString(value.summary, 'summary', errors);
+      break;
+    }
+    case 'cv_result_vnext': {
+      checkUnknownFields(value, CV_RESULT_VNEXT_FIELDS, errors);
+      try {
+        validateVNextCVResultEnvelope(value.envelope);
+      } catch (err) {
+        if (err instanceof SchemaValidationError) {
+          for (const fe of err.fieldErrors) {
+            errors.push({
+              path: fe.path === '' ? 'envelope' : `envelope.${fe.path}`,
+              message: fe.message,
+            });
+          }
+        } else {
+          throw err;
+        }
+      }
       break;
     }
     case 'slice_commit': {

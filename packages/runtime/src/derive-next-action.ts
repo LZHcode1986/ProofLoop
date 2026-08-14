@@ -100,7 +100,7 @@ export interface DerivedNextAction {
   readonly findings: readonly Finding[];
   readonly slice_id?: string;
   readonly task_id?: string;
-  /** Worker mode for DISPATCH_WORKER (implement/recover/finalize/repair/diagnose). */
+  /** Worker mode for DISPATCH_WORKER (implement/recover/finalize/repair). */
   readonly mode?: WorkerStepMode;
 }
 
@@ -207,17 +207,18 @@ function blockingFinding(message: string): Finding {
 }
 
 // ============================================================
-// Row 6 — CV_REPAIR branch (repair / diagnose / recheck)
+// Row 6 — CV_REPAIR branch (repair / recheck)
 // ============================================================
 
 /**
  * Row 6 sub-branches for one slice in READY_FOR_CV with the latest CV fact
  * being CV_REPAIR (cv_status REPAIR or PENDING_RECHECK, derived by Reconcile
  * from the CV receipt chain):
- *   6b PENDING_RECHECK (repair/diagnose TASK_COMPLETE admitted after the last
+ *   6b PENDING_RECHECK (repair TASK_COMPLETE admitted after the last
  *      CV_REPAIR) → RUN_CV recheck;
  *   6c REPAIR + repair_attempt 0 (CV_REPAIR count 1) → DISPATCH_WORKER repair;
- *   6d REPAIR + repair_attempt 1 (CV_REPAIR count 2) → DISPATCH_WORKER diagnose;
+ *   6d REPAIR + repair_attempt 1 (CV_REPAIR count 2) → DISPATCH_WORKER repair
+ *      (second repair — the diagnose skill is loaded by dispatch discipline);
  *   6e REPAIR + repair_attempt ≥ 2 (CV_REPAIR count ≥ 3) → VALIDATE fallback
  *      with the UNRESOLVED_CV_FAILURE blocking finding.
  */
@@ -251,11 +252,11 @@ function cvRepairBranch(
     return makeResult(state, chainValid, {
       action: 'DISPATCH_WORKER',
       action_detail:
-        `DISPATCH_WORKER mode=diagnose for slice "${slice.slice_id}" — CV still REPAIR ` +
-        `after one repair (CV_REPAIR count 2); root-cause diagnosis required`,
+        `DISPATCH_WORKER mode=repair for slice "${slice.slice_id}" — CV still REPAIR ` +
+        `after one repair (CV_REPAIR count 2); second repair with diagnose skill required`,
       responsible_role: 'executor',
       slice_id: slice.slice_id,
-      mode: 'diagnose',
+      mode: 'repair',
     });
   }
   const blocking = blockingFinding(
@@ -398,7 +399,7 @@ export function deriveNextAction(state: DeriveNextActionInput): DerivedNextActio
     });
   }
 
-  // ── Row 6: READY_FOR_CV + latest CV fact CV_REPAIR (repair/diagnose/recheck) ──
+  // ── Row 6: READY_FOR_CV + latest CV fact CV_REPAIR (repair/recheck) ──
   const repairSlice = findRunnableSlice(
     state.slices,
     (s) =>

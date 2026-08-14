@@ -296,6 +296,42 @@ function checkCommitReceiptHead(
   }
 }
 
+/**
+ * Reject Receipt payload schemas that are not understood by the legacy
+ * reader (S08-E-T07).  Legacy v1 receipts predate the payload discriminator
+ * (an explicit schema_version: 1 is also the known legacy shape); vNext
+ * receipts use 2 for EVERY Receipt type (TASK_COMPLETE / CV_PASS / CV_REPAIR /
+ * SLICE_COMMIT / INTEGRATION_PASS / GATE_PASS / GATE_FAIL /
+ * STAGE_REVIEW_PASS / STAGE_PLAN / SPV_PASS ...) and must remain readable by
+ * their own consumers, but never become legacy facts — no v2 Receipt of any
+ * type may enter the legacy reconcile/reducer derivation, and a category
+ * chain may never mix v1/v2 payload schemas.
+ */
+function legacyPayloadSchemaFinding(
+  read: ReadReceiptResult,
+  ctx: Omit<AttributionContext, 'directorySlice' | 'category'>,
+): Finding | null {
+  const payload = read.receipt.payload;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'schema_version')) return null;
+
+  const schemaVersion = payload['schema_version'];
+  if (schemaVersion === 1) return null;
+
+  const label = relPath(ctx.projectRoot, read.filePath);
+  const value = JSON.stringify(schemaVersion);
+  const detail =
+    schemaVersion === 2
+      ? 'is a vNext receipt and is incompatible with the legacy reader'
+      : `is unsupported by the legacy reader (expected legacy v1 or vNext 2, got ${value})`;
+  return {
+    code: 'RUNTIME.SCHEMA_MISMATCH',
+    severity: 'error',
+    message:
+      `legacy reconcile rejected ${read.receipt.type} receipt ${label}: ` +
+      `payload.schema_version=${value} ${detail} (compatibility boundary)`,
+  };
+}
+
 /** `git merge-base --is-ancestor <sha> <head>` — exit 0 ⇒ true. */
 function isCommitAncestorOfHead(projectRoot: string, sha: string, head: string): boolean {
   try {
@@ -402,6 +438,19 @@ function handleCategoryRead(
   // PO-S02-C-03 fact blocking: NO fact may be derived from a broken chain.
   if (!result.chainValid) return;
 
+  // Legacy/vNext isolation: the physical chain remains valid, but a category
+  // containing any non-legacy payload schema is not a legacy fact source.
+  // Check the complete valid receipt set before attribution or validReads
+  // merge so mixed v1/vNext chains are blocked as a whole rather than
+  // partially read, for EVERY Receipt type (S08-E-T07).
+  const legacySchemaFindings = result.receipts
+    .map((read) => legacyPayloadSchemaFinding(read, ctx))
+    .filter((finding): finding is Finding => finding !== null);
+  if (legacySchemaFindings.length > 0) {
+    ctx.findings.push(...legacySchemaFindings);
+    return;
+  }
+
   const attrCtx: AttributionContext = {
     ...ctx,
     category,
@@ -445,7 +494,7 @@ function emptyResult(stageId: string, findings: Finding[]): ReconcileStageResult
 //                     the committed SLICE_COMMIT (the "绑定同一 commit SHA"
 //                     binding);
 //   - TASK_COMPLETE   payload.mode is the worker mode ('finalize-slice' |
-//                     'repair' | 'diagnose' | ...) of the completed step.
+//                     'repair' | ...) of the completed step.
 // ============================================================
 
 /** Per-slice receipt facts consumed by the authoritative derivation. */
@@ -462,7 +511,7 @@ interface SliceReceiptFacts {
   readonly cvRepairCount: number;
   /** Any attributed TASK_COMPLETE with payload.mode === 'finalize-slice'. */
   readonly hasFinalizeSliceTaskComplete: boolean;
-  /** Latest attributed TASK_COMPLETE with payload.mode 'repair' | 'diagnose'. */
+  /** Latest attributed TASK_COMPLETE with payload.mode 'repair'. */
   readonly latestRepairTaskComplete: ReadReceiptResult | null;
 }
 
@@ -516,7 +565,7 @@ function buildSliceReceiptFacts(
   }
   const repairTaskCompletes = taskReads.filter((r) => {
     const mode = r.receipt.payload?.['mode'];
-    return mode === 'repair' || mode === 'diagnose';
+    return mode === 'repair';
   });
   return {
     latestCv: latestOfType(cvReads),

@@ -27,12 +27,11 @@ import { SchemaValidationError } from '@proofloop/kernel';
 // Closed literal sets (§3b / Blueprint §6 / §13)
 // ============================================================
 
-/** Worker step modes — closed 5-value set. */
+/** Worker step modes — closed 4-value set. */
 export const WORKER_STEP_MODES = [
   'implement-task',
   'recover-task',
   'finalize-slice',
-  'diagnose',
   'repair',
 ] as const;
 export type WorkerStepMode = (typeof WORKER_STEP_MODES)[number];
@@ -205,6 +204,37 @@ export interface WorkerResultEnvelope {
   readonly summary: string;
 }
 
+/**
+ * vNext Worker result envelope.
+ *
+ * The v1 envelope intentionally remains a separate closed schema.  A v2
+ * result carries the immutable admission tuple and Context identity required
+ * to reach the vNext Runtime seam; it is never widened into the v1 envelope.
+ */
+export interface VNextWorkerResultEnvelope {
+  readonly schemaVersion: 2;
+  readonly actionToken: string;
+  readonly stageId: string;
+  readonly sliceId: string;
+  readonly taskId?: string;
+  readonly mode: WorkerStepMode;
+  readonly outcome: WorkerOutcome;
+  readonly evidenceRef: string;
+  readonly changedFiles: readonly string[];
+  readonly verificationRuns: readonly {
+    readonly commandId: string;
+    readonly exitCode: number;
+    readonly logRef: string;
+  }[];
+  readonly summary: string;
+  readonly manifestDigest: string;
+  readonly planDigest: string;
+  readonly proofIndexDigest: string;
+  readonly snapshotDigest: string;
+  readonly contextRef: string;
+  readonly contextDigest: string;
+}
+
 // ============================================================
 // WorkerResultEnvelope validator (PO-S02-B-04)
 // ============================================================
@@ -227,6 +257,16 @@ const ENVELOPE_KNOWN_FIELDS = new Set([
   'changedFiles',
   'verificationRuns',
   'summary',
+]);
+
+const VNEXT_ENVELOPE_KNOWN_FIELDS = new Set([
+  ...ENVELOPE_KNOWN_FIELDS,
+  'manifestDigest',
+  'planDigest',
+  'proofIndexDigest',
+  'snapshotDigest',
+  'contextRef',
+  'contextDigest',
 ]);
 
 const VERIFICATION_RUN_KNOWN_FIELDS = new Set(['commandId', 'exitCode', 'logRef']);
@@ -285,11 +325,24 @@ function expectOptionalString(value: unknown, path: string, errors: FieldError[]
   if (value !== undefined) expectString(value, path, errors);
 }
 
+function expectOptionalIdentifier(value: unknown, path: string, errors: FieldError[]): void {
+  if (value !== undefined) expectIdentifier(value, path, errors);
+}
+
 function expectNumber(value: unknown, path: string, errors: FieldError[]): void {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     errors.push({
       path,
       message: `Expected number, got ${value === null ? 'null' : typeof value}`,
+    });
+  }
+}
+
+function expectFiniteNumber(value: unknown, path: string, errors: FieldError[]): void {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    errors.push({
+      path,
+      message: `Expected finite number, got ${value === null ? 'null' : typeof value}`,
     });
   }
 }
@@ -324,7 +377,47 @@ function expectStringArray(value: unknown, path: string, errors: FieldError[]): 
   });
 }
 
-function validateVerificationRuns(value: unknown, path: string, errors: FieldError[]): void {
+function expectDigest(
+  value: unknown,
+  path: string,
+  errors: FieldError[],
+  length: 40 | 64,
+): void {
+  if (typeof value !== 'string' || !new RegExp(`^[a-f0-9]{${length}}$`).test(value)) {
+    errors.push({
+      path,
+      message: `Expected a lowercase ${length === 40 ? 'Git' : 'SHA-256'} digest`,
+    });
+  }
+}
+
+function expectUniqueStringArray(value: unknown, path: string, errors: FieldError[]): void {
+  expectStringArray(value, path, errors);
+  if (Array.isArray(value)) {
+    const strings = value.filter((item): item is string => typeof item === 'string');
+    if (new Set(strings).size !== strings.length) {
+      errors.push({ path, message: 'Array entries must be unique' });
+    }
+  }
+}
+
+function expectUniqueNonEmptyStringArray(value: unknown, path: string, errors: FieldError[]): void {
+  expectUniqueStringArray(value, path, errors);
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => {
+      if (typeof item === 'string' && item.length === 0) {
+        errors.push({ path: `${path}[${i}]`, message: 'Expected non-empty string' });
+      }
+    });
+  }
+}
+
+function validateVerificationRuns(
+  value: unknown,
+  path: string,
+  errors: FieldError[],
+  requireFiniteExitCode = false,
+): void {
   if (!Array.isArray(value)) {
     errors.push({ path, message: `Expected array, got ${value === null ? 'null' : typeof value}` });
     return;
@@ -336,7 +429,11 @@ function validateVerificationRuns(value: unknown, path: string, errors: FieldErr
     }
     checkUnknownFields(run, VERIFICATION_RUN_KNOWN_FIELDS, `${path}[${i}]`, errors);
     expectString(run.commandId, `${path}[${i}].commandId`, errors);
-    expectNumber(run.exitCode, `${path}[${i}].exitCode`, errors);
+    if (requireFiniteExitCode) {
+      expectFiniteNumber(run.exitCode, `${path}[${i}].exitCode`, errors);
+    } else {
+      expectNumber(run.exitCode, `${path}[${i}].exitCode`, errors);
+    }
     expectString(run.logRef, `${path}[${i}].logRef`, errors);
   });
 }
@@ -390,4 +487,58 @@ export function validateWorkerResultEnvelope(data: unknown): WorkerResultEnvelop
   }
 
   return data as unknown as WorkerResultEnvelope;
+}
+
+/**
+ * Validate the closed vNext Worker result schema.  The validator is kept
+ * separate from `validateWorkerResultEnvelope` so a v2 object can never be
+ * silently accepted by a legacy caller.
+ */
+export function validateVNextWorkerResultEnvelope(data: unknown): VNextWorkerResultEnvelope {
+  const errors: FieldError[] = [];
+
+  if (!isRecord(data)) {
+    errors.push({
+      path: '',
+      message: `Expected object, got ${data === null ? 'null' : Array.isArray(data) ? 'array' : typeof data}`,
+    });
+    throw new SchemaValidationError(
+      `Schema validation failed: ${errors.map((e) => `${e.path}: ${e.message}`).join('; ')}`,
+      errors,
+    );
+  }
+
+  checkUnknownFields(data, VNEXT_ENVELOPE_KNOWN_FIELDS, '', errors);
+  if (data.schemaVersion !== 2) {
+    errors.push({ path: 'schemaVersion', message: `Expected 2, got ${JSON.stringify(data.schemaVersion)}` });
+  }
+  expectString(data.actionToken, 'actionToken', errors);
+  expectIdentifier(data.stageId, 'stageId', errors);
+  expectIdentifier(data.sliceId, 'sliceId', errors);
+  expectOptionalIdentifier(data.taskId, 'taskId', errors);
+  expectStringLiteral(data.mode, WORKER_STEP_MODES, 'mode', errors);
+  expectStringLiteral(data.outcome, WORKER_OUTCOMES, 'outcome', errors);
+  expectString(data.evidenceRef, 'evidenceRef', errors);
+  expectUniqueNonEmptyStringArray(data.changedFiles, 'changedFiles', errors);
+  validateVerificationRuns(data.verificationRuns, 'verificationRuns', errors, true);
+  expectString(data.summary, 'summary', errors);
+  expectDigest(data.manifestDigest, 'manifestDigest', errors, 64);
+  expectDigest(data.planDigest, 'planDigest', errors, 64);
+  expectDigest(data.proofIndexDigest, 'proofIndexDigest', errors, 64);
+  expectDigest(data.snapshotDigest, 'snapshotDigest', errors, 40);
+  expectString(data.contextRef, 'contextRef', errors);
+  expectDigest(data.contextDigest, 'contextDigest', errors, 64);
+
+  if (data.mode !== 'finalize-slice' &&
+      (typeof data.taskId !== 'string' || data.taskId.length === 0)) {
+    errors.push({ path: 'taskId', message: 'taskId is required except for finalize-slice results' });
+  }
+
+  if (errors.length > 0) {
+    throw new SchemaValidationError(
+      `Schema validation failed: ${errors.map((e) => `${e.path}: ${e.message}`).join('; ')}`,
+      errors,
+    );
+  }
+  return data as unknown as VNextWorkerResultEnvelope;
 }

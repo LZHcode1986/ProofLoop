@@ -66,7 +66,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { validateReceipt, validateManifest, writeReceipt, SchemaValidationError } from '@proofloop/kernel';
+import {
+  validateReceipt,
+  validateVNextManifest,
+  computeDigest,
+  verifyReceiptDigest,
+  writeReceipt,
+  SchemaValidationError,
+} from '@proofloop/kernel';
 import {
   runProcess,
   spawnService,
@@ -165,33 +172,6 @@ export interface ProjectE2EReceipt {
   created_at: string;
 }
 
-/** Stage Review Receipt (legacy StageReviewReceiptSchema). */
-export interface StageReviewReceipt {
-  stage_id: string;
-  verdict: 'ACCEPTED' | 'REJECTED' | 'BLOCKED';
-  snapshot: string;
-  manifest_digest: string;
-  stage_gate_receipt: { path: string; digest: string };
-  findings?: Array<{ category: string; description: string }>;
-  reviewer: string;
-  reviewed_at: string;
-}
-
-/** Stage Gate Receipt (legacy StageGateReceipt). */
-export interface StageGateReceipt {
-  stage_id: string;
-  snapshot: string;
-  manifest_digest: string;
-  completed_slice_ids?: string[];
-  slice_complete_facts?: Array<Record<string, unknown>>;
-  manifest_path?: string;
-  platform: string;
-  verdict: 'PASS' | 'FAIL' | 'BLOCKED';
-  steps: Array<{ id: string; exit_code: number | null; skipped?: boolean; observations?: string }>;
-  service_cleanup: ServiceCleanupResultShape;
-  timestamps: { started_at: string; completed_at: string };
-}
-
 /** Independent Project Reviewer result (legacy ProjectReviewResultSchema). */
 export interface ProjectReviewResult {
   verdict: 'PROJECT_ACCEPTED' | 'PROJECT_REJECTED' | 'PROJECT_BLOCKED';
@@ -247,6 +227,10 @@ export const PROJECT_E2E_TYPES: readonly string[] = [
 // ============================================================
 
 const HEX16 = /^[a-f0-9]{16}$/i;
+/** vNext stage-receipt digest width: sha256 (64-hex); legacy 16-hex also accepted by the manifest parser. */
+const HEX16_64 = /^[a-f0-9]{16,64}$/i;
+/** vNext canonical digest shape (64-hex sha256). */
+export const HEX64 = /^[a-f0-9]{64}$/i;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -333,17 +317,22 @@ function expectStringArray(value: unknown, pathStr: string, issues: SchemaIssue[
   return value as string[];
 }
 
-/** path+digest reference: both required; digest is 16-char hex (legacy). */
+/**
+ * path+digest reference: both required; digest is 16-char hex by default
+ * (legacy project-domain refs). Stage receipt refs pass `digestRegex`
+ * HEX16_64 — vNext stage digests are 64-hex sha256.
+ */
 function parsePathDigestRef(
   value: unknown,
   pathStr: string,
   issues: SchemaIssue[],
+  opts?: { digestRegex?: RegExp },
 ): { path: string; digest: string } | undefined {
   const obj = expectObject(value, pathStr, issues);
   if (!obj) return undefined;
   let valid = true;
   const p = expectString(obj['path'], `${pathStr}.path`, issues, { min: 1 });
-  const d = expectString(obj['digest'], `${pathStr}.digest`, issues, { regex: HEX16 });
+  const d = expectString(obj['digest'], `${pathStr}.digest`, issues, { regex: opts?.digestRegex ?? HEX16 });
   if (p === undefined || d === undefined) valid = false;
   return valid ? { path: p as string, digest: d as string } : undefined;
 }
@@ -457,9 +446,9 @@ export function parseProjectAcceptanceManifest(value: unknown): ProjectAcceptanc
       if (!sr) continue;
       let valid = true;
       const sid = expectString(sr['stage_id'], `stage_receipts[${i}].stage_id`, issues, { min: 1 });
-      const sm = parsePathDigestRef(sr['stage_manifest'], `stage_receipts[${i}].stage_manifest`, issues);
-      const rr = parsePathDigestRef(sr['review_receipt'], `stage_receipts[${i}].review_receipt`, issues);
-      const gr = parsePathDigestRef(sr['gate_receipt'], `stage_receipts[${i}].gate_receipt`, issues);
+      const sm = parsePathDigestRef(sr['stage_manifest'], `stage_receipts[${i}].stage_manifest`, issues, { digestRegex: HEX16_64 });
+      const rr = parsePathDigestRef(sr['review_receipt'], `stage_receipts[${i}].review_receipt`, issues, { digestRegex: HEX16_64 });
+      const gr = parsePathDigestRef(sr['gate_receipt'], `stage_receipts[${i}].gate_receipt`, issues, { digestRegex: HEX16_64 });
       if (sid === undefined || sm === undefined || rr === undefined || gr === undefined) valid = false;
       if (valid) stageReceipts.push({ stage_id: sid as string, stage_manifest: sm!, review_receipt: rr!, gate_receipt: gr! });
     }
@@ -633,102 +622,6 @@ function parseServiceCleanup(
   };
 }
 
-/** StageReviewReceipt validator (legacy StageReviewReceiptSchema). */
-export function parseStageReviewReceipt(value: unknown): StageReviewReceipt {
-  const issues: SchemaIssue[] = [];
-  const obj = expectObject(value, '', issues);
-  if (!obj) throw new ProjectAcceptanceSchemaError(issues);
-
-  const stageId = expectString(obj['stage_id'], 'stage_id', issues, { min: 1 });
-  const verdict = obj['verdict'];
-  if (verdict !== 'ACCEPTED' && verdict !== 'REJECTED' && verdict !== 'BLOCKED') {
-    issue(issues, 'verdict', `Expected "ACCEPTED" | "REJECTED" | "BLOCKED", got ${JSON.stringify(verdict)}`);
-  }
-  const snapshot = expectString(obj['snapshot'], 'snapshot', issues, { regex: HEX16 });
-  const manifestDigest = expectString(obj['manifest_digest'], 'manifest_digest', issues, { regex: HEX16 });
-  const gateRef = parsePathDigestRef(obj['stage_gate_receipt'], 'stage_gate_receipt', issues);
-  const reviewer = expectString(obj['reviewer'], 'reviewer', issues, { min: 1 });
-  const reviewedAt = expectString(obj['reviewed_at'], 'reviewed_at', issues);
-
-  let findings: Array<{ category: string; description: string }> = [];
-  if (obj['findings'] !== undefined) {
-    if (!Array.isArray(obj['findings'])) {
-      issue(issues, 'findings', 'Must be an array');
-    } else {
-      findings = [];
-      for (let i = 0; i < (obj['findings'] as unknown[]).length; i++) {
-        const f = expectObject((obj['findings'] as unknown[])[i], `findings[${i}]`, issues);
-        if (f) {
-          const cat = expectString(f['category'], `findings[${i}].category`, issues, { min: 1 });
-          const desc = expectString(f['description'], `findings[${i}].description`, issues, { min: 1 });
-          if (cat && desc) findings.push({ category: cat, description: desc });
-        }
-      }
-    }
-  }
-
-  if (issues.length > 0) throw new ProjectAcceptanceSchemaError(issues);
-  return {
-    stage_id: stageId as string,
-    verdict: verdict as StageReviewReceipt['verdict'],
-    snapshot: snapshot as string,
-    manifest_digest: manifestDigest as string,
-    stage_gate_receipt: gateRef as { path: string; digest: string },
-    findings,
-    reviewer: reviewer as string,
-    reviewed_at: reviewedAt as string,
-  };
-}
-
-/** StageGateReceipt validator (legacy StageGateReceipt). */
-export function parseStageGateReceipt(value: unknown): StageGateReceipt {
-  const issues: SchemaIssue[] = [];
-  const obj = expectObject(value, '', issues);
-  if (!obj) throw new ProjectAcceptanceSchemaError(issues);
-
-  const stageId = expectString(obj['stage_id'], 'stage_id', issues, { min: 1 });
-  const snapshot = expectString(obj['snapshot'], 'snapshot', issues, { regex: HEX16 });
-  const manifestDigest = expectString(obj['manifest_digest'], 'manifest_digest', issues, { regex: HEX16 });
-  const platform = expectString(obj['platform'], 'platform', issues);
-  const verdict = obj['verdict'];
-  if (verdict !== 'PASS' && verdict !== 'FAIL' && verdict !== 'BLOCKED') {
-    issue(issues, 'verdict', `Expected "PASS" | "FAIL" | "BLOCKED", got ${JSON.stringify(verdict)}`);
-  }
-  const steps = Array.isArray(obj['steps']) ? obj['steps'] : undefined;
-  if (!Array.isArray(obj['steps'])) issue(issues, 'steps', 'Must be an array');
-  const cleanupRaw = expectObject(obj['service_cleanup'], 'service_cleanup', issues);
-  const timestampsRaw = expectObject(obj['timestamps'], 'timestamps', issues);
-
-  let serviceCleanup: ServiceCleanupResultShape | undefined;
-  if (cleanupRaw) serviceCleanup = parseServiceCleanup(cleanupRaw, 'service_cleanup', issues);
-
-  let startedAt: string | undefined;
-  let completedAt: string | undefined;
-  if (timestampsRaw) {
-    startedAt = expectString(timestampsRaw['started_at'], 'timestamps.started_at', issues);
-    completedAt = expectString(timestampsRaw['completed_at'], 'timestamps.completed_at', issues);
-  }
-
-  if (issues.length > 0) throw new ProjectAcceptanceSchemaError(issues);
-  return {
-    stage_id: stageId as string,
-    snapshot: snapshot as string,
-    manifest_digest: manifestDigest as string,
-    ...(obj['completed_slice_ids'] !== undefined
-      ? { completed_slice_ids: obj['completed_slice_ids'] as string[] }
-      : {}),
-    ...(obj['slice_complete_facts'] !== undefined
-      ? { slice_complete_facts: obj['slice_complete_facts'] as Array<Record<string, unknown>> }
-      : {}),
-    ...(obj['manifest_path'] !== undefined ? { manifest_path: obj['manifest_path'] as string } : {}),
-    platform: platform as string,
-    verdict: verdict as StageGateReceipt['verdict'],
-    steps: steps as Array<{ id: string; exit_code: number | null; skipped?: boolean; observations?: string }>,
-    service_cleanup: serviceCleanup as ServiceCleanupResultShape,
-    timestamps: { started_at: startedAt as string, completed_at: completedAt as string },
-  };
-}
-
 /** ProjectReviewResult validator (legacy ProjectReviewResultSchema + criteria uniqueness). */
 export function parseProjectReviewResult(value: unknown): ProjectReviewResult {
   const issues: SchemaIssue[] = [];
@@ -892,6 +785,96 @@ function readJsonFile(filePath: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+// ============================================================
+// vNext stage evidence helpers (finalize — vNext-only semantics)
+// ============================================================
+
+/** Parsed vNext stage review evidence (STAGE_REVIEW_PASS envelope payload). */
+interface VNextStageReview {
+  readonly digest: string;
+  readonly stageId: string;
+  readonly verdict: string;
+  readonly manifestDigest: string;
+  readonly snapshotDigest: string;
+  readonly stageGateReceiptDigest: string;
+}
+
+/** Parsed vNext stage gate evidence (GATE_PASS envelope payload). */
+interface VNextStageGate {
+  readonly digest: string;
+  readonly stageId: string;
+  readonly verdict: string;
+  readonly manifestDigest: string;
+  readonly snapshotDigest: string;
+}
+
+/**
+ * Read + kernel-validate a vNext stage evidence envelope file
+ * (STAGE_REVIEW_PASS / GATE_PASS). Fail closed on any violation:
+ *   - unreadable / malformed JSON → error;
+ *   - kernel envelope schema violation (validateReceipt) → error;
+ *   - envelope `type` must equal `expectedType` → error;
+ *   - envelope self-digest must match its content (verifyReceiptDigest).
+ * Appends the error message to `errors` and returns null.
+ */
+export function readVNextStageEnvelope(
+  filePath: string,
+  sid: string,
+  expectedType: 'STAGE_REVIEW_PASS' | 'GATE_PASS',
+  errors: string[],
+): { digest: string; payload: Record<string, unknown> } | null {
+  const raw = readJsonFile(filePath);
+  if (raw === null) {
+    errors.push(`Invalid ${expectedType} receipt for ${sid}: cannot parse ${filePath}`);
+    return null;
+  }
+  let envelope: { digest: string; type: string; payload: Record<string, unknown> };
+  try {
+    const validated = validateReceipt(raw);
+    envelope = { digest: validated.digest, type: validated.type, payload: validated.payload };
+  } catch (err) {
+    errors.push(
+      `Invalid ${expectedType} receipt for ${sid} (kernel envelope): ${err instanceof SchemaValidationError ? err.message : String(err)}`,
+    );
+    return null;
+  }
+  if (envelope.type !== expectedType) {
+    errors.push(`Receipt for stage ${sid} type is "${envelope.type}", expected "${expectedType}"`);
+    return null;
+  }
+  if (!verifyReceiptDigest(filePath)) {
+    errors.push(`Receipt for stage ${sid}: envelope self-digest mismatch (${filePath})`);
+    return null;
+  }
+  return { digest: envelope.digest, payload: envelope.payload };
+}
+
+/**
+ * Extract a required string payload field from a vNext stage evidence
+ * envelope. Appends an error and returns null on violation.
+ */
+export function extractVNextStagePayloadField(
+  payload: Record<string, unknown>,
+  key: string,
+  sid: string,
+  kind: 'review' | 'gate',
+  errors: string[],
+  opts?: { regex?: RegExp },
+): string | null {
+  const value = payload[key];
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    (opts?.regex !== undefined && !opts.regex.test(value))
+  ) {
+    errors.push(
+      `Stage ${kind} for ${sid}: payload.${key} must be a non-empty string${opts?.regex !== undefined ? ` matching ${opts.regex}` : ''}`,
+    );
+    return null;
+  }
+  return value;
 }
 
 // ============================================================
@@ -1544,10 +1527,14 @@ export interface FinalizeProjectReviewResult {
  *      reviewed_snapshot bound, project_manifest.digest bound, the reviewer's
  *      e2e receipt file digest matches its declared digest AND the actual
  *      E2E file digest;
- *   4. Per-stage triple-binding: stage manifest (kernel-validated, canonical
- *      digest), stage review receipt (ACCEPTED, manifest_digest bound,
- *      stage_gate_receipt file-digest triple-bound to the manifest gate
- *      entry), stage gate receipt (PASS, manifest_digest bound);
+ *   4. Per-stage triple-binding (vNext-only): stage manifest must be a
+ *      version-2 vNext manifest (kernel-validated; version-1 legacy stages
+ *      are archived and rejected) with the canonical 64-hex digest bound;
+ *      stage review receipt must be a STAGE_REVIEW_PASS envelope (verdict
+ *      ACCEPTED, manifest_digest / snapshot_digest bound); stage gate
+ *      receipt must be a GATE_PASS envelope (verdict PASS, digest-addressed
+ *      to the manifest entry); review.stage_gate_receipt_digest triple-bound
+ *      to the gate envelope digest; review↔gate snapshot consistency;
  *   5. Criteria one-to-one coverage: exact length match, both-set equality,
  *      every criterion passed;
  *   6. Reviewer manifest path file digest matches the actual manifest.
@@ -1679,7 +1666,8 @@ export function finalizeProjectReview(
     }
   }
 
-  // ── 4. Stage evidence triple-binding (single authoritative manifest path) ──
+  // ── 4. Stage evidence triple-binding (vNext semantics — archived legacy
+  //        stages are not part of acceptance) ──
   const stageReceiptResults: ProjectReviewReceipt['stage_receipts'] = [];
   if (manifest.stage_receipts.length === 0) {
     errors.push('Manifest has zero stage_receipts entries');
@@ -1688,7 +1676,8 @@ export function finalizeProjectReview(
   for (const ms of manifest.stage_receipts) {
     const sid = ms.stage_id;
 
-    // a. Stage manifest: exists + kernel-validated + canonical digest bound.
+    // a. Stage manifest: exists + vNext (version 2) + kernel-validated +
+    //    canonical digest bound (64-hex sha256 over canonical JSON).
     let canonicalStageManifestDigest = '';
     if (!fs.existsSync(ms.stage_manifest.path)) {
       errors.push(`Stage manifest file not found for ${sid}: ${ms.stage_manifest.path}`);
@@ -1696,103 +1685,105 @@ export function finalizeProjectReview(
       const stageManifestRaw = readJsonFile(ms.stage_manifest.path);
       if (stageManifestRaw === null) {
         errors.push(`Stage manifest for ${sid}: cannot parse ${ms.stage_manifest.path}`);
+      } else if (!isObject(stageManifestRaw) || (stageManifestRaw as Record<string, unknown>)['version'] !== 2) {
+        errors.push(
+          `Stage manifest for ${sid} is not a vNext manifest (version 2 required): ${ms.stage_manifest.path}. ` +
+            'Version 1 legacy stages are archived and not part of acceptance',
+        );
       } else {
         try {
-          validateManifest(stageManifestRaw);
-          canonicalStageManifestDigest = computeCanonicalJsonDigest(stageManifestRaw);
+          validateVNextManifest(stageManifestRaw);
+          canonicalStageManifestDigest = computeDigest(stageManifestRaw);
           if (ms.stage_manifest.digest !== canonicalStageManifestDigest) {
-            errors.push(`Stage manifest for ${sid}: declared digest "${ms.stage_manifest.digest}" != canonical "${canonicalStageManifestDigest}"`);
+            errors.push(`Stage manifest for ${sid}: declared digest "${ms.stage_manifest.digest}" != vNext canonical "${canonicalStageManifestDigest}"`);
           }
         } catch (err) {
-          errors.push(`Stage manifest for ${sid}: kernel validation failed: ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(`Stage manifest for ${sid}: vNext kernel validation failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
 
-    // b. Stage review receipt.
+    // b. Stage review receipt: STAGE_REVIEW_PASS envelope with
+    //    verdict / manifest_digest / snapshot_digest / stage_id /
+    //    stage_gate_receipt_digest in the payload.
+    let review: VNextStageReview | null = null;
     if (!fs.existsSync(ms.review_receipt.path)) {
       errors.push(`Review receipt not found for stage ${sid}: ${ms.review_receipt.path}`);
-      continue;
+    } else {
+      const reviewEnvelope = readVNextStageEnvelope(ms.review_receipt.path, sid, 'STAGE_REVIEW_PASS', errors);
+      if (reviewEnvelope !== null) {
+        const payload = reviewEnvelope.payload;
+        const stageId = extractVNextStagePayloadField(payload, 'stage_id', sid, 'review', errors);
+        const verdict = extractVNextStagePayloadField(payload, 'verdict', sid, 'review', errors);
+        const manifestDigest = extractVNextStagePayloadField(payload, 'manifest_digest', sid, 'review', errors, { regex: HEX64 });
+        const snapshotDigest = extractVNextStagePayloadField(payload, 'snapshot_digest', sid, 'review', errors);
+        const stageGateReceiptDigest = extractVNextStagePayloadField(payload, 'stage_gate_receipt_digest', sid, 'review', errors, { regex: HEX64 });
+        if (stageId !== null && verdict !== null && manifestDigest !== null && snapshotDigest !== null && stageGateReceiptDigest !== null) {
+          review = { digest: reviewEnvelope.digest, stageId, verdict, manifestDigest, snapshotDigest, stageGateReceiptDigest };
+        }
+      }
     }
-    const reviewRaw = readJsonFile(ms.review_receipt.path);
-    if (reviewRaw === null) {
-      errors.push(`Invalid Stage Review for ${sid}: cannot parse ${ms.review_receipt.path}`);
-      continue;
-    }
-    let review: StageReviewReceipt;
-    try {
-      review = parseStageReviewReceipt(reviewRaw);
-    } catch (err) {
-      errors.push(`Invalid Stage Review for ${sid}: ${err instanceof Error ? err.message : String(err)}`);
-      continue;
-    }
+    if (review === null) continue;
 
-    // c. Stage gate receipt.
+    // c. Stage gate receipt: GATE_PASS envelope (digest-addressed — the
+    //    envelope digest must equal the manifest's declared gate digest).
+    let gate: VNextStageGate | null = null;
     if (!fs.existsSync(ms.gate_receipt.path)) {
       errors.push(`Gate receipt not found for stage ${sid}: ${ms.gate_receipt.path}`);
-      continue;
+    } else {
+      const gateEnvelope = readVNextStageEnvelope(ms.gate_receipt.path, sid, 'GATE_PASS', errors);
+      if (gateEnvelope !== null) {
+        if (gateEnvelope.digest !== ms.gate_receipt.digest) {
+          errors.push(`Gate file for ${sid}: envelope digest "${gateEnvelope.digest}" != declared "${ms.gate_receipt.digest}" (digest-addressed)`);
+        }
+        const payload = gateEnvelope.payload;
+        const stageId = extractVNextStagePayloadField(payload, 'stage_id', sid, 'gate', errors);
+        const verdict = extractVNextStagePayloadField(payload, 'verdict', sid, 'gate', errors);
+        const manifestDigest = extractVNextStagePayloadField(payload, 'manifest_digest', sid, 'gate', errors, { regex: HEX64 });
+        const snapshotDigest = extractVNextStagePayloadField(payload, 'snapshot_digest', sid, 'gate', errors);
+        if (stageId !== null && verdict !== null && manifestDigest !== null && snapshotDigest !== null) {
+          gate = { digest: gateEnvelope.digest, stageId, verdict, manifestDigest, snapshotDigest };
+        }
+      }
     }
-    const gateRaw = readJsonFile(ms.gate_receipt.path);
-    if (gateRaw === null) {
-      errors.push(`Invalid Stage Gate for ${sid}: cannot parse ${ms.gate_receipt.path}`);
-      continue;
-    }
-    let gate: StageGateReceipt;
-    try {
-      gate = parseStageGateReceipt(gateRaw);
-    } catch (err) {
-      errors.push(`Invalid Stage Gate for ${sid}: ${err instanceof Error ? err.message : String(err)}`);
-      continue;
-    }
+    if (gate === null) continue;
 
-    // d. Cross-validation.
-    if (review.stage_id !== sid) errors.push(`Review stage_id "${review.stage_id}" != manifest entry "${sid}"`);
-    if (gate.stage_id !== sid) errors.push(`Gate stage_id "${gate.stage_id}" != manifest entry "${sid}"`);
-    if (review.stage_id !== gate.stage_id) errors.push(`Review stage "${review.stage_id}" != Gate stage "${gate.stage_id}"`);
+    // d. Cross-validation: stage_id / verdict / snapshot bindings.
+    if (review.stageId !== sid) errors.push(`Review stage_id "${review.stageId}" != manifest entry "${sid}"`);
+    if (gate.stageId !== sid) errors.push(`Gate stage_id "${gate.stageId}" != manifest entry "${sid}"`);
+    if (review.stageId !== gate.stageId) errors.push(`Review stage "${review.stageId}" != Gate stage "${gate.stageId}"`);
     if (review.verdict !== 'ACCEPTED') errors.push(`Review for ${sid} verdict is "${review.verdict}", expected "ACCEPTED"`);
     if (gate.verdict !== 'PASS') errors.push(`Gate for ${sid} verdict is "${gate.verdict}", expected "PASS"`);
-    if (review.snapshot !== gate.snapshot) {
-      errors.push(`Review snapshot "${review.snapshot}" != Gate snapshot "${gate.snapshot}" for ${sid}`);
+    if (review.snapshotDigest !== gate.snapshotDigest) {
+      errors.push(`Review snapshot "${review.snapshotDigest}" != Gate snapshot "${gate.snapshotDigest}" for ${sid}`);
     }
 
-    // e. Canonical digest binding: review.manifest_digest / gate.manifest_digest.
-    if (canonicalStageManifestDigest && review.manifest_digest !== canonicalStageManifestDigest) {
-      errors.push(`Review manifest_digest for ${sid}: "${review.manifest_digest}" != canonical "${canonicalStageManifestDigest}"`);
+    // e. Canonical digest binding: review.manifest_digest /
+    //    gate.manifest_digest must equal the vNext manifest digest.
+    if (canonicalStageManifestDigest && review.manifestDigest !== canonicalStageManifestDigest) {
+      errors.push(`Review manifest_digest for ${sid}: "${review.manifestDigest}" != canonical "${canonicalStageManifestDigest}"`);
     }
-    if (canonicalStageManifestDigest && gate.manifest_digest !== canonicalStageManifestDigest) {
-      errors.push(`Gate manifest_digest for ${sid}: "${gate.manifest_digest}" != canonical "${canonicalStageManifestDigest}"`);
-    }
-
-    // f. Triple-binding: review.stage_gate_receipt file digest === declared
-    //    digest === manifest gate_receipt.digest.
-    if (!fs.existsSync(review.stage_gate_receipt.path)) {
-      errors.push(`Review's stage_gate_receipt path not found for ${sid}: ${review.stage_gate_receipt.path}`);
-    } else {
-      const reviewGateFileDigest = fileDigest16(review.stage_gate_receipt.path);
-      if (reviewGateFileDigest !== review.stage_gate_receipt.digest) {
-        errors.push(`Review for ${sid}: gate file digest "${reviewGateFileDigest}" != review declared "${review.stage_gate_receipt.digest}"`);
-      }
-      if (reviewGateFileDigest !== ms.gate_receipt.digest) {
-        errors.push(`Review for ${sid}: gate file digest "${reviewGateFileDigest}" != manifest gate_receipt.digest "${ms.gate_receipt.digest}" (triple binding)`);
-      }
+    if (canonicalStageManifestDigest && gate.manifestDigest !== canonicalStageManifestDigest) {
+      errors.push(`Gate manifest_digest for ${sid}: "${gate.manifestDigest}" != canonical "${canonicalStageManifestDigest}"`);
     }
 
-    // g. Review/gate file digests vs manifest declared digests.
-    const reviewFileDigest = fileDigest16(ms.review_receipt.path);
-    if (reviewFileDigest !== ms.review_receipt.digest) {
-      errors.push(`Review file for ${sid}: actual digest "${reviewFileDigest}" != declared "${ms.review_receipt.digest}"`);
+    // f. Triple-binding: review.stage_gate_receipt_digest must equal the
+    //    gate envelope digest (review → gate file binding).
+    if (review.stageGateReceiptDigest !== gate.digest) {
+      errors.push(`Review for ${sid}: stage_gate_receipt_digest "${review.stageGateReceiptDigest}" != gate envelope digest "${gate.digest}" (triple binding)`);
     }
-    const gateFileDigest = fileDigest16(ms.gate_receipt.path);
-    if (gateFileDigest !== ms.gate_receipt.digest) {
-      errors.push(`Gate file for ${sid}: actual digest "${gateFileDigest}" != declared "${ms.gate_receipt.digest}"`);
+
+    // g. Review envelope digest binding (digest-addressed).
+    if (review.digest !== ms.review_receipt.digest) {
+      errors.push(`Review file for ${sid}: envelope digest "${review.digest}" != declared "${ms.review_receipt.digest}"`);
     }
 
     stageReceiptResults.push({
       stage_id: sid,
       stage_manifest: { path: path.resolve(ms.stage_manifest.path), digest: canonicalStageManifestDigest },
-      review: { path: path.resolve(ms.review_receipt.path), digest: reviewFileDigest },
-      gate: { path: path.resolve(ms.gate_receipt.path), digest: gateFileDigest },
-      snapshot: review.snapshot,
+      review: { path: path.resolve(ms.review_receipt.path), digest: review.digest },
+      gate: { path: path.resolve(ms.gate_receipt.path), digest: gate.digest },
+      snapshot: review.snapshotDigest,
     });
   }
 

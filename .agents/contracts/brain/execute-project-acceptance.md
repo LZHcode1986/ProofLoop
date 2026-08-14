@@ -71,7 +71,7 @@ PROJECT_ACCEPTANCE
 
 输出路径由 CLI 参数指定，例如：
 ```
-node .agents/runtime/dist/compile-project-acceptance.js <input-json> .proofloop/manifests/project-acceptance.json
+node packages/runtime/dist/cli/compile-project-acceptance.js <input-json> .proofloop/manifests/project-acceptance.json
 ```
 
 ## 执行（run-e2e）
@@ -79,7 +79,7 @@ node .agents/runtime/dist/compile-project-acceptance.js <input-json> .proofloop/
 由 `run-project-acceptance` CLI 执行 Manifest 中的 E2E steps：
 
 ```
-node .agents/runtime/dist/run-project-acceptance.js <manifest-path> [output-dir] [project-root]
+node packages/runtime/dist/cli/run-project-acceptance.js <manifest-path> [output-dir] [project-root]
 ```
 
 执行逻辑（`runProjectAcceptance`）：
@@ -133,7 +133,7 @@ Reviewer 独立验证：
 由 `finalize-project-review` 工具执行最终验证和出证：
 
 ```
-node .agents/runtime/dist/finalize-project-review.js <input-json>
+node packages/runtime/dist/cli/finalize-project-review.js <input-json>
 ```
 
 input JSON 包含：

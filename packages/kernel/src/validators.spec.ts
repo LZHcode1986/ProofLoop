@@ -18,6 +18,18 @@ import {
   validateFinding,
   SchemaValidationError,
 } from '@proofloop/kernel';
+// S09-C-T01: the canonical Runtime Proof step validator lives in this file
+// (source-relative import; the public package surface is not re-exported).
+// The error class is imported from the SAME source module so instanceof
+// assertions match the validator's thrown instances.
+import { validateRuntimeProofStep, SchemaValidationError as SourceSchemaValidationError } from './validators';
+// S09-C-T03: the shared canonical Stage ID guard (^S\d+$) lives in this file
+// (source-relative import, same convention as the Runtime Proof validator).
+import {
+  isCanonicalStageId,
+  assertCanonicalStageId,
+  CANONICAL_STAGE_ID_RE,
+} from './validators';
 
 // ============================================================
 // SchemaValidationError — class structure
@@ -1841,4 +1853,148 @@ describe('PROJECT_E2E_* — additive project-level E2E gate receipt types (B1c)'
       validateReceipt({ ...base, type: 'PROJECT_E2E_RUN' }),
     ).toThrow(SchemaValidationError);
   });
+});
+
+// ============================================================
+// S09-C-T01 — canonical executable Runtime Proof step schema
+// ============================================================
+
+describe('validateRuntimeProofStep — canonical executable Runtime Proof step schema (S09-C-T01)', () => {
+  const executableStep: Record<string, unknown> = {
+    id: 'build',
+    type: 'command',
+    executable: 'npm',
+    args: ['run', 'build'],
+    cwd: '.',
+    timeout_ms: 300000,
+    expected: { exit_code: 0 },
+  };
+
+  it('accepts each canonical executable step type (command/service_start/service_stop/probe)', () => {
+    for (const type of ['command', 'service_start', 'service_stop', 'probe']) {
+      const result = validateRuntimeProofStep({ ...executableStep, type });
+      expect(result).toMatchObject({ type });
+    }
+  });
+
+  it('accepts service_start with readiness_signal and service_stop with service_ref', () => {
+    const start = validateRuntimeProofStep({
+      ...executableStep,
+      type: 'service_start',
+      readiness_signal: 'ready',
+    });
+    expect(start).toMatchObject({ type: 'service_start' });
+    const stop = validateRuntimeProofStep({
+      ...executableStep,
+      type: 'service_stop',
+      service_ref: 'app-start',
+    });
+    expect(stop).toMatchObject({ type: 'service_stop' });
+  });
+
+  it('accepts a not_applicable-only step', () => {
+    const result = validateRuntimeProofStep({
+      not_applicable: { reason: 'skipped in this context' },
+    });
+    expect(result).toEqual({ not_applicable: { reason: 'skipped in this context' } });
+  });
+
+  it('rejects a step that mixes executable fields with not_applicable', () => {
+    expect(() =>
+      validateRuntimeProofStep({ ...executableStep, not_applicable: { reason: 'n/a' } }),
+    ).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects a not_applicable step carrying extra fields', () => {
+    expect(() =>
+      validateRuntimeProofStep({ not_applicable: { reason: 'n/a' }, id: 'x' }),
+    ).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects unknown step types including second-set semantics (service_probe/file_assertion)', () => {
+    expect(() => validateRuntimeProofStep({ ...executableStep, type: 'service_probe' })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, type: 'file_assertion' })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, type: 'invalid_type' })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, type: 123 })).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects an empty or non-string executable', () => {
+    expect(() => validateRuntimeProofStep({ ...executableStep, executable: '' })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, executable: 42 })).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects non-string args elements', () => {
+    expect(() => validateRuntimeProofStep({ ...executableStep, args: ['run', 123] })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, args: 'run' })).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects non-positive or non-integer timeout_ms', () => {
+    expect(() => validateRuntimeProofStep({ ...executableStep, timeout_ms: 0 })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, timeout_ms: -100 })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, timeout_ms: 300.5 })).toThrow(SourceSchemaValidationError);
+    expect(() => validateRuntimeProofStep({ ...executableStep, timeout_ms: '300000' })).toThrow(SourceSchemaValidationError);
+  });
+
+  it('rejects a step missing any required executable field', () => {
+    for (const field of ['id', 'type', 'executable', 'args', 'cwd', 'timeout_ms', 'expected']) {
+      const step = { ...executableStep };
+      delete step[field];
+      expect(() => validateRuntimeProofStep(step)).toThrow(SourceSchemaValidationError);
+    }
+  });
+
+  it('rejects unknown fields on an executable step', () => {
+    expect(() => validateRuntimeProofStep({ ...executableStep, bogus: true })).toThrow(SourceSchemaValidationError);
+  });
+});
+
+// ============================================================
+// S09-C-T03 — shared canonical Stage ID guard (^S\d+$)
+// ============================================================
+
+describe('canonical Stage ID guard (S09-C-T03)', () => {
+  const LEGACY_LABELS = ['S08B0', 'S08B'];
+
+  it('accepts canonical stage ids matching /^S\\d+$/', () => {
+    for (const stageId of ['S1', 'S09', 'S10', 'S0', 'S123']) {
+      expect(isCanonicalStageId(stageId)).toBe(true);
+      expect(CANONICAL_STAGE_ID_RE.test(stageId)).toBe(true);
+    }
+  });
+
+  it.each([
+    'S08B0',
+    'S08B',
+    'S08-A',
+    's09',
+    'S',
+    'S9.5',
+    'S9_1',
+    'S2/../../etc/passwd',
+    'S2\\..\\..\\tmp',
+    '9S',
+    'S 9',
+    '',
+  ])('rejects non-canonical stage id %j (legacy labels fail closed)', (stageId) => {
+    expect(isCanonicalStageId(stageId)).toBe(false);
+    expect(CANONICAL_STAGE_ID_RE.test(stageId)).toBe(false);
+  });
+
+  it('assertCanonicalStageId returns the value for canonical ids', () => {
+    expect(assertCanonicalStageId('S09')).toBe('S09');
+  });
+
+  it('assertCanonicalStageId throws SchemaValidationError for legacy S08B0/S08B labels and non-strings', () => {
+    for (const legacy of LEGACY_LABELS) {
+      expect(() => assertCanonicalStageId(legacy)).toThrow(SourceSchemaValidationError);
+      expect(() => assertCanonicalStageId(legacy)).toThrow(/canonical Stage ID/);
+    }
+    expect(() => assertCanonicalStageId(42)).toThrow(SourceSchemaValidationError);
+    expect(() => assertCanonicalStageId(undefined)).toThrow(SourceSchemaValidationError);
+  });
+
+  // NOTE: the v1 Receipt/Manifest validators intentionally keep the v1
+  // stage_id contract (non-empty string).  The shared canonical Stage ID
+  // grammar is enforced at every vNext Runtime boundary (candidate parser,
+  // compiler, Mechanical Validator, plan/stage/review status, admission).
 });

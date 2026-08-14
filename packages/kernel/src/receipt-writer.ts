@@ -34,6 +34,89 @@ export interface ReceiptWriterOptions {
 }
 
 /**
+ * Options for the root-bound receipt writer seam.
+ *
+ * `tempDir` is retained for additive compatibility with the v1 writer shape,
+ * but it must resolve to the same physical directory as `receiptDir`.  The
+ * bounded writer never uses either raw path as an operation base after the
+ * directory fds are opened; temp files, locks, receipts, reads, no-replace
+ * installs, and fsync all use the verified root-fd plus the root-relative
+ * target path.
+ */
+export interface BoundedReceiptWriterOptions extends ReceiptWriterOptions {
+  /** Canonical trust root that must contain `receiptDir`. */
+  projectRoot: string;
+}
+
+/**
+ * Options for securely creating a root-bound Receipt directory.
+ *
+ * `targetDir` may be an absolute path or a path relative to `projectRoot`.
+ * Missing components are created one at a time through an already-open
+ * directory fd; the caller must still pass the returned canonical path to
+ * `writeReceiptBounded` explicitly.
+ */
+export interface EnsureBoundedReceiptDirectoryOptions {
+  /** Canonical trust root that must contain `targetDir`. */
+  projectRoot: string;
+  /** Absolute target path, or a path relative to `projectRoot`. */
+  targetDir: string;
+}
+
+/**
+ * Stable directory binding returned with a bounded write result.
+ *
+ * The fd used by the write is deliberately closed before the function
+ * returns, so no `/proc/self/fd/<fd>` path is exposed.  Consumers doing later
+ * readback or rollback can use this canonical path together with the device
+ * and inode identity for their own bound open/re-verification.
+ */
+export interface ReceiptDirectoryBinding {
+  /** Canonical project root used for the binding. */
+  rootPath: string;
+  /** Canonical physical receipt directory path, never a proc-fd path. */
+  path: string;
+  /** Device identity captured from the opened directory fd. */
+  dev: number;
+  /** Inode identity captured from the opened directory fd. */
+  ino: number;
+}
+
+/**
+ * Writer-time identity of the final Receipt directory entry.
+ *
+ * This is a closed binding: it contains no fd and no redirectable path.  The
+ * bounded writer captures it immediately after the no-replace install has
+ * completed, before any post-install readback or durability verification.
+ * A later consumer must compare this snapshot before attempting a rollback;
+ * it must not substitute a later `lstat` result for this identity.
+ */
+export interface ReceiptFileBinding {
+  /** Final directory-entry name, e.g. `<digest>.json`. */
+  readonly name: string;
+  /** Device identity captured at writer time. */
+  readonly dev: number;
+  /** Inode identity captured at writer time. */
+  readonly ino: number;
+  /** Link count captured at writer time. */
+  readonly nlink: number;
+  /**
+   * Optional byte size for consumers that need an additional identity check.
+   * The bounded writer does not require size because dev/ino/nlink plus the
+   * digest binding are sufficient for its cleanup guard.
+   */
+  readonly size?: number;
+}
+
+/** Result of the additive root-bound receipt writer seam. */
+export interface BoundedWriteReceiptResult extends WriteReceiptResult {
+  /** Binding metadata for safe later readback/rollback re-verification. */
+  boundDirectory: ReceiptDirectoryBinding;
+  /** Receipt entry identity captured by the Kernel writer, not by readback. */
+  receiptFile: ReceiptFileBinding;
+}
+
+/**
  * Fallback lock timeout in milliseconds.
  *
  * Used only when a lock directory carries no readable `owner.pid` (legacy
@@ -119,8 +202,11 @@ export interface ChainVerificationResult {
  *
  * @param value - The value to serialize.
  * @returns Canonical JSON string.
+ *
+ * Exported for reuse by the vNext contract layer (S0-A): all v1 and vNext
+ * digests share this single canonicalization rule.
  */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (value === null || value === undefined) {
     return 'null';
   }
@@ -176,7 +262,11 @@ function canonicalJson(value: unknown): string {
  * @returns `true` if the digest is the tip (or no receipts exist);
  *          `false` if another receipt already points to this digest.
  */
-function isChainTip(receiptDir: string, expectedPreviousDigest: string): boolean {
+function isChainTipWithReader(
+  receiptDir: string,
+  expectedPreviousDigest: string,
+  readText: (filePath: string) => string,
+): boolean {
   let files: string[];
   try {
     files = fs.readdirSync(receiptDir);
@@ -187,9 +277,7 @@ function isChainTip(receiptDir: string, expectedPreviousDigest: string): boolean
   for (const file of files) {
     if (!file.endsWith('.json') || file.startsWith('.')) continue;
     try {
-      const content = JSON.parse(
-        fs.readFileSync(path.join(receiptDir, file), 'utf-8'),
-      ) as Record<string, unknown>;
+      const content = JSON.parse(readText(path.join(receiptDir, file))) as Record<string, unknown>;
       // If another receipt's previous_digest points to our digest, it is not
       // the tip.  Exclude self-references (receipt pointing to itself).
       if (
@@ -204,6 +292,14 @@ function isChainTip(receiptDir: string, expectedPreviousDigest: string): boolean
   }
 
   return true;
+}
+
+function isChainTip(receiptDir: string, expectedPreviousDigest: string): boolean {
+  return isChainTipWithReader(
+    receiptDir,
+    expectedPreviousDigest,
+    (filePath) => fs.readFileSync(filePath, 'utf-8'),
+  );
 }
 
 /**
@@ -301,6 +397,11 @@ function readLockOwnerMetadata(lockDir: string): LockOwnerMetadata {
   } catch {
     return {};
   }
+
+  return parseLockOwnerMetadata(raw);
+}
+
+function parseLockOwnerMetadata(raw: string): LockOwnerMetadata {
 
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
@@ -796,6 +897,417 @@ export function writeReceipt(data: object, options: ReceiptWriterOptions): Write
 }
 
 /**
+ * Write a receipt through the additive root-bound directory seam.
+ *
+ * Unlike the legacy `writeReceipt`, this function is the safe seam for future
+ * Runtime admission wiring: it requires a canonical directory inside the
+ * supplied project root, opens that directory with `O_DIRECTORY|O_NOFOLLOW`,
+ * verifies the opened inode, and performs every subsequent chain, lock,
+ * temp-file, no-replace install, readback, and fsync operation through paths rooted at
+ * `/proc/self/fd/<rootfd>/<relative-target>`.  It never falls back to the raw
+ * target path or to a path rooted only at the target fd.
+ *
+ * The returned `path` is the canonical absolute receipt path, not a proc-fd
+ * path.  The fd is closed before return; `boundDirectory` carries the
+ * canonical path and inode identity needed for a later Runtime readback or
+ * rollback to re-open and re-verify the directory safely.
+ *
+ * The existing v1 `writeReceipt` API remains unchanged and is intentionally
+ * not described as root-bound.  Callers requiring this boundary must use this
+ * additive function explicitly.
+ */
+export function writeReceiptBounded(
+  data: object,
+  options: BoundedReceiptWriterOptions,
+): BoundedWriteReceiptResult {
+  const prepared = prepareBoundedReceipt(data);
+  const directory = openBoundedReceiptDirectory(options);
+  let boundLock: BoundedLockDirectoryHandle | undefined;
+  let lockAcquired = false;
+  let finalLinkInstalled = false;
+  let receiptFile: ReceiptFileBinding | undefined;
+
+  try {
+    assertBoundedDirectoryStable(directory);
+    boundLock = acquireBoundedLock(directory, () =>
+      verifyReceiptChainWithReader(boundedTargetPath(directory), boundedReceiptReader()),
+      () => assertBoundedDirectoryStable(directory),
+    );
+    lockAcquired = true;
+    if (boundLock === undefined) {
+      throw new Error('writeReceiptBounded: lock acquisition returned no bound lock');
+    }
+    const activeLock = boundLock;
+
+    try {
+      // Re-check the binding after lock acquisition.  A raw target swap must
+      // never turn the later result path into an alias for another directory.
+      assertBoundedLockStable(directory, activeLock);
+
+      const preChainResult = verifyBoundedReceiptChain(directory, activeLock);
+      assertBoundedChainValid(preChainResult, 'before write');
+
+      const filename = `${prepared.digest}.json`;
+      const finalPath = boundedEntryPath(directory, filename);
+      const tmpFilename = `.${filename}.tmp.${process.pid}`;
+      const tmpPath = boundedEntryPath(directory, tmpFilename);
+
+      if (boundedEntryExists(finalPath)) {
+        throw new ReceiptChainError(
+          `writeReceiptBounded: duplicate receipt rejected — file already exists ` +
+            `at ${path.join(directory.binding.path, filename)} (digest: ${prepared.digest})`,
+          'duplicate',
+          prepared.digest,
+          `path: ${path.join(directory.binding.path, filename)}`,
+        );
+      }
+
+      const previousDigest = prepared.rawData.previous_digest;
+      if (previousDigest !== undefined && previousDigest !== null && previousDigest !== '') {
+        const previous = String(previousDigest);
+        if (!isReceiptDigestFilename(previous)) {
+          throw new ReceiptChainError(
+            `writeReceiptBounded: predecessor validation failed — invalid previous digest "${previous}"`,
+            'predecessor',
+            previous,
+          );
+        }
+        assertBoundedLockStable(directory, activeLock);
+        if (!isChainTipWithReader(boundedTargetPath(directory), previous, boundedReadReceiptText)) {
+          assertBoundedLockStable(directory, activeLock);
+          throw new ReceiptChainError(
+            `writeReceiptBounded: fork detected — digest "${previous}" ` +
+              'is not the chain tip (another receipt already points to it)',
+            'fork',
+            previous,
+          );
+        }
+
+        const previousPath = boundedEntryPath(directory, `${previous}.json`);
+        if (!boundedEntryExists(previousPath)) {
+          throw new ReceiptChainError(
+            `writeReceiptBounded: predecessor validation failed — previous receipt not found ` +
+              `at ${path.join(directory.binding.path, `${previous}.json`)}`,
+            'predecessor',
+            previous,
+            `missing file: ${path.join(directory.binding.path, `${previous}.json`)}`,
+          );
+        }
+        if (!verifyBoundedReceiptDigest(previousPath)) {
+          assertBoundedLockStable(directory, activeLock);
+          throw new ReceiptChainError(
+            `writeReceiptBounded: predecessor validation failed — previous receipt has an invalid digest`,
+            'predecessor',
+            previous,
+          );
+        }
+      }
+
+      assertBoundedLockStable(directory, activeLock);
+      writeBoundedTempFile(
+        tmpPath,
+        canonicalJson(prepared.fullData),
+        () => assertBoundedLockStable(directory, activeLock),
+      );
+      assertBoundedLockStable(directory, activeLock);
+
+      try {
+        // `renameSync` is replace semantics: a competitor inserted after the
+        // duplicate pre-check (including a symlink) would be overwritten.
+        // Linux hard-link creation is atomic no-replace for the destination;
+        // unlinking the temporary name completes the install without ever
+        // replacing an existing directory entry.
+        fs.linkSync(tmpPath, finalPath);
+        // From this point on the final entry exists even if removing the
+        // temporary hard-link name fails.  The outer catch therefore treats
+        // every later error as a post-install error and never silently leaves
+        // the final Receipt behind.
+        finalLinkInstalled = true;
+        fs.unlinkSync(tmpPath);
+      } catch (err) {
+        try {
+          assertBoundedLockStable(directory, activeLock);
+          fs.unlinkSync(tmpPath);
+        } catch { /* best-effort; never clean through an unstable target */ }
+        throw err;
+      }
+
+      // Capture the final entry identity at writer time, immediately after
+      // the link+unlink install and before any readback or directory fsync.
+      // Runtime rollback must consume this closed binding rather than taking
+      // a later path-based lstat snapshot.
+      assertBoundedLockStable(directory, activeLock);
+      receiptFile = captureBoundedReceiptFile(directory, activeLock, filename);
+
+      // Readback is also a bounded operation: do not verify a path after the
+      // target has been replaced by another directory or symlink.
+      assertBoundedLockStable(directory, activeLock);
+      if (!verifyBoundedReceiptDigest(finalPath)) {
+        const storedDigest = readBoundedStoredDigest(finalPath);
+        throw new ReceiptChainError(
+          `writeReceiptBounded: post-write digest verification failed for ` +
+            `${path.join(directory.binding.path, filename)}. Stored digest: ${storedDigest}. ` +
+            `Expected: ${prepared.digest}.`,
+          'self_digest',
+          prepared.digest,
+          `stored: ${storedDigest}`,
+        );
+      }
+      assertBoundedLockStable(directory, activeLock);
+
+      // Unlike v1, directory fsync is mandatory here.  Capability preflight
+      // already exercised this fd before any write; a later failure is still
+      // surfaced rather than silently claiming a durable bounded write.
+      fsyncBoundedTarget(directory, activeLock);
+
+      if (receiptFile === undefined) {
+        throw new Error('writeReceiptBounded: writer-time Receipt identity was not captured');
+      }
+      return {
+        path: path.join(directory.binding.path, filename),
+        digest: prepared.digest,
+        boundDirectory: directory.binding,
+        receiptFile,
+      };
+    } catch (error) {
+      if (!finalLinkInstalled || boundLock === undefined) {
+        throw error;
+      }
+
+      const cleanup = receiptFile === undefined
+        ? {
+            ok: false,
+            reason:
+              'writer-time Receipt identity was not captured; ownership cannot be proven, so deletion was skipped',
+          }
+        : cleanupBoundedReceipt(directory, boundLock, receiptFile);
+      throw withBoundedReceiptCleanupOutcome(error, cleanup);
+    } finally {
+      if (lockAcquired && boundLock !== undefined) {
+        try {
+          releaseBoundedLockIfOwned(directory, boundLock);
+        } finally {
+          closeBoundedLock(boundLock);
+        }
+      }
+    }
+  } finally {
+    try {
+      fs.closeSync(directory.dirfd);
+    } catch {
+      // best-effort close; no fd is returned to the caller
+    }
+    try {
+      fs.closeSync(directory.rootfd);
+    } catch {
+      // best-effort close; no fd is returned to the caller
+    }
+  }
+}
+
+/**
+ * Securely create and bind a root-contained Receipt directory.
+ *
+ * This is the additive scaffolding seam for callers that need to materialize
+ * nested paths such as `.proofloop/receipts/<stage>`.  It never uses a raw
+ * recursive mkdir.  After the canonical root is opened, every component is
+ * created or opened through the root-fd-relative path
+ * `/proc/self/fd/<rootfd>/<relative-prefix>` with `O_DIRECTORY|O_NOFOLLOW`,
+ * and each opened identity is checked before the next component is touched.
+ *
+ * All file descriptors are closed before this function returns.  The result
+ * therefore exposes only the canonical target path and stable device/inode
+ * identity needed by a later bound writer; it never exposes a proc-fd path.
+ */
+export function ensureBoundedReceiptDirectory(
+  options: EnsureBoundedReceiptDirectoryOptions,
+): ReceiptDirectoryBinding {
+  assertBoundedWriterCapabilities('ensureBoundedReceiptDirectory');
+
+  const root = resolveBoundedDirectory(
+    'projectRoot',
+    options.projectRoot,
+    true,
+    'ensureBoundedReceiptDirectory',
+  );
+  const target = resolveBoundedReceiptTarget(root.path, options.targetDir);
+  const directoryFlags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_DIRECTORY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number);
+  const openFds: number[] = [];
+
+  try {
+    let rootFd: number;
+    try {
+      rootFd = fs.openSync(root.path, directoryFlags);
+    } catch (err) {
+      throw new Error(
+        `ensureBoundedReceiptDirectory: cannot open project root: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    openFds.push(rootFd);
+
+    const rootDirectory: BoundedScaffoldDirectory = {
+      fd: rootFd,
+      procPath: `/proc/self/fd/${rootFd}`,
+      path: root.path,
+      stat: assertBoundedScaffoldDirectoryIdentity(
+        rootFd,
+        `/proc/self/fd/${rootFd}`,
+        root.path,
+        root.path,
+        root.stat,
+        'project root',
+      ),
+    };
+
+    // This is both the directory-fsync capability preflight and the first
+    // durability barrier.  It happens before any missing component can be
+    // created, so unsupported directory fsync fails closed without a partial
+    // Receipt tree.
+    fs.fsyncSync(rootFd);
+
+    let parent = rootDirectory;
+    for (let index = 0; index < target.components.length; index += 1) {
+      const expectedPath = path.join(
+        root.path,
+        ...target.components.slice(0, index + 1),
+      );
+
+      // Re-check both the root and the currently bound parent immediately
+      // before any mkdir.  The mkdir/open path below is rebuilt from the
+      // verified root fd and the relative component prefix, never from the
+      // parent fd alone.
+      assertBoundedScaffoldDirectoryIdentity(
+        rootDirectory.fd,
+        rootDirectory.procPath,
+        rootDirectory.path,
+        root.path,
+        rootDirectory.stat,
+        'project root before component creation',
+      );
+      assertBoundedScaffoldDirectoryIdentity(
+        parent.fd,
+        parent.procPath,
+        parent.path,
+        root.path,
+        parent.stat,
+        'bound parent before component creation',
+      );
+
+      const existing = inspectBoundedScaffoldDirectory(expectedPath, 'target component');
+      const childProcPath = path.join(
+        rootDirectory.procPath,
+        ...target.components.slice(0, index + 1),
+      );
+      let created = false;
+      if (existing === undefined) {
+        try {
+          // Deliberately non-recursive and rooted at the already-open root fd.
+          // Never replace this with raw recursive path creation.
+          fs.mkdirSync(childProcPath, { recursive: false, mode: 0o700 });
+          created = true;
+        } catch (err) {
+          // A competing creator may win between lstat and mkdir.  Re-open it
+          // with O_NOFOLLOW below; a symlink or non-directory still fails
+          // closed rather than being followed.
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+            throw new Error(
+              `ensureBoundedReceiptDirectory: cannot create ${expectedPath}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
+      }
+
+      let childFd: number;
+      try {
+        childFd = fs.openSync(childProcPath, directoryFlags);
+      } catch (err) {
+        throw new Error(
+          `ensureBoundedReceiptDirectory: cannot no-follow open ${expectedPath}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      openFds.push(childFd);
+
+      if (created) {
+        // Re-verify the parent after creation and persist the new directory
+        // entry through the same bound fd before proceeding.
+        assertBoundedScaffoldDirectoryIdentity(
+          parent.fd,
+          parent.procPath,
+          parent.path,
+          root.path,
+          parent.stat,
+          'bound parent after component creation',
+        );
+        fs.fsyncSync(parent.fd);
+      }
+
+      const childStat = assertBoundedScaffoldDirectoryIdentity(
+        childFd,
+        `/proc/self/fd/${childFd}`,
+        expectedPath,
+        root.path,
+        existing,
+        'created/opened target component',
+      );
+      if (existing !== undefined && !sameDirectoryIdentity(childStat, existing)) {
+        throw new Error(
+          `ensureBoundedReceiptDirectory: target component identity changed before open: ${expectedPath}`,
+        );
+      }
+
+      parent = {
+        fd: childFd,
+        procPath: `/proc/self/fd/${childFd}`,
+        path: expectedPath,
+        stat: childStat,
+      };
+    }
+
+    // Re-check the root and final component immediately before returning the
+    // binding.  This is an identity gate, not an atomic-containment claim; the
+    // later bounded writer repeats its root-relative fd/path checks before
+    // every write phase.
+    assertBoundedScaffoldDirectoryIdentity(
+      rootDirectory.fd,
+      rootDirectory.procPath,
+      rootDirectory.path,
+      root.path,
+      rootDirectory.stat,
+      'project root after scaffolding',
+    );
+    const targetStat = assertBoundedScaffoldDirectoryIdentity(
+      parent.fd,
+      parent.procPath,
+      target.path,
+      root.path,
+      parent.stat,
+      'final target after scaffolding',
+    );
+    fs.fsyncSync(parent.fd);
+
+    return {
+      rootPath: root.path,
+      path: target.path,
+      dev: targetStat.dev,
+      ino: targetStat.ino,
+    };
+  } finally {
+    for (let index = openFds.length - 1; index >= 0; index -= 1) {
+      try { fs.closeSync(openFds[index]); } catch { /* best-effort */ }
+    }
+  }
+}
+
+/**
  * Remove the per-directory lock ONLY when this process still owns it.
  *
  * F1 hardening (PO-S03-I-03): the lock's `owner.pid` must equal this
@@ -821,6 +1333,1369 @@ function releaseLockIfOwned(lockDir: string): void {
     fs.rmSync(lockDir, { recursive: true, force: true });
   } catch {
     // best-effort — a failed release leaves the lock for later stale recovery
+  }
+}
+
+/**
+ * Release a bounded lock only while the root fd and root-relative target still
+ * identify the originally bound directory.  If the target was moved or
+ * replaced, do not follow the moved inode (or a replacement symlink) during
+ * cleanup; fail-closed cleanup is safer than deleting an outside artifact.
+ */
+function releaseBoundedLockIfOwned(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  try {
+    assertBoundedLockStable(directory, lock);
+    const ownerMeta = readBoundedLockOwnerMetadata(directory, lock);
+    if (ownerMeta.pid !== process.pid) {
+      return;
+    }
+    removeBoundedLock(directory, lock);
+  } catch {
+    // The write path already reports the binding failure.  Never use the raw
+    // target path as a fallback cleanup route after that failure.
+  }
+}
+
+function closeBoundedLock(lock: BoundedLockDirectoryHandle): void {
+  try {
+    fs.closeSync(lock.fd);
+  } catch {
+    // best-effort close; no fd is exposed to the caller
+  }
+}
+
+interface PreparedBoundedReceipt {
+  rawData: Record<string, unknown>;
+  fullData: Record<string, unknown>;
+  digest: string;
+}
+
+interface DirectoryIdentity {
+  dev: number;
+  ino: number;
+}
+
+interface BoundedReceiptDirectoryHandle {
+  /** Verified canonical Trust Root directory fd. */
+  rootfd: number;
+  /** `/proc` path for the verified Trust Root fd. */
+  rootProcPath: string;
+  rootPath: string;
+  rootDev: number;
+  rootIno: number;
+  /** Canonical path relative to the verified root fd. */
+  rootRelativeTargetPath: string;
+  /** Canonical target components, retained for anchored re-open checks. */
+  targetComponents: string[];
+  dirfd: number;
+  binding: ReceiptDirectoryBinding;
+}
+
+/**
+ * Identity-bound handle for the per-directory bounded lock.
+ *
+ * `entryPath` is only the root-anchored entry used for identity verification
+ * and final directory removal.  All owner metadata and stale decisions use
+ * `procPath`, which is rooted at this already-open lock fd.
+ */
+interface BoundedLockDirectoryHandle {
+  entryPath: string;
+  canonicalPath: string;
+  procPath: string;
+  fd: number;
+  dev: number;
+  ino: number;
+}
+
+interface CanonicalDirectoryInfo {
+  path: string;
+  stat: fs.Stats;
+}
+
+interface BoundedScaffoldDirectory {
+  fd: number;
+  procPath: string;
+  path: string;
+  stat: fs.Stats;
+}
+
+interface BoundedReceiptTargetPath {
+  path: string;
+  components: string[];
+}
+
+/**
+ * Construct a bounded target path from the verified Trust Root fd.
+ *
+ * This is deliberately the only path base used by the bounded writer.  The
+ * target directory fd is retained for identity/fsync checks, but it is never
+ * used as the parent of a lock, receipt, temporary file, or readback path.
+ */
+function boundedTargetPath(directory: BoundedReceiptDirectoryHandle): string {
+  return directory.rootRelativeTargetPath === ''
+    ? directory.rootProcPath
+    : path.join(directory.rootProcPath, directory.rootRelativeTargetPath);
+}
+
+function boundedEntryPath(
+  directory: BoundedReceiptDirectoryHandle,
+  entryName: string,
+): string {
+  if (
+    entryName.length === 0 ||
+    entryName === '.' ||
+    entryName === '..' ||
+    entryName !== path.basename(entryName) ||
+    entryName.includes('/') ||
+    entryName.includes('\\')
+  ) {
+    throw new Error(`writeReceiptBounded: unsafe bounded entry name: ${entryName}`);
+  }
+  return path.join(boundedTargetPath(directory), entryName);
+}
+
+function boundedLockFilePath(
+  lock: BoundedLockDirectoryHandle,
+  filename: string,
+): string {
+  if (
+    filename.length === 0 ||
+    filename === '.' ||
+    filename === '..' ||
+    filename !== path.basename(filename) ||
+    filename.includes('/') ||
+    filename.includes('\\')
+  ) {
+    throw new Error(`writeReceiptBounded: unsafe lock metadata name: ${filename}`);
+  }
+  return path.join(lock.procPath, filename);
+}
+
+function openBoundedLock(
+  directory: BoundedReceiptDirectoryHandle,
+): BoundedLockDirectoryHandle {
+  const entryPath = boundedEntryPath(directory, '.receipt-lock');
+  const canonicalPath = path.join(directory.binding.path, '.receipt-lock');
+  const directoryFlags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_DIRECTORY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number);
+  let fd: number;
+  try {
+    // This is deliberately the first operation after mkdir for a newly
+    // created lock.  The root-fd anchor plus O_NOFOLLOW prevents a replaced
+    // lock entry from being followed into another directory.
+    fd = fs.openSync(entryPath, directoryFlags);
+  } catch (err) {
+    throw new Error(
+      `writeReceiptBounded: cannot root-anchor open receipt lock: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  const lock: BoundedLockDirectoryHandle = {
+    entryPath,
+    canonicalPath,
+    procPath: `/proc/self/fd/${fd}`,
+    fd,
+    dev: 0,
+    ino: 0,
+  };
+
+  try {
+    const stat = fs.fstatSync(fd);
+    lock.dev = stat.dev;
+    lock.ino = stat.ino;
+    // Verify the opened identity immediately, before owner metadata is
+    // created or read.  The fstat/lstat comparison also catches a replacement
+    // between the root-anchored open and this check.
+    assertBoundedLockEntryIdentity(directory, lock);
+    assertBoundedDirectoryStable(directory);
+    assertBoundedLockEntryIdentity(directory, lock);
+    return lock;
+  } catch (err) {
+    closeBoundedLock(lock);
+    throw err;
+  }
+}
+
+function assertBoundedLockEntryIdentity(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  const opened = fs.fstatSync(lock.fd);
+  if (!opened.isDirectory() || opened.dev !== lock.dev || opened.ino !== lock.ino) {
+    throw new Error('writeReceiptBounded: bound receipt lock fd identity changed');
+  }
+
+  const rawEntry = fs.lstatSync(lock.entryPath);
+  if (
+    rawEntry.isSymbolicLink() ||
+    !rawEntry.isDirectory() ||
+    rawEntry.dev !== lock.dev ||
+    rawEntry.ino !== lock.ino
+  ) {
+    throw new Error(
+      'writeReceiptBounded: receipt lock entry is a symlink, outside, or identity replacement',
+    );
+  }
+
+  const procPhysical = fs.realpathSync(lock.procPath);
+  if (
+    procPhysical !== lock.canonicalPath ||
+    !isPathWithinRoot(directory.rootPath, procPhysical)
+  ) {
+    throw new Error(
+      `writeReceiptBounded: receipt lock fd escaped its bound path: ${procPhysical}`,
+    );
+  }
+
+  const procStat = fs.statSync(lock.procPath);
+  if (
+    !procStat.isDirectory() ||
+    procStat.dev !== lock.dev ||
+    procStat.ino !== lock.ino
+  ) {
+    throw new Error('writeReceiptBounded: receipt lock proc-fd identity mismatch');
+  }
+}
+
+function assertBoundedLockStable(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  assertBoundedDirectoryStable(directory);
+  assertBoundedLockEntryIdentity(directory, lock);
+}
+
+function readBoundedLockOwnerMetadata(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): LockOwnerMetadata {
+  assertBoundedLockStable(directory, lock);
+  const flags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number) |
+    (boundedConstant('O_NONBLOCK') as number);
+  const ownerPath = boundedLockFilePath(lock, LOCK_OWNER_FILENAME);
+  let fd: number | undefined;
+  let raw: string;
+  try {
+    fd = fs.openSync(ownerPath, flags);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error('writeReceiptBounded: bounded lock owner metadata is not a regular file');
+    }
+    raw = fs.readFileSync(fd, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      assertBoundedLockStable(directory, lock);
+      return {};
+    }
+    throw new Error(
+      `writeReceiptBounded: cannot no-follow read bounded lock owner metadata: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* best-effort */ }
+    }
+  }
+  assertBoundedLockStable(directory, lock);
+  return parseLockOwnerMetadata(raw);
+}
+
+function removeBoundedLock(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  assertBoundedLockStable(directory, lock);
+  for (const filename of fs.readdirSync(lock.procPath)) {
+    const childPath = boundedLockFilePath(lock, filename);
+    const child = fs.lstatSync(childPath);
+    if (child.isDirectory() && !child.isSymbolicLink()) {
+      throw new Error('writeReceiptBounded: refusing to recursively remove bounded lock content');
+    }
+    fs.unlinkSync(childPath);
+    assertBoundedLockStable(directory, lock);
+  }
+  assertBoundedLockStable(directory, lock);
+  // The entry remains identity-checked immediately before this removal.  No
+  // raw options.receiptDir lock path is ever used.
+  // The directory has been emptied through the bound lock fd above.  A
+  // non-recursive rmdir cannot traverse a replacement directory or symlink;
+  // identity is rechecked immediately before this call and no raw lock path
+  // is used.
+  fs.rmdirSync(lock.entryPath);
+}
+
+function prepareBoundedReceipt(data: object): PreparedBoundedReceipt {
+  if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+    throw new TypeError('writeReceiptBounded: data must be a non-null, non-array object');
+  }
+
+  const rawData = data as Record<string, unknown>;
+  const callerDigestRaw = rawData.digest;
+  const { digest: _existingDigest, ...content } = rawData;
+  if (content.previous_digest === '') {
+    delete content.previous_digest;
+  }
+
+  const digest = computeReceiptDigest(content);
+  if (callerDigestRaw !== undefined && callerDigestRaw !== null) {
+    const callerDigest = String(callerDigestRaw);
+    if (callerDigest !== digest) {
+      throw new Error(
+        `writeReceiptBounded: caller-supplied digest "${callerDigest}" does not match ` +
+          `computed digest "${digest}"`,
+      );
+    }
+  }
+
+  const fullData = { ...content, digest };
+  try {
+    validateReceipt(fullData);
+  } catch (err: unknown) {
+    if (err instanceof SchemaValidationError) {
+      throw new Error(`writeReceiptBounded: receipt validation failed: ${err.message}`);
+    }
+    throw err;
+  }
+
+  return { rawData, fullData, digest };
+}
+
+function boundedConstant(name: string): number | undefined {
+  const value = (fs.constants as unknown as Record<string, unknown>)[name];
+  return typeof value === 'number' ? value : undefined;
+}
+
+function assertBoundedWriterCapabilities(operation = 'writeReceiptBounded'): void {
+  if (process.platform !== 'linux') {
+    throw new Error(
+      `${operation}: unsupported platform — safe directory-fd/proc-fd binding is unavailable`,
+    );
+  }
+
+  const requiredConstants = [
+    'O_RDONLY',
+    'O_WRONLY',
+    'O_CREAT',
+    'O_EXCL',
+    'O_DIRECTORY',
+    'O_NOFOLLOW',
+    'O_NONBLOCK',
+  ];
+  for (const name of requiredConstants) {
+    if (boundedConstant(name) === undefined) {
+      throw new Error(`${operation}: required filesystem capability ${name} is unavailable`);
+    }
+  }
+
+  const requiredFunctions: Array<keyof typeof fs> = [
+    'openSync',
+    'closeSync',
+    'fstatSync',
+    'fsyncSync',
+    'realpathSync',
+    'statSync',
+    'lstatSync',
+    'readdirSync',
+    'readFileSync',
+    'writeFileSync',
+    'writeSync',
+    'linkSync',
+    'unlinkSync',
+    'rmdirSync',
+    'mkdirSync',
+    'rmSync',
+    'existsSync',
+  ];
+  for (const name of requiredFunctions) {
+    if (typeof fs[name] !== 'function') {
+      throw new Error(`${operation}: required filesystem function ${String(name)} is unavailable`);
+    }
+  }
+}
+
+function resolveBoundedDirectory(
+  label: string,
+  value: string,
+  allowRootAlias: boolean,
+  operation = 'writeReceiptBounded',
+): CanonicalDirectoryInfo {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${operation}: ${label} must be a non-empty path`);
+  }
+
+  const lexicalPath = path.resolve(value);
+  let canonicalPath: string;
+  try {
+    canonicalPath = fs.realpathSync(lexicalPath);
+  } catch (err) {
+    throw new Error(
+      `${operation}: ${label} cannot be canonicalized: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Root aliases are canonicalized as the authority itself.  Receipt and
+  // temp directories must already be expressed canonically: accepting a
+  // symlink alias would make the later raw-path identity re-check ambiguous.
+  if (!allowRootAlias && canonicalPath !== lexicalPath) {
+    throw new Error(`${operation}: ${label} must be a canonical, symlink-free directory path`);
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(canonicalPath);
+  } catch (err) {
+    throw new Error(
+      `${operation}: ${label} cannot be inspected: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`${operation}: ${label} is not a regular directory`);
+  }
+  return { path: canonicalPath, stat };
+}
+
+function isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function resolveBoundedReceiptTarget(
+  rootPath: string,
+  targetDir: string,
+): BoundedReceiptTargetPath {
+  if (typeof targetDir !== 'string' || targetDir.length === 0) {
+    throw new Error('ensureBoundedReceiptDirectory: targetDir must be a non-empty path');
+  }
+
+  const targetPath = path.isAbsolute(targetDir)
+    ? path.resolve(targetDir)
+    : path.resolve(rootPath, targetDir);
+  if (!isPathWithinRoot(rootPath, targetPath)) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: targetDir "${targetPath}" escapes project root "${rootPath}"`,
+    );
+  }
+
+  const relative = path.relative(rootPath, targetPath);
+  const components = relative === '' ? [] : relative.split(path.sep);
+  if (components.some((component) => component === '' || component === '.' || component === '..')) {
+    throw new Error('ensureBoundedReceiptDirectory: targetDir contains an unsafe path component');
+  }
+  return { path: targetPath, components };
+}
+
+function sameDirectoryIdentity(left: DirectoryIdentity, right: DirectoryIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function inspectBoundedScaffoldDirectory(
+  directoryPath: string,
+  label: string,
+): fs.Stats | undefined {
+  let entry: fs.Stats;
+  try {
+    entry = fs.lstatSync(directoryPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw new Error(
+      `ensureBoundedReceiptDirectory: cannot inspect ${label} ${directoryPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  if (entry.isSymbolicLink()) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: ${label} is a symlink; refusing to follow ${directoryPath}`,
+    );
+  }
+  if (!entry.isDirectory()) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: ${label} is not a directory: ${directoryPath}`,
+    );
+  }
+  return entry;
+}
+
+function assertBoundedScaffoldDirectoryIdentity(
+  fd: number,
+  procPath: string,
+  expectedPath: string,
+  rootPath: string,
+  expectedIdentity: fs.Stats | undefined,
+  label: string,
+): fs.Stats {
+  let actual: fs.Stats;
+  try {
+    actual = fs.fstatSync(fd);
+  } catch (err) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: cannot inspect ${label} fd: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (!actual.isDirectory()) {
+    throw new Error(`ensureBoundedReceiptDirectory: ${label} is not a directory`);
+  }
+  if (expectedIdentity !== undefined && !sameDirectoryIdentity(actual, expectedIdentity)) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: ${label} identity mismatch at ${expectedPath}`,
+    );
+  }
+
+  let procPhysical: string;
+  try {
+    procPhysical = fs.realpathSync(procPath);
+  } catch (err) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: cannot resolve bound ${label} proc-fd: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (procPhysical !== expectedPath || !isPathWithinRoot(rootPath, procPhysical)) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: ${label} proc-fd escaped or changed identity: ${procPhysical}`,
+    );
+  }
+
+  let procStat: fs.Stats;
+  try {
+    procStat = fs.statSync(procPath);
+  } catch (err) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: cannot stat bound ${label} proc-fd: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (!procStat.isDirectory() || !sameDirectoryIdentity(procStat, actual)) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: bound ${label} proc-fd identity mismatch`,
+    );
+  }
+
+  const rawEntry = inspectBoundedScaffoldDirectory(expectedPath, label);
+  if (rawEntry === undefined || !sameDirectoryIdentity(rawEntry, actual)) {
+    throw new Error(
+      `ensureBoundedReceiptDirectory: ${label} raw path identity mismatch at ${expectedPath}`,
+    );
+  }
+  return actual;
+}
+
+function openBoundedReceiptDirectory(
+  options: BoundedReceiptWriterOptions,
+): BoundedReceiptDirectoryHandle {
+  assertBoundedWriterCapabilities();
+
+  const root = resolveBoundedDirectory('projectRoot', options.projectRoot, true);
+  const receipt = resolveBoundedDirectory('receiptDir', options.receiptDir, false);
+  const temp = resolveBoundedDirectory('tempDir', options.tempDir, false);
+
+  if (!isPathWithinRoot(root.path, receipt.path)) {
+    throw new Error(
+      `writeReceiptBounded: receiptDir "${receipt.path}" escapes project root "${root.path}"`,
+    );
+  }
+  if (temp.path !== receipt.path || temp.stat.dev !== receipt.stat.dev || temp.stat.ino !== receipt.stat.ino) {
+    throw new Error(
+      'writeReceiptBounded: tempDir must resolve to the same physical directory as receiptDir',
+    );
+  }
+
+  const directoryFlags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_DIRECTORY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number);
+  const relativeTargetPath = path.relative(root.path, receipt.path);
+  const targetComponents = relativeTargetPath === ''
+    ? []
+    : relativeTargetPath.split(path.sep);
+  if (
+    !isPathWithinRoot(root.path, receipt.path) ||
+    targetComponents.some((component) =>
+      component.length === 0 || component === '.' || component === '..',
+    )
+  ) {
+    throw new Error(
+      `writeReceiptBounded: receiptDir "${receipt.path}" is not a safe root-relative target`,
+    );
+  }
+
+  let rootfd: number | undefined;
+  let dirfd: number | undefined;
+  try {
+    try {
+      rootfd = fs.openSync(root.path, directoryFlags);
+    } catch (err) {
+      throw new Error(
+        `writeReceiptBounded: cannot open verified project root: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    const rootProcPath = `/proc/self/fd/${rootfd}`;
+    assertBoundedRootFd(rootfd, rootProcPath, root.path, root.stat, 'project root');
+
+    const targetPath = relativeTargetPath === ''
+      ? rootProcPath
+      : path.join(rootProcPath, relativeTargetPath);
+    try {
+      // The target is opened through the verified root fd.  This path is the
+      // locator only; every later child path is rebuilt from rootProcPath and
+      // rootRelativeTargetPath rather than from this target fd.
+      dirfd = fs.openSync(targetPath, directoryFlags);
+    } catch (err) {
+      throw new Error(
+        `writeReceiptBounded: cannot no-follow open root-relative receipt directory: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    const actual = fs.fstatSync(dirfd);
+    if (!actual.isDirectory()) {
+      throw new Error('writeReceiptBounded: opened receipt target is not a regular directory');
+    }
+    if (actual.dev !== receipt.stat.dev || actual.ino !== receipt.stat.ino) {
+      throw new Error(
+        'writeReceiptBounded: receipt directory identity changed between verification and open',
+      );
+    }
+    assertBoundedOpenedTarget(
+      dirfd,
+      `/proc/self/fd/${dirfd}`,
+      targetPath,
+      root.path,
+      receipt.path,
+      actual,
+      'opened receipt target',
+    );
+
+    // Exercise directory fsync before any temp, lock, or receipt write.  A
+    // platform/filesystem that cannot fsync a directory is unsupported here;
+    // the bounded writer never falls back to the legacy path writer.
+    fs.fsyncSync(dirfd);
+
+    const binding: ReceiptDirectoryBinding = {
+      rootPath: root.path,
+      path: receipt.path,
+      dev: actual.dev,
+      ino: actual.ino,
+    };
+    const handle: BoundedReceiptDirectoryHandle = {
+      rootfd,
+      rootProcPath,
+      rootPath: root.path,
+      rootDev: root.stat.dev,
+      rootIno: root.stat.ino,
+      rootRelativeTargetPath: relativeTargetPath,
+      targetComponents,
+      dirfd,
+      binding,
+    };
+
+    assertBoundedDirectoryStable(handle);
+    return handle;
+  } catch (err) {
+    if (dirfd !== undefined) {
+      try { fs.closeSync(dirfd); } catch { /* best-effort */ }
+    }
+    if (rootfd !== undefined) {
+      try { fs.closeSync(rootfd); } catch { /* best-effort */ }
+    }
+    throw err;
+  }
+}
+
+function assertBoundedRootFd(
+  rootfd: number,
+  rootProcPath: string,
+  rootPath: string,
+  expected: DirectoryIdentity,
+  label: string,
+): void {
+  const actual = fs.fstatSync(rootfd);
+  if (!actual.isDirectory() || !sameDirectoryIdentity(actual, expected)) {
+    throw new Error(`writeReceiptBounded: ${label} fd identity mismatch`);
+  }
+
+  const rawRoot = fs.lstatSync(rootPath);
+  if (rawRoot.isSymbolicLink() || !rawRoot.isDirectory() || !sameDirectoryIdentity(rawRoot, actual)) {
+    throw new Error(`writeReceiptBounded: ${label} path identity changed`);
+  }
+
+  const procPhysical = fs.realpathSync(rootProcPath);
+  if (procPhysical !== rootPath || !isPathWithinRoot(rootPath, procPhysical)) {
+    throw new Error(`writeReceiptBounded: ${label} fd moved or escaped its canonical path`);
+  }
+  const procStat = fs.statSync(rootProcPath);
+  if (!procStat.isDirectory() || !sameDirectoryIdentity(procStat, actual)) {
+    throw new Error(`writeReceiptBounded: ${label} proc-fd identity mismatch`);
+  }
+}
+
+function assertBoundedOpenedTarget(
+  fd: number,
+  procPath: string,
+  targetPath: string,
+  rootPath: string,
+  expectedPath: string,
+  expected: DirectoryIdentity,
+  label: string,
+): void {
+  const actual = fs.fstatSync(fd);
+  if (!actual.isDirectory() || !sameDirectoryIdentity(actual, expected)) {
+    throw new Error(`writeReceiptBounded: ${label} fd identity mismatch`);
+  }
+
+  const rawEntry = fs.lstatSync(expectedPath);
+  if (rawEntry.isSymbolicLink() || !rawEntry.isDirectory() || !sameDirectoryIdentity(rawEntry, actual)) {
+    throw new Error(`writeReceiptBounded: ${label} raw path identity changed`);
+  }
+
+  const targetEntry = fs.lstatSync(targetPath);
+  // `/proc/self/fd/<rootfd>` is itself the expected proc symlink when the
+  // receipt directory is the Trust Root.  For every child target, the final
+  // component must still be a real directory and not a symlink.
+  if (expectedPath !== rootPath && (targetEntry.isSymbolicLink() || !targetEntry.isDirectory())) {
+    throw new Error(`writeReceiptBounded: ${label} root-relative target is not a directory`);
+  }
+
+  const procPhysical = fs.realpathSync(procPath);
+  if (procPhysical !== expectedPath || !isPathWithinRoot(rootPath, procPhysical)) {
+    throw new Error(`writeReceiptBounded: ${label} moved or escaped its root anchor`);
+  }
+  const procStat = fs.statSync(procPath);
+  if (!procStat.isDirectory() || !sameDirectoryIdentity(procStat, actual)) {
+    throw new Error(`writeReceiptBounded: ${label} proc-fd identity mismatch`);
+  }
+}
+
+/**
+ * Re-open every target component from the verified root anchor.  Checking the
+ * final directory alone would allow a swapped intermediate parent symlink to
+ * redirect a root-relative child path, so each component is opened with
+ * `O_NOFOLLOW` and its `/proc` identity is compared with the canonical prefix.
+ */
+function assertBoundedTargetComponentsStable(
+  directory: BoundedReceiptDirectoryHandle,
+): void {
+  for (let index = 0; index < directory.targetComponents.length; index += 1) {
+    const prefixComponents = directory.targetComponents.slice(0, index + 1);
+    const expectedPrefix = path.join(directory.rootPath, ...prefixComponents);
+    const anchoredPrefix = path.join(directory.rootProcPath, ...prefixComponents);
+    let componentFd: number | undefined;
+    try {
+      componentFd = fs.openSync(
+        anchoredPrefix,
+        (boundedConstant('O_RDONLY') as number) |
+          (boundedConstant('O_DIRECTORY') as number) |
+          (boundedConstant('O_NOFOLLOW') as number),
+      );
+      assertBoundedOpenedTarget(
+        componentFd,
+        `/proc/self/fd/${componentFd}`,
+        anchoredPrefix,
+        directory.rootPath,
+        expectedPrefix,
+        fs.fstatSync(componentFd),
+        `root-relative target component ${index}`,
+      );
+    } finally {
+      if (componentFd !== undefined) {
+        try { fs.closeSync(componentFd); } catch { /* best-effort */ }
+      }
+    }
+  }
+}
+
+function assertBoundedDirectoryStable(directory: BoundedReceiptDirectoryHandle): void {
+  assertBoundedRootFd(
+    directory.rootfd,
+    directory.rootProcPath,
+    directory.rootPath,
+    { dev: directory.rootDev, ino: directory.rootIno },
+    'project root',
+  );
+  assertBoundedTargetComponentsStable(directory);
+
+  const targetPath = boundedTargetPath(directory);
+  let checkedFd: number | undefined;
+  try {
+    checkedFd = fs.openSync(
+      targetPath,
+      (boundedConstant('O_RDONLY') as number) |
+        (boundedConstant('O_DIRECTORY') as number) |
+        (boundedConstant('O_NOFOLLOW') as number),
+    );
+    assertBoundedOpenedTarget(
+      checkedFd,
+      `/proc/self/fd/${checkedFd}`,
+      targetPath,
+      directory.rootPath,
+      directory.binding.path,
+      { dev: directory.binding.dev, ino: directory.binding.ino },
+      'root-relative receipt target',
+    );
+
+    const boundFdStat = fs.fstatSync(directory.dirfd);
+    if (
+      !boundFdStat.isDirectory() ||
+      !sameDirectoryIdentity(boundFdStat, {
+        dev: directory.binding.dev,
+        ino: directory.binding.ino,
+      }) ||
+      !sameDirectoryIdentity(boundFdStat, fs.fstatSync(checkedFd))
+    ) {
+      throw new Error('writeReceiptBounded: bound receipt directory fd identity changed');
+    }
+  } catch (err) {
+    throw new Error(
+      `writeReceiptBounded: bounded directory is not stable: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  } finally {
+    if (checkedFd !== undefined) {
+      try { fs.closeSync(checkedFd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+function fsyncBoundedTarget(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  assertBoundedLockStable(directory, lock);
+  const targetPath = boundedTargetPath(directory);
+  let targetFd: number | undefined;
+  try {
+    targetFd = fs.openSync(
+      targetPath,
+      (boundedConstant('O_RDONLY') as number) |
+        (boundedConstant('O_DIRECTORY') as number) |
+        (boundedConstant('O_NOFOLLOW') as number),
+    );
+    assertBoundedOpenedTarget(
+      targetFd,
+      `/proc/self/fd/${targetFd}`,
+      targetPath,
+      directory.rootPath,
+      directory.binding.path,
+      { dev: directory.binding.dev, ino: directory.binding.ino },
+      'fsync receipt target',
+    );
+    fs.fsyncSync(targetFd);
+    assertBoundedLockStable(directory, lock);
+  } finally {
+    if (targetFd !== undefined) {
+      try { fs.closeSync(targetFd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+function verifyBoundedReceiptChain(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): ChainVerificationResult {
+  assertBoundedLockStable(directory, lock);
+  const result = verifyReceiptChainWithReader(
+    boundedTargetPath(directory),
+    boundedReceiptReader(),
+  );
+  assertBoundedLockStable(directory, lock);
+  return result;
+}
+
+function boundedReceiptReader(): ReceiptReadOperations {
+  return {
+    readText: boundedReadReceiptText,
+    verifyDigest: verifyBoundedReceiptDigest,
+  };
+}
+
+function boundedReadReceiptText(filePath: string): string {
+  const readFlags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number) |
+    (boundedConstant('O_NONBLOCK') as number);
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, readFlags);
+  } catch (err) {
+    throw new Error(
+      `writeReceiptBounded: cannot no-follow read receipt: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error('writeReceiptBounded: receipt entry is not a regular file');
+    }
+    return fs.readFileSync(fd, 'utf-8');
+  } finally {
+    try { fs.closeSync(fd); } catch { /* best-effort */ }
+  }
+}
+
+function verifyBoundedReceiptDigest(filePath: string): boolean {
+  try {
+    return verifyReceiptDigestText(boundedReadReceiptText(filePath));
+  } catch {
+    return false;
+  }
+}
+
+function readBoundedStoredDigest(filePath: string): string {
+  try {
+    const parsed = JSON.parse(boundedReadReceiptText(filePath)) as Record<string, unknown>;
+    return typeof parsed.digest === 'string' ? parsed.digest : '(missing or invalid)';
+  } catch {
+    return '(unreadable)';
+  }
+}
+
+function boundedEntryExists(filePath: string): boolean {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Capture a Receipt entry identity while the bounded writer still owns the
+ * directory lock.  The final path is a root-fd-relative path and the file is
+ * opened with `O_NOFOLLOW`; the subsequent lstat/fstat comparison prevents a
+ * replacement between the no-follow open and the identity snapshot from being
+ * returned as the writer's Receipt.
+ */
+function captureBoundedReceiptFile(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+  entryName: string,
+): ReceiptFileBinding {
+  assertBoundedLockStable(directory, lock);
+  const filePath = boundedEntryPath(directory, entryName);
+  const flags =
+    (boundedConstant('O_RDONLY') as number) |
+    (boundedConstant('O_NOFOLLOW') as number) |
+    (boundedConstant('O_NONBLOCK') as number);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, flags);
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile()) {
+      throw new Error(
+        `writeReceiptBounded: installed Receipt entry is not a regular file: ${entryName}`,
+      );
+    }
+
+    const entry = fs.lstatSync(filePath);
+    if (
+      entry.isSymbolicLink() ||
+      !entry.isFile() ||
+      entry.dev !== opened.dev ||
+      entry.ino !== opened.ino ||
+      entry.nlink !== opened.nlink ||
+      entry.size !== opened.size
+    ) {
+      throw new Error(
+        `writeReceiptBounded: installed Receipt entry identity changed while being captured: ${entryName}`,
+      );
+    }
+
+    return {
+      name: entryName,
+      dev: opened.dev,
+      ino: opened.ino,
+      nlink: opened.nlink,
+      size: opened.size,
+    };
+  } catch (err) {
+    throw new Error(
+      `writeReceiptBounded: cannot capture writer-time Receipt identity for ${entryName}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+interface BoundedReceiptCleanupResult {
+  ok: boolean;
+  reason?: string;
+}
+
+function boundedReceiptIdentityMatches(
+  entry: fs.Stats,
+  expected: ReceiptFileBinding,
+): boolean {
+  return (
+    !entry.isSymbolicLink() &&
+    entry.isFile() &&
+    entry.dev === expected.dev &&
+    entry.ino === expected.ino &&
+    entry.nlink === expected.nlink &&
+    (expected.size === undefined || entry.size === expected.size)
+  );
+}
+
+/**
+ * Delete only the Receipt entry whose writer-time identity was captured above.
+ *
+ * The operation is deliberately fail-closed: the parent is revalidated
+ * through the already-open Trust Root and lock bindings, the final component
+ * is lstat'ed without following symlinks, and any dev/ino/nlink/size mismatch
+ * leaves the entry untouched.  No canonical raw target path is used as a
+ * fallback when a bound check fails.
+ */
+function cleanupBoundedReceipt(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+  receiptFile: ReceiptFileBinding,
+): BoundedReceiptCleanupResult {
+  let entryPath: string;
+  try {
+    assertBoundedLockStable(directory, lock);
+    entryPath = boundedEntryPath(directory, receiptFile.name);
+
+    let current: fs.Stats;
+    try {
+      current = fs.lstatSync(entryPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { ok: true };
+      }
+      throw err;
+    }
+
+    if (path.basename(entryPath) !== receiptFile.name) {
+      return {
+        ok: false,
+        reason: 'cleanup skipped: Receipt entry name no longer matches the writer-time binding',
+      };
+    }
+    if (!boundedReceiptIdentityMatches(current, receiptFile)) {
+      return {
+        ok: false,
+        reason:
+          'cleanup skipped: Receipt entry identity mismatch (dev/ino/nlink/size); ownership cannot be proven',
+      };
+    }
+
+    // Repeat the bound-parent and entry checks immediately before unlink.  The
+    // bound root/lock check prevents a moved or replacement directory from
+    // becoming the cleanup target; the final component remains no-follow.
+    assertBoundedLockStable(directory, lock);
+    let last: fs.Stats;
+    try {
+      last = fs.lstatSync(entryPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { ok: true };
+      }
+      throw err;
+    }
+    if (!boundedReceiptIdentityMatches(last, receiptFile)) {
+      return {
+        ok: false,
+        reason:
+          'cleanup skipped: Receipt entry changed before unlink; ownership cannot be proven',
+      };
+    }
+
+    fs.unlinkSync(entryPath);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `cleanup failed closed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/** Preserve the original failure while honestly declaring an uncompleted cleanup. */
+function withBoundedReceiptCleanupOutcome(
+  error: unknown,
+  cleanup: BoundedReceiptCleanupResult,
+): Error {
+  if (cleanup.ok) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  const originalMessage = error instanceof Error ? error.message : String(error);
+  const cleanupMessage =
+    `writeReceiptBounded: Receipt persisted after install, but cleanup was not completed; ` +
+    `${cleanup.reason ?? 'ownership could not be proven'}`;
+  const message = `${originalMessage}; ${cleanupMessage}`;
+
+  if (error instanceof ReceiptChainError) {
+    const detail = [error.detail, cleanupMessage].filter(Boolean).join('; ');
+    return new ReceiptChainError(message, error.subtype, error.digest, detail);
+  }
+  if (error instanceof Error) {
+    // Keep the original Error class/name (and therefore existing callers'
+    // classification) while making the residual Receipt state explicit.
+    error.message = message;
+    return error;
+  }
+  return new Error(message);
+}
+
+function writeBoundedTempFile(
+  filePath: string,
+  content: string,
+  verifyStable: () => void,
+): void {
+  const flags =
+    (boundedConstant('O_WRONLY') as number) |
+    (boundedConstant('O_CREAT') as number) |
+    (boundedConstant('O_EXCL') as number) |
+    (boundedConstant('O_NOFOLLOW') as number);
+  writeBoundedExclusiveFile(filePath, content, flags, 'receipt temp file', verifyStable);
+}
+
+function writeBoundedExclusiveFile(
+  filePath: string,
+  content: string,
+  flags: number,
+  artifactName: string,
+  verifyStable?: () => void,
+): void {
+  let fd: number | undefined;
+  let created = false;
+  try {
+    verifyStable?.();
+    fd = fs.openSync(filePath, flags, 0o600);
+    created = true;
+    verifyStable?.();
+    const bytes = Buffer.from(content, 'utf-8');
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
+      if (written <= 0) {
+        throw new Error(`writeReceiptBounded: short write while creating ${artifactName}`);
+      }
+      offset += written;
+    }
+    fs.fsyncSync(fd);
+    // A replacement can be injected while the file is being fsynced.  Check
+    // the bound directory/fd once more before closing the metadata/temp fd;
+    // callers then fail closed instead of moving on with an unstable entry.
+    verifyStable?.();
+    fs.closeSync(fd);
+    fd = undefined;
+  } catch (err) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* best-effort */ }
+    }
+    if (created) {
+      let safeToCleanup = true;
+      if (verifyStable !== undefined) {
+        try { verifyStable(); } catch { safeToCleanup = false; }
+      }
+      if (safeToCleanup) {
+        try { fs.unlinkSync(filePath); } catch { /* best-effort */ }
+      }
+    }
+    throw err;
+  }
+}
+
+function isReceiptDigestFilename(digest: string): boolean {
+  return /^[0-9a-f]{64}$/.test(digest);
+}
+
+function assertBoundedChainValid(result: ChainVerificationResult, phase: string): void {
+  if (result.valid) return;
+  const detail = result.brokenLink
+    ? `broken link at index ${result.brokenLink.index}: expected ${result.brokenLink.expected}, got ${result.brokenLink.actual}`
+    : result.duplicateDigests && result.duplicateDigests.length > 0
+      ? `duplicate digests: ${result.duplicateDigests.map((entry) => entry.digest).join(', ')}`
+      : 'chain verification failed';
+  throw new ReceiptChainError(
+    `writeReceiptBounded: chain integrity check failed ${phase} — ${detail}`,
+    'chain',
+    undefined,
+    detail,
+  );
+}
+
+function writeBoundedLockOwnerMetadata(
+  directory: BoundedReceiptDirectoryHandle,
+  lock: BoundedLockDirectoryHandle,
+): void {
+  const owner: { pid: number; startedAt: number; startTimeTicks?: number } = {
+    pid: process.pid,
+    startedAt: Date.now() - Math.round(process.uptime() * 1000),
+  };
+  const startTimeTicks = readProcStartTimeTicks(process.pid);
+  if (startTimeTicks !== undefined) {
+    owner.startTimeTicks = startTimeTicks;
+  }
+
+  const flags =
+    (boundedConstant('O_WRONLY') as number) |
+    (boundedConstant('O_CREAT') as number) |
+    (boundedConstant('O_EXCL') as number) |
+    (boundedConstant('O_NOFOLLOW') as number);
+  const verifyLockStable = () => assertBoundedLockStable(directory, lock);
+  writeBoundedExclusiveFile(
+    boundedLockFilePath(lock, LOCK_OWNER_FILENAME),
+    `${JSON.stringify(owner)}\n`,
+    flags,
+    'bounded lock owner metadata',
+    verifyLockStable,
+  );
+  writeBoundedExclusiveFile(
+    boundedLockFilePath(lock, LOCK_CREATED_AT_FILENAME),
+    `${new Date().toISOString()}\n`,
+    flags,
+    'bounded lock creation metadata',
+    verifyLockStable,
+  );
+}
+
+function acquireBoundedLock(
+  directory: BoundedReceiptDirectoryHandle,
+  verifyChain: () => ChainVerificationResult,
+  verifyStable: () => void,
+): BoundedLockDirectoryHandle {
+  const lockEntryPath = boundedEntryPath(directory, '.receipt-lock');
+  let lock: BoundedLockDirectoryHandle | undefined;
+  let created = false;
+  try {
+    verifyStable();
+    try {
+      fs.mkdirSync(lockEntryPath, { recursive: false });
+      created = true;
+      // Bind the lock immediately after creation.  No metadata operation is
+      // allowed to use the root-relative entry until this no-follow fd has
+      // passed its dev/ino and containment checks.
+      lock = openBoundedLock(directory);
+      writeBoundedLockOwnerMetadata(directory, lock);
+      return lock;
+    } catch (err) {
+      if (created) {
+        if (lock !== undefined) {
+          closeBoundedLock(lock);
+          lock = undefined;
+        }
+        throw err;
+      }
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw err;
+      }
+    }
+
+    // An existing entry is opened and identity-checked before any stale
+    // read.  A symlink or an outside replacement therefore fails closed and
+    // cannot be followed by owner.pid or mtime logic.
+    lock = openBoundedLock(directory);
+    const ownerMeta = readBoundedLockOwnerMetadata(directory, lock);
+    const ownerPid = ownerMeta.pid;
+    let stale: boolean;
+    let contentionDetail: string;
+    if (ownerPid === undefined) {
+      const lockStat = fs.fstatSync(lock.fd);
+      const age = Date.now() - lockStat.mtimeMs;
+      stale = age >= DEFAULT_LOCK_TIMEOUT_MS;
+      contentionDetail =
+        `lock age ${Math.round(age)}ms < timeout ${DEFAULT_LOCK_TIMEOUT_MS}ms ` +
+        '(no owner.pid — legacy lock format)';
+    } else {
+      stale = !isProcessAlive(ownerPid);
+      contentionDetail = `lock owner pid ${ownerPid} is alive`;
+      if (!stale && ownerMeta.startTimeTicks !== undefined) {
+        const currentStartTimeTicks = readProcStartTimeTicks(ownerPid);
+        if (currentStartTimeTicks !== undefined && currentStartTimeTicks !== ownerMeta.startTimeTicks) {
+          stale = true;
+          contentionDetail =
+            `lock owner pid ${ownerPid} reused (start-time ${ownerMeta.startTimeTicks} → ${currentStartTimeTicks})`;
+        } else if (currentStartTimeTicks === undefined) {
+          contentionDetail = `lock owner pid ${ownerPid} is alive (no /proc start-time — PID-only fallback)`;
+        } else {
+          contentionDetail = `lock owner pid ${ownerPid} is alive (start-time matched)`;
+        }
+      }
+    }
+
+    if (!stale) {
+      throw new ReceiptChainError(
+        `writeReceiptBounded: another write operation is in progress — lock directory exists at ${lockEntryPath}`,
+        'predecessor',
+        undefined,
+        contentionDetail,
+      );
+    }
+
+    const currentMeta = readBoundedLockOwnerMetadata(directory, lock);
+    if (lockMetadataChanged(currentMeta, ownerMeta)) {
+      throw new ReceiptChainError(
+        'writeReceiptBounded: lock owner metadata changed during stale recovery',
+        'predecessor',
+      );
+    }
+
+    removeBoundedLock(directory, lock);
+    closeBoundedLock(lock);
+    lock = undefined;
+    created = false;
+    verifyStable();
+    fs.mkdirSync(lockEntryPath, { recursive: false });
+    created = true;
+    lock = openBoundedLock(directory);
+    writeBoundedLockOwnerMetadata(directory, lock);
+    assertBoundedLockStable(directory, lock);
+    const chain = verifyChain();
+    assertBoundedLockStable(directory, lock);
+    if (!chain.valid) {
+      removeBoundedLock(directory, lock);
+      closeBoundedLock(lock);
+      lock = undefined;
+      assertBoundedChainValid(chain, 'after stale lock recovery');
+    }
+    if (lock === undefined) {
+      throw new Error('writeReceiptBounded: bounded lock disappeared during acquisition');
+    }
+    return lock;
+  } catch (err) {
+    if (lock !== undefined) {
+      closeBoundedLock(lock);
+    }
+    if (err instanceof ReceiptChainError) {
+      throw err;
+    }
+    if (created) {
+      throw err;
+    }
+    throw new ReceiptChainError(
+      `writeReceiptBounded: another write operation is in progress — lock directory exists at ${lockEntryPath}`,
+      'predecessor',
+    );
   }
 }
 
@@ -864,6 +2739,12 @@ export function verifyReceiptDigest(filePath: string): boolean {
     return false;
   }
 
+  return verifyReceiptDigestText(raw);
+}
+
+/** Verify a receipt digest from already-read text. */
+function verifyReceiptDigestText(raw: string): boolean {
+
   let data: Record<string, unknown>;
   try {
     data = JSON.parse(raw) as Record<string, unknown>;
@@ -892,6 +2773,11 @@ export function verifyReceiptDigest(filePath: string): boolean {
   return computedDigest === storedDigest;
 }
 
+interface ReceiptReadOperations {
+  readText(filePath: string): string;
+  verifyDigest(filePath: string): boolean;
+}
+
 /**
  * Walk all receipts in a directory, verifying the previous_digest chain.
  *
@@ -907,6 +2793,16 @@ export function verifyReceiptDigest(filePath: string): boolean {
  * @returns ChainVerificationResult indicating validity and chain details.
  */
 export function verifyReceiptChain(receiptDir: string): ChainVerificationResult {
+  return verifyReceiptChainWithReader(receiptDir, {
+    readText: (filePath) => fs.readFileSync(filePath, 'utf-8'),
+    verifyDigest: verifyReceiptDigest,
+  });
+}
+
+function verifyReceiptChainWithReader(
+  receiptDir: string,
+  reader: ReceiptReadOperations,
+): ChainVerificationResult {
   let filenames: string[];
   try {
     filenames = fs.readdirSync(receiptDir);
@@ -944,7 +2840,7 @@ export function verifyReceiptChain(receiptDir: string): ChainVerificationResult 
     // Read file content
     let raw: string;
     try {
-      raw = fs.readFileSync(filePath, 'utf-8');
+      raw = reader.readText(filePath);
     } catch {
       return {
         valid: false,
@@ -980,7 +2876,7 @@ export function verifyReceiptChain(receiptDir: string): ChainVerificationResult 
     }
 
     // Self-digest verification
-    if (!verifyReceiptDigest(filePath)) {
+    if (!reader.verifyDigest(filePath)) {
       return {
         valid: false,
         receipts: [filePath],

@@ -11,7 +11,7 @@
  *         `tasks/<stage>/<slice>/`, slice stays IN_PROGRESS;
  *       completed (finalize-slice + evidence finalized) → TASK_COMPLETE
  *         Receipt, reducer FINISH_TASKS advances IN_PROGRESS → READY_FOR_CV;
- *       completed (repair/diagnose — CV-REPAIR recheck branch, S02-D row 6)
+ *       completed (repair — CV-REPAIR recheck branch, S02-D row 6)
  *         → precondition slice derived READY_FOR_CV + CV_REPAIR receipt
  *         binding; TASK_COMPLETE Receipt (payload mode + bound cv receipt
  *         digest); slice stays READY_FOR_CV; CVStatus via kernel FIX event
@@ -36,7 +36,16 @@
  * exclusively the injected ReceiptWriterPort through the pipeline).
  */
 
-import { SliceState, CVStatus, StageState, ProjectState, InvalidTransitionError } from '@proofloop/kernel';
+import {
+  SliceState,
+  CVStatus,
+  StageState,
+  ProjectState,
+  InvalidTransitionError,
+  SchemaValidationError,
+  validateManifest,
+} from '@proofloop/kernel';
+import * as path from 'node:path';
 import type { Finding } from '@proofloop/kernel';
 import { reduceRuntimeAction } from './reducer';
 import type { RuntimeAction, ReconciledSliceState, ReconciledStageState } from './state-model';
@@ -44,8 +53,15 @@ import { reconcileStage } from './reconcile';
 import type { ReconcileStageResult } from './reconcile';
 import { tasksReceiptDir, cvReceiptDir, committerReceiptDir, integrationReceiptDir, reviewReceiptDir, projectReceiptDir, planReceiptDir } from './receipt-layout';
 import { readReceiptCategory } from './receipt-reader';
-import { manifestFileDigest } from './manifest-source';
+import { defaultManifestPath, manifestFileDigest } from './manifest-source';
+import { detectPlanManifestRoute } from './plan-services';
 import { runAdmitPipeline } from './admit-pipeline';
+import { assertAdmissionRequest } from './admission-request';
+import { admitVNextWorkerResult } from './vnext/worker-admission';
+import { admitVNextSliceCommit } from './vnext/commit-admission';
+import { admitVNextIntegration } from './vnext/integration-admission';
+import { admitVNextStageReview, assembleVNextStageReviewRequest } from './vnext/review-admission';
+import { readRootBoundFile } from './vnext/entity-resolver';
 import type {
   ReceiptWriterPort,
   AdmitResult,
@@ -84,6 +100,12 @@ export type AdmitReduceFn = (
 export interface AdmissionDeps {
   /** Project root — canonical receipt category directories resolve under it. */
   readonly projectRoot: string;
+  /**
+   * Optional Host-selected Manifest route binding for Slice Commit admission.
+   * When present, the canonical Manifest route must still match before any
+   * legacy or vNext consumer is entered.
+   */
+  readonly manifestRouteBinding?: 'v1' | 'vnext';
   /** Deterministic current-state source. */
   readonly reconcile?: (stageId: string) => ReconcileStageResult;
   /** Reducer seam. */
@@ -105,6 +127,83 @@ export interface AdmissionDeps {
 /** Structured rejection builder — canonical Finding, no Receipt. */
 function refuse(code: Finding['code'], message: string): AdmitPrecheckResult {
   return { accepted: false, findings: [{ code, severity: 'error', message }] };
+}
+
+/** Structured request-level schema rejection — no reconcile, state advance, or Receipt. */
+function rejectAdmissionSchema(message: string): AdmitResult {
+  return {
+    accepted: false,
+    receipt_ref: null,
+    new_state: null,
+    findings: [{ code: 'RUNTIME.SCHEMA_MISMATCH', severity: 'error', message }],
+  };
+}
+
+/**
+ * The legacy Worker consumer may only run against the canonical, validated
+ * v1 Manifest.  This check is deliberately independent of the injected
+ * reconcile seam and never accepts a caller-supplied alternate Manifest path.
+ */
+function legacyManifestRejection(projectRoot: string, stageId: string): AdmitResult | null {
+  const manifestPath = defaultManifestPath(projectRoot, stageId);
+  let manifestValue: unknown;
+  try {
+    manifestValue = JSON.parse(readRootBoundFile(projectRoot, manifestPath).content) as unknown;
+  } catch (err) {
+    return rejectAdmissionSchema(
+      `legacy v1 Worker admission requires a readable canonical Manifest at ${manifestPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  try {
+    const manifest = validateManifest(manifestValue);
+    if (manifest.stage_id !== stageId) {
+      return rejectAdmissionSchema(
+        `legacy v1 Worker admission rejected the canonical Manifest: stage_id "${manifest.stage_id}" does not match "${stageId}"`,
+      );
+    }
+  } catch (err) {
+    return rejectAdmissionSchema(
+      `legacy v1 Worker admission rejected the canonical Manifest at ${manifestPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * The legacy Slice Commit pipeline may only reconcile a canonical v1 route.
+ * This check is kept at the direct Runtime seam as well as at the Host route
+ * boundary, so a vNext Manifest can never reach the legacy reducer through a
+ * direct caller or a route change observed during reconciliation.
+ */
+function assertLegacySliceCommitManifestRoute(projectRoot: string, stageId: string): void {
+  const route = detectPlanManifestRoute(
+    projectRoot,
+    defaultManifestPath(projectRoot, stageId),
+  );
+  if (route !== 'v1') {
+    throw new Error(
+      `legacy Slice Commit admission requires a canonical v1 Manifest route; observed ${route}`,
+    );
+  }
+}
+
+/** The legacy Integration consumer is reachable only from an explicit v1 route. */
+function assertLegacyIntegrationManifestRoute(projectRoot: string, stageId: string): void {
+  const route = detectPlanManifestRoute(
+    projectRoot,
+    defaultManifestPath(projectRoot, stageId),
+  );
+  if (route !== 'v1') {
+    throw new Error(
+      `legacy Integration admission requires a canonical v1 Manifest route; observed ${route}`,
+    );
+  }
 }
 
 /** Re-attach the Reconcile-only chain fields to a reducer-advanced state. */
@@ -163,26 +262,62 @@ function advanceSlice(
  * Admit a WorkerResultEnvelope (S02-B) into a canonical TASK_COMPLETE
  * Receipt, or reject it structurally without a Receipt.
  *
- * @param request - `{ type: 'worker_result', envelope }` — schema-validated
- *        inside the pipeline (fail closed via the S02-B envelope validator).
+ * @param request - `{ type: 'worker_result', envelope }` — fully validated at
+ *        this method boundary before explicit schemaVersion routing; the v1
+ *        pipeline re-validates the request as its own fail-closed seam.
  * @param deps    - projectRoot / reconcile / reduce / writer seams.
  */
 export function admitWorkerResult(
   request: WorkerResultAdmissionRequest,
   deps: AdmissionDeps,
 ): AdmitResult {
-  return runAdmitPipeline({
-    request,
-    reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
-    projectRoot: deps.projectRoot,
-    writer: deps.writer,
-    steps: workerResultSteps(request, deps),
-  });
+  // The vNext consumer is a separate seam, so it cannot rely on the legacy
+  // pipeline's request validation. Validate the COMPLETE outer request first
+  // to keep malformed values out of both consumers and to avoid dereferencing
+  // a missing/null envelope before the closed validator has run.
+  try {
+    assertAdmissionRequest(request);
+  } catch (err) {
+    if (err instanceof SchemaValidationError) {
+      return rejectAdmissionSchema(`admission request rejected: ${err.message}`);
+    }
+    throw err;
+  }
+
+  if (request.envelope.schemaVersion === 2) {
+    return admitVNextWorkerResult(request.envelope, {
+      projectRoot: deps.projectRoot,
+      writer: deps.writer,
+    });
+  }
+  if (request.envelope.schemaVersion === 1) {
+    const manifestRejection = legacyManifestRejection(deps.projectRoot, request.envelope.stageId);
+    if (manifestRejection !== null) return manifestRejection;
+
+    const legacyRequest = request as WorkerResultAdmissionRequest & {
+      readonly envelope: WorkerResultEnvelope;
+    };
+    return runAdmitPipeline({
+      request: legacyRequest,
+      reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
+      projectRoot: deps.projectRoot,
+      writer: deps.writer,
+      steps: workerResultSteps(legacyRequest, deps),
+    });
+  }
+
+  // Defensive guard: assertAdmissionRequest currently makes this unreachable,
+  // but unknown versions must never silently fall through to the v1 path.
+  return rejectAdmissionSchema(
+    `admission request rejected: unsupported envelope.schemaVersion ${JSON.stringify(
+      (request.envelope as { readonly schemaVersion?: unknown }).schemaVersion,
+    )}`,
+  );
 }
 
 /** Per-admit pipeline wiring for worker-result admits. */
 function workerResultSteps(
-  request: WorkerResultAdmissionRequest,
+  request: WorkerResultAdmissionRequest & { readonly envelope: WorkerResultEnvelope },
   deps: AdmissionDeps,
 ): AdmitPipelineSteps {
   const envelope = request.envelope;
@@ -204,7 +339,7 @@ function workerResultSteps(
  *       implement/recover  → slice IN_PROGRESS (stays);
  *       finalize-slice     → IN_PROGRESS + evidence finalized →
  *                            FINISH_TASKS → READY_FOR_CV;
- *       repair/diagnose    → READY_FOR_CV + CV_REPAIR binding (cv REPAIR) →
+ *       repair            → READY_FOR_CV + CV_REPAIR binding (cv REPAIR) →
  *                            cv FIX → PENDING_RECHECK (slice stays
  *                            READY_FOR_CV).
  */
@@ -284,8 +419,7 @@ function workerResultPrecheck(
         (s) => s.slice_state === SliceState.READY_FOR_CV,
       );
 
-    case 'repair':
-    case 'diagnose': {
+    case 'repair': {
       if (slice.slice_state !== SliceState.READY_FOR_CV) {
         return refuse(
           'DOMAIN.INVALID_TRANSITION',
@@ -321,7 +455,7 @@ function workerResultPrecheck(
 /**
  * Canonical TASK_COMPLETE Receipt body (PO-S02-E-02): payload binds the
  * envelope facts (action_token / mode / evidence_ref / changed_files /
- * verification_runs / summary); repair/diagnose additionally bind the
+ * verification_runs / summary); repair additionally binds the
  * CV_REPAIR receipt digest of the recheck branch.
  */
 function workerResultReceipt(
@@ -336,7 +470,7 @@ function workerResultReceipt(
     verification_runs: envelope.verificationRuns.map((r) => ({ ...r })),
     summary: envelope.summary,
   };
-  if (envelope.mode === 'repair' || envelope.mode === 'diagnose') {
+  if (envelope.mode === 'repair') {
     const slice = state.slices.find((s) => s.slice_id === envelope.sliceId);
     const cvReceipt = slice?.latest_cv_receipt;
     if (cvReceipt !== undefined && cvReceipt !== null && cvReceipt.type === 'CV_REPAIR') {
@@ -369,6 +503,18 @@ export function admitCVResult(
   request: CVResultAdmissionRequest,
   deps: AdmissionDeps,
 ): AdmitResult {
+  // The vNext CV request has its own consumer.  Keep this legacy seam
+  // fail-closed even for JavaScript callers or unsafe casts: a vNext envelope
+  // must never reach the legacy reconcile/reducer/writer pipeline.
+  if (
+    request === null ||
+    typeof request !== 'object' ||
+    (request as { readonly type?: unknown }).type !== 'cv_result'
+  ) {
+    return rejectAdmissionSchema(
+      'legacy admitCVResult accepts only the cv_result request; vNext CV results must use admitVNextCVResult',
+    );
+  }
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
@@ -487,10 +633,54 @@ export function admitSliceCommit(
   request: SliceCommitAdmissionRequest,
   deps: AdmissionDeps,
 ): AdmitResult {
+  // A vNext Manifest selects the independent vNext Slice Commit consumer.
+  // Never let vNext facts enter the legacy reconcile/reducer pipeline; v1
+  // manifests retain the exact existing route below.
+  let manifestRoute: ReturnType<typeof detectPlanManifestRoute>;
+  try {
+    manifestRoute = detectPlanManifestRoute(
+      deps.projectRoot,
+      defaultManifestPath(deps.projectRoot, request.stageId),
+    );
+  } catch (error) {
+    return rejectAdmissionSchema(
+      `Slice Commit Manifest route could not be determined: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    deps.manifestRouteBinding !== undefined &&
+    manifestRoute !== deps.manifestRouteBinding
+  ) {
+    return rejectAdmissionSchema(
+      `Slice Commit Manifest route binding mismatch: Host selected ${deps.manifestRouteBinding}, ` +
+        `but the canonical Manifest is currently ${manifestRoute}; no consumer may be selected`,
+    );
+  }
+  if (manifestRoute === 'vnext') {
+    return admitVNextSliceCommit(request, {
+      projectRoot: deps.projectRoot,
+      writer: deps.writer,
+    }) as unknown as AdmitResult;
+  }
+  if (manifestRoute === 'unknown') {
+    return rejectAdmissionSchema(
+      'Slice Commit requires an explicit paired v1/vNext Manifest route; unknown Manifest versions never fall back to the legacy consumer',
+    );
+  }
+  const legacyReconcile =
+    deps.reconcile ?? ((stageId: string) => reconcileStage({ projectRoot: deps.projectRoot, stageId }));
   return runAdmitPipeline({
     request,
-    reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
     projectRoot: deps.projectRoot,
+    reconcile: (stageId) => {
+      // Check immediately before entering the legacy reconcile/reducer seam,
+      // and again after it, so a canonical vNext route is refused before the
+      // legacy precheck or Receipt writer can run.
+      assertLegacySliceCommitManifestRoute(deps.projectRoot, stageId);
+      const state = legacyReconcile(stageId);
+      assertLegacySliceCommitManifestRoute(deps.projectRoot, stageId);
+      return state;
+    },
     writer: deps.writer,
     steps: sliceCommitSteps(request, deps),
   });
@@ -581,10 +771,49 @@ export function admitIntegration(
   request: IntegrationAdmissionRequest,
   deps: AdmissionDeps,
 ): AdmitResult {
+  let manifestRoute: ReturnType<typeof detectPlanManifestRoute>;
+  try {
+    manifestRoute = detectPlanManifestRoute(
+      deps.projectRoot,
+      defaultManifestPath(deps.projectRoot, request.stageId),
+    );
+  } catch (error) {
+    return rejectAdmissionSchema(
+      `Integration Manifest route could not be determined: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    deps.manifestRouteBinding !== undefined &&
+    manifestRoute !== deps.manifestRouteBinding
+  ) {
+    return rejectAdmissionSchema(
+      `Integration Manifest route binding mismatch: Host selected ${deps.manifestRouteBinding}, ` +
+        `but the canonical Manifest is currently ${manifestRoute}; no consumer may be selected`,
+    );
+  }
+  if (manifestRoute === 'vnext') {
+    return admitVNextIntegration(request, {
+      projectRoot: deps.projectRoot,
+      writer: deps.writer,
+    }) as unknown as AdmitResult;
+  }
+  if (manifestRoute === 'unknown') {
+    return rejectAdmissionSchema(
+      'Integration requires an explicit paired v1/vNext Manifest route; unknown Manifest versions never fall back to the legacy consumer',
+    );
+  }
+
+  const legacyReconcile =
+    deps.reconcile ?? ((stageId: string) => reconcileStage({ projectRoot: deps.projectRoot, stageId }));
   return runAdmitPipeline({
     request,
-    reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),
     projectRoot: deps.projectRoot,
+    reconcile: (stageId) => {
+      assertLegacyIntegrationManifestRoute(deps.projectRoot, stageId);
+      const state = legacyReconcile(stageId);
+      assertLegacyIntegrationManifestRoute(deps.projectRoot, stageId);
+      return state;
+    },
     writer: deps.writer,
     steps: integrationSteps(request, deps),
   });
@@ -754,7 +983,13 @@ function advanceProject(
 /**
  * Admit a stage review verdict (PO-S02-E-05).
  *
- * Precondition: stage derived UNDER_REVIEW (reconcile fact).
+ * vNext route guard: a Stage Review fact for a vNext Manifest never enters
+ * the legacy reconcile/reducer path; the vNext Review consumer persists its
+ * own STAGE_REVIEW_PASS Receipt (verdict ACCEPTED | REPAIR) through the
+ * shared bounded Receipt seam.  `unknown` routes are refused, never silently
+ * degraded to the v1 reader (fail closed, §9.5).
+ *
+ * Legacy precondition: stage derived UNDER_REVIEW (reconcile fact).
  *   - verdict ACCEPTED → STAGE_REVIEW_PASS Receipt to `review/<stage>/` +
  *     reducer COMPLETE advance UNDER_REVIEW → COMPLETED;
  *   - verdict REPAIR → legal no-Receipt branch: reducer REOPEN advance
@@ -765,6 +1000,35 @@ export function admitStageReview(
   request: StageReviewAdmissionRequest,
   deps: AdmissionDeps,
 ): AdmitResult {
+  // vNext route guard (mirrors the Gate consumer): a Review fact for a vNext
+  // Manifest never enters the legacy reconcile/reducer path.  `unknown`
+  // routes are refused, never silently degraded to the v1 reader.
+  const projectRoot = path.resolve(deps.projectRoot);
+  const manifestPath = path.join(projectRoot, '.proofloop', 'manifests', `${request.stageId}.json`);
+  const route = detectPlanManifestRoute(projectRoot, manifestPath);
+  if (route === 'vnext') {
+    // Runtime assembles the closed vNext digest bindings (Manifest digest,
+    // current Git HEAD snapshot, deterministic Runtime Proof digest) from the
+    // shared stage-level request — the Host layer never computes digests.  A
+    // broken assembly is a rejected AdmitResult, never a bare exception.
+    const assembled = assembleVNextStageReviewRequest(request, projectRoot);
+    if (!assembled.ok) {
+      return assembled.result as unknown as AdmitResult;
+    }
+    return admitVNextStageReview(assembled.request, { projectRoot, writer: deps.writer }) as unknown as AdmitResult;
+  }
+  if (route === 'unknown') {
+    return {
+      accepted: false,
+      receipt_ref: null,
+      new_state: null,
+      findings: [{
+        code: 'RUNTIME.SCHEMA_MISMATCH',
+        severity: 'error',
+        message: `stage review refused: Manifest route is unknown for stage "${request.stageId}"`,
+      }],
+    };
+  }
   return runAdmitPipeline({
     request,
     reconcile: deps.reconcile ?? ((stageId) => reconcileStage({ projectRoot: deps.projectRoot, stageId })),

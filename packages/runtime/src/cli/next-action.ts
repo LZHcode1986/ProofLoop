@@ -1,135 +1,68 @@
-/**
- * next-action — new runtime CLI entry (PO-S03-H-01, S03-H-T01)
- *
- * Path-only input → `NextActionService` (the S02-D full Reconcile →
- * Validate → Reduce → Action pipeline). Legacy-compatible argument shape
- * (file path or inline `--json`):
- *
- *   node packages/runtime/dist/cli/next-action.js <input.json>
- *   node packages/runtime/dist/cli/next-action.js --json '<json>'
- *
- * Input (path-only; camelCase aliases accepted):
- *   { "stage_id": "S03", "project_root": ".", "manifest_path"?, "tasks_path"? }
- *
- * Output: the proofloop_next contract JSON
- *   { action, action_detail, responsible_role, receipt_chain_valid, findings }
- *
- * The CLI is a thin wrapper: it never reads the filesystem itself to derive
- * the action — derivation is exclusively the `NextActionService` (HP-003,
- * PO-S02-D-02/04). Zero host dependencies.
- */
+/** Canonical path only next action CLI with explicit v1 and vNext routing. */
 
-import { NextActionService } from '../next-action-service';
-import type { NextActionOutput } from '../next-action-service';
-import * as path from 'node:path';
-
-// ============================================================
-// Input normalization (old snake_case contract + camelCase aliases)
-// ============================================================
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { NextActionService } from "../next-action-service";
+import type { NextActionOutput } from "../next-action-service";
+import { defaultManifestPath } from "../manifest-source";
+import { detectVNextManifestDiscriminator, VNextNextActionService } from "../vnext";
+import type { VNextNextActionOutput } from "../vnext";
 
 function str(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
-
 export interface NextActionCliInput {
   readonly stage_id?: string;
   readonly project_root?: string;
   readonly manifest_path?: string;
   readonly tasks_path?: string;
+  readonly snapshot_digest?: string;
   readonly stageId?: string;
   readonly projectRoot?: string;
   readonly manifestPath?: string;
   readonly tasksPath?: string;
+  readonly snapshotDigest?: string;
 }
-
-/**
- * Run the next-action pipeline from a path-only input JSON object.
- *
- * @throws TypeError when the required identity fields are missing.
- */
-export function nextActionFromInput(raw: unknown): NextActionOutput {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new TypeError('next-action input must be a JSON object');
-  }
+export function nextActionFromInput(raw: unknown): NextActionOutput | VNextNextActionOutput {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new TypeError("next-action input must be a JSON object");
   const input = raw as Record<string, unknown>;
   const projectRoot = str(input.project_root) ?? str(input.projectRoot);
   const stageId = str(input.stage_id) ?? str(input.stageId);
-  if (projectRoot === undefined) {
-    throw new TypeError('next-action input requires project_root (string)');
+  if (projectRoot === undefined) throw new TypeError("next-action input requires project_root (string)");
+  if (stageId === undefined) throw new TypeError("next-action input requires stage_id (string)");
+  const resolveWithin = (value: string | undefined): string | undefined => value === undefined || path.isAbsolute(value) ? value : path.resolve(projectRoot, value);
+  const manifestPath = resolveWithin(str(input.manifest_path) ?? str(input.manifestPath)) ?? defaultManifestPath(projectRoot, stageId);
+  if (detectVNextManifestDiscriminator(projectRoot, manifestPath)) {
+    return new VNextNextActionService().nextAction({
+      projectRoot,
+      stageId,
+      manifestPath,
+      snapshotDigest: str(input.snapshot_digest) ?? str(input.snapshotDigest),
+      persistContext: true,
+    });
   }
-  if (stageId === undefined) {
-    throw new TypeError('next-action input requires stage_id (string)');
-  }
-  // Relative manifest/tasks paths resolve inside the project root (legacy
-  // executor-next-action path semantics — never outside it).
-  const resolveWithin = (p: string | undefined): string | undefined =>
-    p === undefined || path.isAbsolute(p) ? p : path.resolve(projectRoot, p);
   return new NextActionService().nextAction({
     projectRoot,
     stageId,
-    manifestPath: resolveWithin(str(input.manifest_path) ?? str(input.manifestPath)),
+    manifestPath,
     tasksPath: resolveWithin(str(input.tasks_path) ?? str(input.tasksPath)),
   });
 }
-
-// ============================================================
-// CLI entry
-// ============================================================
-
-/** Read `<input.json>` or `--json '<json>'` (legacy arg contract). */
-function readInputArg(argv: readonly string[]): { raw: string } {
+function readInputArg(argv: readonly string[]): string {
   const [arg1, arg2] = argv;
-  if (arg1 === '--json') {
-    if (!arg2) return { raw: '' };
-    return { raw: arg2 };
-  }
-  if (arg1 !== undefined) {
-    return { raw: require('node:fs').readFileSync(arg1, 'utf-8') };
-  }
-  return { raw: '' };
+  if (arg1 === "--json") return arg2 ?? "";
+  if (arg1 !== undefined) return fs.readFileSync(arg1, "utf8");
+  return "";
 }
-
-/**
- * Legacy-compatible CLI:
- *   node dist/cli/next-action.js <input.json>
- *   node dist/cli/next-action.js --json '<json>'
- */
 export function nextActionCli(argv: readonly string[]): number {
   let raw: string;
-  try {
-    raw = readInputArg(argv).raw;
-  } catch (err) {
-    console.error(`Error: Cannot read input file: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  if (!raw) {
-    console.error('Usage: node dist/cli/next-action.js <input.json>');
-    console.error('       node dist/cli/next-action.js --json \'<json>\'');
-    console.error('');
-    console.error('Input (path-only, old CLI contract):');
-    console.error('  { "stage_id": "S03", "project_root": ".",');
-    console.error('    "manifest_path": ".proofloop/manifests/S03.json",   // optional');
-    console.error('    "tasks_path": "delivery/stages/S03/tasks.md" }      // optional');
-    console.error('Outputs the proofloop_next contract JSON to stdout.');
-    return 1;
-  }
+  try { raw = readInputArg(argv); }
+  catch (error) { console.error("Error: Cannot read input file: " + (error instanceof Error ? error.message : String(error))); return 1; }
+  if (!raw) { console.error("Usage: node dist/cli/next-action.js <input.json>"); return 1; }
   let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch (err) {
-    console.error(`Error: Invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  try {
-    const output = nextActionFromInput(data);
-    console.log(JSON.stringify(output, null, 2));
-    return 0;
-  } catch (err) {
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
+  try { data = JSON.parse(raw); }
+  catch (error) { console.error("Error: Invalid JSON: " + (error instanceof Error ? error.message : String(error))); return 1; }
+  try { console.log(JSON.stringify(nextActionFromInput(data), null, 2)); return 0; }
+  catch (error) { console.error("Error: " + (error instanceof Error ? error.message : String(error))); return 1; }
 }
-
-if (require.main === module) {
-  process.exitCode = nextActionCli(process.argv.slice(2));
-}
+if (require.main === module) process.exitCode = nextActionCli(process.argv.slice(2));

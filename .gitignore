@@ -1,14 +1,6 @@
 docs/
-.proofloop/
-.pi-subagents/
-.codegraph/
-
-__pycache__/
-*.pyc
-
-# Node.js
 node_modules/
-.agents/runtime/node_modules/
-.agents/runtime/dist/*.d.ts
-.agents/runtime/dist/*.d.cts
-.agents/runtime/dist/*.js.map
+dist/
+*.tsbuildinfo
+.codegraph/
+.proofloop/

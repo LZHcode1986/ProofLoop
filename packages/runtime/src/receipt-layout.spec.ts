@@ -46,6 +46,10 @@ import {
   projectReceiptDir,
   tmpReceiptDir,
 } from '@proofloop/runtime';
+// P-11: `stageCloseReceiptDir`/`categoryForType` are not part of the package
+// index (the vNext stage-close seam is not a legacy layout export) — import
+// them from the source module directly.
+import { categoryForType, stageCloseReceiptDir } from './receipt-layout';
 
 const ROOT = '/fixture/project';
 const STAGE = 'S02';
@@ -88,7 +92,7 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
     expect(layout.tmp).toBe(path.join(base, 'tmp'));
   });
 
-  it('exposes the closed category set: 8 content categories + tmp', () => {
+  it('exposes the closed category set: 9 content categories + tmp', () => {
     expect([...RECEIPT_CATEGORIES]).toEqual([
       'plan',
       'tasks',
@@ -97,6 +101,7 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
       'integration',
       'stage-gate',
       'review',
+      'stage-close',
       'project',
       'tmp',
     ]);
@@ -108,6 +113,7 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
       'integration',
       'stage-gate',
       'review',
+      'stage-close',
       'project',
     ]);
   });
@@ -125,6 +131,7 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
     );
     expect(receiptCategoryDir(ROOT, 'stage-gate', STAGE)).toBe(stageGateReceiptDir(ROOT, STAGE));
     expect(receiptCategoryDir(ROOT, 'review', STAGE)).toBe(reviewReceiptDir(ROOT, STAGE));
+    expect(receiptCategoryDir(ROOT, 'stage-close', STAGE)).toBe(stageCloseReceiptDir(ROOT, STAGE));
     expect(receiptCategoryDir(ROOT, 'project')).toBe(projectReceiptDir(ROOT));
     expect(receiptCategoryDir(ROOT, 'tmp')).toBe(tmpReceiptDir(ROOT));
   });
@@ -158,6 +165,16 @@ describe('receiptLayout — canonical category directory layout (PO-S02-C-05)', 
   it('derives RECEIPT_TYPES_BY_CATEGORY as the inverse of the type→category map', () => {
     for (const category of RECEIPT_CONTENT_CATEGORIES) {
       const types = RECEIPT_TYPES_BY_CATEGORY[category];
+      // P-11: `stage-close` is the vNext-only content category — the kernel
+      // 16-type set stays closed, so no legacy ReceiptType maps into it and
+      // the inverse map is legitimately empty. Its receipts are vNext-owned
+      // STAGE_CLOSE_PASS envelopes, classified by the vNext result-type map
+      // (categoryForType), not the kernel map.
+      if (category === 'stage-close') {
+        expect(types).toHaveLength(0);
+        expect(categoryForType('STAGE_CLOSE_RESULT')).toBe('stage-close');
+        continue;
+      }
       expect(types.length).toBeGreaterThan(0);
       for (const type of types) {
         expect(RECEIPT_TYPE_CATEGORY[type]).toBe(category);

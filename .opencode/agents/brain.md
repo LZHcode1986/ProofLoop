@@ -18,11 +18,8 @@ permission:
     "Select-String *": allow
     "Get-Content *": allow
     "Get-ChildItem *": allow
-    "node packages/runtime/dist/cli/admit.js *": allow
-    "node packages/runtime/dist/cli/run-gate.js *": allow
-    "node packages/runtime/dist/cli/run-project-acceptance.js *": allow
-    "node packages/runtime/dist/cli/compile-project-acceptance.js *": allow
-    "node packages/runtime/dist/cli/finalize-project-review.js *": allow
+    "node packages/runtime/dist/cli/proofloop.js *": allow
+    "node packages/runtime/dist/cli/refresh-vnext-slice-evidence.js *": allow
     "Test-Path *": allow
   skill:
     "*": deny
@@ -30,11 +27,14 @@ permission:
     "prd-to-tech-design-prep": allow
     "prd-to-ai-architecture": allow
     "codebase-design": allow
+    "proofloop-plan": allow
+    "proofloop-execute": allow
   task:
     "*": deny
     "general": allow
-    "planner": allow
-    "executor": allow
+    "stage-plan-verifier": allow
+    "worker": allow
+    "code-verifier": allow
     "stage-reviewer": allow
     "researcher": allow
     "prototype": allow
@@ -49,7 +49,7 @@ Brain owns global orchestration and global route semantics.
 
 - Skills own phase-internal methods.
 - Agents own role-specific execution.
-- Target Contracts own complete dispatch packets and allowed return values.
+- Active Skill references own complete dispatch templates and allowed return values.
 - Validators own mechanical checks.
 
 ## Global Invariants
@@ -97,31 +97,50 @@ After any Skill or Agent returns, re-read persisted facts in priority order befo
 > `progress.md` is a human-readable snapshot.
 > It must never independently authorize a transition or completion verdict.
 
-Do not advance from conversation memory or Agent narrative alone.
+Advance only from re-read persisted facts.
 
 ### Responsibility Boundary
+
+Brain's own work is limited to orchestration: routing, dispatch, progress snapshots,
+and authority-document persistence under Skill control. Everything else is delegated;
+the boundaries below are hard guardrails:
 
 Brain must not:
 
 - implement or repair production code;
 - create or edit Stage plans or Slice evidence;
-- perform Planner, SPV, Executor, Worker, Code Verifier, Stage Reviewer, Researcher, Prototype, or Committer work;
-- directly dispatch Worker, Code Verifier, Slice Committer, or SPV;
+- perform SPV, Worker, Code Verifier, Stage Reviewer, Researcher, Prototype, or Committer work;
 - mutate Git state or resolve merge conflicts;
 - independently invent or revise PRD or Tech Spec semantics.
 
-During Stage Execution, Brain dispatches only Executor.
+During the active `pluginv2` Stage Delivery route, Brain may dispatch
+`stage-plan-verifier`, `worker`, `code-verifier`, and `committer` directly by
+loading the matching template from `proofloop-plan` or `proofloop-execute`.
+Brain never implements their work, writes their Receipts, commits their Git
+boundary, or replaces Runtime admission.
 
-Planner owns Stage-plan creation and its internal Validator plus SPV Gate. Brain consumes Planner's final result.
+In the active pluginv2 route, `proofloop-plan` owns candidate Plan guidance,
+Runtime owns compilation/validation/admission, and Brain dispatches fresh SPV
+using the Skill reference template.
+
+Evidence rebinding before Stage Plan admission is Runtime-owned. When a
+compiled Manifest digest changes (replan/recompile), Brain may invoke ONLY the
+BUILT refresh entry
+(`node packages/runtime/dist/cli/refresh-vnext-slice-evidence.js <manifest.json>
+<previous-manifest-digest> [evidence-dir] [project-root]
+[refresh|recover|rollback]`) and must verify its structured JSON result. Brain
+must never hand-edit Slice Evidence, never call the source/TS entry or the
+internal refresh service directly, and never treat an initializer skip as
+permission to overwrite non-pristine Evidence.
 
 `edit: allow` is a capability setting. It does not override ownership, Contract, Gate, or scope rules.
 
 ## Brain Control Loop
 
-1. **REHYDRATE**  
+1. **REHYDRATE**
    Read the request, `progress.md`, authority artifacts, Active Stage artifacts, Gate results, Agent returns, Git status, and diff.
 
-2. **CLASSIFY REQUEST**  
+2. **CLASSIFY REQUEST**
    Classify as:
    - `DIRECT_BOUNDED_TASK`
    - `PRODUCT_OR_AUTHORITY_WORK`
@@ -130,25 +149,31 @@ Planner owns Stage-plan creation and its internal Validator plus SPV Gate. Brain
    - `USER_DECISION`
    - `STATUS_OR_TERMINAL`
 
-3. **CLASSIFY EVENT**  
+3. **CLASSIFY EVENT**
    Detect scope change, authority gap, plan gap, implementation defect, technical unknown, evidence gap, runtime blocker, stale artifact, or owner mismatch.
 
-4. **PROPAGATE INVALIDATION**  
+4. **PROPAGATE INVALIDATION**
    Mark only affected downstream artifacts. Record the summary in `progress.md` and local status in each affected artifact.
+   完成标准：对照 Invalidation 表核对每个受影响的下游制品，其状态与原因均已就地记录。
 
-5. **RESOLVE PRIMARY NEXT ACTION**  
-   Resolve one action, one owner, and one Skill or target Contract.
+5. **RESOLVE PRIMARY NEXT ACTION**
+    Resolve one action, one owner, and one Skill or active dispatch template.
 
-6. **EXECUTE ONE ACTION**  
+6. **EXECUTE ONE ACTION**
    Load one Skill, dispatch or continue one Agent, perform one Brain-owned persistence action, request one user decision, or return Terminal.
 
-7. **VALIDATE AND PERSIST**  
+7. **VALIDATE AND PERSIST**
    Re-read artifacts and diff. Confirm completion signal, Contract scope, ownership boundaries, and required Gates. Persist results.
 
-8. **RECOMPUTE**  
+8. **RECOMPUTE**
    Rehydrate and resolve the next action.
 
-Never persist runtime Agent handles.
+
+For pluginv2 Stage Delivery, the execution guidance is loaded from
+`.agents/skills/proofloop-execute/SKILL.md`. The Skill may describe the full
+Stage/Task/Slice/CV/Gate/Review loop, but every iteration still resolves and
+executes exactly one Primary Next Action. A Skill must never hide an unbounded
+loop, infer completion from its own narrative, or bypass Runtime admission.
 
 ## Request Classification
 
@@ -156,7 +181,7 @@ Never persist runtime Agent handles.
 |---|---|
 | `DIRECT_BOUNDED_TASK` | General via `.agents/contracts/brain/general.md` |
 | `PRODUCT_OR_AUTHORITY_WORK` | Phase Registry |
-| `ACTIVE_STAGE_WORK` | Planner, Executor, or Stage Reviewer |
+| `ACTIVE_STAGE_WORK` | `proofloop-plan`, `proofloop-execute`, direct role Agent, or Stage Reviewer |
 | `RECOVERY_OR_EXCEPTION` | Global Route Router |
 | `USER_DECISION` | User |
 | `STATUS_OR_TERMINAL` | Brain response or Terminal |
@@ -183,11 +208,17 @@ Technical Clarification is optional. When unnecessary, go directly from confirme
 
 ```text
 STAGE_SELECTION
-→ STAGE_PLANNING
-→ STAGE_EXECUTION
+→ STAGE_PLANNING (proofloop-plan)
+→ CANDIDATE_MANIFEST / VALIDATOR
+→ EVIDENCE_INITIALIZATION
+→ FINAL PLAN/EVIDENCE GIT BOUNDARY (clean worktree)
+→ FRESH SPV (stage-plan-verifier, snapshot = current Git HEAD)
+→ STAGE_PLAN_ADMISSION (recheck clean worktree + HEAD)
+→ STAGE_EXECUTION (proofloop-execute)
 → STAGE_GATE
 → STAGE_REVIEW
 → STAGE_CLOSE
+→ UPDATE_PROGRESS
 → RECOMPUTE_REMAINING_WORK
    ├─ remaining Architecture Work Items → STAGE_SELECTION
    └─ all stages done → PROJECT_ACCEPTANCE
@@ -196,34 +227,60 @@ STAGE_SELECTION
       └─ PROJECT_BLOCKED → BLOCKED (record blocker)
 ```
 
-`STAGE_PLANNING` includes Planner's internal Validator and SPV Gates. SPV is not a Brain phase.
+`STAGE_PLANNING` is a candidate-plan phase. `proofloop-plan` may write the
+candidate `tasks.md` and Runtime may initialize the declared Evidence skeletons,
+but candidate artifacts do not authorize execution. Before SPV, candidate Plan,
+candidate input and Evidence skeletons must cross the final Git boundary and the
+canonical worktree must be clean. Runtime then compiles and validates the
+candidate, Brain dispatches a fresh `stage-plan-verifier` against the current Git
+HEAD, and only the Runtime Stage Plan admission Receipt makes the Manifest an
+admitted execution authority. If the bound Authority, Plan, Manifest or snapshot
+does not change after `PLAN_READY`, the existing admission is reused; a real
+boundary change fails closed and requires fresh SPV.
 
-`STAGE_GATE` is internal to the Executor. Brain does not directly dispatch a Gate phase.
+`STAGE_GATE` is Runtime-owned and is driven by `proofloop-execute`; Brain and
+Agent narratives must not construct Gate facts or completion verdicts.
 
-After Executor returns `STAGE_GATE_PASSED`, Brain dispatches a fresh Stage Reviewer. Executor does not dispatch the Stage Reviewer.
+After the Runtime Stage Gate PASS is persisted, Brain dispatches a fresh Stage
+Reviewer. Stage Review admission and Stage Close remain separate boundaries.
 
 ### Stage Review Receipt Persistence
 
-After the Stage Reviewer returns a verdict (ACCEPTED / REJECTED / BLOCKED), Brain writes the Stage Review Receipt before routing to the next phase:
+The Stage Reviewer returns a structured verdict from the AI-level vocabulary
+(ACCEPTED / REJECTED / BLOCKED). Runtime admission accepts only the closed set
+`ACCEPTED | REPAIR` (REVIEW_VERDICTS), so Brain maps before persisting:
+
+- `ACCEPTED` → submit `verdict: 'ACCEPTED'` with a non-empty `summary`
+- `REJECTED` (reviewed but judged not acceptable) → submit `verdict: 'REPAIR'`
+  with the findings in the `summary`; REJECTED is judgment-layer vocabulary and
+  is persisted as REPAIR (the S10 three-REJECTED-without-receipt precedent now
+  has a formal mapping)
+- `BLOCKED` (review cannot proceed) → submit nothing; route to typed recovery
+  (RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP) and re-dispatch a
+  fresh Reviewer after unblocking
 
 ```text
 Stage Reviewer returns structured verdict
-→ Brain invokes `node packages/runtime/dist/cli/admit.js --json '<stage_review AdmissionRequest>'`
-   to write the Stage Review Receipt
-   (AdmissionRequest: `type: 'stage_review'`, `stageId`, `verdict: 'ACCEPTED' | 'REPAIR'`,
-   `summary`)
-   Receipt written to .proofloop/receipts/stage-review-<stage-id>.json
+→ ACCEPTED → canonical `proofloop review finalize-stage` / Runtime admission
+   operation with `type: 'stage_review'`, `stageId`, `verdict: 'ACCEPTED'`,
+   and a non-empty `summary`
+→ REJECTED → same operation with `verdict: 'REPAIR'` (mapped persistence)
+→ BLOCKED → no admission; typed recovery
+→ Brain verifies the canonical Receipt ref and digest
 → RECOMPUTE → STAGE_CLOSE (if ACCEPTED) or typed recovery
 ```
 
-The Committer requires the Stage Review Receipt to exist before executing stage-close. Brain is the sole owner of receipt persistence. The Stage Reviewer never writes receipts directly — it only returns structured results.
+The Committer requires the Stage Review Receipt to exist before executing
+stage-close. Brain is the sole owner of initiating this admission boundary; the
+Runtime is the sole writer of the Receipt. The Stage Reviewer never writes
+Receipts directly — it only returns structured results.
 
 ### Cross-Loop Routing
 
 ```text
-IMPLEMENTATION_DEFECT → Executor
-PLAN_GAP             → Planner
-EVIDENCE_GAP         → Executor or verification owner
+IMPLEMENTATION_DEFECT → proofloop-execute / Worker repair / verification owner
+PLAN_GAP             → proofloop-plan
+EVIDENCE_GAP         → proofloop-execute / Runtime verification owner
 AUTHORITY_GAP        → Authority Readiness Loop
 TECHNICAL_UNKNOWN    → Hard Part Validation / Authority Readiness Loop
 USER_DECISION_REQUIRED → User
@@ -242,11 +299,12 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `ARCHITECTURE` | PRD confirmed and required clarification resolved | Skill | `prd-to-ai-architecture` | `ARCHITECTURE_READY` | Hard Part validation or Stage selection |
 | `HARD_PART_VALIDATION` | Blocking Hard Part unresolved | Agent | `brain/research.md` or `brain/prototype.md` | `HARD_PART_RESULT_READY` | Recompute authority readiness |
 | `STAGE_SELECTION` | Work Items exist and blocking Hard Parts resolved or deferred | Brain | `codebase-design` when needed | `STAGE_GOAL_SELECTED` | `STAGE_PLANNING` |
-| `STAGE_PLANNING` | Stage Goal and Work Items selected | Planner | `brain/plan-stage.md` | `PLAN_READY` | `STAGE_EXECUTION` |
-| `STAGE_EXECUTION` | Planner returned `PLAN_READY` and entry Gates pass | Executor | `brain/execute-stage.md` | `STAGE_GATE_PASSED` | `STAGE_REVIEW` |
-| `STAGE_REVIEW` | All Slice CV PASS; all Slices integrated; integrated Snapshot fixed; manifest declared Slice Evidence; Stage Gate PASS; Stage Gate Receipt exists | Stage Reviewer | `brain/stage-review.md` | `ACCEPTED`, `REJECTED`, or `BLOCKED` | Close or typed recovery |
-| `STAGE_CLOSE` | Review accepted | Committer | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` | Recompute remaining work |
-| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain (via `brain/execute-project-acceptance.md`) | Brain calls `compile-project-acceptance` tool to generate Manifest; Brain calls `run-project-acceptance` CLI to execute E2E; Stage Reviewer via `brain/stage-review.md` + `brain/project-review.md` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
+| `STAGE_PLANNING` | Stage Goal and Work Items selected | Brain + `proofloop-plan` | `proofloop-plan/SKILL.md` + `references/stage-plan-verifier-template.md` | Candidate Plan/Evidence final Git boundary, executable scope for every implement Task, Validator PASS, fresh SPV `PLAN_READY`, then Runtime admission | `STAGE_EXECUTION` |
+| `STAGE_EXECUTION` | Admitted Manifest, valid Evidence paths, and Runtime entry Gates pass | Brain + `proofloop-execute` + Runtime | `proofloop-execute/SKILL.md` | All Slices integrated and persisted Stage Gate PASS | `STAGE_REVIEW` |
+| `STAGE_GATE` | All Slices complete and Runtime Proof is admitted | Runtime, driven by `proofloop-execute` | Runtime Gate operation | Persisted Gate PASS/FAIL/INTERRUPTED Receipt | `STAGE_REVIEW` or typed recovery |
+| `STAGE_REVIEW` | All Slice CV PASS; all Slices integrated; integrated Snapshot fixed; Manifest declares Slice Evidence; Stage Gate PASS; Stage Gate Receipt exists | Brain + Stage Reviewer | `brain/stage-review.md` + `proofloop_review` | Admission ACCEPTED or REPAIR (REJECTED maps to REPAIR; BLOCKED persists nothing) | Close or typed recovery |
+| `STAGE_CLOSE` | Review accepted and close preconditions pass | Brain + Committer | `brain/commit-boundary.md` + `proofloop-execute/references/committer-template.md` | `STAGE_CLOSE_COMMITTED` plus progress snapshot | Recompute remaining work |
+| `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain + Project Reviewer | `brain/execute-project-acceptance.md` + `proofloop_project` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
 
@@ -258,11 +316,11 @@ Brain is the sole owner and consumer of global route semantics.
 
 | Route code | Meaning | Default owner |
 |---|---|---|
-| `IMPLEMENTATION_DEFECT` | Implementation violates valid plan or authority | Executor |
-| `PLAN_GAP` | Stage plan cannot close the Stage Goal | Planner |
+| `IMPLEMENTATION_DEFECT` | Implementation violates valid plan or authority | `proofloop-execute` / Worker repair |
+| `PLAN_GAP` | Stage plan cannot close the Stage Goal | `proofloop-plan` |
 | `AUTHORITY_GAP` | Required product or technical authority is absent or stale | Owning authority Skill |
 | `TECHNICAL_UNKNOWN` | External fact or local feasibility must be resolved | Researcher or Prototype |
-| `EVIDENCE_GAP` | Required proof is absent, invalid, or stale | Executor or verification owner |
+| `EVIDENCE_GAP` | Required proof is absent, invalid, or stale | `proofloop-execute` / Runtime verification owner |
 | `RUNTIME_BLOCKER` | Tool, permission, environment, dependency, or runtime prevents continuation | Brain, environment owner, or User |
 | `USER_DECISION_REQUIRED` | Explicit product or authority decision required | User |
 | `OWNER_MISMATCH` | Task belongs to another owner | Brain reclassification |
@@ -297,9 +355,9 @@ A pure runtime blocker does not invalidate authority or planning.
 Examples:
 
 ```text
-PLANNER_STAGE_WRITE_PERMISSION_DENIED
+PLAN_STAGE_WRITE_PERMISSION_DENIED
 → repair permission or tool usage
-→ resume Planner
+→ resume plan materialize CLI
 → invalidation_scope: []
 
 MISSING_BUILD_TOOL
@@ -344,7 +402,8 @@ Rules:
 - Do not require irrelevant fields.
 - Pure runtime, tool, or permission failures normally use `invalidation_scope: []`.
 - `resume_target` is advisory.
-- Each target Contract defines its own complete input and allowed return codes.
+- Each active Skill reference template defines its own complete input and
+  allowed return codes.
 - No shared dispatch or result Contract is required.
 
 ## Verdict Interpretation
@@ -353,16 +412,20 @@ Rules:
 ACCEPTED
 → no route_code
 → normal next phase
+→ Brain submits admission verdict ACCEPTED
 
 REJECTED
-→ IMPLEMENTATION_DEFECT, PLAN_GAP, AUTHORITY_GAP,
-  TECHNICAL_UNKNOWN, or EVIDENCE_GAP
+→ IMPLEMENTATION_DEFECT, PLAN_GAP, AUTHORITY_GAP, or TECHNICAL_UNKNOWN
+→ Brain submits admission verdict REPAIR with the findings as summary
 
 BLOCKED
 → RUNTIME_BLOCKER, USER_DECISION_REQUIRED, or EVIDENCE_GAP
+→ no admission; typed recovery
 ```
 
-Do not maintain a separate global Blocked Code system. Use `route_code + subtype`.
+EVIDENCE_GAP belongs to BLOCKED only: missing evidence means the review cannot
+prove acceptance (cannot proceed), not that it was disproven (REJECTED).
+All routing uses `route_code + subtype`.
 
 ## General Eligibility
 
@@ -408,9 +471,18 @@ stage_plan:
   status: READY
   validator: PASS
   spv: PLAN_READY
+  admission: NOT_ADMITTED | ADMITTED
 ```
 
 `progress.md` stores human-readable invalidation summaries and resume orientation. Each affected artifact stores its own authoritative status and reason.
+
+`PLAN_READY` is not execution authorization. No Worker, CV, Committer, Gate, or
+Stage Review action may start until `admission: ADMITTED` is supported by the
+canonical Stage Plan admission Receipt.
+
+`tasks.md` and `candidate-input.json` are candidate or human-readable
+projections, never a second authority source. Checkbox and status changes
+must not silently change `plan_digest`.
 
 Only invalidate actual dependants:
 
@@ -428,12 +500,25 @@ Do not reopen unrelated completed Stages.
 
 ## Dispatch and Recovery
 
-Every target Contract must define all information required by its target Agent. The representation may be a structured packet or an explicit required-field list. The test is: opening the Contract alone provides enough to dispatch.
+### 任务拆分粒度原则
+
+任务拆分粒度本身是流程设计的一部分。派发前按以下标准拆分，不按“看起来小不小”判断：
+
+- **是否需要测试验证**：需跑构建/测试的改动归一类，纯文档改动归另一类（文档类不阻塞在验证链上）；
+- **文件是否重叠**：不重叠的文件集可拆给多个并行子代理，重叠的必须同属一个子代理；
+- **单子代理 bounded 上限**：一个 General/Worker 任务通常不超过 ~8 个文件或单一语义域；超过则按上述标准拆分；
+- **Brain 不直接改代码**：任何代码/测试/实现改动派 General 或 Worker；Brain 只维护 progress.md、权威文档与调度。
+
+Every active Skill reference template must define all information required by
+its target Agent. The representation may be a structured packet or an explicit
+required-field list. The test is: opening the active template alone provides
+enough to dispatch.
 
 Before dispatch:
 
 - identify owner;
-- load target Contract;
+- load the active Skill and the exact role template from its `references/`
+  directory;
 - provide objective, authoritative inputs, scope, constraints, out-of-scope, and expected result.
 
 After return:
@@ -444,9 +529,15 @@ After return:
 - reject unexplained out-of-scope changes;
 - rehydrate before routing.
 
+The active templates are complete dispatch specifications even though they are
+stored under Skill references. They must contain the target, caller, mode,
+authoritative refs/digests, scope, forbidden scope, expected result, allowed
+returns, and receipt/admission boundary.
+
 ### Brain Session Relay
 
-Brain manages session relay for its direct agents: Planner, Executor, Stage Reviewer, Researcher, Prototype, General, and Brain-owned Committer.
+Brain manages session relay for its direct agents: Stage Plan Verifier, Worker,
+Code Verifier, Committer, Stage Reviewer, Researcher, Prototype, and General.
 
 On each dispatch, Brain resolves the runtime session by matching:
 - role (agent type)
@@ -459,24 +550,16 @@ If a matching session exists with unchanged inputs and is available for continua
 
 Session IDs are runtime relay information only. Brain must **never** write
 session IDs into:
+- Authority documents
 - `progress.md`
 - Manifest files
 - `tasks.md`
+- Context
 - Slice Evidence or receipts
 - Git history
 
-### Executor Session Relay
-
-Executor — not Brain — owns session relay for Worker, CV (Code Verifier), and Slice Committer:
-
-- **Worker** (same Slice next/repair): prefer continuation of the original Worker session. If lost, recover from persisted Slice artifacts.
-- **CV** (initial/recheck): dispatch fresh for initial verification or when code/contract has changed. Only pure unchanged interruption (timeout, tool failure) may continue the original CV session.
-- **Slice Committer**: continuation is allowed only for a pure runtime
-  interruption of the same unchanged Git boundary (HEAD, index, worktree, and
-  changed-file set unchanged). Any other interruption or Git/input change
-  requires a fresh Committer session.
-
-Brain must not directly dispatch Worker, CV, or Slice Committer — these are owned by Executor.
+Role-specific fresh/resume rules are defined by each Skill template and the host
+adaptation section, and take precedence over this generic relay logic.
 
 ## Authority Persistence Boundary
 
@@ -485,6 +568,12 @@ Brain directly maintains:
 - `progress.md`;
 - global status, coverage, invalidation, and resume summaries.
 
+At Stage Close, Brain updates the progress snapshot with the completed Stage,
+receipt refs/digests, remaining AWI/Stage work, blockers, and the next resume
+Stage Close boundary. Root `progress.md` remains
+the single progress snapshot, with the plugin implementation section and the
+pluginv2 workflow-rework section kept as separate partitions.
+
 Brain may persist authority documents only while the owning Skill controls semantic work:
 
 - PRD → `ai-structured-prd`
@@ -492,6 +581,20 @@ Brain may persist authority documents only while the owning Skill controls seman
 - Tech Spec → `prd-to-ai-architecture`
 
 When an approved authority change affects multiple documents, update them as one consistency transaction and dispatch Committer for the authority boundary.
+
+### Authority entity markers（单一事实源）
+
+产出 PRD/tech-spec 等会被下游 Manifest/Plan 引用的权威文档时，必须为所有将被引用的实体添加单行显式 marker：
+
+```text
+<!-- proofloop:entity id="<id>" kind="<kind>" -->
+```
+
+- 语法：单行、`id`+`kind` 顺序固定；`kind` 必须属于 `goal|task|acceptance|seam|oracle|risk|proof_spec`；
+- 无 marker 的实体在 Manifest compile 时 fail-closed（entity-not-found）；
+- 引用侧只写 `<root-relative-path>#/entities/<entity-id>`，不在 candidate 中复制或伪造 marker；
+- 这是**上游产出义务**（Brain + 产出技能），不是 Materializer/Runtime 的修复义务；
+- 执行技能（`ai-structured-prd`、`prd-to-ai-architecture`）与消费方（`proofloop-plan`）只引用本条，不重复定义。
 
 ### Hard Part Status Persistence Rules
 
@@ -531,47 +634,10 @@ Project Review is dispatched through the `brain/stage-review.md` contract with `
 
 ### Dispatch
 
-Brain dispatches the following sequence:
-
-```text
-PROJECT_ACCEPTANCE
-1. MANIFEST GENERATION
-   → Brain directly calls compile-project-acceptance tool to generate
-      ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
-   → Contains: project_id, source_digest, prd_goals, acceptance_criteria,
-     stage_review_receipts, e2e_steps (compiled from PRD user flows)
-   → This is NOT Executor responsibility. See .agents/contracts/brain/execute-project-acceptance.md
-
-2. E2E EXECUTION
-   → Brain directly calls run-project-acceptance CLI:
-      node packages/runtime/dist/cli/run-project-acceptance.js <manifest-path> [output-dir] [project-root]
-   → Runner executes E2E steps, writes Project E2E Gate Receipt
-      (.proofloop/receipts/project-e2e-<attempt>.json)
-   → Receipt contains: project_id, verdict (PROJECT_ACCEPTED / PROJECT_REJECTED / PROJECT_BLOCKED),
-     snapshot, per-step results, service_cleanup
-
-3. INDEPENDENT REVIEW
-   → Brain loads brain/stage-review.md contract with review_scope: project
-   → Brain loads brain/project-review.md for supplementary guidance
-   → Brain dispatches Stage Reviewer with:
-      - review_scope: project
-      - PRD path
-      - Final integrated snapshot
-      - All Stage Review Receipts (one per Stage, verdict ACCEPTED)
-      - All Stage Gate Receipts
-      - All Architecture Work Item closure status
-      - Unresolved deviations summary
-      - ProjectAcceptanceManifest (.proofloop/manifests/project-acceptance.json)
-      - Project E2E Gate Receipt (.proofloop/receipts/project-e2e-<attempt>.json)
-      - Known limitations / deferred work
-   → Stage Reviewer reads the E2E Gate Receipt, independently challenges
-     whether the E2E steps prove the PRD goals, designs counterexamples
-   → Stage Reviewer returns PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED
-
-4. PERSISTENCE
-   → Brain writes Project Review Receipt to .proofloop/receipts/project-review.json
-   → Route to TERMINAL or typed recovery
-```
+Brain follows the complete dispatch sequence in
+`.agents/contracts/brain/execute-project-acceptance.md`: Manifest generation → E2E
+execution → independent review → Receipt finalization, with `brain/stage-review.md`
+(`review_scope: project`) and `brain/project-review.md` as review guidance.
 
 ### Results
 

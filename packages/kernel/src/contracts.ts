@@ -164,13 +164,81 @@ export interface ProofObligation {
 // ============================================================
 
 /**
+ * Canonical closed set of executable Runtime Proof step types.
+ *
+ * The seam (§5.3 executable Runtime Proof / Evidence refresh bootstrap
+ * contracts) admits exactly `command | service_start | service_stop |
+ * probe`; `service_start` may add `readiness_signal`, `service_stop` may
+ * add `service_ref`. No second set of types (e.g. `service_probe`,
+ * `file_assertion`) may be introduced by any consumer.
+ */
+export type RuntimeProofStepType =
+  | 'command'
+  | 'service_start'
+  | 'service_stop'
+  | 'probe';
+
+/**
+ * An executable Runtime Proof step (S09-C-T01 canonical shape).
+ *
+ * Required fields are `id`, `type`, `executable`, `args`, `cwd`,
+ * `timeout_ms` and `expected`. `readiness_signal` is only meaningful for
+ * `service_start`, `service_ref` only for `service_stop`; unknown fields,
+ * empty `executable`, non-string `args`, non-root-bound `cwd` and
+ * non-positive `timeout_ms` are rejected before any Manifest write.
+ */
+export interface ExecutableRuntimeProofStep {
+  /** Step identifier. */
+  id: string;
+  /** Step type from the canonical closed set. */
+  type: RuntimeProofStepType;
+  /** Executable command. */
+  executable: string;
+  /** Command arguments. */
+  args: string[];
+  /** Root-relative working directory. */
+  cwd: string;
+  /** Timeout in milliseconds (positive integer). */
+  timeout_ms: number;
+  /** Expected outcomes. */
+  expected: Record<string, unknown>;
+  /** Optional service ref for service_stop steps. */
+  service_ref?: string;
+  /** Optional readiness signal for service_start steps. */
+  readiness_signal?: string;
+}
+
+/**
+ * An explicit not-applicable boundary: a step is either a canonical
+ * executable step or `not_applicable{reason}` — never both.
+ */
+export interface NotApplicableRuntimeProofStep {
+  not_applicable: {
+    /** Human-readable reason the step does not apply. */
+    reason: string;
+  };
+}
+
+/**
+ * Canonical closed union for a single Runtime Proof step: executable step
+ * or explicit not-applicable boundary (S09-C-T01).
+ */
+export type CanonicalRuntimeProofStep =
+  | ExecutableRuntimeProofStep
+  | NotApplicableRuntimeProofStep;
+
+/**
  * A single proof step in a manifest's runtime_proof section.
+ *
+ * v1 compatibility shape (kept permissive on purpose: the v1 YAML compiler
+ * may emit `not_applicable` alongside executable fields). The canonical
+ * vNext seam uses `CanonicalRuntimeProofStep` instead.
  */
 export interface RuntimeProofStep {
   /** Step identifier. */
   id: string;
-  /** Step type ('command', 'probe', 'service_start', 'service_stop'). */
-  type: string;
+  /** Step type from the canonical closed set. */
+  type: RuntimeProofStepType;
   /** Executable command. */
   executable: string;
   /** Command arguments. */
@@ -313,3 +381,15 @@ export interface RuntimeLock {
   /** Extension version. */
   extension_version: string;
 }
+
+// ============================================================
+// Canonical Stage ID type (S09-C-T03)
+// ============================================================
+
+/**
+ * Canonical Stage ID string: `S` followed by one or more decimal digits
+ * (`^S\d+$`, e.g. `S09`).  Legacy parked labels such as `S08B0` / `S08B`
+ * are NOT canonical Stage IDs and fail closed at every Runtime boundary.
+ * The single grammar authority is `CANONICAL_STAGE_ID_RE` in validators.ts.
+ */
+export type CanonicalStageId = string;

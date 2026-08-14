@@ -334,10 +334,10 @@ describe('row 5: pending CV result envelope → ADMIT_CV_RESULT', () => {
 });
 
 // ============================================================
-// Row 6 — READY_FOR_CV + latest CV fact CV_REPAIR (repair/diagnose/recheck)
+// Row 6 — READY_FOR_CV + latest CV fact CV_REPAIR (repair/recheck)
 // ============================================================
 
-describe('row 6: CV_REPAIR branch (repair / diagnose / recheck)', () => {
+describe('row 6: CV_REPAIR branch (repair / recheck)', () => {
   const repairSlice = (overrides: Partial<ReconciledSliceState> = {}) =>
     makeSlice({
       slice_state: SliceState.READY_FOR_CV,
@@ -366,13 +366,13 @@ describe('row 6: CV_REPAIR branch (repair / diagnose / recheck)', () => {
     expect(r.slice_id).toBe('S02-A');
   });
 
-  it('6d: REPAIR + repair_attempt 1 (CV_REPAIR count 2) → DISPATCH_WORKER mode=diagnose', () => {
+  it('6d: REPAIR + repair_attempt 1 (CV_REPAIR count 2) → DISPATCH_WORKER mode=repair (second repair)', () => {
     const state = makeState({
       slices: [repairSlice({ cv_status: CVStatus.REPAIR, repair_attempt: 1 })],
     });
     const r = deriveNextAction(state);
     expect(r.action).toBe('DISPATCH_WORKER');
-    expect(r.mode).toBe('diagnose');
+    expect(r.mode).toBe('repair');
   });
 
   it('6e: REPAIR + repair_attempt >= 2 (CV_REPAIR count >= 3) → VALIDATE fallback UNRESOLVED_CV_FAILURE', () => {

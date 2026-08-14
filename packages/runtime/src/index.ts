@@ -61,6 +61,7 @@ export type { StageReceiptSummary, DeriveStageStateInput } from './stage-state';
 // validator is the fail-closed validation seam reused by Admission (S02-E).
 export {
   validateWorkerResultEnvelope,
+  validateVNextWorkerResultEnvelope,
   WORKER_STEP_MODES,
   WORKER_CONTINUATIONS,
   WORKER_EXECUTIONS,
@@ -83,6 +84,7 @@ export type {
   WorkerSliceInvalidation,
   WorkerRelayPort,
   WorkerResultEnvelope,
+  VNextWorkerResultEnvelope,
 } from './relay-contract';
 
 // WorkerStepService — the runtime's worker step execution seam (PO-S02-B-02 / PO-S02-B-03)
@@ -272,6 +274,7 @@ export type {
 } from './admission-request';
 export {
   runAdmitPipeline,
+  runReceiptAdmission,
   defaultReceiptWriter,
   admitSpvResult,
   admitGateResult,
@@ -284,6 +287,7 @@ export type {
   ReceiptBuild,
   AdmitPipelineInput,
   AdmitResult,
+  ReceiptAdmissionInput,
   SpvGateAdmissionDeps,
   SpvGateReduceFn,
 } from './admit-pipeline';
@@ -299,7 +303,7 @@ export type {
 
 // AdmissionService slice-boundary admit methods (PO-S02-E-02 / PO-S02-E-03,
 // S02-E-T02; PO-S02-E-04, S02-E-T03): admitWorkerResult (TASK_COMPLETE
-// receipt, per-mode state advance incl. the CV-REPAIR repair/diagnose
+// receipt, per-mode state advance incl. the CV-REPAIR repair
 // branch), admitCVResult (CV_PASS / CV_REPAIR receipt with the
 // cv_dispatched composite + verdict application), admitSliceCommit
 // (SLICE_COMMIT receipt, CV_PASSED → INTEGRATING) and admitIntegration
@@ -385,32 +389,6 @@ export {
 } from './platform-adapter';
 export type { Platform, PlatformInfo } from './platform-adapter';
 
-// Planner validate seam (PO-S02-B-01 / PO-S02-B-02 / AWI-007, AWI-013) —
-// the proofloop_plan(validate) adapter consumes the EXISTING validate-stage
-// library semantics in-process through this re-export. The CLI canonical
-// payload `{ valid, stage_id, errors }` (and the `ValidateStageResult` /
-// `ValidationError` types) is the parity baseline: the plugin never shells the
-// CLI and never copies the parser — it calls `validateStage` directly. The
-// validate-stage implementation itself is unchanged (re-export only).
-export { validateStage } from './cli/validate-stage.js';
-export type { ValidateStageResult, ValidationError } from './cli/validate-stage.js';
-
-// S03-A Planner compile/initialize library seams (PO-S03-A-02/03,
-// S03-A-T01): the proofloop_plan(compile) adapter consumes `compileManifest`
-// (compile a Stage tasks.md into a kernel-valid Manifest — the CLI writes the
-// output file itself, so the plugin writes via a root-bound path) and the
-// proofloop_plan(initialize_evidence) adapter consumes
-// `initializeSliceEvidence` (exclusive-create Evidence skeletons with
-// non-empty skip and canonical path validation). The plugin production path
-// never shells the CLI — these re-exports are the ONLY consumption seam; the
-// CLI dist entries stay test-only parity oracles.
-export { compileManifest } from './cli/compile-manifest.js';
-export { initializeSliceEvidence } from './cli/initialize-slice-evidence.js';
-export type {
-  InitializeSliceEvidenceOptions,
-  InitializeSliceEvidenceResult,
-} from './cli/initialize-slice-evidence.js';
-
 // Project Acceptance pipeline (B1c, blueprint §6.4 proofloop_project) — the
 // project-level acceptance ported onto the new runtime with zero host deps:
 //   - compileProjectAcceptance: COMPILE_ACCEPTANCE — build the
@@ -440,13 +418,178 @@ export {
   validateE2ETopology,
   parseProjectAcceptanceManifest,
   parseProjectE2EReceipt,
-  parseStageReviewReceipt,
-  parseStageGateReceipt,
   parseProjectReviewResult,
   PROJECT_E2E_TYPE_BY_VERDICT,
   PROJECT_E2E_TYPES,
   ProjectAcceptanceSchemaError,
 } from './project-acceptance';
+// vNext Runtime seam (S0-A bootstrap, task 2) — consumed by Planner /
+// Executor to consume the kernel vNext contract surface.
+//   - resolveVNextReference: READ-ONLY stable entity marker resolver
+//     (root-bound, TOCTOU-safe; explicit `<!-- proofloop:entity -->` markers
+//     only; JSON supports only explicit `entities` maps; no fuzzy search).
+//   - compileVNextManifest: structured vNext input → kernel-validated vNext
+//     Manifest (plan_digest + reference_index + Proof Index binding);
+//     pure / read-only, never infers from arbitrary Markdown.
+//   - writeVNextManifest: compile + FULL validate, then atomic write.
+//   - kernel vNext validators re-exported for a single import path;
+//     old v1 validators above remain unchanged and are never used to
+//     interpret vNext artifacts.
+export {
+  resolveVNextReference,
+  parseEntityRef,
+  parseEntityMarkers,
+  normalizeEntityText,
+  normalizePlanExecutionProjection,
+  readRootBoundFile,
+  extractJsonEntity,
+  assertFileUnchanged,
+  VNextEntityResolutionError,
+  compileVNextManifest,
+  writeVNextManifest,
+  VNextCompileError,
+  validateVNextPlan,
+  validateVNextManifest,
+  validateVNextReferenceDescriptor,
+  validateVNextReferenceIndex,
+  validateVNextProofIndex,
+  VNEXT_SCHEMA_VERSION,
+  VNEXT_REFERENCE_KINDS,
+  VNEXT_PLAN_KINDS,
+  VNEXT_REF_GRAMMAR_RE,
+  projectVNextWorkerDispatch,
+  assertVNextManifestReferenceBindings,
+  readVNextManifest,
+  VNextHandoffError,
+  computeVNextSpvPassReceiptDigest,
+  computeVNextStagePlanReceiptDigest,
+  VNextNextActionService,
+  detectVNextManifestDiscriminator,
+  admitVNextStagePlan,
+  validateVNextStagePlanAdmissionRequest,
+  VNextStagePlanAdmissionError,
+  readVNextAdmissionAuthority,
+  persistVNextWorkerContext,
+  admitVNextWorkerResult,
+  validateVNextCvResultEnvelope,
+  validateVNextCVResultEnvelope,
+  validateVNextCvResult,
+  validateVNextCVResult,
+  admitVNextCVResult,
+  admitVNextCvResult,
+  admitVNextIntegration,
+  admitVNextIntegrationResult,
+  validateVNextIntegrationRequest,
+  admitVNextGateResult,
+  admitVNextGate,
+  validateVNextGateResultRequest,
+  admitVNextStageReview,
+  assembleVNextStageReviewRequest,
+  validateVNextStageReviewRequest,
+  VNEXT_CV_SCHEMA_VERSION,
+  VNEXT_CV_RESULT_TYPE,
+  VNEXT_CV_VERIFICATION_TYPES,
+  VNEXT_CV_VERDICTS,
+  VNEXT_CV_RISK_APPLICABILITIES,
+  VNEXT_INTEGRATION_SCHEMA_VERSION,
+  VNEXT_INTEGRATION_RESULT_TYPE,
+  VNEXT_INTEGRATION_ACTION,
+  VNEXT_GATE_SCHEMA_VERSION,
+  VNEXT_GATE_RESULT_TYPE,
+  VNEXT_GATE_ACTION,
+  VNEXT_GATE_VERDICTS,
+  VNEXT_REVIEW_SCHEMA_VERSION,
+  VNEXT_REVIEW_RESULT_TYPE,
+  VNEXT_REVIEW_ACTION,
+  VNEXT_REVIEW_VERDICTS,
+  // S09-C-T03 — shared canonical Stage ID guard (^S\d+$; legacy S08B0/S08B
+  // labels fail closed before any Runtime read/write).
+  CANONICAL_STAGE_ID_RE,
+  isCanonicalStageId,
+  assertCanonicalStageId,
+  VNextStageIdError,
+} from './vnext';
+export type {
+  EntityDigestBinding,
+  ParsedEntityRef,
+  MarkedEntity,
+  ResolvedEntity,
+  ResolveEntityOptions,
+  ReadRootBoundResult,
+  CompileVNextManifestInput,
+  CompileVNextManifestResult,
+  VNextManifestWriteOps,
+  VNextReferenceSeed,
+  VNextSliceSeed,
+  VNextSchemaVersion,
+  VNextReferenceKind,
+  VNextReferenceDescriptor,
+  VNextReferenceIndex,
+  VNextRiskBinding,
+  VNextProofIndex,
+  VNextPlanKind,
+  VNextPlanNode,
+  VNextCanonicalPlan,
+  VNextPlanProjection,
+  VNextRuntimeProofSection,
+  VNextManifestSlice,
+  VNextManifest,
+  VNextSpvPassReceipt,
+  VNextStagePlanReceipt,
+  VNextAdmissionAuthority,
+  VNextWorkerContext,
+  VNextWorkerDispatch,
+  ProjectVNextWorkerDispatchInput,
+  VNextWorkerAdmissionDependencies,
+  VNextWorkerAdmissionState,
+  VNextCvAdmissionDependencies,
+  VNextCVAdmissionDependencies,
+  VNextCvAdmissionState,
+  VNextCvSchemaVersion,
+  VNextCvResultType,
+  VNextCvVerificationType,
+  VNextCvVerdict,
+  VNextCvRiskApplicability,
+  VNextCvRiskReference,
+  VNextCvResultEnvelopeBase,
+  VNextCvPassInitialResult,
+  VNextCvPassRecheckResult,
+  VNextCvRepairInitialResult,
+  VNextCvRepairRecheckResult,
+  VNextCvResultEnvelope,
+  VNextCVResultEnvelope,
+  VNextCvResult,
+  VNextIntegrationAdmissionDependencies,
+  VNextIntegrationSchemaVersion,
+  VNextIntegrationResultType,
+  VNextIntegrationAction,
+  VNextIntegrationAdmissionState,
+  VNextIntegrationResult,
+  VNextGateAdmissionDependencies,
+  VNextGateResultAdmissionRequest,
+  VNextGateSchemaVersion,
+  VNextGateResultType,
+  VNextGateAction,
+  VNextGateVerdict,
+  VNextGateSliceIntegration,
+  VNextGateAdmissionState,
+  VNextGateResult,
+  VNextReviewAdmissionDependencies,
+  VNextStageReviewAdmissionRequest,
+  VNextReviewSchemaVersion,
+  VNextReviewResultType,
+  VNextReviewAction,
+  VNextReviewVerdict,
+  VNextReviewAdmissionState,
+  VNextReviewResult,
+  VNextNextActionInput,
+  VNextNextActionOutput,
+  VNextStagePlanAdmissionRequest,
+  VNextStagePlanAdmissionSuccess,
+  VNextStagePlanAdmissionFailure,
+  VNextStagePlanAdmissionResult,
+} from './vnext';
+
 export type {
   SchemaIssue,
   RuntimeProofStep,
@@ -455,8 +598,6 @@ export type {
   E2EStepResult,
   ServiceCleanupResultShape,
   ProjectE2EReceipt,
-  StageReviewReceipt,
-  StageGateReceipt,
   ProjectReviewResult,
   ProjectReviewReceipt,
   TopologyError,
@@ -467,3 +608,74 @@ export type {
   FinalizeProjectReviewInput,
   FinalizeProjectReviewResult,
 } from './project-acceptance';
+
+// vNext plan handoff services.  These are additive to the legacy v1
+// compile/validate/initialize seams above: explicit candidate input is adapted
+// structurally, vNext validation preserves schema_version 2, and no service
+// below performs SPV/admission/Receipt or Stage execution work.
+export {
+  adaptCandidateInputToCompileVNextManifestInput,
+  candidateInputToCompileVNextManifestInput,
+  isActiveCandidateInput,
+  readActiveCandidateInput,
+} from './vnext/candidate-input';
+export type {
+  ActiveCandidateInput,
+  ActiveCandidateReference,
+  ActiveCandidateRiskBinding,
+  ActiveCandidateProofIndex,
+  ActiveCandidateTask,
+  ActiveCandidateSlice,
+  CandidateInputErrorCode,
+} from './vnext/candidate-input';
+export { CandidateInputError } from './vnext/candidate-input';
+export {
+  detectPlanManifestRoute,
+  compileVNextPlan,
+  compileVNextPlanFromCandidate,
+  validateVNextPlanStage,
+  initializeVNextPlanEvidence,
+} from './plan-services';
+export type {
+  PlanManifestRoute,
+  CompileVNextPlanInput,
+  CompileVNextPlanResult,
+} from './plan-services';
+export { validateVNextStage } from './cli/validate-vnext-stage';
+export type { ValidateVNextStageResult } from './cli/validate-vnext-stage';
+export { initializeVNextSliceEvidence } from './cli/initialize-vnext-slice-evidence';
+export type { InitializeVNextSliceEvidenceResult } from './cli/initialize-vnext-slice-evidence';
+export type { VNextCliError } from './cli/vnext-cli-support-vnext';
+
+// S10-A-T01 — public proofloop CLI seam base: closed domain/operation
+// registry、canonical JSON envelope、exit contract 与 canonical trust root
+// assertion。CLI 不 import harness SDK；后续 Slice 通过同一 closed registry
+// 注册各域 handler（T02 注册 doctor，S10-B..E 注册 authority/plan/...）。
+export {
+  CANONICAL_DOMAINS,
+  DOMAIN_REGISTRY,
+  CLI_EXIT,
+  PROOFLOOP_CLI_SCHEMA_VERSION,
+  PROOFLOOP_RUNTIME_VERSION,
+  PROOFLOOP_ROOT_ENV,
+  resolveTrustRoot,
+  TrustRootError,
+  isCanonicalDomain,
+  isCanonicalOperation,
+  okEnvelope,
+  errorEnvelope,
+  emitEnvelope,
+  parseCliArgs,
+} from './cli/proofloop-common';
+export type {
+  CanonicalDomain,
+  DomainRegistryEntry,
+  CliCommand,
+  CliFinding,
+  CliRef,
+  CliEnvelope,
+  TrustRootResolution,
+  ParsedCliArgs,
+} from './cli/proofloop-common';
+export { proofloopCli } from './cli/proofloop';
+export type { ProofloopCliOptions } from './cli/proofloop';

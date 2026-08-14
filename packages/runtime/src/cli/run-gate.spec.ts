@@ -1,32 +1,23 @@
 /**
- * run-gate.spec.ts — service lifecycle + command/probe oracles (B1b)
+ * run-gate.spec.ts — v1/vNext Gate routes
  *
- * Real-spawn coverage for the run-gate service lifecycle (blueprint §11 via
- * the B1a process-runner), with parity to the legacy
- * `.agents/runtime/src/run-stage.ts` executeRuntimeProof semantics:
- *
- *   service_start  — spawn → register → (readiness wait) → stop on failure
- *   service_stop   — registry lookup by service_ref (or step id) → stop
- *   cleanup        — mandatory at Gate end (PASS or FAIL); a still-running
- *                    service with a DECLARED service_stop step = "explicit
- *                    stop was missed" → Gate FAIL; no process leaks
- *   command/probe  — runProcess oracle: expected.exit_code (null = any),
- *                    timeout, not_applicable skip
- *
- * No mocks: every test spawns real `node -e` child processes with short
- * timeouts. Leak checks read the spawned PID from a marker file and probe
- * liveness after the gate; the registry is verified empty afterwards.
+ * The Gate never executes Manifest runtime_proof steps (transition check
+ * deleted by the 2026-08-13 ruling; build/test is the Stage Review's job):
+ * the v1 route decides PASS/FAIL from the Slice COMPLETE facts alone, and
+ * the vNext route delegates integration completeness to the admission
+ * consumer.  This spec covers the remaining CLI contract: facts validation,
+ * result persistence, vNext integrated-prefix PASS/FAIL, archive refusal,
+ * re-gate, and the canonical Stage ID guard.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Manifest } from '@proofloop/kernel';
 import { validateManifest } from '@proofloop/kernel';
 import { runGate, runGateCli } from './run-gate';
-import { getRegisteredService } from '../process-runner';
-import { isProcessAlive } from '../platform-adapter';
 
 // ============================================================
 // Fixture helpers
@@ -111,38 +102,7 @@ async function gateFixture(steps: Array<Record<string, unknown>>): Promise<GateF
   return { dir, result };
 }
 
-/**
- * service_start step that writes its PID to a marker file, then idles.
- * Emits "PIDREADY" AFTER the synchronous pid-file write, so declaring
- * `readiness_signal: 'PIDREADY'` guarantees the marker exists once the gate
- * proceeds past the start step (the pid-file write would otherwise race the
- * fast path into cleanup).
- */
-function pidFileService(id: string, pidFile: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    id,
-    type: 'service_start',
-    executable: 'node',
-    args: ['-e', `require('fs').writeFileSync(process.argv[1], String(process.pid)); console.log("PIDREADY");setInterval(()=>{},1000)`, pidFile],
-    cwd: '.',
-    timeout_ms: 10000,
-    readiness_signal: 'PIDREADY',
-    ...overrides,
-  };
-}
 
-/** service_stop step (executable/args/cwd/timeout_ms required by the kernel validator). */
-function stopStep(id: string, ref?: string): Record<string, unknown> {
-  return {
-    id,
-    type: 'service_stop',
-    executable: 'node',
-    args: [],
-    cwd: '.',
-    timeout_ms: 10000,
-    ...(ref !== undefined ? { service_ref: ref } : {}),
-  };
-}
 
 /** command step — scripts must avoid shell operator chars (runProcess enforces). */
 function commandStep(id: string, script: string, expected: unknown, timeoutMs = 10000): Record<string, unknown> {
@@ -157,259 +117,9 @@ function commandStep(id: string, script: string, expected: unknown, timeoutMs = 
   };
 }
 
-/** Read the marker file's PID and probe whether the process is still alive. */
-function pidAlive(pidFile: string): boolean {
-  const pid = Number(fs.readFileSync(pidFile, 'utf-8').trim());
-  return isProcessAlive(pid);
-}
 
 // ============================================================
 // service_start
-// ============================================================
-
-describe('run-gate service_start', () => {
-  it('spawns, registers and implicitly cleans up a service on PASS (no declared stop)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
-    cleanups.push(() => {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    });
-    const pidFile = path.join(dir, 'svc.pid');
-    const { result } = await gateFixture([pidFileService('svc', pidFile)]);
-    expect(result.gate).toBe('PASS');
-    expect(result.success).toBe(true);
-    expect(result.errors).toEqual([]);
-    expect(result.steps[0]).toMatchObject({ id: 'svc', type: 'service_start', passed: true, exit_code: 0 });
-    expect(result.steps[0].observations).toContain('Service started, PID');
-    // registry empty + process actually gone after the mandatory cleanup
-    expect(getRegisteredService('svc')).toBeUndefined();
-    expect(pidAlive(pidFile)).toBe(false);
-  });
-
-  it('PASSes when the readiness signal appears within the timeout', async () => {
-    const { result } = await gateFixture([
-      {
-        id: 'app',
-        type: 'service_start',
-        executable: 'node',
-        args: ['-e', 'console.log("READY");setInterval(()=>{},1000)'],
-        cwd: '.',
-        timeout_ms: 10000,
-        readiness_signal: 'READY',
-      },
-    ]);
-    expect(result.gate).toBe('PASS');
-    expect(result.steps[0]).toMatchObject({ id: 'app', passed: true, exit_code: 0 });
-    expect(result.steps[0].observations).toContain('Readiness signal found after');
-    expect(getRegisteredService('app')).toBeUndefined();
-  });
-
-  it('FAILs on readiness timeout and STOPS the service (no leak)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
-    cleanups.push(() => {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    });
-    const pidFile = path.join(dir, 'svc.pid');
-    const { result } = await gateFixture([
-      pidFileService('svc', pidFile, { readiness_signal: 'NEVER', timeout_ms: 500 }),
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0]).toMatchObject({ id: 'svc', passed: false, exit_code: null });
-    expect(result.errors.join(' ')).toContain('readiness signal "NEVER" not found within 500ms');
-    // must not leak: registry empty + process dead
-    expect(getRegisteredService('svc')).toBeUndefined();
-    expect(pidAlive(pidFile)).toBe(false);
-  });
-
-  it('FAILs when the process exits before the readiness signal (exit code recorded)', async () => {
-    const { result } = await gateFixture([
-      {
-        id: 'svc',
-        type: 'service_start',
-        executable: 'node',
-        args: ['-e', 'process.exit(7)'],
-        cwd: '.',
-        timeout_ms: 5000,
-        readiness_signal: 'READY',
-      },
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0]).toMatchObject({ id: 'svc', passed: false, exit_code: 7 });
-    expect(result.errors.join(' ')).toContain('exited (code 7) before readiness signal');
-  });
-
-  it('FAILs when the executable cannot be spawned (ENOENT)', async () => {
-    const { result } = await gateFixture([
-      {
-        id: 'svc',
-        type: 'service_start',
-        executable: 'no-such-binary-abc',
-        args: [],
-        cwd: '.',
-        timeout_ms: 5000,
-      },
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0]).toMatchObject({ id: 'svc', passed: false, exit_code: null });
-    expect(result.errors.join(' ')).toContain('service_start');
-  });
-});
-
-// ============================================================
-// service_stop
-// ============================================================
-
-describe('run-gate service_stop', () => {
-  it('terminates a registered service referenced by service_ref', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
-    cleanups.push(() => {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    });
-    const pidFile = path.join(dir, 'app.pid');
-    const { result } = await gateFixture([
-      pidFileService('start-app', pidFile),
-      stopStep('stop-app', 'start-app'),
-    ]);
-    expect(result.gate).toBe('PASS');
-    expect(result.success).toBe(true);
-    expect(result.errors).toEqual([]);
-    expect(result.steps[0]).toMatchObject({ id: 'start-app', passed: true, exit_code: 0 });
-    expect(result.steps[1]).toMatchObject({ id: 'stop-app', passed: true, exit_code: 0 });
-    expect(result.steps[1].observations).toContain('Service stopped (PID');
-    // the explicit stop already removed the service: no cleanup needed, no leak
-    expect(getRegisteredService('start-app')).toBeUndefined();
-    expect(pidAlive(pidFile)).toBe(false);
-  });
-
-  it('FAILs when the referenced service is not registered', async () => {
-    const { result } = await gateFixture([stopStep('stop-app', 'ghost')]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0]).toMatchObject({ id: 'stop-app', passed: false, exit_code: null });
-    expect(result.errors.join(' ')).toContain('no registered service found for ref "ghost"');
-  });
-
-  it('FAILs when service_stop has no service_ref and the step id is unregistered', async () => {
-    const { result } = await gateFixture([stopStep('orphan')]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.errors.join(' ')).toContain('no registered service found for ref "orphan"');
-  });
-});
-
-// ============================================================
-// cleanup semantics
-// ============================================================
-
-describe('run-gate cleanup', () => {
-  it('treats a missed explicit service_stop as a Gate FAIL and still cleans up', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
-    cleanups.push(() => {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    });
-    const pidFile = path.join(dir, 'svc.pid');
-    // The command step fails → execution stops → the declared service_stop
-    // never runs → cleanup stops the service → "explicit stop was missed".
-    const { result } = await gateFixture([
-      pidFileService('svc', pidFile),
-      commandStep('boom', 'process.exit(1)', { exit_code: 0 }),
-      stopStep('stop-svc', 'svc'),
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.errors.join(' ')).toContain('explicit stop was missed');
-    expect(result.errors.join(' ')).toContain('svc');
-    // cleanup still killed the process — no leak
-    expect(pidAlive(pidFile)).toBe(false);
-    expect(getRegisteredService('svc')).toBeUndefined();
-    // the stop step never executed (break on first failure)
-    expect(result.steps.map((s) => s.id)).toEqual(['svc', 'boom']);
-  });
-
-  it('cleans up services on failure WITHOUT a declared stop (no missed-stop error)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
-    cleanups.push(() => {
-      try {
-        fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    });
-    const pidFile = path.join(dir, 'svc.pid');
-    const { result } = await gateFixture([
-      pidFileService('svc', pidFile),
-      commandStep('boom', 'process.exit(1)', { exit_code: 0 }),
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.errors.join(' ')).toContain('exited 1');
-    expect(result.errors.join(' ')).not.toContain('explicit stop was missed');
-    // implicit cleanup stopped the service — no leak
-    expect(pidAlive(pidFile)).toBe(false);
-    expect(getRegisteredService('svc')).toBeUndefined();
-  });
-
-  it('does not fire missed-stop when a skipped (not_applicable) stop step is declared but the service was never started', async () => {
-    const { result } = await gateFixture([
-      commandStep('ok', 'process.exit(0)', { exit_code: 0 }),
-      { ...stopStep('stop-svc', 'svc'), not_applicable: { reason: 'no service in library stage' } },
-    ]);
-    expect(result.gate).toBe('PASS');
-    expect(result.steps[1]).toMatchObject({ id: 'stop-svc', passed: true, skipped: true });
-  });
-});
-
-// ============================================================
-// command / probe oracles (regression)
-// ============================================================
-
-describe('run-gate command/probe oracles', () => {
-  it('accepts any exit code when expected.exit_code is null', async () => {
-    const { result } = await gateFixture([commandStep('any', 'process.exit(5)', { exit_code: null })]);
-    expect(result.gate).toBe('PASS');
-    expect(result.steps[0]).toMatchObject({ id: 'any', passed: true, exit_code: 5 });
-  });
-
-  it('FAILs a mismatched exit code with stderr context', async () => {
-    const { result } = await gateFixture([commandStep('bad', 'process.exit(2)', { exit_code: 0 })]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.steps[0]).toMatchObject({ id: 'bad', passed: false, exit_code: 2 });
-    expect(result.errors.join(' ')).toContain('exited 2, expected 0');
-  });
-
-  it('FAILs a step that exceeds its timeout', async () => {
-    const { result } = await gateFixture([
-      commandStep('tmo', 'setTimeout(function(){},10000)', { exit_code: 0 }, 300),
-    ]);
-    expect(result.gate).toBe('FAIL');
-    expect(result.errors.join(' ')).toContain('timed out after 300ms');
-    expect(result.steps[0]).toMatchObject({ id: 'tmo', passed: false, exit_code: null });
-  });
-
-  it('skips not_applicable steps and continues', async () => {
-    const { result } = await gateFixture([
-      commandStep('na', 'process.exit(9)', { exit_code: 0 }),
-      commandStep('ok', 'process.exit(0)', { exit_code: 0 }),
-    ].map((s, i) => (i === 0 ? { ...s, not_applicable: { reason: 'skipped' } } : s)));
-    expect(result.gate).toBe('PASS');
-    expect(result.steps[0]).toMatchObject({ id: 'na', passed: true, skipped: true });
-    expect(result.steps[1]).toMatchObject({ id: 'ok', passed: true });
-  });
-});
-
-// ============================================================
-// CLI exit semantics
 // ============================================================
 
 describe('run-gate CLI', () => {
@@ -431,7 +141,7 @@ describe('run-gate CLI', () => {
     expect(fs.existsSync(path.join(dir, 'out', 'gate-result.json'))).toBe(true);
   });
 
-  it('runGateCli returns 1 on FAIL', async () => {
+  it('runGateCli returns 1 on FAIL (facts not integrated; no runtime_proof steps are executed)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-'));
     cleanups.push(() => {
       try {
@@ -440,10 +150,8 @@ describe('run-gate CLI', () => {
         // best-effort
       }
     });
-    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(makeManifest([
-      commandStep('boom', 'process.exit(1)', { exit_code: 0 }),
-    ]), null, 2), 'utf-8');
-    fs.writeFileSync(path.join(dir, 'facts.json'), JSON.stringify([{ slice_id: SLICE_ID, integrated: true }]), 'utf-8');
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(makeManifest([]), null, 2), 'utf-8');
+    fs.writeFileSync(path.join(dir, 'facts.json'), JSON.stringify([{ slice_id: SLICE_ID, integrated: false }]), 'utf-8');
     const code = await runGateCli([path.join(dir, 'manifest.json'), path.join(dir, 'facts.json'), path.join(dir, 'out'), dir]);
     expect(code).toBe(1);
   });
@@ -451,5 +159,681 @@ describe('run-gate CLI', () => {
   it('runGateCli returns 1 with usage text when args are missing', async () => {
     const code = await runGateCli([]);
     expect(code).toBe(1);
+  });
+});
+import { execFileSync } from 'node:child_process';
+import {
+  admitVNextCVResult,
+  admitVNextIntegration,
+  admitVNextStagePlan,
+  admitVNextStageReview,
+  admitVNextWorkerResult,
+  computeVNextSpvPassReceiptDigest,
+  defaultReceiptWriter,
+  resolveVNextReference,
+  VNextNextActionService,
+} from '@proofloop/runtime';
+import type { VNextSpvPassReceipt } from '@proofloop/runtime';
+import { computeDigest, computeReceiptDigest } from '@proofloop/kernel';
+import { admitVNextSliceCommit } from '../vnext/commit-admission';
+import { runGateVNext } from './run-gate';
+
+// ============================================================
+// vNext Stage Gate route (S08-E-T06) — runGateVNext + runGateCli
+// ============================================================
+
+const REPO = path.resolve(__dirname, '../../../..');
+
+function copyFixture(root: string, relative: string): void {
+  const destination = path.join(root, relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(REPO, relative), destination);
+}
+
+/** Minimal vNext planning stage without the integrated Slices. */
+function vNextAcceptedFixture(): { dir: string; manifestPath: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofloop-rungate-vnext-'));
+  cleanups.push(() => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+  execFileSync('git', ['init', '-q', dir]);
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'run-gate-vnext@test.local']);
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'run-gate vNext']);
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.proofloop/\n', 'utf8');
+  for (const relative of [
+    'delivery/stages/S04/tasks.md',
+    '.proofloop/manifests/S04.json',
+    'delivery/stages/S04/evidence/S04-A.md',
+    'delivery/stages/S0-A/tasks.md',
+  ]) {
+    vFixtureCopy(dir, relative);
+  }
+  const tasksPath = path.join(dir, 'delivery/stages/S04/tasks.md');
+  fs.writeFileSync(
+    tasksPath,
+    fs.readFileSync(tasksPath, 'utf8').replace('- Worker Status: `NOT_STARTED`', '- Worker Status: `planned`'),
+    'utf8',
+  );
+  fs.mkdirSync(path.join(dir, 'packages'), { recursive: true });
+  const manifestPath = path.join(dir, '.proofloop/manifests/S04.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+  manifest.task_scopes = {
+    'S04-A-T01': {
+      task_ref: 'delivery/stages/S04/tasks.md#/entities/S04-A-T01',
+      execution_scope: {
+        kind: 'implementation',
+        code_paths: ['delivery/stages/S04/tasks.md'],
+        test_paths: ['packages/worker-test.ts'],
+        forbidden_paths: ['.proofloop/receipts', '.git'],
+      },
+    },
+  };
+  for (const descriptor of Object.values(manifest.reference_index as Record<string, any>)) {
+    const resolved = resolveVNextReference({ root: dir, ref: descriptor.ref, expectedKind: descriptor.kind });
+    descriptor.file_digest = resolved.fileDigest;
+    descriptor.section_digest = resolved.sectionDigest;
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8');
+  execFileSync('git', ['-C', dir, 'add', '-A']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'vNext run-gate planning boundary']);
+  return { dir, manifestPath };
+}
+
+function vFixtureCopy(root: string, relative: string): void {
+  const destination = path.join(root, relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(REPO, relative), destination);
+}
+
+/**
+ * P-11 task B fixture seam：手工写入合法 v2 STAGE_CLOSE_RESULT envelope
+ * （任务 A 的 admit seam 未就绪前，测试直接构造自 digest 一致的 envelope
+ * 文件到 stage-close 目录）。
+ */
+function writeStageCloseReceipt(root: string, stageId: string, closeType = 'COMPLETED'): string {
+  const content = {
+    version: 1,
+    type: 'STAGE_CLOSE_PASS',
+    stage_id: stageId,
+    timestamp: '2026-08-20T10:00:00.000Z',
+    payload: {
+      schema_version: 2,
+      type: 'STAGE_CLOSE_RESULT',
+      action: 'STAGE_CLOSE',
+      stage_id: stageId,
+      close_type: closeType,
+      reason: 'stage closed (fixture)',
+      manifest_digest: 'a'.repeat(64),
+    },
+  };
+  const digest = computeReceiptDigest(content);
+  const directory = path.join(root, '.proofloop', 'receipts', 'stage-close', stageId);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, `${digest}.json`), JSON.stringify({ ...content, digest }, null, 2), 'utf8');
+  return digest;
+}
+
+describe('run-gate vNext Gate route', () => {
+  it('refuses a vNext run without the integrated prefix (no receipt, honest FAIL)', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const result = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: path.join(dir, 'out'),
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    if (result.errors.some((message) => /Integration Receipt|authority is unavailable/i.test(message))) {
+      // ok
+    } else {
+      throw new Error('stage plan refused: ' + JSON.stringify(result.errors));
+    }
+    expect(result.errors.some((message) => /Integration Receipt|authority is unavailable/i.test(message))).toBe(true);
+    expect(fs.existsSync(path.join(dir, '.proofloop/receipts/stage-gate/S04'))).toBe(false);
+  });
+
+  it('PASSes on a fully integrated vNext stage and persists the GATE_PASS receipt', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const root = dir;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+    const manifestDigest = computeDigest(manifest);
+    const planDigest = manifest.plan.plan_digest as string;
+    const tasksPath = path.join(root, 'delivery/stages/S04/tasks.md');
+    const evidencePath = path.join(root, 'delivery/stages/S04/evidence/S04-A.md');
+    const snapshotDigest = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    const spvContent = {
+      version: 2 as const,
+      schema_version: 2 as const,
+      type: 'SPV_PASS' as const,
+      stage_id: 'S04',
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      snapshot_digest: snapshotDigest,
+    };
+    const spv: VNextSpvPassReceipt = { ...spvContent, digest: computeVNextSpvPassReceiptDigest(spvContent) };
+    expect(admitVNextStagePlan({
+      version: 2,
+      schema_version: 2,
+      type: 'STAGE_PLAN_ADMISSION',
+      project_root: root,
+      manifest_path: '.proofloop/manifests/S04.json',
+      stage_id: 'S04',
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      snapshot_digest: snapshotDigest,
+      spv,
+    }).accepted).toBe(true);
+
+    const next = new VNextNextActionService().nextAction({
+      projectRoot: root,
+      stageId: 'S04',
+      snapshotDigest,
+      persistContext: true,
+    });
+    const context = JSON.parse(fs.readFileSync(path.join(root, next.context_ref as string), 'utf8')) as {
+      context_digest: string;
+    };
+
+    fs.writeFileSync(path.join(root, 'packages/worker-test.ts'), 'export const fixture = true;\n', 'utf8');
+    fs.writeFileSync(tasksPath, fs.readFileSync(tasksPath, 'utf8').replace('- [ ] S04-A-T01', '- [x] S04-A-T01').replace('- Worker Status: `planned`', '- Worker Status: `executing`'), 'utf8');
+fs.writeFileSync(
+    evidencePath,
+    fs.readFileSync(evidencePath, 'utf8').replace(
+      '## Task Evidence\n\n*Not yet captured.*',
+      [
+        '## Task Evidence',
+      '',
+      '### S04-A-T01',
+      '',
+      '- Task Goal: run-gate vNext',
+      '- Relevant PO IDs: PO-FIXTURE',
+      '- Source Snapshot: fixture-source',
+      '- Current Snapshot: fixture-current',
+      '- Changed Files:',
+      '  - delivery/stages/S04/evidence/S04-A.md',
+      '  - delivery/stages/S04/tasks.md',
+      '  - packages/worker-test.ts',
+      '- RED Receipt:',
+      '  - Test ID: integration-red',
+      '  - Command: integration-red-command',
+      '  - Failure Output: integration-red-output',
+      '  - Expected Failure: integration-red-expected',
+      '  - Snapshot: integration-red-snapshot',
+      '- GREEN Receipt:',
+      '  - Test ID: integration-green',
+      '  - Command: integration-green-command',
+      '  - Pass Output: integration-green-output',
+      '  - Snapshot: integration-green-snapshot',
+      '- Status: COMPLETE',
+      '',
+      ].join('\n'),
+    ),
+    'utf8',
+  );
+    const proofIndex = (manifest.slices as Array<Record<string, any>>)[0].proof_index as Record<string, any>;
+    const worker = admitVNextWorkerResult({
+      schemaVersion: 2,
+      actionToken: 'run-gate-worker-1',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      taskId: 'S04-A-T01',
+      mode: 'implement-task',
+      outcome: 'completed',
+      evidenceRef: 'delivery/stages/S04/evidence/S04-A.md',
+      changedFiles: ['delivery/stages/S04/evidence/S04-A.md', 'delivery/stages/S04/tasks.md', 'packages/worker-test.ts'],
+      verificationRuns: [],
+      summary: 'run-gate vNext Worker completed',
+      manifestDigest,
+      planDigest,
+      proofIndexDigest: next.proof_index_digest,
+      snapshotDigest,
+      contextRef: next.context_ref,
+      contextDigest: context.context_digest,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    if (!worker.accepted) throw new Error('worker admission failed: ' + JSON.stringify(worker.findings));
+    expect(worker.accepted).toBe(true);
+
+    const cv = admitVNextCVResult({
+      schema_version: 2,
+      type: 'CV_RESULT',
+      stage_id: 'S04',
+      slice_id: 'S04-A',
+      worker_receipt_digest: worker.receipt_ref as string,
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      proof_index_digest: next.proof_index_digest,
+      context_ref: next.context_ref,
+      context_digest: context.context_digest,
+      snapshot_digest: snapshotDigest,
+      verification_type: 'initial',
+      verdict: 'PASS',
+      summary: 'run-gate vNext fixture CV pass',
+      acceptance_refs_checked: [...(proofIndex.acceptance_refs as string[])],
+      seam_refs_checked: [...(proofIndex.seam_refs as string[])],
+      oracle_refs_checked: [...(proofIndex.oracle_refs as string[])],
+      risk_refs_considered: (proofIndex.risk_refs as Array<Record<string, string>>).map((risk) => ({
+        ref_id: risk.ref_id,
+        applicability: 'APPLICABLE',
+        reason: 'run-gate fixture binding',
+      })),
+      failed_acceptance_refs: [],
+      invalid_tests: [],
+      counterexamples: [],
+      scope_violations: [],
+      forbidden_substitutions: [],
+      regression_failures: [],
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    if (!cv.accepted) throw new Error('cv admission failed: ' + JSON.stringify(cv.findings));
+    expect(cv.accepted).toBe(true);
+
+    execFileSync('git', ['-C', root, 'add', '-A']);
+    execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'slice S04-A integration work']);
+    const commitSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    const commit = admitVNextSliceCommit({
+      type: 'slice_commit',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      commitSha,
+      cvReceiptDigest: cv.receipt_ref as string,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    expect(commit.accepted).toBe(true);
+
+    const integration = admitVNextIntegration({
+      type: 'integration',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      commitSha,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    expect(integration.accepted).toBe(true);
+
+    const result = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: path.join(root, 'out'),
+      projectRoot: root,
+    });
+    expect(result.success).toBe(true);
+    expect(result.gate).toBe('PASS');
+    const gateDir = path.join(root, '.proofloop/receipts/stage-gate/S04');
+    const receipts = fs.existsSync(gateDir) ? fs.readdirSync(gateDir) : [];
+    expect(receipts).toHaveLength(1);
+    const gateReceipt = JSON.parse(fs.readFileSync(path.join(gateDir, receipts[0]), 'utf8')) as {
+      type: string;
+      payload: Record<string, unknown>;
+    };
+    expect(gateReceipt.type).toBe('GATE_PASS');
+    expect(gateReceipt.payload).toMatchObject({
+      schema_version: 2,
+      type: 'GATE_RESULT',
+      action: 'GATE',
+      manifest_digest: manifestDigest,
+      // Dual-path SG: the default receipts path is recorded on the Receipt.
+      verification_source: 'receipts',
+    });
+    const out = JSON.parse(fs.readFileSync(path.join(root, 'out/gate-result.json'), 'utf8')) as Record<string, unknown>;
+    expect(out.success).toBe(true);
+    expect((out.vnext as Record<string, unknown>).receipt_ref).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('refuses an archived stage before any admission check（STAGE_CLOSE → honest FAIL with an archived finding, zero writes）', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const closeDigest = writeStageCloseReceipt(dir, 'S04');
+    const outDir = path.join(dir, 'out');
+    const result = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: outDir,
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    // 归档守卫先于 admission 触发：错误是 archived，不是缺失集成前缀。
+    expect(result.errors.some((message) => /is archived/i.test(message))).toBe(true);
+    expect(result.errors.some((message) => /is archived/i.test(message) && message.includes(closeDigest))).toBe(true);
+    expect(result.errors.some((message) => /Integration Receipt|authority is unavailable/i.test(message))).toBe(false);
+    // 零写入：不写 gate-result.json、不写任何 GATE Receipt。
+    expect(fs.existsSync(path.join(outDir, 'gate-result.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.proofloop/receipts/stage-gate/S04'))).toBe(false);
+  });
+
+  it('re-gates after a REPAIR review via reGate: true (new PASS tip appended, old PASS kept as history)', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const root = dir;
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+    const manifestDigest = computeDigest(manifest);
+    const planDigest = manifest.plan.plan_digest as string;
+    const tasksPath = path.join(root, 'delivery/stages/S04/tasks.md');
+    const evidencePath = path.join(root, 'delivery/stages/S04/evidence/S04-A.md');
+    const snapshotDigest = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    const spvContent = {
+      version: 2 as const,
+      schema_version: 2 as const,
+      type: 'SPV_PASS' as const,
+      stage_id: 'S04',
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      snapshot_digest: snapshotDigest,
+    };
+    const spv: VNextSpvPassReceipt = { ...spvContent, digest: computeVNextSpvPassReceiptDigest(spvContent) };
+    expect(admitVNextStagePlan({
+      version: 2,
+      schema_version: 2,
+      type: 'STAGE_PLAN_ADMISSION',
+      project_root: root,
+      manifest_path: '.proofloop/manifests/S04.json',
+      stage_id: 'S04',
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      snapshot_digest: snapshotDigest,
+      spv,
+    }).accepted).toBe(true);
+
+    const next = new VNextNextActionService().nextAction({
+      projectRoot: root,
+      stageId: 'S04',
+      snapshotDigest,
+      persistContext: true,
+    });
+    const context = JSON.parse(fs.readFileSync(path.join(root, next.context_ref as string), 'utf8')) as {
+      context_digest: string;
+    };
+
+    fs.writeFileSync(path.join(root, 'packages/worker-test.ts'), 'export const fixture = true;\n', 'utf8');
+    fs.writeFileSync(tasksPath, fs.readFileSync(tasksPath, 'utf8').replace('- [ ] S04-A-T01', '- [x] S04-A-T01').replace('- Worker Status: `planned`', '- Worker Status: `executing`'), 'utf8');
+    fs.writeFileSync(
+      evidencePath,
+      fs.readFileSync(evidencePath, 'utf8').replace(
+        '## Task Evidence\n\n*Not yet captured.*',
+        [
+          '## Task Evidence',
+          '',
+          '### S04-A-T01',
+          '',
+          '- Task Goal: run-gate vNext',
+          '- Relevant PO IDs: PO-FIXTURE',
+          '- Source Snapshot: fixture-source',
+          '- Current Snapshot: fixture-current',
+          '- Changed Files:',
+          '  - delivery/stages/S04/evidence/S04-A.md',
+          '  - delivery/stages/S04/tasks.md',
+          '  - packages/worker-test.ts',
+          '- RED Receipt:',
+          '  - Test ID: integration-red',
+          '  - Command: integration-red-command',
+          '  - Failure Output: integration-red-output',
+          '  - Expected Failure: integration-red-expected',
+          '  - Snapshot: integration-red-snapshot',
+          '- GREEN Receipt:',
+          '  - Test ID: integration-green',
+          '  - Command: integration-green-command',
+          '  - Pass Output: integration-green-output',
+          '  - Snapshot: integration-green-snapshot',
+          '- Status: COMPLETE',
+          '',
+        ].join('\n'),
+      ),
+      'utf8',
+    );
+    const proofIndex = (manifest.slices as Array<Record<string, any>>)[0].proof_index as Record<string, any>;
+    const worker = admitVNextWorkerResult({
+      schemaVersion: 2,
+      actionToken: 'run-gate-worker-1',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      taskId: 'S04-A-T01',
+      mode: 'implement-task',
+      outcome: 'completed',
+      evidenceRef: 'delivery/stages/S04/evidence/S04-A.md',
+      changedFiles: ['delivery/stages/S04/evidence/S04-A.md', 'delivery/stages/S04/tasks.md', 'packages/worker-test.ts'],
+      verificationRuns: [],
+      summary: 'run-gate vNext Worker completed',
+      manifestDigest,
+      planDigest,
+      proofIndexDigest: next.proof_index_digest,
+      snapshotDigest,
+      contextRef: next.context_ref,
+      contextDigest: context.context_digest,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    if (!worker.accepted) throw new Error('worker admission failed: ' + JSON.stringify(worker.findings));
+    expect(worker.accepted).toBe(true);
+
+    const cv = admitVNextCVResult({
+      schema_version: 2,
+      type: 'CV_RESULT',
+      stage_id: 'S04',
+      slice_id: 'S04-A',
+      worker_receipt_digest: worker.receipt_ref as string,
+      manifest_digest: manifestDigest,
+      plan_digest: planDigest,
+      proof_index_digest: next.proof_index_digest,
+      context_ref: next.context_ref,
+      context_digest: context.context_digest,
+      snapshot_digest: snapshotDigest,
+      verification_type: 'initial',
+      verdict: 'PASS',
+      summary: 'run-gate vNext fixture CV pass',
+      acceptance_refs_checked: [...(proofIndex.acceptance_refs as string[])],
+      seam_refs_checked: [...(proofIndex.seam_refs as string[])],
+      oracle_refs_checked: [...(proofIndex.oracle_refs as string[])],
+      risk_refs_considered: (proofIndex.risk_refs as Array<Record<string, string>>).map((risk) => ({
+        ref_id: risk.ref_id,
+        applicability: 'APPLICABLE',
+        reason: 'run-gate fixture binding',
+      })),
+      failed_acceptance_refs: [],
+      invalid_tests: [],
+      counterexamples: [],
+      scope_violations: [],
+      forbidden_substitutions: [],
+      regression_failures: [],
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    if (!cv.accepted) throw new Error('cv admission failed: ' + JSON.stringify(cv.findings));
+    expect(cv.accepted).toBe(true);
+
+    execFileSync('git', ['-C', root, 'add', '-A']);
+    execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'slice S04-A integration work']);
+    const commitSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    const commit = admitVNextSliceCommit({
+      type: 'slice_commit',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      commitSha,
+      cvReceiptDigest: cv.receipt_ref as string,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    expect(commit.accepted).toBe(true);
+
+    const integration = admitVNextIntegration({
+      type: 'integration',
+      stageId: 'S04',
+      sliceId: 'S04-A',
+      commitSha,
+    }, { projectRoot: root, writer: defaultReceiptWriter });
+    expect(integration.accepted).toBe(true);
+
+    // First Gate PASS at the integrated boundary.  The output dir lives under
+    // the gitignored .proofloop/ so the tree stays clean for the review round.
+    const runOutputDir = path.join(root, '.proofloop', 'runtime', 'S04');
+    const first = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: runOutputDir,
+      projectRoot: root,
+    });
+    expect(first.success).toBe(true);
+    expect(first.gate).toBe('PASS');
+    const gateDir = path.join(root, '.proofloop/receipts/stage-gate/S04');
+    let receipts = fs.existsSync(gateDir) ? fs.readdirSync(gateDir).filter((name) => name.endsWith('.json')) : [];
+    expect(receipts).toHaveLength(1);
+    const firstDigest = receipts[0].replace(/\.json$/, '');
+
+    // REPAIR review round at the integrated boundary.
+    const review = admitVNextStageReview({
+      type: 'stage_review',
+      stageId: 'S04',
+      verdict: 'REPAIR',
+      manifestDigest,
+      snapshotDigest: commitSha,
+      summary: 'run-gate REPAIR round',
+    }, { projectRoot: root });
+    expect(review.accepted).toBe(true);
+
+    // The repair fix advances HEAD.
+    fs.appendFileSync(path.join(root, 'packages/worker-test.ts'), 'export const repaired = true;\n');
+    execFileSync('git', ['-C', root, 'add', '-A']);
+    execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'repair fix after review REPAIR']);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+    // Without reGate the duplicate run is still refused (fail-closed).
+    const refused = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: runOutputDir,
+      projectRoot: root,
+    });
+    expect(refused.success).toBe(false);
+    expect(refused.gate).toBe('FAIL');
+    expect(refused.errors.join(' ')).toMatch(/re-gate refused/i);
+
+    // Explicit re-gate: appended as the new chain tip at the advanced HEAD.
+    const second = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: runOutputDir,
+      projectRoot: root,
+      reGate: true,
+    });
+    expect(second.success).toBe(true);
+    expect(second.gate).toBe('PASS');
+    const out2 = JSON.parse(fs.readFileSync(path.join(runOutputDir, 'gate-result.json'), 'utf8')) as Record<string, unknown>;
+    const newDigest = (out2.vnext as Record<string, unknown>).receipt_ref as string;
+    expect(newDigest).not.toBe(firstDigest);
+    receipts = fs.readdirSync(gateDir).filter((name) => name.endsWith('.json'));
+    expect(receipts).toHaveLength(2);
+    const chain = receipts.map((name) =>
+      JSON.parse(fs.readFileSync(path.join(gateDir, name), 'utf8')) as Record<string, any>,
+    );
+    const tip = chain.find((r) => r.digest === newDigest) as Record<string, any> | undefined;
+    expect(tip).toBeDefined();
+    expect((tip?.payload as Record<string, unknown>)?.snapshot_digest).toBe(head);
+    expect(chain.some((r) => r.digest === firstDigest)).toBe(true);
+  });
+});
+
+// ============================================================
+// S09-REVIEW-001 — run-gate fails closed on a non-canonical Stage
+// label in the manifest path BEFORE reading/executing anything
+// ============================================================
+describe('run-gate Stage ID guard before any read (S09-REVIEW-001)', () => {
+  it('refuses a vNext manifest path whose stage label is the parked S08B0 label before reading the Manifest', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const forgedPath = path.join(dir, '.proofloop/manifests/S08B0.json');
+    fs.copyFileSync(manifestPath, forgedPath);
+    const result = await runGateVNext({
+      manifestPath: forgedPath,
+      factsPath: '',
+      outputDir: path.join(dir, 'out'),
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    expect(result.steps).toEqual([]);
+    expect(result.errors.join(' ')).toMatch(/canonical Stage ID/);
+    // The Manifest was never read (route probe not reached) and nothing was
+    // executed or written.
+    expect(fs.existsSync(path.join(dir, '.proofloop/receipts/stage-gate/S08B0'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'out/gate-result.json'))).toBe(false);
+  });
+
+  it('refuses a vNext manifest path whose stage label is the parked S08B label before reading the Manifest', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const forgedPath = path.join(dir, '.proofloop/manifests/S08B.json');
+    fs.copyFileSync(manifestPath, forgedPath);
+    const result = await runGateVNext({
+      manifestPath: forgedPath,
+      factsPath: '',
+      outputDir: path.join(dir, 'out'),
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    expect(result.steps).toEqual([]);
+    expect(result.errors.join(' ')).toMatch(/canonical Stage ID/);
+  });
+});
+
+// ============================================================
+// S09-REVIEW-002-F01 — run-gate fails closed on the
+// Manifest-DECLARED stage_id (parked S08B0/S08B) BEFORE any proof
+// step executes and BEFORE any gate-result is written.  The
+// manifest FILE name is irrelevant (manifest.json / S09.json are
+// both fine) — the filename label guard cannot see the declared
+// stage_id, so the declared value itself must be guarded.
+// ============================================================
+describe('run-gate Manifest-declared Stage ID guard (S09-REVIEW-002-F01)', () => {
+  it('refuses a manifest.json whose declared stage_id is the parked S08B0 label before executing steps or writing gate-result', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+    manifest.stage_id = 'S08B0';
+    const forgedPath = path.join(dir, '.proofloop/manifests/manifest.json');
+    fs.writeFileSync(forgedPath, JSON.stringify(manifest), 'utf8');
+    const result = await runGateVNext({
+      manifestPath: forgedPath,
+      factsPath: '',
+      outputDir: path.join(dir, 'out'),
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    expect(result.steps).toEqual([]);
+    expect(result.errors.join(' ')).toMatch(/canonical Stage ID/);
+    // Nothing executed, nothing written.
+    expect(fs.existsSync(path.join(dir, 'out/gate-result.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.proofloop/receipts/stage-gate/S08B0'))).toBe(false);
+  });
+
+  it('refuses a manifest whose declared stage_id is the parked S08B label even when the file name label is canonical', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+    manifest.stage_id = 'S08B';
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf8');
+    const result = await runGateVNext({
+      manifestPath,
+      factsPath: '',
+      outputDir: path.join(dir, 'out'),
+      projectRoot: dir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.gate).toBe('FAIL');
+    expect(result.steps).toEqual([]);
+    expect(result.errors.join(' ')).toMatch(/canonical Stage ID/);
+    expect(fs.existsSync(path.join(dir, 'out/gate-result.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, '.proofloop/receipts/stage-gate/S08B'))).toBe(false);
+  });
+
+  it('built dist run-gate refuses a manifest.json whose declared stage_id is S08B0 before executing steps or writing gate-result', async () => {
+    const { dir, manifestPath } = vNextAcceptedFixture();
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, any>;
+    manifest.stage_id = 'S08B0';
+    const forgedPath = path.join(dir, 'manifest.json');
+    fs.writeFileSync(forgedPath, JSON.stringify(manifest), 'utf8');
+    const distPath = path.resolve(__dirname, '../../../../packages/runtime/dist/cli/run-gate.js');
+    const res = spawnSync(process.execPath, [distPath, forgedPath, '', path.join(dir, 'out'), dir], {
+      encoding: 'utf-8',
+      timeout: 30000,
+    });
+    expect(res.status).toBe(1);
+    const out = JSON.parse(res.stdout) as { steps: unknown[]; errors: string[] };
+    expect(out.steps).toEqual([]);
+    expect(out.errors.join(' ')).toMatch(/canonical Stage ID/);
+    expect(fs.existsSync(path.join(dir, 'out/gate-result.json'))).toBe(false);
   });
 });

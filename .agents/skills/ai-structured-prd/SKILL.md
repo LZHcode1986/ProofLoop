@@ -1,6 +1,6 @@
 ---
 name: ai-structured-prd
-description: Turn rough product ideas or existing requirements into a structured PRD before technical design.
+description: Use when the user has a rough product idea to shape into a structured PRD, or an existing PRD to review, before technical design.
 ---
 
 # ai-structured-prd
@@ -20,7 +20,7 @@ Separate layers:
 
 Use the smallest mode that fits the request:
 
-1. **intent mode**: user has a vague idea. Restate the desired outcome, user, why now, success, constraints, and out of scope. Ask one high-leverage question if needed.
+1. **intent mode**: user has a vague idea. Restate the desired outcome, user, why now, success, constraints, and out of scope.
 2. **context mode**: conversation contains scattered decisions. Build or update `PRD Context` and label each item as `confirmed`, `inferred`, `decided during intake`, `open`, or `optional`.
 3. **draft mode**: enough context exists. Generate the structured PRD using `references/prd-template.md`.
 4. **review mode**: user provides a PRD or draft. Use `references/review-rubric.md` to score readiness and ask only the single most important clarification if blocked.
@@ -68,7 +68,6 @@ Use the smallest mode that fits the request:
    - If blocked, ask only the highest-leverage clarification question.
 
 6. **Prepare stage candidates only after PRD readiness**
-   - Do not create stage candidates while core PRD facts are still unstable.
    - Stage candidates are product-delivery slices for Brain dispatch, not technical tasks.
    - Each candidate must map to user-visible value or a coherent product capability.
    - Each candidate must preserve PRD acceptance criteria, scope, and non-goals.

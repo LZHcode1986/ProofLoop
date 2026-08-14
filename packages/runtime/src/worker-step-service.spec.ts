@@ -315,7 +315,7 @@ describe('PO-S02-B-02 — WorkerStepService.executeStep (packet construction, si
   });
 
   it('rejects non-canonical literals at compile time (closed sets, literal versions)', () => {
-    // @ts-expect-error — mode is the closed 5-value WorkerStepMode set
+    // @ts-expect-error — mode is the closed 4-value WorkerStepMode set
     const badMode: WorkerStepDispatchInput['mode'] = 'deploy';
     // @ts-expect-error — continuation is the closed 2-value set
     const badContinuation: WorkerStepDispatchInput['continuation'] = 'auto';

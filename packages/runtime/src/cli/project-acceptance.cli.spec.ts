@@ -22,6 +22,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { spawnSync, execFileSync } from 'node:child_process';
+import { computeDigest, computeReceiptDigest, validateVNextManifest } from '@proofloop/kernel';
 import { computeCanonicalJsonDigest, fileDigest16 } from '../project-acceptance';
 
 // ============================================================
@@ -42,6 +43,10 @@ const DIST_CLI_DIR = path.join(REPO_ROOT, 'packages', 'runtime', 'dist', 'cli');
 const CLI_TOOLS = ['compile-project-acceptance', 'run-project-acceptance', 'finalize-project-review'] as const;
 
 const SNAPSHOT_HEX16 = 'a1b2c3d4e5f6a7b8';
+/** vNext stage snapshot digest shape: 40-hex (git commit sha). */
+const SNAPSHOT_HEX40 = '15d873a0d06831be3f11fccd8042b536fd4f04d0';
+
+const HEX64_FILL = (seed: string): string => seed.repeat(64).slice(0, 64);
 
 interface Fx {
   readonly root: string;
@@ -81,7 +86,108 @@ function makeFx(): Fx {
   return fx;
 }
 
-/** Write stage manifest / review / gate evidence into fx.artifacts (real digests). */
+/** Minimal kernel-valid vNext stage manifest (version 2). */
+function makeVNextStageManifest(stageId: string): Record<string, unknown> {
+  return {
+    version: 2,
+    stage_id: stageId,
+    plan: {
+      ref: `delivery/stages/${stageId}/tasks.md`,
+      plan_digest: HEX64_FILL('a'),
+      schema_version: 2,
+    },
+    reference_index: {
+      'REF-GOAL': {
+        kind: 'goal',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/goal`,
+        file_digest: HEX64_FILL('b'),
+        section_digest: HEX64_FILL('c'),
+      },
+      'REF-TASK': {
+        kind: 'task',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/slice-task`,
+        file_digest: HEX64_FILL('d'),
+        section_digest: HEX64_FILL('e'),
+      },
+      'REF-ACCEPT': {
+        kind: 'acceptance',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/acceptance`,
+        file_digest: HEX64_FILL('f'),
+        section_digest: HEX64_FILL('a'),
+      },
+      'REF-SEAM': {
+        kind: 'seam',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/seam`,
+        file_digest: HEX64_FILL('b'),
+        section_digest: HEX64_FILL('c'),
+      },
+      'REF-ORACLE': {
+        kind: 'oracle',
+        ref: `delivery/stages/${stageId}/tasks.md#/entities/oracle`,
+        file_digest: HEX64_FILL('d'),
+        section_digest: HEX64_FILL('e'),
+      },
+    },
+    slices: [
+      {
+        slice_id: `${stageId}-A`,
+        proof_index: {
+          slice_id: `${stageId}-A`,
+          goal_ref: 'REF-GOAL',
+          task_refs: ['REF-TASK'],
+          acceptance_refs: ['REF-ACCEPT'],
+          seam_refs: ['REF-SEAM'],
+          oracle_refs: ['REF-ORACLE'],
+          risk_refs: [],
+        },
+        required_skills: ['typescript'],
+        depends_on: [],
+        evidence_path: `delivery/stages/${stageId}/evidence/${stageId}-A.md`,
+      },
+    ],
+    task_scopes: {
+      'slice-task': {
+        task_ref: `delivery/stages/${stageId}/tasks.md#/entities/slice-task`,
+        execution_scope: { kind: 'implementation', code_paths: ['src'], test_paths: ['test'], forbidden_paths: [] },
+      },
+    },
+  };
+}
+
+/** Build a vNext stage evidence envelope (STAGE_REVIEW_PASS / GATE_PASS) with a valid self-digest. */
+function makeVNextEnvelope(opts: {
+  type: 'STAGE_REVIEW_PASS' | 'GATE_PASS';
+  stageId: string;
+  verdict: string;
+  manifestDigest: string;
+  snapshotDigest: string;
+  stageGateReceiptDigest?: string;
+  timestamp?: string;
+}): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    action: opts.type === 'STAGE_REVIEW_PASS' ? 'STAGE_REVIEW' : 'GATE',
+    type: opts.type === 'STAGE_REVIEW_PASS' ? 'STAGE_REVIEW_RESULT' : 'GATE_RESULT',
+    schema_version: 2,
+    verdict: opts.verdict,
+    stage_id: opts.stageId,
+    manifest_digest: opts.manifestDigest,
+    snapshot_digest: opts.snapshotDigest,
+    receipt_chain_valid: true,
+  };
+  if (opts.stageGateReceiptDigest !== undefined) {
+    payload['stage_gate_receipt_digest'] = opts.stageGateReceiptDigest;
+  }
+  const envelope = {
+    version: 1,
+    type: opts.type,
+    stage_id: opts.stageId,
+    timestamp: opts.timestamp ?? '2025-01-01T00:00:00.000Z',
+    payload,
+  };
+  return { ...envelope, digest: computeReceiptDigest(envelope as never) };
+}
+
+/** Write stage manifest / review / gate evidence into fx.artifacts (real digests, vNext). */
 function writeStageEvidence(fx: Fx): {
   stageManifestPath: string;
   stageManifestDigest: string;
@@ -90,70 +196,33 @@ function writeStageEvidence(fx: Fx): {
   gatePath: string;
   gateDigest: string;
 } {
-  const stageManifest = {
-    stage_id: 'S01',
-    source_path: 'delivery/stages/S01/tasks.md',
-    source_digest: 'f'.repeat(64),
-    stage_goal: 'Stage fixture goal',
-    outcomes: ['gate evidence exists'],
-    slices: [
-      {
-        slice_id: 'S01-A',
-        goal: 'Stage fixture',
-        observable_outcome: 'gate evidence exists',
-        public_seam: 'fixture',
-        dependencies: [],
-        proof_obligations: [
-          {
-            po_id: 'PO-S01-A-01',
-            behavior: 'fixture behavior',
-            public_seam: 'fixture',
-            oracle_source: 'fixture oracle',
-            success_criteria: 'fixture passes',
-            required_observation: 'fixture observation',
-            applicable_risk_facts: ['none'],
-          },
-        ],
-        tasks: ['S01-A-T01'],
-        risk_facts: ['none'],
-        evidence_path: 'delivery/stages/S01/evidence/S01-A.md',
-        cv_minimum_level: 'lite',
-      },
-    ],
-    dependencies: [],
-    risk_facts: ['none'],
-  };
+  const stageManifest = makeVNextStageManifest('S01');
   const stageManifestPath = path.join(fx.artifacts, 'stage-manifest-S01.json');
   fs.writeFileSync(stageManifestPath, JSON.stringify(stageManifest, null, 2), 'utf-8');
-  const stageManifestDigest = computeCanonicalJsonDigest(
-    JSON.parse(fs.readFileSync(stageManifestPath, 'utf-8')),
-  );
-  const gate = {
-    stage_id: 'S01',
-    snapshot: SNAPSHOT_HEX16,
-    manifest_digest: stageManifestDigest,
-    platform: 'linux',
+  const parsedManifest = JSON.parse(fs.readFileSync(stageManifestPath, 'utf-8'));
+  validateVNextManifest(parsedManifest);
+  const stageManifestDigest = computeDigest(parsedManifest);
+  const gate = makeVNextEnvelope({
+    type: 'GATE_PASS',
+    stageId: 'S01',
     verdict: 'PASS',
-    steps: [{ id: 'build', exit_code: 0 }],
-    service_cleanup: { cleaned: [], failed: [], remainingPids: [] },
-    timestamps: { started_at: '2025-01-01T00:00:00.000Z', completed_at: '2025-01-01T00:00:05.000Z' },
-  };
+    manifestDigest: stageManifestDigest,
+    snapshotDigest: SNAPSHOT_HEX40,
+  });
   const gatePath = path.join(fx.artifacts, 'stage-gate-S01.json');
   fs.writeFileSync(gatePath, JSON.stringify(gate, null, 2), 'utf-8');
-  const gateDigest = fileDigest16(gatePath);
-  const review = {
-    stage_id: 'S01',
+  const gateDigest = gate['digest'] as string;
+  const review = makeVNextEnvelope({
+    type: 'STAGE_REVIEW_PASS',
+    stageId: 'S01',
     verdict: 'ACCEPTED',
-    snapshot: SNAPSHOT_HEX16,
-    manifest_digest: stageManifestDigest,
-    stage_gate_receipt: { path: gatePath, digest: gateDigest },
-    findings: [],
-    reviewer: 'stage-reviewer',
-    reviewed_at: '2025-01-01T00:00:10.000Z',
-  };
+    manifestDigest: stageManifestDigest,
+    snapshotDigest: SNAPSHOT_HEX40,
+    stageGateReceiptDigest: gateDigest,
+  });
   const reviewPath = path.join(fx.artifacts, 'stage-review-S01.json');
   fs.writeFileSync(reviewPath, JSON.stringify(review, null, 2), 'utf-8');
-  const reviewDigest = fileDigest16(reviewPath);
+  const reviewDigest = review['digest'] as string;
   return { stageManifestPath, stageManifestDigest, reviewPath, reviewDigest, gatePath, gateDigest };
 }
 

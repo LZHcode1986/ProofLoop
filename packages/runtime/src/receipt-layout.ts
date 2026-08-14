@@ -13,6 +13,10 @@
  *   integration/<stage>/<slice>/ INTEGRATION_PASS
  *   stage-gate/<stage>/      GATE_PASS, GATE_FAIL, GATE_INTERRUPTED
  *   review/<stage>/          STAGE_REVIEW_PASS
+ *   stage-close/<stage>/     STAGE_CLOSE_PASS (vNext Stage Close receipt —
+ *                            the P-11 "Stage closed" machine authority; the
+ *                            envelope type is vNext-owned, never a kernel
+ *                            legacy ReceiptType)
  *   project/                 PROJECT_REVIEW_PASS, PROJECT_E2E_PASS,
  *                            PROJECT_E2E_FAIL, PROJECT_E2E_BLOCKED
  *   .tmp/                    scratch — never a receipt source
@@ -33,6 +37,10 @@
 
 import * as path from 'node:path';
 import type { ReceiptType } from '@proofloop/kernel';
+// P-11: the vNext Stage Close payload discriminator is the single source of
+// truth for the vNext result-type → category classification below. The import
+// is a leaf constant module (kernel + relay-contract only) — no cycle.
+import { VNEXT_STAGE_CLOSE_RESULT_TYPE } from './vnext/types';
 
 // ============================================================
 // Category closed sets
@@ -47,13 +55,14 @@ export type ReceiptCategory =
   | 'integration'
   | 'stage-gate'
   | 'review'
+  | 'stage-close'
   | 'project'
   | 'tmp';
 
 /** Content categories that may hold receipt files (excludes `.tmp`). */
 export type ReceiptContentCategory = Exclude<ReceiptCategory, 'tmp'>;
 
-/** Closed set of all 9 category directory names. */
+/** Closed set of all 10 category directory names. */
 export const RECEIPT_CATEGORIES: readonly ReceiptCategory[] = [
   'plan',
   'tasks',
@@ -62,11 +71,12 @@ export const RECEIPT_CATEGORIES: readonly ReceiptCategory[] = [
   'integration',
   'stage-gate',
   'review',
+  'stage-close',
   'project',
   'tmp',
 ] as const;
 
-/** Closed set of the 8 content categories (never `.tmp`). */
+/** Closed set of the 9 content categories (never `.tmp`). */
 export const RECEIPT_CONTENT_CATEGORIES: readonly ReceiptContentCategory[] = [
   'plan',
   'tasks',
@@ -75,6 +85,7 @@ export const RECEIPT_CONTENT_CATEGORIES: readonly ReceiptContentCategory[] = [
   'integration',
   'stage-gate',
   'review',
+  'stage-close',
   'project',
 ] as const;
 
@@ -120,6 +131,11 @@ export function stageGateReceiptDir(projectRoot: string, stageId: string): strin
 /** `review/<stage>/` — STAGE_REVIEW_PASS. */
 export function reviewReceiptDir(projectRoot: string, stageId: string): string {
   return path.join(receiptsRoot(projectRoot), 'review', stageId);
+}
+
+/** `stage-close/<stage>/` — STAGE_CLOSE_PASS (P-11 vNext Stage Close receipt). */
+export function stageCloseReceiptDir(projectRoot: string, stageId: string): string {
+  return path.join(receiptsRoot(projectRoot), 'stage-close', stageId);
 }
 
 /** `project/` — PROJECT_REVIEW_PASS. */
@@ -193,6 +209,8 @@ export function receiptCategoryDir(
       return stageGateReceiptDir(projectRoot, requireId(stageId, 'stageId'));
     case 'review':
       return reviewReceiptDir(projectRoot, requireId(stageId, 'stageId'));
+    case 'stage-close':
+      return stageCloseReceiptDir(projectRoot, requireId(stageId, 'stageId'));
     case 'project':
       return projectReceiptDir(projectRoot);
     case 'tmp':
@@ -300,6 +318,7 @@ function buildTypesByCategory(): Readonly<
     integration: [],
     'stage-gate': [],
     review: [],
+    'stage-close': [],
     project: [],
   };
   for (const type of Object.keys(RECEIPT_TYPE_CATEGORY) as ReceiptType[]) {
@@ -315,3 +334,32 @@ function buildTypesByCategory(): Readonly<
 export const RECEIPT_TYPES_BY_CATEGORY: Readonly<
   Record<ReceiptContentCategory, readonly ReceiptType[]>
 > = buildTypesByCategory();
+
+// ============================================================
+// vNext result type → category classification (P-11)
+// ============================================================
+
+/**
+ * vNext result-type → content category mapping (additive, P-11).
+ *
+ * vNext result types (`STAGE_CLOSE_RESULT`, …) are NOT kernel `ReceiptType`
+ * values — the kernel 16-type legacy union stays closed. This map is the
+ * layout seam that classifies the vNext-only receipt envelopes (e.g. the
+ * STAGE_CLOSE_PASS envelope whose payload discriminator is
+ * `STAGE_CLOSE_RESULT`) into their category directory.
+ */
+const VNEXT_RESULT_TYPE_CATEGORY: Readonly<Record<string, ReceiptContentCategory>> = {
+  [VNEXT_STAGE_CLOSE_RESULT_TYPE]: 'stage-close',
+};
+
+/**
+ * Resolve the content category of a receipt type — legacy kernel `ReceiptType`
+ * values (via `RECEIPT_TYPE_CATEGORY`) and vNext result types (via the
+ * additive vNext map). Unknown types resolve to `undefined` (fail-closed
+ * callers must treat that as a schema mismatch).
+ */
+export function categoryForType(type: string): ReceiptContentCategory | undefined {
+  const legacy = RECEIPT_TYPE_CATEGORY[type as ReceiptType];
+  if (legacy !== undefined) return legacy;
+  return VNEXT_RESULT_TYPE_CATEGORY[type];
+}

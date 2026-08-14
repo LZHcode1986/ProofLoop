@@ -1,8 +1,8 @@
 ---
 description: Prototype — local technical experiment in isolated worktree.
 mode: subagent
-model: openai/gpt-5.6-luna
-variant: xhigh
+model: openai/gpt-5.6-luna-fast
+variant: max
 hidden: true
 permission:
   read: allow

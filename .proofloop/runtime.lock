@@ -1,0 +1,9 @@
+{
+  "runtime_version": "0.1.0",
+  "domain_schema_version": 1,
+  "risk_policy_version": 1,
+  "capability_policy_version": 1,
+  "host_adapter": "opencode",
+  "extension_package": "@proofloop/runtime",
+  "extension_version": "0.1.0"
+}

@@ -54,11 +54,17 @@ E2E scenarios are **not** executed directly by the Reviewer. Instead, they are d
 
 ### review_scope: stage
 
-ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain.
+ACCEPTED, REJECTED, or BLOCKED verdict returned to Brain. The AI-level
+vocabulary maps to the Runtime admission closed set `ACCEPTED | REPAIR`
+(`review finalize-stage`, REVIEW_VERDICTS): REJECTED is persisted by Brain as
+`verdict: 'REPAIR'` with the findings in the summary; BLOCKED is never admitted —
+Brain routes to typed recovery and re-dispatches a fresh Reviewer.
 
 ### review_scope: project
 
-PROJECT_ACCEPTED, PROJECT_REJECTED, or PROJECT_BLOCKED verdict returned to Brain.
+PROJECT_ACCEPTED, PROJECT_REJECTED, or PROJECT_BLOCKED verdict returned to
+Brain. `project finalize-review` accepts the full three-value closed set, so no
+vocabulary mapping is needed; only PROJECT_ACCEPTED signals acceptance.
 
 ## Return codes — review_scope: stage
 
@@ -66,7 +72,7 @@ PROJECT_ACCEPTED, PROJECT_REJECTED, or PROJECT_BLOCKED verdict returned to Brain
 
 ```yaml
 Verdict: REJECTED
-route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | EVIDENCE_GAP
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN
 subtype: <specific subtype>
 finding_id: <id>
 affected_stage: <stage-id>
@@ -105,7 +111,7 @@ resume_target:
 
 ```yaml
 Verdict: PROJECT_REJECTED
-route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP | EVIDENCE_GAP
+route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | AUTHORITY_GAP
 subtype: <specific subtype>
 finding_id: <id>
 affected_stages: <list>
@@ -148,27 +154,23 @@ The Stage Reviewer returns a structured verdict only. The Stage Reviewer does **
 
 ```
 Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
-→ Brain invokes receipt-writer CLI:
-     node .agents/runtime/dist/receipt-writer.js stage-review '<json-input>'
-   JSON input:
+→ Brain maps to the admission closed set `ACCEPTED | REPAIR` (REVIEW_VERDICTS):
+     ACCEPTED → verdict "ACCEPTED"
+     REJECTED → verdict "REPAIR"（REJECTED is judgment-layer vocabulary;
+                 persisted as REPAIR, summary carries the findings）
+     BLOCKED  → no admission; typed recovery, then a fresh Reviewer
+→ Brain invokes the canonical review admission CLI:
+     node packages/runtime/dist/cli/proofloop.js review finalize-stage --json '<request>'
+   Request (canonical shape, see packages/runtime/src/admission-request.ts):
    {
-     "outputDir": ".proofloop/receipts",
-     "data": {
-       "stage_id": "S01",
-       "verdict": "ACCEPTED",
-       "snapshot": "16-char-hex",
-       "manifest_digest": "16-char-hex",
-       "stage_gate_receipt": {
-         "path": ".proofloop/receipts/stage-gate-S01.json",
-         "digest": "16-char-hex"
-       },
-       "findings": [],
-       "reviewer": "stage-reviewer",
-       "reviewed_at": "ISO-8601"
-     }
+     "type": "stage_review",
+     "stageId": "S01",
+     "verdict": "ACCEPTED | REPAIR",
+     "summary": "<review summary>"
    }
-   Exit 0 → stdout returns absolute Receipt path; Brain verifies file exists
-   Exit 1 → stderr contains error message; Brain routes to recovery
+   Exit 0 → stdout returns the AdmitResult `{ accepted, receipt_ref, new_state, findings }`;
+     Brain verifies the receipt file exists
+   Exit 2/1 → stderr contains a canonical finding; Brain routes to recovery
 → Brain routes to STAGE_CLOSE (if ACCEPTED) or typed recovery
 ```
 
@@ -178,7 +180,12 @@ The Committer requires the persisted Stage Review Receipt to exist before execut
 
 ```
 Stage Reviewer returns structured verdict (PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED)
-→ Brain invokes finalize-project-review.js
-   finalize-project-review reads Manifest, E2E Receipt, and Review Result; validates all cross-references; and writes the final Project Review Receipt to .proofloop/receipts/project-review.json
+→ Brain invokes the canonical project finalize CLI:
+     node packages/runtime/dist/cli/proofloop.js project finalize-review --json '<request>'
+   finalize-review reads Manifest, E2E Receipt, and Review Result; validates all
+   cross-references; and writes the final Project Review Receipt. The three-value
+   verdict is the closed set of this operation (PROJECT_ACCEPTED /
+   PROJECT_REJECTED / PROJECT_BLOCKED all persist; only PROJECT_ACCEPTED
+   signals acceptance).
 → Brain routes to TERMINAL (if PROJECT_ACCEPTED) or typed recovery
 ```

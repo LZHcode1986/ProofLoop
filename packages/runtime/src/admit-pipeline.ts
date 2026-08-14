@@ -8,7 +8,7 @@
  *   reducer precheck / state advance (per-admit steps) → canonical Receipt
  *   construction (type/stage/slice/payload binding + previous_digest chain
  *   linkage) → persistence through the injected `ReceiptWriterPort`
- *   (kernel `writeReceipt` by default) → post-write chain verification →
+ *   (legacy kernel `writeReceipt` by default) → post-write chain verification →
  *   `{ accepted, receipt_ref, new_state, findings }`.
  *
  * Fail-closed contract (AWI-006 forbidden shortcuts):
@@ -16,10 +16,9 @@
  *     canonical Finding and NO Receipt;
  *   - a broken target category chain blocks the admit
  *     (RUNTIME.RECEIPT_CHAIN_BROKEN);
- *   - persistence ONLY through the writer port — this module performs no
- *     direct file writes (directory scaffolding via mkdir, read-only
- *     chain-tip resolution, and the post-write ROLLBACK delete of a
- *     digest-verified receipt on chain failure are the only fs access);
+ *   - legacy persistence is ONLY through the writer port; the active vNext
+ *     branch uses K2/K1 for directory/Receipt writes and performs only
+ *     fd-bound readback, chain verification, and rollback revalidation;
  *   - when the post-write chain verification fails AFTER the receipt was
  *     persisted, the just-written receipt is ROLLED BACK — bound to the
  *     verified category directory inode (S03-A dirfd precedent, no parent
@@ -36,11 +35,18 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
+import * as os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import {
   writeReceipt,
+  writeReceiptBounded,
+  ensureBoundedReceiptDirectory,
+  computeReceiptDigest,
+  computeDigest,
   verifyReceiptChain,
   verifyReceiptDigest,
+  validateReceipt,
   ReceiptChainError,
   SchemaValidationError,
   StageState,
@@ -51,14 +57,29 @@ import type {
   ReceiptType,
   ReceiptWriterOptions,
   WriteReceiptResult,
+  ReceiptDirectoryBinding,
+  ReceiptFileBinding,
+  BoundedWriteReceiptResult,
   ChainVerificationResult,
 } from '@proofloop/kernel';
 import type { ReconcileStageResult } from './reconcile';
+import type { VNextWorkerAdmissionState } from './vnext/types';
 import { reconcileStage } from './reconcile';
 import { reduceRuntimeAction } from './reducer';
 import type { ReconciledStageState, RuntimeAction } from './state-model';
-import { planReceiptDir, stageGateReceiptDir } from './receipt-layout';
+import {
+  cvReceiptDir,
+  committerReceiptDir,
+  integrationReceiptDir,
+  planReceiptDir,
+  RECEIPT_TYPE_CATEGORY,
+  reviewReceiptDir,
+  stageGateReceiptDir,
+  tasksReceiptDir,
+} from './receipt-layout';
 import { manifestFileDigest } from './manifest-source';
+import { detectPlanManifestRoute } from './plan-services';
+import { admitVNextGateResult } from './vnext/gate-admission';
 import { assertAdmissionRequest, admissionRequestStageId } from './admission-request';
 import type {
   AdmissionRequest,
@@ -77,7 +98,10 @@ import { canonicalPathWithinRoot } from './path-guard';
  *
  * The default implementation delegates to the kernel ReceiptWriter seams
  * (`writeReceipt` / `verifyReceiptChain`); tests inject a fake port to prove
- * the pipeline never touches the filesystem for persistence on its own.
+ * the legacy pipeline never touches the filesystem for persistence on its own.
+ * The active vNext `runReceiptAdmission` branch is separate and uses K2
+ * `ensureBoundedReceiptDirectory` plus K1 `writeReceiptBounded` when no test
+ * port is injected.
  */
 export interface ReceiptWriterPort {
   write(data: object, options: ReceiptWriterOptions): WriteReceiptResult;
@@ -174,10 +198,13 @@ export interface AdmitPipelineInput {
  * reconciliation (schema failure) — for every post-reconcile result it is
  * the current (or advanced) state.
  */
-export interface AdmitResult {
+export interface AdmitResult<TVNextState extends object = VNextWorkerAdmissionState> {
   readonly accepted: boolean;
   readonly receipt_ref: string | null;
+  /** Legacy reconcile projection; vNext admissions use `vnext_state`. */
   readonly new_state: ReconcileStageResult | null;
+  /** Additive vNext fact projection; never interpreted as legacy state. */
+  readonly vnext_state?: TVNextState;
   readonly findings: readonly Finding[];
 }
 
@@ -197,6 +224,14 @@ function reject(
     new_state: newState,
     findings: [{ code, severity: 'error', message }],
   };
+}
+
+/** Rejection helper for the additive vNext state projection. */
+function rejectVNext<TVNextState extends object = VNextWorkerAdmissionState>(
+  code: Finding['code'],
+  message: string,
+): AdmitResult<TVNextState> {
+  return reject(code, message, null) as AdmitResult<TVNextState>;
 }
 
 /** Human-readable chain failure detail from a kernel verification result. */
@@ -722,6 +757,2005 @@ function resolveCategoryChainTip(receiptDir: string): string | undefined {
   return tips.length === 1 ? tips[0] : undefined;
 }
 
+interface RuntimeAdmissionLock {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+  readonly nlink: number;
+}
+
+/**
+ * Runtime idempotency lock for receipt-only admissions.
+ *
+ * The kernel writer serializes writes, but its lock is intentionally private
+ * to the writer call.  A vNext action-token duplicate check must cover the
+ * read/check/build/write interval as one admission transaction; otherwise two
+ * processes can both observe an empty chain and append two genesis receipts.
+ * This lock is exclusive-create, fail-closed (including stale locks), and is
+ * removed only when the original inode is still owned by this admission.
+ */
+function admissionLockPath(targetDir: string, admissionKey: string): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(`${targetDir}\u0000${admissionKey}`, 'utf8')
+    .digest('hex');
+  // Keep this ephemeral coordination file outside `.proofloop/receipts`; the
+  // vNext changed-file/protected-path validator must never mistake it for a
+  // candidate artifact or Receipt.
+  return path.join(os.tmpdir(), `proofloop-runtime-admission-${digest}.lock`);
+}
+
+function removeAdmissionLockIfOwned(
+  lockPath: string,
+  identity: { readonly dev: number; readonly ino: number; readonly nlink: number } | null,
+): void {
+  if (identity === null) return;
+  try {
+    const current = fs.lstatSync(lockPath);
+    if (
+      current.dev === identity.dev &&
+      current.ino === identity.ino &&
+      current.nlink === identity.nlink
+    ) {
+      fs.rmdirSync(lockPath);
+    }
+  } catch {
+    // Fail closed: an unreadable or replaced lock is left in place.
+  }
+}
+
+/** Return null when another admission already owns this action key. */
+function acquireRuntimeAdmissionLock(
+  targetDir: string,
+  admissionKey: string,
+): RuntimeAdmissionLock | null {
+  const lockPath = admissionLockPath(targetDir, admissionKey);
+  try {
+    fs.mkdirSync(lockPath, { recursive: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null;
+    throw error;
+  }
+
+  let identity: { dev: number; ino: number; nlink: number } | null = null;
+  try {
+    const stat = fs.lstatSync(lockPath);
+    identity = { dev: stat.dev, ino: stat.ino, nlink: stat.nlink };
+    return { path: lockPath, ...identity };
+  } catch (error) {
+    removeAdmissionLockIfOwned(lockPath, identity);
+    throw error;
+  }
+}
+
+function releaseRuntimeAdmissionLock(lock: RuntimeAdmissionLock): void {
+  removeAdmissionLockIfOwned(lock.path, lock);
+}
+
+/**
+ * The active vNext path is root-bound even when a caller bypasses the Worker
+ * validator and invokes this Runtime seam directly.  K1 accepts a root alias
+ * so it can canonicalize it for its own internal binding; this Runtime seam is
+ * stricter and requires the authority supplied by the caller to already be the
+ * canonical absolute path.
+ */
+function canonicalReceiptProjectRoot(projectRoot: string | undefined): string | null {
+  if (typeof projectRoot !== 'string' || !path.isAbsolute(projectRoot)) return null;
+  const lexical = path.resolve(projectRoot);
+  try {
+    const canonical = fs.realpathSync(lexical);
+    const stat = fs.statSync(canonical);
+    if (!stat.isDirectory() || canonical !== lexical) return null;
+    return canonical;
+  } catch {
+    return null;
+  }
+}
+
+interface BoundedReceiptDirectoryHandle {
+  readonly binding: ReceiptDirectoryBinding;
+  readonly dirfd: number;
+  readonly procPath: string;
+}
+
+interface BoundedReceiptEntry {
+  readonly name: string;
+  readonly receipt: Record<string, unknown>;
+  readonly stat: fs.Stats;
+}
+
+function isCanonicalPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/**
+ * Re-open a K1 directory binding and make the fd, canonical path, and inode
+ * identity agree before any Runtime read or rollback operation.  The fd is
+ * the authority for subsequent operations; the raw path is only the locator
+ * that is re-verified against that fd and is never used as the delete/read
+ * boundary by itself.
+ */
+function openBoundedReceiptDirectory(
+  binding: ReceiptDirectoryBinding,
+): BoundedReceiptDirectoryHandle {
+  if (
+    !path.isAbsolute(binding.rootPath) ||
+    !path.isAbsolute(binding.path) ||
+    path.resolve(binding.rootPath) !== binding.rootPath ||
+    path.resolve(binding.path) !== binding.path
+  ) {
+    throw new Error('bounded Receipt binding is not canonical and absolute');
+  }
+
+  let rootCanonical: string;
+  let targetCanonical: string;
+  let expected: fs.Stats;
+  try {
+    rootCanonical = fs.realpathSync(binding.rootPath);
+    targetCanonical = fs.realpathSync(binding.path);
+    expected = fs.statSync(binding.path);
+  } catch (error) {
+    throw new Error(
+      `bounded Receipt binding cannot be re-opened: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    rootCanonical !== binding.rootPath ||
+    targetCanonical !== binding.path ||
+    !isCanonicalPathWithinRoot(rootCanonical, targetCanonical) ||
+    !expected.isDirectory() ||
+    expected.dev !== binding.dev ||
+    expected.ino !== binding.ino
+  ) {
+    throw new Error('bounded Receipt directory binding changed identity or escaped the project root');
+  }
+
+  const requiredFlags = [
+    fs.constants.O_RDONLY,
+    fs.constants.O_DIRECTORY,
+    fs.constants.O_NOFOLLOW,
+  ];
+  if (requiredFlags.some((flag) => typeof flag !== 'number')) {
+    throw new Error('bounded Receipt directory capability is unavailable');
+  }
+
+  const flags =
+    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
+  let dirfd: number | undefined;
+  try {
+    dirfd = fs.openSync(binding.path, flags);
+    const actual = fs.fstatSync(dirfd);
+    const procPath = `/proc/self/fd/${dirfd}`;
+    const procCanonical = fs.realpathSync(procPath);
+    const procStat = fs.statSync(procPath);
+    if (
+      !actual.isDirectory() ||
+      actual.dev !== binding.dev ||
+      actual.ino !== binding.ino ||
+      procCanonical !== binding.path ||
+      !procStat.isDirectory() ||
+      procStat.dev !== actual.dev ||
+      procStat.ino !== actual.ino
+    ) {
+      throw new Error('bounded Receipt directory fd identity mismatch');
+    }
+    return { binding, dirfd, procPath };
+  } catch (error) {
+    if (dirfd !== undefined) {
+      try { fs.closeSync(dirfd); } catch { /* best-effort */ }
+    }
+    throw error;
+  }
+}
+
+function closeBoundedReceiptDirectory(directory: BoundedReceiptDirectoryHandle): void {
+  try { fs.closeSync(directory.dirfd); } catch { /* best-effort */ }
+}
+
+/** Read one receipt entry through the already-bound directory fd. */
+function readBoundedReceiptEntry(
+  directory: BoundedReceiptDirectoryHandle,
+  name: string,
+): { readonly raw: string; readonly stat: fs.Stats } {
+  if (
+    name.length === 0 ||
+    name === '.' ||
+    name === '..' ||
+    name !== path.basename(name) ||
+    name.includes('/') ||
+    name.includes('\\')
+  ) {
+    throw new Error(`unsafe bounded Receipt entry name: ${name}`);
+  }
+
+  const filePath = path.join(directory.procPath, name);
+  const requiredFlags = [fs.constants.O_RDONLY, fs.constants.O_NOFOLLOW, fs.constants.O_NONBLOCK];
+  if (requiredFlags.some((flag) => typeof flag !== 'number')) {
+    throw new Error('bounded Receipt file-read capability is unavailable');
+  }
+
+  const flags = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
+  let filefd: number | undefined;
+  try {
+    filefd = fs.openSync(filePath, flags);
+    const stat = fs.fstatSync(filefd);
+    if (!stat.isFile()) {
+      throw new Error(`bounded Receipt entry is not a regular file: ${name}`);
+    }
+    return { raw: fs.readFileSync(filefd, 'utf8'), stat };
+  } finally {
+    if (filefd !== undefined) {
+      try { fs.closeSync(filefd); } catch { /* best-effort */ }
+    }
+  }
+}
+
+function parseBoundedReceipt(raw: string, name: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new ReceiptChainError(
+      `bounded Receipt ${name} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      'chain',
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ReceiptChainError(`bounded Receipt ${name} is not an object`, 'chain');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function boundedReceiptContentMatches(receipt: Record<string, unknown>, digest: string): boolean {
+  if (receipt.digest !== digest) return false;
+  const { digest: _storedDigest, ...content } = receipt;
+  try {
+    return computeReceiptDigest(content) === digest;
+  } catch {
+    return false;
+  }
+}
+
+function boundedRawReceiptContentMatches(raw: string, digest: string, name: string): boolean {
+  try {
+    return boundedReceiptContentMatches(parseBoundedReceipt(raw, name), digest);
+  } catch {
+    return false;
+  }
+}
+
+function readBoundedReceiptEntries(
+  directory: BoundedReceiptDirectoryHandle,
+): BoundedReceiptEntry[] {
+  const names = fs
+    .readdirSync(directory.procPath)
+    .filter((name) => name.endsWith('.json'))
+    .sort();
+  const entries: BoundedReceiptEntry[] = [];
+  for (const name of names) {
+    let entry: { readonly raw: string; readonly stat: fs.Stats };
+    try {
+      entry = readBoundedReceiptEntry(directory, name);
+    } catch (error) {
+      if (error instanceof ReceiptChainError) throw error;
+      throw new ReceiptChainError(
+        `bounded Receipt ${name} cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+        'chain',
+      );
+    }
+    const receipt = parseBoundedReceipt(entry.raw, name);
+    try {
+      validateReceipt(receipt);
+    } catch (error) {
+      throw new ReceiptChainError(
+        `bounded Receipt ${name} failed schema validation: ${error instanceof Error ? error.message : String(error)}`,
+        'chain',
+      );
+    }
+    const digest = receipt.digest;
+    if (
+      typeof digest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(digest) ||
+      !boundedReceiptContentMatches(receipt, digest)
+    ) {
+      throw new ReceiptChainError(
+        `bounded Receipt ${name} has an invalid self-digest`,
+        'self_digest',
+        typeof digest === 'string' ? digest : undefined,
+      );
+    }
+    entries.push({ name, receipt, stat: entry.stat });
+  }
+  return entries;
+}
+
+/** Resolve the category tip without ever reading through the raw target path. */
+function resolveBoundedCategoryChainTip(
+  binding: ReceiptDirectoryBinding,
+): string | undefined {
+  const directory = openBoundedReceiptDirectory(binding);
+  try {
+    const entries = readBoundedReceiptEntries(directory);
+    const digests = new Set<string>();
+    const referenced = new Set<string>();
+    for (const entry of entries) {
+      const digest = entry.receipt.digest;
+      if (typeof digest === 'string') digests.add(digest);
+      const previous = entry.receipt.previous_digest;
+      if (typeof previous === 'string' && previous.length > 0) referenced.add(previous);
+    }
+    const tips = [...digests].filter((digest) => !referenced.has(digest)).sort();
+    return tips.length === 1 ? tips[0] : undefined;
+  } finally {
+    closeBoundedReceiptDirectory(directory);
+  }
+}
+
+function boundedReceiptFileIdentityMatches(
+  entry: fs.Stats,
+  expected: ReceiptFileBinding,
+): boolean {
+  return (
+    !entry.isSymbolicLink() &&
+    entry.isFile() &&
+    entry.dev === expected.dev &&
+    entry.ino === expected.ino &&
+    entry.nlink === expected.nlink &&
+    (expected.size === undefined || entry.size === expected.size)
+  );
+}
+
+/**
+ * Read back the bounded writer result without creating a new ownership
+ * snapshot.  `receiptFile` is captured by K1 immediately after install; the
+ * current entry identity is only compared against that writer-time binding.
+ */
+function readBoundedReceiptResult(result: BoundedWriteReceiptResult): void {
+  const binding = result.boundDirectory;
+  if (!/^[a-f0-9]{64}$/.test(result.digest)) {
+    throw new Error('bounded Receipt writer returned an invalid digest');
+  }
+  const name = `${result.digest}.json`;
+  const receiptFile = result.receiptFile;
+  if (
+    receiptFile === undefined ||
+    receiptFile.name !== name ||
+    receiptFile.name !== path.basename(receiptFile.name)
+  ) {
+    throw new Error('bounded Receipt writer returned no matching writer-time Receipt identity');
+  }
+  const expectedPath = path.join(binding.path, name);
+  if (result.path !== expectedPath) {
+    throw new Error(
+      `bounded Receipt writer returned a non-canonical path: ${result.path}`,
+    );
+  }
+
+  const directory = openBoundedReceiptDirectory(binding);
+  try {
+    const entry = readBoundedReceiptEntry(directory, name);
+    const receipt = parseBoundedReceipt(entry.raw, name);
+    if (!boundedReceiptContentMatches(receipt, result.digest)) {
+      throw new Error(`bounded Receipt readback digest mismatch: ${result.path}`);
+    }
+    if (!boundedReceiptFileIdentityMatches(entry.stat, receiptFile)) {
+      throw new Error(
+        `bounded Receipt readback entry identity differs from the writer-time binding: ${result.path}`,
+      );
+    }
+  } finally {
+    closeBoundedReceiptDirectory(directory);
+  }
+}
+
+interface BoundedChainTipCheck {
+  readonly present: boolean;
+  readonly reason?: string;
+}
+
+function boundedChainTipStillPresent(
+  directory: BoundedReceiptDirectoryHandle,
+  digest: string,
+): BoundedChainTipCheck {
+  try {
+    const names = fs.readdirSync(directory.procPath);
+    // A symlink anywhere in the bound category is an unsafe successor/entry,
+    // even when it does not carry a `.json` suffix.  Do not let an lstat or
+    // directory-entry race turn an unknown entry into a safe tip decision.
+    for (const name of names) {
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(path.join(directory.procPath, name));
+      } catch (error) {
+        return {
+          present: false,
+          reason:
+            `rollback skipped because bounded chain entry ${name} could not be safely inspected: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      if (stat.isSymbolicLink()) {
+        return {
+          present: false,
+          reason:
+            `rollback skipped because bounded chain entry ${name} is a symlink and its ownership cannot be safely verified`,
+        };
+      }
+    }
+
+    const entries = readBoundedReceiptEntries(directory);
+    const digests = new Set(entries.map((entry) => entry.receipt.digest as string));
+    const referenced = new Set(
+      entries
+        .map((entry) => entry.receipt.previous_digest)
+        .filter((previous): previous is string => typeof previous === 'string' && previous.length > 0),
+    );
+    if (!digests.has(digest)) {
+      return {
+        present: false,
+        reason: 'rollback skipped because the bounded Receipt is no longer present in the chain',
+      };
+    }
+    if (referenced.has(digest)) {
+      return {
+        present: false,
+        reason:
+          'rollback skipped because a successor Receipt now references the bounded chain',
+      };
+    }
+    return { present: true };
+  } catch (error) {
+    return {
+      present: false,
+      reason:
+        'rollback skipped because bounded chain entries could not be safely read; ' +
+        `the residual Receipt was retained: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/** Verify a category chain through one K1-bound fd, never through the raw path. */
+function verifyBoundedReceiptChain(
+  binding: ReceiptDirectoryBinding,
+): ChainVerificationResult {
+  let directory: BoundedReceiptDirectoryHandle;
+  try {
+    directory = openBoundedReceiptDirectory(binding);
+  } catch (error) {
+    return {
+      valid: false,
+      receipts: [],
+      brokenLink: {
+        index: 0,
+        expected: '(bound-directory)',
+        actual: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+
+  try {
+    let entries: BoundedReceiptEntry[];
+    try {
+      entries = readBoundedReceiptEntries(directory);
+    } catch (error) {
+      return {
+        valid: false,
+        receipts: [],
+        brokenLink: {
+          index: 0,
+          expected: '(bound-receipt)',
+          actual: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+    if (entries.length === 0) return { valid: true, receipts: [] };
+
+    const byDigest = new Map<string, BoundedReceiptEntry>();
+    const filesByDigest = new Map<string, string[]>();
+    for (const entry of entries) {
+      const digest = entry.receipt.digest as string;
+      const files = filesByDigest.get(digest) ?? [];
+      files.push(entry.name);
+      filesByDigest.set(digest, files);
+      if (!byDigest.has(digest)) byDigest.set(digest, entry);
+    }
+
+    const duplicateDigests = [...filesByDigest.entries()]
+      .filter(([, names]) => names.length > 1)
+      .map(([digest, names]) => ({
+        digest,
+        paths: names.map((name) => path.join(binding.path, name)),
+      }));
+
+    let brokenLink: { index: number; expected: string; actual: string } | undefined;
+    for (const entry of byDigest.values()) {
+      const previous = entry.receipt.previous_digest;
+      if (
+        previous !== undefined &&
+        previous !== null &&
+        previous !== '' &&
+        !byDigest.has(String(previous))
+      ) {
+        brokenLink = {
+          index: 0,
+          expected: String(previous),
+          actual: '(not found in directory)',
+        };
+        break;
+      }
+    }
+
+    const visited = new Set<string>();
+    const orderedReceipts: string[] = [];
+    const genesis = [...byDigest.entries()]
+      .filter(([, entry]) => {
+        const previous = entry.receipt.previous_digest;
+        return previous === undefined || previous === null || previous === '';
+      })
+      .map(([digest]) => digest)
+      .sort();
+
+    for (const genesisDigest of genesis) {
+      if (visited.has(genesisDigest)) continue;
+      let current: string | undefined = genesisDigest;
+      while (current !== undefined) {
+        if (visited.has(current)) {
+          if (brokenLink === undefined) {
+            brokenLink = {
+              index: orderedReceipts.length,
+              expected: current,
+              actual: '(circular reference)',
+            };
+          }
+          break;
+        }
+        const entry = byDigest.get(current);
+        if (entry === undefined) break;
+        visited.add(current);
+        orderedReceipts.push(path.join(binding.path, entry.name));
+        const next = [...byDigest.entries()]
+          .filter(([digest, candidate]) => {
+            if (visited.has(digest)) return false;
+            return candidate.receipt.previous_digest === current;
+          })
+          .map(([digest]) => digest)
+          .sort();
+        current = next[0];
+      }
+    }
+
+    for (const [digest, entry] of byDigest) {
+      if (visited.has(digest)) continue;
+      orderedReceipts.push(path.join(binding.path, entry.name));
+      if (brokenLink === undefined) {
+        const previous = entry.receipt.previous_digest;
+        brokenLink = {
+          index: orderedReceipts.length - 1,
+          expected: typeof previous === 'string' ? previous : '(genesis)',
+          actual: byDigest.has(String(previous))
+            ? '(orphan — not reachable from genesis)'
+            : '(not found in directory)',
+        };
+      }
+    }
+
+    return {
+      valid: brokenLink === undefined && duplicateDigests.length === 0,
+      receipts: orderedReceipts,
+      brokenLink,
+      duplicateDigests: duplicateDigests.length > 0 ? duplicateDigests : undefined,
+    };
+  } finally {
+    closeBoundedReceiptDirectory(directory);
+  }
+}
+
+/**
+ * Roll back a bounded write through the returned directory binding only.  No
+ * raw category path is used as the authority for the read, tip check, or
+ * unlink.  A missing file is already equivalent to a successful rollback;
+ * every present file must match the writer result and the original inode
+ * identity before it can be removed.
+ */
+function rollbackBoundedReceipt(
+  result: BoundedWriteReceiptResult,
+  testHooks?: RollbackTestHooks,
+): ReceiptRollbackResult {
+  const binding = result.boundDirectory;
+  const name = `${result.digest}.json`;
+  const receiptFile = result.receiptFile;
+  if (result.path !== path.join(binding.path, name)) {
+    return { ok: false, reason: `bounded Receipt result path is not canonical: ${result.path}` };
+  }
+  if (
+    receiptFile === undefined ||
+    receiptFile.name !== name ||
+    receiptFile.name !== path.basename(receiptFile.name)
+  ) {
+    return {
+      ok: false,
+      reason:
+        'rollback skipped: bounded Receipt writer-time identity is missing or does not match the result path',
+    };
+  }
+
+  testHooks?.beforeDirOpen?.();
+
+  let directory: BoundedReceiptDirectoryHandle;
+  try {
+    directory = openBoundedReceiptDirectory(binding);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `bounded Receipt directory could not be re-opened: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  try {
+    let first: { readonly raw: string; readonly stat: fs.Stats };
+    try {
+      first = readBoundedReceiptEntry(directory, name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true };
+      return {
+        ok: false,
+        reason: `bounded Receipt target cannot be opened for rollback: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!boundedRawReceiptContentMatches(first.raw, result.digest, name)) {
+      return {
+        ok: false,
+        reason: 'rollback skipped: bounded Receipt digest identity mismatch',
+      };
+    }
+    if (!boundedReceiptFileIdentityMatches(first.stat, receiptFile)) {
+      return {
+        ok: false,
+        reason:
+          'rollback skipped: bounded Receipt target identity differs from the writer-time binding',
+      };
+    }
+    const firstTip = boundedChainTipStillPresent(directory, result.digest);
+    if (!firstTip.present) {
+      return { ok: false, reason: firstTip.reason ?? 'rollback skipped: bounded chain tip is not safe to verify' };
+    }
+
+    testHooks?.beforeUnlink?.();
+
+    // Last-moment revalidation through the same bound fd.  A parent swap can
+    // no longer redirect this path, and a final symlink is rejected by the
+    // no-follow open before unlink is attempted.
+    let last: { readonly raw: string; readonly stat: fs.Stats };
+    try {
+      last = readBoundedReceiptEntry(directory, name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true };
+      return {
+        ok: false,
+        reason: `rollback skipped: bounded Receipt target changed before unlink: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!boundedRawReceiptContentMatches(last.raw, result.digest, name)) {
+      return {
+        ok: false,
+        reason: 'rollback skipped: bounded Receipt digest changed before unlink',
+      };
+    }
+    if (!boundedReceiptFileIdentityMatches(last.stat, receiptFile)) {
+      return {
+        ok: false,
+        reason:
+          'rollback skipped: bounded Receipt target identity changed from the writer-time binding before unlink',
+      };
+    }
+    const lastTip = boundedChainTipStillPresent(directory, result.digest);
+    if (!lastTip.present) {
+      return { ok: false, reason: lastTip.reason ?? 'rollback skipped: bounded chain tip is not safe to verify' };
+    }
+
+    try {
+      fs.unlinkSync(path.join(directory.procPath, name));
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `bounded Receipt delete failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    return { ok: true };
+  } finally {
+    closeBoundedReceiptDirectory(directory);
+  }
+}
+
+interface WrittenReceiptIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly name: string;
+  readonly nlink: number;
+}
+
+function captureWrittenReceiptIdentity(filePath: string): WrittenReceiptIdentity | null {
+  try {
+    const stat = fs.lstatSync(filePath);
+    return {
+      dev: stat.dev,
+      ino: stat.ino,
+      name: path.basename(filePath),
+      nlink: stat.nlink,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function receiptReadbackMatches(writeResult: WriteReceiptResult): boolean {
+  if (!/^[a-f0-9]{64}$/.test(writeResult.digest)) return false;
+  if (!verifyReceiptDigest(writeResult.path)) return false;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(writeResult.path, 'utf8')) as {
+      digest?: unknown;
+    };
+    return parsed.digest === writeResult.digest;
+  } catch {
+    return false;
+  }
+}
+
+function rejectAfterReceiptVerificationFailure<TVNextState extends object = VNextWorkerAdmissionState>(
+  rejected: AdmitResult<TVNextState>,
+  writeResult: WriteReceiptResult,
+  targetDir: string,
+  projectRoot: string | undefined,
+  rollbackTestHooks: RollbackTestHooks | undefined,
+  writtenFileIdentity?: WrittenReceiptIdentity | null,
+): AdmitResult<TVNextState> {
+  const rollback = rollbackWrittenReceipt(
+    writeResult,
+    targetDir,
+    projectRoot,
+    rollbackTestHooks,
+    writtenFileIdentity === undefined
+      ? captureWrittenReceiptIdentity(writeResult.path)
+      : writtenFileIdentity,
+  );
+  if (rollback.ok) return rejected;
+  return {
+    ...rejected,
+    findings: [
+      ...rejected.findings,
+      {
+        code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+        severity: 'error',
+        message:
+          `receipt persisted but post-write verification failed and rollback incomplete: ` +
+          `receipt digest ${writeResult.digest} at ${writeResult.path} remains on disk — ` +
+          `rollback failed: ${rollback.reason}`,
+      },
+    ],
+  };
+}
+
+function rejectAfterBoundedReceiptVerificationFailure<TVNextState extends object = VNextWorkerAdmissionState>(
+  rejected: AdmitResult<TVNextState>,
+  writeResult: BoundedWriteReceiptResult,
+  rollbackTestHooks: RollbackTestHooks | undefined,
+): AdmitResult<TVNextState> {
+  const rollback = rollbackBoundedReceipt(
+    writeResult,
+    rollbackTestHooks,
+  );
+  if (rollback.ok) return rejected;
+  return {
+    ...rejected,
+    findings: [
+      ...rejected.findings,
+      {
+        code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+        severity: 'error',
+        message:
+          `receipt persisted but bounded post-write verification failed and rollback incomplete: ` +
+          `receipt digest ${writeResult.digest} at ${writeResult.path} remains on disk — ` +
+          `rollback failed: ${rollback.reason}`,
+      },
+    ],
+  };
+}
+
+function canonicalReceiptTempDirectory(
+  projectRoot: string,
+  targetBinding: ReceiptDirectoryBinding,
+  tempDir: string,
+): string | null {
+  if (typeof tempDir !== 'string' || tempDir.length === 0) return null;
+  const lexical = path.isAbsolute(tempDir)
+    ? path.resolve(tempDir)
+    : path.resolve(projectRoot, tempDir);
+  try {
+    const canonical = fs.realpathSync(lexical);
+    const stat = fs.statSync(canonical);
+    if (
+      canonical !== lexical ||
+      !stat.isDirectory() ||
+      !isCanonicalPathWithinRoot(projectRoot, canonical) ||
+      stat.dev !== targetBinding.dev ||
+      stat.ino !== targetBinding.ino
+    ) {
+      return null;
+    }
+    return canonical;
+  } catch {
+    return null;
+  }
+}
+
+function sameReceiptDirectoryBinding(
+  left: ReceiptDirectoryBinding,
+  right: ReceiptDirectoryBinding,
+): boolean {
+  return (
+    left.rootPath === right.rootPath &&
+    left.path === right.path &&
+    left.dev === right.dev &&
+    left.ino === right.ino
+  );
+}
+
+/**
+ * Input for a receipt-only admission branch whose state is not represented by
+ * the legacy `ReconcileStageResult` state machine.
+ *
+ * Validation and state derivation remain the responsibility of the caller; this
+ * seam only shares the canonical chain/write/verify/rollback path with the
+ * legacy admission pipeline.  In particular, it never fabricates a legacy
+ * state in order to persist a vNext fact.
+ */
+export interface ReceiptAdmissionInput<TVNextState extends object = VNextWorkerAdmissionState> {
+  readonly build: ReceiptBuild;
+  readonly targetDir: string;
+  /** Optional temp directory; bounded default requires it to be the same physical directory. */
+  readonly tempDir?: string;
+  readonly nextState: TVNextState;
+  readonly writer?: ReceiptWriterPort;
+  readonly projectRoot?: string;
+  /** Exclusive idempotency key held across duplicate-check and writer call. */
+  readonly admissionKey?: string;
+  /** Final read-only binding check immediately before the writer call. */
+  readonly beforeWrite?: () => void;
+  /**
+   * Final read-only consistency check after the Receipt is installed and its
+   * chain is valid, but before the admission returns success. This callback is
+   * used only by vNext consumers; a thrown error rolls back this run's Receipt
+   * through the writer-time identity/safety seam.
+   */
+  readonly afterWrite?: (writeResult: WriteReceiptResult) => void;
+}
+
+type VNextReceiptAdmissionAction =
+  | 'TASK_COMPLETE'
+  | 'CV_PASS'
+  | 'CV_REPAIR'
+  | 'SLICE_COMMIT'
+  | 'INTEGRATION'
+  | 'GATE'
+  | 'STAGE_REVIEW';
+
+const VNEXT_SLICE_COMMIT_FIELDS = new Set([
+  'schema_version',
+  'type',
+  'action',
+  'stage_id',
+  'slice_id',
+  'manifest_digest',
+  'plan_digest',
+  'proof_index_digest',
+  'snapshot_digest',
+  'commit_sha',
+  'cv_receipt_digest',
+  'changed_files',
+  'receipt_chain_valid',
+]);
+
+const VNEXT_INTEGRATION_FIELDS = new Set([
+  'schema_version',
+  'type',
+  'action',
+  'stage_id',
+  'slice_id',
+  'manifest_digest',
+  'plan_digest',
+  'proof_index_digest',
+  'snapshot_digest',
+  'commit_sha',
+  'slice_commit_receipt_digest',
+  'worker_receipt_digest',
+  'cv_receipt_digest',
+  'changed_files',
+  'receipt_chain_valid',
+]);
+
+const VNEXT_GATE_FIELDS = new Set([
+  'schema_version',
+  'type',
+  'action',
+  'stage_id',
+  'manifest_digest',
+  'plan_digest',
+  // Legacy field: only present on archived pre-decision Gate Receipts; new
+  // Receipts never carry it (the Runtime Proof it bound was deleted).
+  'runtime_proof_digest',
+  'stage_plan_receipt_digest',
+  'spv_receipt_digest',
+  'snapshot_digest',
+  'verdict',
+  'integrated_slices',
+  'summary',
+  // S09-REVIEW-001: the one-time restricted bootstrap marker (optional; only
+  // present on the S09 all-not_applicable Gate Receipt).
+  'restricted_bootstrap',
+  // S10 backfill (dual-path SG): explicit verification path marker
+  // (optional; `receipts` | `git_facts`, absent on pre-decision Receipts).
+  'verification_source',
+  'receipt_chain_valid',
+]);
+
+const VNEXT_REVIEW_FIELDS = new Set([
+  'schema_version',
+  'type',
+  'action',
+  'stage_id',
+  'manifest_digest',
+  'plan_digest',
+  // Legacy field: only present on archived pre-decision Review Receipts; new
+  // Receipts never carry it (the Runtime Proof it bound was deleted).
+  'runtime_proof_digest',
+  'stage_plan_receipt_digest',
+  'spv_receipt_digest',
+  'stage_gate_receipt_digest',
+  'snapshot_digest',
+  'verdict',
+  'summary',
+  'receipt_chain_valid',
+]);
+
+const VNEXT_SHA256_RE = /^[a-f0-9]{64}$/;
+const VNEXT_SNAPSHOT_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const VNEXT_GIT_SHA_RE = /^[a-f0-9]{40}$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCanonicalReceiptSegment(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function exactClosedFields(
+  value: Record<string, unknown>,
+  fields: ReadonlySet<string>,
+  label: string,
+): string | null {
+  const unknown = Reflect.ownKeys(value).filter(
+    (key) => typeof key !== 'string' || !fields.has(key),
+  );
+  if (unknown.length > 0) {
+    return `${label} contains unknown field(s): ${unknown.map(String).join(', ')}`;
+  }
+  for (const field of fields) {
+    if (!hasOwn(value, field)) return `${label}.${field} is required`;
+  }
+  return null;
+}
+
+function canonicalSliceCommitPath(
+  projectRoot: string,
+  value: unknown,
+  label: string,
+): string | null {
+  if (
+    typeof value !== 'string' ||
+    value.trim().length === 0 ||
+    path.isAbsolute(value) ||
+    value.startsWith('//') ||
+    value.includes('\\') ||
+    value.includes('\u0000')
+  ) {
+    return `${label} must be a canonical root-relative path string`;
+  }
+  const parts = value.split('/');
+  if (parts.some((part) => part.length === 0 || part === '.' || part === '..')) {
+    return `${label} must be a canonical root-relative path string`;
+  }
+  const lexical = path.resolve(projectRoot, ...parts);
+  const canonical = canonicalPathWithinRoot(projectRoot, lexical);
+  if (canonical === null || canonical !== lexical) {
+    return `${label} escapes or traverses the project root`;
+  }
+  return null;
+}
+
+function validateVNextSliceCommitRecord(
+  value: Record<string, unknown>,
+  label: string,
+  projectRoot: string,
+): string | null {
+  const fieldsError = exactClosedFields(value, VNEXT_SLICE_COMMIT_FIELDS, label);
+  if (fieldsError !== null) return fieldsError;
+  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.type !== 'SLICE_COMMIT_RESULT') {
+    return `${label}.type must be SLICE_COMMIT_RESULT`;
+  }
+  if (value.action !== 'SLICE_COMMIT') return `${label}.action must be SLICE_COMMIT`;
+  if (!isCanonicalReceiptSegment(value.stage_id)) {
+    return `${label}.stage_id must be a canonical identifier`;
+  }
+  if (!isCanonicalReceiptSegment(value.slice_id)) {
+    return `${label}.slice_id must be a canonical identifier`;
+  }
+  for (const field of ['manifest_digest', 'plan_digest', 'proof_index_digest', 'cv_receipt_digest']) {
+    if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+      return `${label}.${field} must be a lowercase SHA-256 digest`;
+    }
+  }
+  if (typeof value.snapshot_digest !== 'string' || !VNEXT_SNAPSHOT_RE.test(value.snapshot_digest)) {
+    return `${label}.snapshot_digest must be a Git snapshot digest`;
+  }
+  if (typeof value.commit_sha !== 'string' || !VNEXT_GIT_SHA_RE.test(value.commit_sha)) {
+    return `${label}.commit_sha must be a full lowercase Git commit SHA`;
+  }
+  if (value.receipt_chain_valid !== true) {
+    return `${label}.receipt_chain_valid must be true`;
+  }
+  if (!Array.isArray(value.changed_files)) {
+    return `${label}.changed_files must be an array of unique root-relative strings`;
+  }
+  if (value.changed_files.length === 0) {
+    return `${label}.changed_files must not be empty`;
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < value.changed_files.length; index += 1) {
+    const changedFile = value.changed_files[index];
+    const pathError = canonicalSliceCommitPath(
+      projectRoot,
+      changedFile,
+      `${label}.changed_files[${index}]`,
+    );
+    if (pathError !== null) return pathError;
+    if (typeof changedFile === 'string') {
+      if (seen.has(changedFile)) {
+        return `${label}.changed_files contains duplicate entries`;
+      }
+      seen.add(changedFile);
+    }
+  }
+  return null;
+}
+
+function validateVNextIntegrationRecord(
+  value: Record<string, unknown>,
+  label: string,
+  projectRoot: string,
+): string | null {
+  const fieldsError = exactClosedFields(value, VNEXT_INTEGRATION_FIELDS, label);
+  if (fieldsError !== null) return fieldsError;
+  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.type !== 'INTEGRATION_RESULT') {
+    return `${label}.type must be INTEGRATION_RESULT`;
+  }
+  if (value.action !== 'INTEGRATION') return `${label}.action must be INTEGRATION`;
+  if (!isCanonicalReceiptSegment(value.stage_id)) {
+    return `${label}.stage_id must be a canonical identifier`;
+  }
+  if (!isCanonicalReceiptSegment(value.slice_id)) {
+    return `${label}.slice_id must be a canonical identifier`;
+  }
+  for (const field of [
+    'manifest_digest',
+    'plan_digest',
+    'proof_index_digest',
+    'slice_commit_receipt_digest',
+    'worker_receipt_digest',
+    'cv_receipt_digest',
+  ]) {
+    if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+      return `${label}.${field} must be a lowercase SHA-256 digest`;
+    }
+  }
+  if (typeof value.snapshot_digest !== 'string' || !VNEXT_SNAPSHOT_RE.test(value.snapshot_digest)) {
+    return `${label}.snapshot_digest must be a Git snapshot digest`;
+  }
+  if (typeof value.commit_sha !== 'string' || !VNEXT_GIT_SHA_RE.test(value.commit_sha)) {
+    return `${label}.commit_sha must be a full lowercase Git commit SHA`;
+  }
+  if (value.receipt_chain_valid !== true) {
+    return `${label}.receipt_chain_valid must be true`;
+  }
+  if (!Array.isArray(value.changed_files)) {
+    return `${label}.changed_files must be an array of unique root-relative strings`;
+  }
+  if (value.changed_files.length === 0) {
+    return `${label}.changed_files must not be empty`;
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < value.changed_files.length; index += 1) {
+    const changedFile = value.changed_files[index];
+    const pathError = canonicalSliceCommitPath(
+      projectRoot,
+      changedFile,
+      `${label}.changed_files[${index}]`,
+    );
+    if (pathError !== null) return pathError;
+    if (typeof changedFile === 'string') {
+      if (seen.has(changedFile)) {
+        return `${label}.changed_files contains duplicate entries`;
+      }
+      seen.add(changedFile);
+    }
+  }
+  return null;
+}
+
+/**
+ * Validate the closed Gate state/payload projection (stage-level: no
+ * `slice_id` member).  `integrated_slices` must be a non-empty array of
+ * closed { slice_id, integration_receipt_digest, commit_sha } entries in
+ * deterministic order.
+ */
+function validateVNextGateRecord(
+  value: Record<string, unknown>,
+  label: string,
+): string | null {
+  // S09-REVIEW-001 + dual-path SG: `restricted_bootstrap` and
+  // `verification_source` are OPTIONAL members of the closed Gate record;
+  // `runtime_proof_digest` is a legacy field tolerated on archived
+  // pre-decision Receipts only (the Runtime Proof it bound was deleted) —
+  // the required members are checked individually so an executable proof
+  // (no marker), the S09 restricted bootstrap (marker present), a
+  // pre-decision Receipt (no verification_source) and a dual-path Receipt
+  // (verification_source present) all stay closed-valid.
+  const unknown = Reflect.ownKeys(value).filter(
+    (key) => typeof key !== 'string' || !VNEXT_GATE_FIELDS.has(key),
+  );
+  if (unknown.length > 0) {
+    return `${label} contains unknown field(s): ${unknown.map(String).join(', ')}`;
+  }
+  for (const field of VNEXT_GATE_FIELDS) {
+    if (field === 'restricted_bootstrap') continue;
+    if (field === 'verification_source') continue;
+    if (field === 'runtime_proof_digest') continue;
+    if (!hasOwn(value, field)) return `${label}.${field} is required`;
+  }
+  if (value.restricted_bootstrap !== undefined && value.restricted_bootstrap !== true) {
+    return `${label}.restricted_bootstrap must be true when present`;
+  }
+  if (
+    value.verification_source !== undefined &&
+    value.verification_source !== 'receipts' &&
+    value.verification_source !== 'git_facts'
+  ) {
+    return `${label}.verification_source must be "receipts" or "git_facts" when present`;
+  }
+  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.type !== 'GATE_RESULT') return `${label}.type must be GATE_RESULT`;
+  if (value.action !== 'GATE') return `${label}.action must be GATE`;
+  if (!isCanonicalReceiptSegment(value.stage_id)) {
+    return `${label}.stage_id must be a canonical identifier`;
+  }
+  for (const field of [
+    'manifest_digest',
+    'plan_digest',
+    'stage_plan_receipt_digest',
+    'spv_receipt_digest',
+  ]) {
+    if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+      return `${label}.${field} must be a lowercase SHA-256 digest`;
+    }
+  }
+  if (
+    value.runtime_proof_digest !== undefined &&
+    (typeof value.runtime_proof_digest !== 'string' || !VNEXT_SHA256_RE.test(value.runtime_proof_digest))
+  ) {
+    return `${label}.runtime_proof_digest must be a lowercase SHA-256 digest when present (legacy field)`;
+  }
+  if (typeof value.snapshot_digest !== 'string' || !VNEXT_SNAPSHOT_RE.test(value.snapshot_digest)) {
+    return `${label}.snapshot_digest must be a Git snapshot digest`;
+  }
+  if (value.verdict !== 'PASS' && value.verdict !== 'FAIL') {
+    return `${label}.verdict must be PASS or FAIL`;
+  }
+  if (typeof value.summary !== 'string' || value.summary.length === 0) {
+    return `${label}.summary must be a non-empty string`;
+  }
+  if (value.receipt_chain_valid !== true) {
+    return `${label}.receipt_chain_valid must be true`;
+  }
+  if (!Array.isArray(value.integrated_slices) || value.integrated_slices.length === 0) {
+    return `${label}.integrated_slices must be a non-empty array of slice bindings`;
+  }
+  const seenSlices = new Set<string>();
+  for (let index = 0; index < value.integrated_slices.length; index += 1) {
+    const binding = value.integrated_slices[index];
+    const entryLabel = `${label}.integrated_slices[${index}]`;
+    if (!isRecord(binding)) return `${entryLabel} must be an object`;
+    const bindingFields = new Set(['slice_id', 'integration_receipt_digest', 'commit_sha']);
+    const unknownFields = Reflect.ownKeys(binding).filter(
+      (key) => typeof key !== 'string' || !bindingFields.has(key),
+    );
+    if (unknownFields.length > 0) {
+      return `${entryLabel} contains unknown field(s): ${unknownFields.map(String).join(', ')}`;
+    }
+    if (!isCanonicalReceiptSegment(binding.slice_id)) {
+      return `${entryLabel}.slice_id must be a canonical identifier`;
+    }
+    if (seenSlices.has(binding.slice_id)) {
+      return `${entryLabel}.slice_id is duplicated`;
+    }
+    seenSlices.add(binding.slice_id);
+    if (typeof binding.integration_receipt_digest !== 'string' || !VNEXT_SHA256_RE.test(binding.integration_receipt_digest)) {
+      return `${entryLabel}.integration_receipt_digest must be a lowercase SHA-256 digest`;
+    }
+    if (typeof binding.commit_sha !== 'string' || !VNEXT_GIT_SHA_RE.test(binding.commit_sha)) {
+      return `${entryLabel}.commit_sha must be a full lowercase Git commit SHA`;
+    }
+  }
+  return null;
+}
+
+function validateVNextReviewRecord(
+  value: Record<string, unknown>,
+  label: string,
+): string | null {
+  // `runtime_proof_digest` is a legacy field tolerated on archived
+  // pre-decision Review Receipts only (the Runtime Proof it bound was
+  // deleted); every other member is required.
+  const unknown = Reflect.ownKeys(value).filter(
+    (key) => typeof key !== 'string' || !VNEXT_REVIEW_FIELDS.has(key),
+  );
+  if (unknown.length > 0) {
+    return `${label} contains unknown field(s): ${unknown.map(String).join(', ')}`;
+  }
+  for (const field of VNEXT_REVIEW_FIELDS) {
+    if (field === 'runtime_proof_digest') continue;
+    if (!hasOwn(value, field)) return `${label}.${field} is required`;
+  }
+  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.type !== 'STAGE_REVIEW_RESULT') return `${label}.type must be STAGE_REVIEW_RESULT`;
+  if (value.action !== 'STAGE_REVIEW') return `${label}.action must be STAGE_REVIEW`;
+  if (!isCanonicalReceiptSegment(value.stage_id)) {
+    return `${label}.stage_id must be a canonical identifier`;
+  }
+  for (const field of [
+    'manifest_digest',
+    'plan_digest',
+    'stage_plan_receipt_digest',
+    'spv_receipt_digest',
+    'stage_gate_receipt_digest',
+  ]) {
+    if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+      return `${label}.${field} must be a lowercase SHA-256 digest`;
+    }
+  }
+  if (
+    value.runtime_proof_digest !== undefined &&
+    (typeof value.runtime_proof_digest !== 'string' || !VNEXT_SHA256_RE.test(value.runtime_proof_digest))
+  ) {
+    return `${label}.runtime_proof_digest must be a lowercase SHA-256 digest when present (legacy field)`;
+  }
+  if (typeof value.snapshot_digest !== 'string' || !VNEXT_SNAPSHOT_RE.test(value.snapshot_digest)) {
+    return `${label}.snapshot_digest must be a Git snapshot digest`;
+  }
+  if (value.verdict !== 'ACCEPTED' && value.verdict !== 'REPAIR') {
+    return `${label}.verdict must be ACCEPTED or REPAIR`;
+  }
+  if (typeof value.summary !== 'string' || value.summary.length === 0) {
+    return `${label}.summary must be a non-empty string`;
+  }
+  if (value.receipt_chain_valid !== true) {
+    return `${label}.receipt_chain_valid must be true`;
+  }
+  return null;
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  try {
+    return computeDigest(left) === computeDigest(right);
+  } catch {
+    return false;
+  }
+}
+
+function bindPayloadField(
+  payload: Record<string, unknown>,
+  state: Record<string, unknown>,
+  action: VNextReceiptAdmissionAction,
+  field: string,
+  required: boolean,
+): string | null {
+  const payloadHasField = hasOwn(payload, field);
+  const stateHasField = hasOwn(state, field);
+  if (!stateHasField) {
+    if (required) {
+      return `${action} state.${field} is required by the admission binding`;
+    }
+    return payloadHasField
+      ? `${action} payload.${field} has no corresponding state binding`
+      : null;
+  }
+  if (!payloadHasField) {
+    return required ? `${action} payload.${field} is required by the state binding` : null;
+  }
+  if (!sameJsonValue(payload[field], state[field])) {
+    return `${action} payload.${field} does not match the admitted state`;
+  }
+  return null;
+}
+
+/**
+ * Bind the public vNext Receipt seam before K2 directory creation or any
+ * injected writer call.  The generic type parameter is compile-time only, so
+ * the runtime must bind the state discriminator, Receipt type, tuple, payload
+ * version, and canonical category path as one closed contract.
+ */
+function vNextReceiptAdmissionBindingError(
+  input: {
+    readonly build: ReceiptBuild;
+    readonly targetDir: string;
+    readonly nextState: object;
+  },
+  projectRoot: string,
+): string | null {
+  if (!isRecord(input.nextState)) {
+    return 'vNext Receipt admission state must be an object';
+  }
+  const state = input.nextState;
+  if (state.schema_version !== 2) {
+    return 'vNext Receipt admission state schema_version must be 2';
+  }
+
+  let action: VNextReceiptAdmissionAction;
+  let receiptType: ReceiptType;
+  let category: 'tasks' | 'cv' | 'committer' | 'integration' | 'stage-gate' | 'review';
+  switch (state.action) {
+    case 'TASK_COMPLETE':
+      action = 'TASK_COMPLETE';
+      receiptType = 'TASK_COMPLETE';
+      category = 'tasks';
+      if (Object.prototype.hasOwnProperty.call(state, 'type')) {
+        return 'TASK_COMPLETE vNext state must not carry a different type discriminator';
+      }
+      break;
+    case 'CV_PASS':
+      action = 'CV_PASS';
+      receiptType = 'CV_PASS';
+      category = 'cv';
+      if (state.type !== 'CV_RESULT' || state.verdict !== 'PASS') {
+        return 'CV_PASS vNext state discriminator is not CV_RESULT/PASS';
+      }
+      break;
+    case 'CV_REPAIR':
+      action = 'CV_REPAIR';
+      receiptType = 'CV_REPAIR';
+      category = 'cv';
+      if (state.type !== 'CV_RESULT' || state.verdict !== 'REPAIR') {
+        return 'CV_REPAIR vNext state discriminator is not CV_RESULT/REPAIR';
+      }
+      break;
+    case 'SLICE_COMMIT':
+      action = 'SLICE_COMMIT';
+      receiptType = 'SLICE_COMMIT';
+      category = 'committer';
+      if (state.type !== 'SLICE_COMMIT_RESULT' || state.action !== 'SLICE_COMMIT') {
+        return 'SLICE_COMMIT vNext state discriminator is not SLICE_COMMIT_RESULT/SLICE_COMMIT';
+      }
+      break;
+    case 'INTEGRATION':
+      action = 'INTEGRATION';
+      receiptType = 'INTEGRATION_PASS';
+      category = 'integration';
+      if (state.type !== 'INTEGRATION_RESULT' || state.action !== 'INTEGRATION') {
+        return 'INTEGRATION vNext state discriminator is not INTEGRATION_RESULT/INTEGRATION';
+      }
+      break;
+    case 'GATE':
+      action = 'GATE';
+      receiptType = state.verdict === 'PASS' ? 'GATE_PASS' : 'GATE_FAIL';
+      category = 'stage-gate';
+      if (state.type !== 'GATE_RESULT' || state.action !== 'GATE') {
+        return 'GATE vNext state discriminator is not GATE_RESULT/GATE';
+      }
+      if (state.verdict !== 'PASS' && state.verdict !== 'FAIL') {
+        return 'GATE vNext state verdict must be PASS or FAIL';
+      }
+      break;
+    case 'STAGE_REVIEW':
+      action = 'STAGE_REVIEW';
+      receiptType = 'STAGE_REVIEW_PASS';
+      category = 'review';
+      if (state.type !== 'STAGE_REVIEW_RESULT' || state.action !== 'STAGE_REVIEW') {
+        return 'STAGE_REVIEW vNext state discriminator is not STAGE_REVIEW_RESULT/STAGE_REVIEW';
+      }
+      if (state.verdict !== 'ACCEPTED' && state.verdict !== 'REPAIR') {
+        return 'STAGE_REVIEW vNext state verdict must be ACCEPTED or REPAIR';
+      }
+      break;
+    default:
+      return `unsupported vNext Receipt admission state action: ${String(state.action)}`;
+  }
+
+  const stateStageId = state.stage_id;
+  const stateSliceId = state.slice_id;
+  if (!isCanonicalReceiptSegment(stateStageId)) {
+    return 'vNext Receipt admission state stage_id must be a canonical identifier';
+  }
+  if (action === 'GATE' || action === 'STAGE_REVIEW') {
+    if (stateSliceId !== undefined) {
+      return `${action} vNext Receipt admission state must not carry a slice_id (stage-level ${action})`;
+    }
+  } else if (!isCanonicalReceiptSegment(stateSliceId)) {
+    return 'vNext Receipt admission state slice_id must be a canonical identifier';
+  }
+  if (!isCanonicalReceiptSegment(input.build.stage_id)) {
+    return 'vNext Receipt build stage_id must be a canonical identifier';
+  }
+  if (input.build.stage_id !== stateStageId) {
+    return 'vNext Receipt state and build stage_id do not match';
+  }
+  if (action === 'GATE' || action === 'STAGE_REVIEW') {
+    if (input.build.slice_id !== undefined) {
+      return `${action} vNext Receipt build must not carry a slice_id (stage-level ${action})`;
+    }
+  } else {
+    if (!isCanonicalReceiptSegment(input.build.slice_id) || input.build.slice_id !== stateSliceId) {
+      return 'vNext Receipt state and build slice_id do not match';
+    }
+  }
+
+  if (input.build.type !== receiptType) {
+    return `${action} vNext state does not match Receipt type ${String(input.build.type)}`;
+  }
+  if (RECEIPT_TYPE_CATEGORY[input.build.type] !== category) {
+    return `Receipt type ${input.build.type} is not canonical for category ${category}`;
+  }
+  if (!isRecord(input.build.payload) || input.build.payload.schema_version !== 2) {
+    return 'vNext Receipt payload.schema_version must be 2';
+  }
+
+  const payload = input.build.payload;
+  if (action === 'SLICE_COMMIT') {
+    const stateError = validateVNextSliceCommitRecord(state, 'SLICE_COMMIT state', projectRoot);
+    if (stateError !== null) return stateError;
+    const payloadError = validateVNextSliceCommitRecord(
+      payload,
+      'SLICE_COMMIT payload',
+      projectRoot,
+    );
+    if (payloadError !== null) return payloadError;
+  }
+  if (action === 'INTEGRATION') {
+    const stateError = validateVNextIntegrationRecord(state, 'INTEGRATION state', projectRoot);
+    if (stateError !== null) return stateError;
+    const payloadError = validateVNextIntegrationRecord(
+      payload,
+      'INTEGRATION payload',
+      projectRoot,
+    );
+    if (payloadError !== null) return payloadError;
+  }
+  if (action === 'GATE') {
+    const stateError = validateVNextGateRecord(state, 'GATE state');
+    if (stateError !== null) return stateError;
+    const payloadError = validateVNextGateRecord(payload, 'GATE payload');
+    if (payloadError !== null) return payloadError;
+  }
+  if (action === 'STAGE_REVIEW') {
+    const stateError = validateVNextReviewRecord(state, 'STAGE_REVIEW state');
+    if (stateError !== null) return stateError;
+    const payloadError = validateVNextReviewRecord(payload, 'STAGE_REVIEW payload');
+    if (payloadError !== null) return payloadError;
+  }
+  const payloadBindingFields: readonly { readonly field: string; readonly required: boolean }[] = action === 'TASK_COMPLETE'
+    ? [
+        { field: 'stage_id', required: false },
+        { field: 'slice_id', required: false },
+        { field: 'task_id', required: true },
+        { field: 'mode', required: true },
+        { field: 'outcome', required: true },
+        { field: 'manifest_digest', required: true },
+        { field: 'plan_digest', required: true },
+        { field: 'proof_index_digest', required: true },
+        { field: 'snapshot_digest', required: true },
+        { field: 'context_ref', required: true },
+        { field: 'context_digest', required: true },
+        { field: 'changed_files', required: true },
+      ]
+    : action === 'SLICE_COMMIT'
+      ? [
+        { field: 'type', required: true },
+        { field: 'action', required: true },
+        { field: 'stage_id', required: true },
+        { field: 'slice_id', required: true },
+        { field: 'manifest_digest', required: true },
+        { field: 'plan_digest', required: true },
+        { field: 'proof_index_digest', required: true },
+        { field: 'snapshot_digest', required: true },
+        { field: 'commit_sha', required: true },
+        { field: 'cv_receipt_digest', required: true },
+        { field: 'changed_files', required: true },
+        { field: 'receipt_chain_valid', required: true },
+      ]
+      : action === 'INTEGRATION'
+        ? [
+          { field: 'type', required: true },
+          { field: 'stage_id', required: true },
+          { field: 'slice_id', required: true },
+          { field: 'manifest_digest', required: true },
+          { field: 'plan_digest', required: true },
+          { field: 'proof_index_digest', required: true },
+          { field: 'snapshot_digest', required: true },
+          { field: 'commit_sha', required: true },
+          { field: 'slice_commit_receipt_digest', required: true },
+          { field: 'worker_receipt_digest', required: true },
+          { field: 'cv_receipt_digest', required: true },
+          { field: 'changed_files', required: true },
+          { field: 'receipt_chain_valid', required: true },
+        ]
+        : action === 'GATE'
+          ? [
+            { field: 'type', required: true },
+            { field: 'stage_id', required: true },
+            { field: 'manifest_digest', required: true },
+            { field: 'plan_digest', required: true },
+            { field: 'stage_plan_receipt_digest', required: true },
+            { field: 'spv_receipt_digest', required: true },
+            { field: 'snapshot_digest', required: true },
+            { field: 'verdict', required: true },
+            { field: 'integrated_slices', required: true },
+            { field: 'summary', required: true },
+            { field: 'receipt_chain_valid', required: true },
+          ]
+          : action === 'STAGE_REVIEW'
+            ? [
+              { field: 'type', required: true },
+              { field: 'stage_id', required: true },
+              { field: 'manifest_digest', required: true },
+              { field: 'plan_digest', required: true },
+              { field: 'stage_plan_receipt_digest', required: true },
+              { field: 'spv_receipt_digest', required: true },
+              { field: 'stage_gate_receipt_digest', required: true },
+              { field: 'snapshot_digest', required: true },
+              { field: 'verdict', required: true },
+              { field: 'summary', required: true },
+              { field: 'receipt_chain_valid', required: true },
+            ]
+      : [
+        { field: 'type', required: true },
+        { field: 'stage_id', required: true },
+        { field: 'slice_id', required: true },
+        { field: 'verdict', required: true },
+        { field: 'verification_type', required: true },
+        { field: 'manifest_digest', required: true },
+        { field: 'plan_digest', required: true },
+        { field: 'proof_index_digest', required: true },
+        { field: 'context_ref', required: true },
+        { field: 'context_digest', required: true },
+        { field: 'snapshot_digest', required: true },
+        { field: 'worker_receipt_digest', required: true },
+      ];
+  for (const { field, required } of payloadBindingFields) {
+    const fieldError = bindPayloadField(
+      payload,
+      state,
+      action,
+      field,
+      required,
+    );
+    if (fieldError !== null) return fieldError;
+  }
+  if (action === 'SLICE_COMMIT' && payload.type !== 'SLICE_COMMIT_RESULT') {
+    return `${action} payload.type must be SLICE_COMMIT_RESULT`;
+  }
+  if (action === 'INTEGRATION' && payload.type !== 'INTEGRATION_RESULT') {
+    return `${action} payload.type must be INTEGRATION_RESULT`;
+  }
+  if (action === 'GATE' && payload.type !== 'GATE_RESULT') {
+    return `${action} payload.type must be GATE_RESULT`;
+  }
+  if (action === 'STAGE_REVIEW' && payload.type !== 'STAGE_REVIEW_RESULT') {
+    return `${action} payload.type must be STAGE_REVIEW_RESULT`;
+  }
+  if (
+    action !== 'TASK_COMPLETE' &&
+    action !== 'SLICE_COMMIT' &&
+    action !== 'INTEGRATION' &&
+    action !== 'GATE' &&
+    action !== 'STAGE_REVIEW' &&
+    payload.type !== 'CV_RESULT'
+  ) {
+    return `${action} payload.type must be CV_RESULT`;
+  }
+  const actionFieldError = bindPayloadField(payload, state, action, 'action', action === 'SLICE_COMMIT');
+  if (actionFieldError !== null) return actionFieldError;
+
+  let expectedTargetDir: string;
+  if (category === 'stage-gate') {
+    expectedTargetDir = stageGateReceiptDir(projectRoot, stateStageId);
+  } else if (category === 'review') {
+    expectedTargetDir = reviewReceiptDir(projectRoot, stateStageId);
+  } else {
+    if (stateSliceId === undefined) {
+      return `${action} Receipt slice_id is required for category ${category}`;
+    }
+    expectedTargetDir = category === 'tasks'
+      ? tasksReceiptDir(projectRoot, stateStageId, stateSliceId)
+      : category === 'cv'
+        ? cvReceiptDir(projectRoot, stateStageId, stateSliceId)
+        : category === 'committer'
+          ? committerReceiptDir(projectRoot, stateStageId, stateSliceId)
+          : integrationReceiptDir(projectRoot, stateStageId, stateSliceId);
+  }
+  if (
+    typeof input.targetDir !== 'string' ||
+    !path.isAbsolute(input.targetDir) ||
+    path.resolve(input.targetDir) !== expectedTargetDir
+  ) {
+    return `${action} Receipt targetDir must be the canonical ${category}/${stateStageId}${stateSliceId !== undefined ? `/${stateSliceId}` : ''} directory`;
+  }
+
+  return null;
+}
+
+/**
+ * Persist one already-validated non-legacy admission fact through the Runtime
+ * ReceiptWriter seam.  Rejects before `writer.write` leave no Receipt.
+ */
+export function runReceiptAdmission<TVNextState extends object = VNextWorkerAdmissionState>(
+  input: ReceiptAdmissionInput<TVNextState>,
+  rollbackTestHooks?: RollbackTestHooks,
+): AdmitResult<TVNextState> {
+  const boundedDefault = input.writer === undefined;
+  const writer = input.writer ?? defaultReceiptWriter;
+
+  // The active vNext path has no safe meaning without the canonical trust
+  // root.  This check deliberately runs before K2 scaffolding and before the
+  // admission lock so a missing/aliased root cannot cause any filesystem write.
+  const projectRoot = canonicalReceiptProjectRoot(input.projectRoot);
+  if (projectRoot === null) {
+    return rejectVNext<TVNextState>(
+      'RUNTIME.SCHEMA_MISMATCH',
+      'active vNext Receipt admission requires an existing canonical absolute projectRoot',
+    );
+  }
+
+  const bindingError = vNextReceiptAdmissionBindingError(input, projectRoot);
+  if (bindingError !== null) {
+    return rejectVNext<TVNextState>('RUNTIME.SCHEMA_MISMATCH', bindingError);
+  }
+
+  // K2 is the only directory-materialization path for this active vNext
+  // seam.  It is also deliberately applied when a test injects a fake writer:
+  // the fake may replace persistence semantics, but it cannot bypass the
+  // production root/target directory gate.
+  let targetBinding: ReceiptDirectoryBinding;
+  try {
+    targetBinding = ensureBoundedReceiptDirectory({
+      projectRoot,
+      targetDir: input.targetDir,
+    });
+  } catch (error) {
+    return rejectVNext<TVNextState>(
+      'RUNTIME.SCHEMA_MISMATCH',
+      `bounded Receipt directory admission failed for ${input.targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const targetDir = targetBinding.path;
+  const requestedTempDir = input.tempDir ?? targetDir;
+  const tempDir = canonicalReceiptTempDirectory(
+    projectRoot,
+    targetBinding,
+    requestedTempDir,
+  );
+  if (tempDir === null) {
+    return rejectVNext<TVNextState>(
+      'RUNTIME.SCHEMA_MISMATCH',
+      `bounded Receipt tempDir is outside, symlinked, or has a different directory identity: ${requestedTempDir}`,
+    );
+  }
+
+  let admissionLock: RuntimeAdmissionLock | null = null;
+  try {
+    if (input.admissionKey !== undefined) {
+      try {
+        admissionLock = acquireRuntimeAdmissionLock(targetDir, input.admissionKey);
+      } catch (error) {
+        return rejectVNext<TVNextState>(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `vNext admission lock could not be acquired for ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (admissionLock === null) {
+        return rejectVNext<TVNextState>(
+          'DOMAIN.INVALID_TRANSITION',
+          `admission key "${input.admissionKey}" is already in flight or has a stale lock; duplicate admission refused`,
+        );
+      }
+    }
+
+    let previousDigest: string | undefined;
+    if (boundedDefault) {
+      // Do not call the legacy path-based verifyChain or
+      // resolveCategoryChainTip for the bounded default.  K1 performs its own
+      // bound-fd chain verification immediately before writing; this read only
+      // resolves the predecessor through the K2/K1 directory identity seam.
+      try {
+        previousDigest = resolveBoundedCategoryChainTip(targetBinding);
+      } catch (error) {
+        const code =
+          error instanceof ReceiptChainError
+            ? 'RUNTIME.RECEIPT_CHAIN_BROKEN'
+            : 'RUNTIME.SCHEMA_MISMATCH';
+        return rejectVNext<TVNextState>(
+          code,
+          `bounded Receipt chain could not be read in ${targetDir} before admit: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else {
+      // Explicit injected ReceiptWriterPort remains the legacy-compatible test
+      // seam.  It is reached only after the K2 root/target/temp gate above.
+      const preChain = writer.verifyChain(targetDir);
+      if (!preChain.valid) {
+        return rejectVNext<TVNextState>(
+          'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          `receipt chain broken in ${targetDir} before admit: ${chainFailureDetail(preChain)}`,
+        );
+      }
+      previousDigest = resolveCategoryChainTip(targetDir);
+    }
+
+    const receiptData: Record<string, unknown> = {
+      version: 1,
+      type: input.build.type,
+      stage_id: input.build.stage_id,
+      timestamp: input.build.timestamp,
+      payload: input.build.payload,
+    };
+    if (input.build.slice_id !== undefined) receiptData.slice_id = input.build.slice_id;
+    if (previousDigest !== undefined) receiptData.previous_digest = previousDigest;
+
+    try {
+      input.beforeWrite?.();
+    } catch (error) {
+      return rejectVNext<TVNextState>(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `pre-write admission binding check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (!boundedDefault) {
+      // Keep the injected fake seam, but do not let its call happen after a
+      // test-injected target/temp identity swap has invalidated the bounded
+      // gate established above.
+      try {
+        const guard = openBoundedReceiptDirectory(targetBinding);
+        closeBoundedReceiptDirectory(guard);
+        if (
+          canonicalReceiptTempDirectory(projectRoot, targetBinding, tempDir) === null
+        ) {
+          throw new Error('bounded Receipt tempDir identity changed before injected writer');
+        }
+      } catch (error) {
+        return rejectVNext<TVNextState>(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `bounded Receipt binding changed before injected writer: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    if (boundedDefault) {
+      let boundedResult: BoundedWriteReceiptResult;
+      try {
+        boundedResult = writeReceiptBounded(receiptData, {
+          projectRoot,
+          receiptDir: targetDir,
+          tempDir,
+        });
+      } catch (error) {
+        const code =
+          error instanceof ReceiptChainError
+            ? 'RUNTIME.RECEIPT_CHAIN_BROKEN'
+            : 'RUNTIME.SCHEMA_MISMATCH';
+        const rejected = rejectVNext<TVNextState>(
+          code,
+          `writeReceiptBounded failed for ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+
+        // K1 owns post-install cleanup.  A failure before a bounded result is
+        // returned has no writer-time ReceiptFileBinding for Runtime to use;
+        // do not guess a digest path or lstat a possible pre-existing entry.
+        return rejected;
+      }
+
+      try {
+        if (!sameReceiptDirectoryBinding(boundedResult.boundDirectory, targetBinding)) {
+          throw new Error('bounded Receipt writer returned a different directory binding');
+        }
+        readBoundedReceiptResult(boundedResult);
+      } catch (error) {
+        return rejectAfterBoundedReceiptVerificationFailure<TVNextState>(
+          rejectVNext<TVNextState>(
+            'RUNTIME.RECEIPT_CHAIN_BROKEN',
+            `bounded post-write Receipt readback verification failed for ${boundedResult.path}: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+          boundedResult,
+          rollbackTestHooks,
+        );
+      }
+
+      // Preserve the legacy post-write chain guarantee without reopening the
+      // redirectable category path: the verification below binds every read
+      // to the canonical result's directory identity.
+      const postChain = verifyBoundedReceiptChain(boundedResult.boundDirectory);
+      if (!postChain.valid) {
+        return rejectAfterBoundedReceiptVerificationFailure<TVNextState>(
+          rejectVNext<TVNextState>(
+            'RUNTIME.RECEIPT_CHAIN_BROKEN',
+            `bounded Receipt chain broken in ${targetDir} after admit: ${chainFailureDetail(postChain)}`,
+          ),
+          boundedResult,
+          rollbackTestHooks,
+        );
+      }
+
+      try {
+        input.afterWrite?.(boundedResult);
+      } catch (error) {
+        return rejectAfterBoundedReceiptVerificationFailure<TVNextState>(
+          rejectVNext<TVNextState>(
+            'RUNTIME.SCHEMA_MISMATCH',
+            `post-install Receipt consistency check failed for ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+          boundedResult,
+          rollbackTestHooks,
+        );
+      }
+
+      return {
+        accepted: true,
+        receipt_ref: boundedResult.digest,
+        new_state: null,
+        vnext_state: input.nextState,
+        findings: [],
+      };
+    }
+
+    let writeResult: WriteReceiptResult;
+    try {
+      writeResult = writer.write(receiptData, {
+        receiptDir: targetDir,
+        tempDir,
+      });
+    } catch (error) {
+      const code =
+        error instanceof ReceiptChainError
+          ? 'RUNTIME.RECEIPT_CHAIN_BROKEN'
+          : 'RUNTIME.SCHEMA_MISMATCH';
+      const rejected = rejectVNext<TVNextState>(
+        code,
+        `writeReceipt failed for ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // Kernel writeReceipt renames before a post-write self-digest check.  Its
+      // ReceiptChainError carries the digest, so recover that exact path and
+      // apply the same identity-bound rollback used by post-chain failure.
+      if (
+        error instanceof ReceiptChainError &&
+        error.subtype === 'self_digest' &&
+        error.digest !== undefined &&
+        /^[a-f0-9]{64}$/.test(error.digest)
+      ) {
+        return rejectAfterReceiptVerificationFailure<TVNextState>(
+          rejected,
+          { path: path.join(targetDir, `${error.digest}.json`), digest: error.digest },
+          targetDir,
+          projectRoot,
+          rollbackTestHooks,
+        );
+      }
+      return rejected;
+    }
+
+    const writtenFileIdentity = captureWrittenReceiptIdentity(writeResult.path);
+
+    // Verify both the writer's canonical result and the actual on-disk
+    // self-digest before relying on the chain verdict or returning its digest.
+    if (canonicalPathWithinRoot(projectRoot, writeResult.path) !== path.resolve(writeResult.path)) {
+      return rejectAfterReceiptVerificationFailure<TVNextState>(
+        rejectVNext<TVNextState>(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `Receipt writer returned a path outside the project root: ${writeResult.path}`,
+        ),
+        writeResult,
+        targetDir,
+        projectRoot,
+        rollbackTestHooks,
+        writtenFileIdentity,
+      );
+    }
+    if (!receiptReadbackMatches(writeResult)) {
+      return rejectAfterReceiptVerificationFailure<TVNextState>(
+        rejectVNext<TVNextState>(
+          'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          `post-write Receipt readback verification failed for ${writeResult.path}`,
+        ),
+        writeResult,
+        targetDir,
+        projectRoot,
+        rollbackTestHooks,
+        writtenFileIdentity,
+      );
+    }
+
+    let postChain: ChainVerificationResult;
+    try {
+      postChain = writer.verifyChain(targetDir);
+    } catch (error) {
+      return rejectAfterReceiptVerificationFailure<TVNextState>(
+        rejectVNext<TVNextState>(
+          'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          `receipt chain verification failed in ${targetDir} after admit: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+        writeResult,
+        targetDir,
+        projectRoot,
+        rollbackTestHooks,
+        writtenFileIdentity,
+      );
+    }
+    if (!postChain.valid) {
+      return rejectAfterReceiptVerificationFailure<TVNextState>(
+        rejectVNext<TVNextState>(
+          'RUNTIME.RECEIPT_CHAIN_BROKEN',
+          `receipt chain broken in ${targetDir} after admit: ${chainFailureDetail(postChain)}`,
+        ),
+        writeResult,
+        targetDir,
+        projectRoot,
+        rollbackTestHooks,
+        writtenFileIdentity,
+      );
+    }
+
+    try {
+      input.afterWrite?.(writeResult);
+    } catch (error) {
+      return rejectAfterReceiptVerificationFailure<TVNextState>(
+        rejectVNext<TVNextState>(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `post-install Receipt consistency check failed for ${targetDir}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+        writeResult,
+        targetDir,
+        projectRoot,
+        rollbackTestHooks,
+        writtenFileIdentity,
+      );
+    }
+
+    return {
+      accepted: true,
+      receipt_ref: writeResult.digest,
+      new_state: null,
+      vnext_state: input.nextState,
+      findings: [],
+    };
+  } finally {
+    if (admissionLock !== null) releaseRuntimeAdmissionLock(admissionLock);
+  }
+}
+
 /**
  * Run the unified admit pipeline (AWI-006) for one AdmissionRequest.
  *
@@ -789,6 +2823,41 @@ export function runAdmitPipeline(
       stageNotFoundAttribution(state.stage_id, stageNotFound),
       state,
     );
+  }
+
+  // Reconcile errors are already canonical Findings.  Preserve their exact
+  // code/message and refuse before the reducer, precheck, target-directory
+  // access, or Receipt writer.  The stage-not-found attribution above stays
+  // first so that existing source-specific attribution is unchanged.
+  //
+  // Scope note (legacy v1 Integration regression): the git-source diagnostic
+  // from `checkCommitReceiptHead` (a SLICE_COMMIT receipt recording a commit
+  // that is not an ancestor of git HEAD) is an error-level
+  // RUNTIME.RECEIPT_CHAIN_BROKEN Finding, but it does NOT put the receipt
+  // chain itself in a broken state — `receipt_chain_valid` stays true, the
+  // commit fact is still attributable, and the Finding exists to surface the
+  // git/chain disagreement (PO-S02-C-02), not to refuse the admission.  The
+  // legacy consumer has always tolerated that diagnostic Finding at this
+  // gate (it refused only genuine chain breaks, where `receipt_chain_valid`
+  // is false).  A genuinely broken / tampered chain keeps `receipt_chain_valid
+  // === false` and is STILL refused below, together with every other
+  // error-level Finding (incl. the legacy/vNext SCHEMA_MISMATCH isolation
+  // gate — v2 Receipts must never flow into the legacy consumer).
+  const reconcileErrors = state.findings.filter(
+    (finding) =>
+      finding.severity === 'error' &&
+      !(
+        finding.code === 'RUNTIME.RECEIPT_CHAIN_BROKEN' &&
+        state.receipt_chain_valid === true
+      ),
+  );
+  if (reconcileErrors.length > 0) {
+    return {
+      accepted: false,
+      receipt_ref: null,
+      new_state: state,
+      findings: reconcileErrors,
+    };
   }
 
   // ── 3. Reducer precheck / state advance (T02–T04 wire per admit method;
@@ -1176,6 +3245,27 @@ export function admitGateResult(
   request: GateResultAdmissionRequest,
   deps: SpvGateAdmissionDeps,
 ): AdmitResult {
+  // vNext route guard: a Gate fact for a vNext Manifest never enters the
+  // legacy reconcile/reducer path.  `unknown` routes are refused, never
+  // silently degraded to the v1 reader (fail closed, §9.5).
+  const projectRoot = path.resolve(deps.projectRoot);
+  const manifestPath = path.join(projectRoot, '.proofloop', 'manifests', `${request.stageId}.json`);
+  const route = detectPlanManifestRoute(projectRoot, manifestPath);
+  if (route === 'vnext') {
+    return admitVNextGateResult(request, { projectRoot, writer: deps.writer }) as unknown as AdmitResult;
+  }
+  if (route === 'unknown') {
+    return {
+      accepted: false,
+      receipt_ref: null,
+      new_state: null,
+      findings: [{
+        code: 'RUNTIME.SCHEMA_MISMATCH',
+        severity: 'error',
+        message: `stage gate refused: Manifest route is unknown for stage "${request.stageId}"`,
+      }],
+    };
+  }
   return runAdmitPipeline({
     request,
     reconcile:
