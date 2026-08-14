@@ -1,6 +1,6 @@
 ---
 name: ai-structured-prd
-description: convert messy product ideas, chat history, notes, screenshots, or partial requirements into an ai-usable structured prd for non-technical users. use when the user wants to turn an idea into a prd, prepare requirements before ai coding, maintain prd context across a long conversation, review a prd for clarity, or identify missing product decisions before technical design. focuses on intent, users, scenarios, flows, scope, acceptance criteria, decision ledger, glossary, and readiness; does not create full technical architecture or implementation plans.
+description: Use when the user has a rough product idea to shape into a structured PRD, or an existing PRD to review, before technical design.
 ---
 
 # ai-structured-prd
@@ -20,7 +20,7 @@ Separate layers:
 
 Use the smallest mode that fits the request:
 
-1. **intent mode**: user has a vague idea. Restate the desired outcome, user, why now, success, constraints, and out of scope. Ask one high-leverage question if needed.
+1. **intent mode**: user has a vague idea. Restate the desired outcome, user, why now, success, constraints, and out of scope.
 2. **context mode**: conversation contains scattered decisions. Build or update `PRD Context` and label each item as `confirmed`, `inferred`, `decided during intake`, `open`, or `optional`.
 3. **draft mode**: enough context exists. Generate the structured PRD using `references/prd-template.md`.
 4. **review mode**: user provides a PRD or draft. Use `references/review-rubric.md` to score readiness and ask only the single most important clarification if blocked.
@@ -38,6 +38,8 @@ Use the smallest mode that fits the request:
 - Keep language accessible to non-programmers. If a term such as login, permission, data saving, import/export, deployment, or integration is necessary, explain it in one sentence.
 - Include product facts that affect implementation, such as login, data persistence, roles, permissions, uploads, integrations, mobile use, privacy, payment, content safety, and admin needs.
 - Do not choose frameworks, databases, API design, schema, architecture, deployment, or task breakdown inside the PRD.
+- When the user is missing a product decision that blocks progress, return `USER_DECISION_REQUIRED`.
+- When a product authority gap is identified (e.g., scope, behavior, or acceptance criteria is unclear), return `AUTHORITY_GAP` with a descriptive subtype.
 
 ## Standard workflow
 
@@ -66,7 +68,6 @@ Use the smallest mode that fits the request:
    - If blocked, ask only the highest-leverage clarification question.
 
 6. **Prepare stage candidates only after PRD readiness**
-   - Do not create stage candidates while core PRD facts are still unstable.
    - Stage candidates are product-delivery slices for Brain dispatch, not technical tasks.
    - Each candidate must map to user-visible value or a coherent product capability.
    - Each candidate must preserve PRD acceptance criteria, scope, and non-goals.
