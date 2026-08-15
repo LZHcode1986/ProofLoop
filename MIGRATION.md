@@ -9,7 +9,7 @@
 | `packages/kernel/`、`packages/runtime/` | 校验核心 + CLI（含 `dist/` 构建产物，复制即用） |
 | `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces、4-worker OOM 防护） |
 | `.agents/contracts/brain/` | Brain 角色契约（评审/提交/验收/研究/原型/多轮修复等 9 个） |
-| `.agents/skills/`（10 个） | 流程技能：`proofloop-plan`、`proofloop-execute`、`ai-structured-prd`、`prd-to-ai-architecture`、`prd-to-tech-design-prep`、`codebase-design`、`test-driven-development`、`security-and-hardening`、`diagnose`、`code-review-and-quality`、`handoff` |
+| `.agents/skills/`（13 个） | 流程技能：`proofloop-plan`、`proofloop-execute`、`ai-structured-prd`、`prd-to-ai-architecture`、`prd-to-tech-design-prep`、`codebase-design`、`test-driven-development`、`security-and-hardening`、`diagnose`、`code-review-and-quality`、`handoff`、`wayfinder`、`writing-great-skills` |
 | 角色定义（二选一或都带） | Pi：`.pi/agents/`（8 个）+ `.pi/brain-workflow.md` + `.pi/extensions/proofloop-mode.ts`；OpenCode：`.opencode/agents/`（9 个） |
 | `AGENTS.md` | 项目规则（流程纪律、职责边界） |
 | `opencode.json`、`.pi/subagents.json` | harness 配置（按需） |

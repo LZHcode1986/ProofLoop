@@ -11,7 +11,7 @@
 | 路径 | 内容 | 迁移方式 |
 |---|---|---|
 | `packages/kernel` / `packages/runtime` | 校验核心 + CLI（10 域） | 直接复制 |
-| `.agents/skills/` | 流程技能（规划/执行/权威分析等 10 个） | 直接复制 |
+| `.agents/skills/` | 流程技能（规划/执行/权威分析等 13 个） | 直接复制 |
 | `.agents/contracts/` | Brain 角色契约（评审/提交/验收/研究等） | 直接复制 |
 | `.pi/agents/` + `.pi/brain-workflow.md` | Pi harness 角色定义 + Brain 工作流 | 按 harness 选择 |
 | `.opencode/agents/` | OpenCode harness 角色定义 | 按 harness 选择 |
