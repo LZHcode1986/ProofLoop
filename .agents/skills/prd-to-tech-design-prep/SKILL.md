@@ -1,6 +1,6 @@
 ---
 name: prd-to-tech-design-prep
-description: CONDITIONAL_TECHNICAL_CLARIFICATION phase skill (conditional): use only when the PRD is confirmed and product-level technical questions block architecture; produce plain-language clarification questions and a technical design input brief (TECHNICAL_CLARIFICATION_READY).
+description: CONDITIONAL_TECHNICAL_CLARIFICATION phase skill (conditional)：use only when the PRD is confirmed and product-level technical questions block architecture; produce plain-language clarification questions and a technical design input brief (TECHNICAL_CLARIFICATION_READY).
 ---
 
 # prd-to-tech-design-prep

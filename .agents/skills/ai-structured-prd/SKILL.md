@@ -1,6 +1,6 @@
 ---
 name: ai-structured-prd
-description: PRODUCT_DEFINITION phase skill: use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD and wait for user confirmation (PRD_CONFIRMED).
+description: PRODUCT_DEFINITION phase skill：use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD and wait for user confirmation (PRD_CONFIRMED).
 ---
 
 # ai-structured-prd

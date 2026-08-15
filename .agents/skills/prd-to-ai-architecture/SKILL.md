@@ -1,6 +1,6 @@
 ---
 name: prd-to-ai-architecture
-description: ARCHITECTURE phase skill: use after the PRD is confirmed (and required clarification resolved); produce an AI-coding-ready architecture package under tech-spec/ (contracts, state matrices, hard parts, task acceptance matrix), confirming artifact by artifact (ARCHITECTURE_READY).
+description: ARCHITECTURE phase skill：use after the PRD is confirmed (and required clarification resolved); produce an AI-coding-ready architecture package under tech-spec/ (contracts, state matrices, hard parts, task acceptance matrix), confirming artifact by artifact (ARCHITECTURE_READY).
 ---
 
 # PRD to AI Architecture

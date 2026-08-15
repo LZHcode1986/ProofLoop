@@ -1,6 +1,6 @@
 ---
 name: codebase-design
-description: STAGE_SELECTION support skill: use when deep module principles, seam identification, or domain modeling is needed to select Stage Goals and Work Items.
+description: STAGE_SELECTION support skill：use when deep module principles, seam identification, or domain modeling is needed to select Stage Goals and Work Items.
 ---
 
 # Codebase Design Skill
