@@ -17,7 +17,7 @@
 | `.opencode/agents/` | OpenCode harness 角色定义 | 按 harness 选择 |
 | `CONTEXT.md` / `PRD.md` / `tech-spec/` | 需求与权威模板（需改写） | 复制后改写 |
 | `AGENTS.md` | 项目规则 | 直接复制 |
-| `package.json` 等 | 构建/测试配置 | 直接复制 |
+| `package.json` 等 | 构建配置 | 直接复制 |
 
 ## 快速开始
 

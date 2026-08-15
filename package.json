@@ -6,12 +6,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/kernel packages/runtime",
-    "test": "vitest run"
+    "build": "tsc -b packages/kernel packages/runtime"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^3.0.0"
+    "typescript": "^5.0.0"
   }
-}
+}

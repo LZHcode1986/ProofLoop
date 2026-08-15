@@ -7,7 +7,7 @@
 | 路径 | 说明 |
 |---|---|
 | `packages/kernel/`、`packages/runtime/` | 校验核心 + CLI（含 `dist/` 构建产物，复制即用） |
-| `package.json`、`package-lock.json`、`tsconfig.json`、`vitest.config.ts` | 构建/测试配置（workspaces、4-worker OOM 防护） |
+| `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces、4-worker OOM 防护） |
 | `.agents/contracts/brain/` | Brain 角色契约（评审/提交/验收/研究/原型/多轮修复等 9 个） |
 | `.agents/skills/`（10 个） | 流程技能：`proofloop-plan`、`proofloop-execute`、`ai-structured-prd`、`prd-to-ai-architecture`、`prd-to-tech-design-prep`、`codebase-design`、`test-driven-development`、`security-and-hardening`、`diagnose`、`code-review-and-quality`、`handoff` |
 | 角色定义（二选一或都带） | Pi：`.pi/agents/`（8 个）+ `.pi/brain-workflow.md` + `.pi/extensions/proofloop-mode.ts`；OpenCode：`.opencode/agents/`（9 个） |
@@ -28,7 +28,6 @@
 | `.proofloop/` | 新项目首次运行自动/手工创建；`runtime.lock` 见下 |
 | `delivery/stages/` | 从第一个 Stage 的规划开始生成（`plan materialize`） |
 | `progress.md` | 新项目自己的进度快照 |
-| 测试 | **模板不含测试**：本仓库的测试绑定本项目语义（S08/S09 等历史夹具），不迁移。新项目验证走真实流程（计划 → 认可 → 派工 → 验收），按需自建测试 |
 
 ### runtime.lock 初始化
 
