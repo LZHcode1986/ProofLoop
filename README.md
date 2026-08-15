@@ -16,7 +16,6 @@
 | `.pi/agents/` + `.pi/brain-workflow.md` | Pi harness 角色定义 + Brain 工作流 | 按 harness 选择 |
 | `.opencode/agents/` | OpenCode harness 角色定义 | 按 harness 选择 |
 | `CONTEXT.md` / `PRD.md` / `tech-spec/` | 需求与权威模板（需改写） | 复制后改写 |
-| `ProofLoop_pluginv2_流程优化方案.md` | 流程设计规范（参考） | 保留 |
 | `AGENTS.md` | 项目规则 | 直接复制 |
 | `package.json` 等 | 构建/测试配置 | 直接复制 |
 
