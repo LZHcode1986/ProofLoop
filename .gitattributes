@@ -11,3 +11,6 @@
 *.woff binary
 *.woff2 binary
 *.ttf binary
+
+# drvfs (WSL /mnt) misdetects CRLF package.json as binary; force explicit text.
+package.json text eol=lf
