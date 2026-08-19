@@ -1,5 +1,5 @@
 /**
- * Shared closed v2 CV_RESULT payload and CV Receipt chain validation
+ * Shared closed CV_RESULT payload and CV Receipt chain validation
  * (S08-REVIEW-006).
  *
  * This module is deliberately independent of both `./cv-admission` and
@@ -7,7 +7,17 @@
  * `./next`, so a reverse import would create a direct circular dependency.
  * The `next` execution consumer applies the SAME closed validation strength
  * as CV admission through this module instead of re-implementing a weaker
- * "equivalent" subset. The exported checks cover:
+ * "equivalent" subset. S12-D-T04 (§8.3) extends the shared payload seam to
+ * the slice-local (schema_version 3) shape: the same validator discriminates
+ * v2 (no binding fields) from v3 (three binding fields required) and never
+ * produces a second validation logic; the admission-level schema_version
+ * discrimination helper (`credentialSchemaVersionMismatch`) is shared by the
+ * Worker/CV/Commit/Integration consumers. Per the S12-D REPLAN, schema_version
+ * 3 IS the slice-local credential version: a v3 credential in a slice-local
+ * Stage is the legal credential of that Stage (binding fields validated and
+ * bound to the Manifest contract digests), while a v2 credential in a
+ * slice-local Stage and a v3 credential in a legacy Stage are both
+ * BINDING.MODE_MIXED. The exported checks cover:
  *
  *   1. the closed v2 CV_RESULT payload field set — schema/type/verdict/
  *      verification_type vocabulary, stage/slice and Manifest/Plan/Proof
@@ -30,14 +40,26 @@
  */
 import { VNextHandoffError } from './dispatch';
 import {
+  VNEXT_BINDING_FIELD_EXECUTION_BINDING_DIGEST,
+  VNEXT_BINDING_FIELD_SLICE_CONTRACT_DIGEST,
+  VNEXT_BINDING_FIELD_STAGE_CONTRACT_DIGEST,
+  VNEXT_CREDENTIAL_BINDING_FIELDS,
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY,
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL,
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_V2,
   VNEXT_CV_RESULT_TYPE,
   VNEXT_CV_RISK_APPLICABILITIES,
-  VNEXT_CV_SCHEMA_VERSION,
   VNEXT_CV_VERDICTS,
   VNEXT_CV_VERIFICATION_TYPES,
 } from './types';
+import type { VNextManifest, VNextManifestSlice } from '@proofloop/kernel';
+import {
+  computeExecutionBindingDigest,
+  type VNextDependencyBinding,
+} from '@proofloop/kernel/dist/vnext';
 
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const GIT_SHA_RE = /^[a-f0-9]{40}$/;
 const SNAPSHOT_RE = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const CONTEXT_REF_RE = /^\.proofloop\/context\/([a-f0-9]{64})\.json$/;
 const RISK_REFERENCE_FIELDS = new Set(['ref_id', 'applicability', 'reason']);
@@ -77,6 +99,12 @@ const KNOWN_CV_PAYLOAD_FIELDS = new Set([
   'required_recheck_scope',
   'previous_failure_signature',
   'repair_diff_digest',
+  // S12-D-T04 (§8.3): slice-local binding fields — only admissible on a
+  // schema_version 3 payload; a v2 payload carrying any of them is rejected
+  // below (never silently ignored).
+  VNEXT_BINDING_FIELD_STAGE_CONTRACT_DIGEST,
+  VNEXT_BINDING_FIELD_SLICE_CONTRACT_DIGEST,
+  VNEXT_BINDING_FIELD_EXECUTION_BINDING_DIGEST,
 ]);
 
 /**
@@ -102,6 +130,14 @@ export interface VNextCvPayloadBinding {
   readonly proofIndexDigest: string;
   /** The self-digest of the Slice Worker chain tip (latest TASK_COMPLETE). */
   readonly workerTipDigest: string;
+  /**
+   * S12-D-T04 (§8.3, S12-D REPLAN): slice-local (schema_version 3) binding
+   * expectation. When provided and the payload is a v3 credential, the three
+   * binding fields must exactly match the Manifest stage/slice contract
+   * digests and the recomputed execution binding digest; a v2 payload
+   * carrying any binding field is rejected (never silently ignored).
+   */
+  readonly sliceLocalBinding?: VNextSliceLocalBindingExpectation;
   /** Manifest Slice Proof Index acceptance ref set (exact match when set). */
   readonly expectedAcceptanceRefs?: readonly string[];
   /** Manifest Slice Proof Index seam ref set (exact match when set). */
@@ -324,6 +360,318 @@ function sameRefSet(actual: readonly string[], expected: readonly string[]): boo
 }
 
 /**
+ * S12-D-T04 (§8.3): explicit credential schema_version discrimination for a
+ * CV payload. The shared validator understands BOTH the current vNext (2)
+ * and the slice-local (3) payload shapes — one validation logic, no second
+ * schema. For v3 the three binding fields are required (each a lowercase
+ * SHA-256); for v2 the binding fields are forbidden (a v2 payload carrying
+ * them would silently smuggle slice-local fields past v2 consumers).
+ * Legacy (1), unknown future (>3) and malformed values fail closed with an
+ * explicit message.
+ */
+function assertCredentialSchemaVersion(
+  payload: Record<string, unknown>,
+  label: string,
+): void {
+  const schemaVersion = payload.schema_version;
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) {
+    for (const field of VNEXT_CREDENTIAL_BINDING_FIELDS) {
+      requireSha256Digest(payload[field], `${label}.${field}`);
+    }
+    return;
+  }
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_V2) {
+    for (const field of VNEXT_CREDENTIAL_BINDING_FIELDS) {
+      if (hasOwn(payload, field)) {
+        failAdmission(
+          `${label} is a v2 credential and must not carry the slice-local binding field "${field}" (schema_version must be ${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL} for binding fields)`,
+        );
+      }
+    }
+    return;
+  }
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY) {
+    failAdmission(
+      `${label} is a legacy schema_version ${VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY} credential; legacy facts cannot be consumed by the vNext consumer`,
+    );
+  }
+  if (
+    typeof schemaVersion === 'number' &&
+    Number.isInteger(schemaVersion) &&
+    schemaVersion > VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL
+  ) {
+    failAdmission(
+      `${label} carries an unknown future schema_version ${schemaVersion} (>${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL}); explicit fail-closed in every consumer`,
+    );
+  }
+  failAdmission(
+    `${label}.schema_version must be ${VNEXT_CREDENTIAL_SCHEMA_VERSION_V2} (current vNext) or ${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL} (slice-local)`,
+  );
+}
+
+/**
+ * S12-D-T04 (§8.3/§8.4, S12-D REPLAN): admission-level credential
+ * schema_version discrimination shared by every vNext admission consumer.
+ *
+ * A credential (Receipt payload) entering a vNext consumer is rejected when
+ * its schema_version is not the mode the consumer admits:
+ *  - legacy credential (1) never enters a vNext chain (blocked, unchanged);
+ *  - a credential whose mode contradicts the Stage mode (manifest.binding
+ *    present vs absent) fails closed with BINDING.MODE_MIXED — including a
+ *    v2 (no-binding) credential in a slice-local Stage: every consumer
+ *    rejects it, there is no Phase-1 acceptance policy (S12-D repair);
+ *  - a slice-local credential (3) in a slice-local Stage is the LEGAL
+ *    credential of that Stage (S12-D REPLAN: schema_version 3 = slice-local
+ *    credential version; the binding fields are validated and bound by each
+ *    consumer through `assertSliceLocalCredentialBindingFields`);
+ *  - unknown/future schema_version (>3) fails closed explicitly in every
+ *    consumer (BINDING.SCHEMA_FUTURE);
+ *  - malformed values fail closed as RUNTIME.SCHEMA_MISMATCH.
+ *
+ * Returns null when the credential is admissible for the Stage mode.
+ */
+export type CredentialSchemaMismatchKind =
+  | 'LEGACY_BLOCKED'
+  | 'SCHEMA_FUTURE'
+  | 'MODE_MIXED'
+  | 'SCHEMA_UNKNOWN'
+  | 'SCHEMA_MALFORMED';
+
+export interface CredentialSchemaMismatch {
+  readonly kind: CredentialSchemaMismatchKind;
+  readonly code: 'RUNTIME.SCHEMA_MISMATCH' | 'BINDING.SCHEMA_FUTURE' | 'BINDING.MODE_MIXED';
+  readonly message: string;
+}
+
+export function credentialSchemaVersionMismatch(
+  schemaVersion: unknown,
+  stageHasBinding: boolean,
+  label: string,
+): CredentialSchemaMismatch | null {
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_V2) {
+    if (!stageHasBinding) return null;
+    return {
+      kind: 'MODE_MIXED',
+      code: 'BINDING.MODE_MIXED',
+      message:
+        `${label} is a v2 (no-binding) credential in a slice-local Stage: the Stage mixes two credential modes (BINDING.MODE_MIXED)`,
+    };
+  }
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) {
+    if (!stageHasBinding) {
+      return {
+        kind: 'MODE_MIXED',
+        code: 'BINDING.MODE_MIXED',
+        message:
+          `${label} is a slice-local (schema_version ${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL}) credential in a legacy Stage: the Stage mixes two credential modes (BINDING.MODE_MIXED)`,
+      };
+    }
+    // S12-D REPLAN: schema_version 3 IS the slice-local credential version.
+    // A v3 credential in a slice-local Stage is the legal credential of that
+    // Stage — the binding fields are validated (64-hex, Manifest contract
+    // digest consistency, recomputed execution binding) by every consumer
+    // through `assertSliceLocalCredentialBindingFields`.
+    return null;
+  }
+  if (schemaVersion === VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY) {
+    return {
+      kind: 'LEGACY_BLOCKED',
+      code: 'RUNTIME.SCHEMA_MISMATCH',
+      message:
+        `${label} is a legacy schema_version ${VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY} credential; legacy facts cannot be mixed into a vNext chain`,
+    };
+  }
+  if (
+    typeof schemaVersion === 'number' &&
+    Number.isInteger(schemaVersion) &&
+    schemaVersion > VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL
+  ) {
+    return {
+      kind: 'SCHEMA_UNKNOWN',
+      code: 'BINDING.SCHEMA_FUTURE',
+      message:
+        `${label} carries an unknown future schema_version ${schemaVersion} (>${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL}): explicit fail-closed in every consumer (BINDING.SCHEMA_FUTURE)`,
+    };
+  }
+  return {
+    kind: 'SCHEMA_MALFORMED',
+    code: 'RUNTIME.SCHEMA_MISMATCH',
+    message:
+      `${label}.schema_version must be ${VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY}, ${VNEXT_CREDENTIAL_SCHEMA_VERSION_V2}, or ${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL}`,
+  };
+}
+
+/**
+ * S12-D-T04 (§8.3): the slice-local binding-field expectation a v3
+ * credential must satisfy — the Manifest `binding.stage_contract_digest`, the
+ * Slice's `slice_contract_digest` and the execution binding digest recomputed
+ * through the kernel bindings.ts oracle (never caller-supplied).
+ */
+export interface VNextSliceLocalBindingExpectation {
+  readonly stageContractDigest: string;
+  readonly sliceContractDigest: string;
+  readonly executionBindingDigest: string;
+}
+
+/**
+ * S12-D-T04 (§8.3): shared slice-local binding-field validation for v3
+ * credential payloads, applied by EVERY consumer (Worker/CV/Commit/
+ * Integration) to every credential it consumes:
+ *  - a v2 credential carrying any binding field is rejected (never silently
+ *    ignored — the binding fields belong to the v3 shape only);
+ *  - a v3 credential must carry the three binding fields as lowercase
+ *    SHA-256 digests (same closed rule as `assertCredentialSchemaVersion`);
+ *  - when `expected` is provided (slice-local Stage), the three fields must
+ *    exactly match the Manifest stage/slice contract digests and the
+ *    recomputed execution binding digest.
+ */
+export function assertSliceLocalCredentialBindingFields(
+  payload: Record<string, unknown>,
+  label: string,
+  expected?: VNextSliceLocalBindingExpectation,
+): void {
+  if (payload.schema_version === VNEXT_CREDENTIAL_SCHEMA_VERSION_V2) {
+    for (const field of VNEXT_CREDENTIAL_BINDING_FIELDS) {
+      if (hasOwn(payload, field)) {
+        failAdmission(
+          `${label} is a v2 credential and must not carry the slice-local binding field "${field}" (schema_version must be ${VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL} for binding fields)`,
+        );
+      }
+    }
+    return;
+  }
+  if (payload.schema_version !== VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) return;
+  for (const field of VNEXT_CREDENTIAL_BINDING_FIELDS) {
+    requireSha256Digest(payload[field], `${label}.${field}`);
+  }
+  if (expected === undefined) return;
+  if (payload.stage_contract_digest !== expected.stageContractDigest) {
+    failAdmission(`${label}.stage_contract_digest does not match the Manifest slice-local binding`);
+  }
+  if (payload.slice_contract_digest !== expected.sliceContractDigest) {
+    failAdmission(`${label}.slice_contract_digest does not match the Manifest Slice contract`);
+  }
+  if (payload.execution_binding_digest !== expected.executionBindingDigest) {
+    failAdmission(`${label}.execution_binding_digest does not match the recomputed slice-local execution binding`);
+  }
+}
+
+/**
+ * T04b (user authorization) + S12-D repair (v3 historical base snapshot):
+ * the slice-local binding expectation a persisted v3 credential must
+ * satisfy, computed by the READ-ONLY currentness consumers (`next` /
+ * `validate-vnext-stage`) from the Manifest and the credential's own bound
+ * facts.
+ *
+ * The stage/slice contract digests come from the current Manifest (the
+ * compiler computed them through the kernel bindings.ts oracle, S12-C); the
+ * execution binding digest is recomputed through the same kernel oracle from
+ * the receipt-bound dependency bindings and the credential's OWN payload
+ * `snapshot_digest` — the HISTORICAL base snapshot the execution binding
+ * was computed against at admission (a Worker/CV/Commit credential is
+ * admitted at the then-current snapshot, and the INTEGRATION_PASS tuple
+ * snapshot equals the admitted SPV snapshot, stable for the whole Stage).
+ * The admission consumers keep using `computeSliceLocalBindingExpectation`
+ * (worker-admission) which derives dependency bindings from the persisted
+ * dependency receipts; this pure helper derives them from the credential's
+ * own payload facts (no filesystem or Git I/O, matching this module's
+ * contract).
+ *
+ * S12-D repair (v3 historical base snapshot): the base MUST be the
+ * credential's own payload snapshot, never the CURRENT authority snapshot.
+ * After an integration commit + fresh SPV the current snapshot legitimately
+ * advances while every historical credential of an integrated CURRENT
+ * slice stays bound to its own snapshot; recomputing against the current
+ * authority snapshot would change the digest and wrongly block RUN_CV for
+ * a slice that is integrated and current (FR-020). The execution binding
+ * digest is recomputed over the credential's own bound facts, so a v3
+ * credential whose execution binding cannot be recomputed from them fails
+ * closed — the credential is not self-consistent and can never back a
+ * slice-local currentness claim.
+ */
+export function computeSliceLocalCredentialExpectation(
+  manifest: VNextManifest,
+  sliceId: string,
+  dependencyBindings: readonly VNextDependencyBinding[],
+  payload: Record<string, unknown>,
+): VNextSliceLocalBindingExpectation {
+  // The credential's own tuple snapshot is the execution-binding base
+  // snapshot the admission consumer computed against (§8.2): for the
+  // INTEGRATION_PASS credential the payload snapshot equals the admitted
+  // SPV snapshot, and for Worker/CV/Commit credentials the payload snapshot
+  // is the snapshot the credential was admitted at. The historical value
+  // stays stable across HEAD advances / fresh SPV passes, so the recompute
+  // reproduces the write-side digest (S12-D repair).
+  return computeSliceLocalCredentialExpectationForBase(
+    manifest,
+    sliceId,
+    dependencyBindings,
+    requireSnapshotDigest(
+      payload.snapshot_digest,
+      'INTEGRATION_PASS.payload.snapshot_digest',
+    ),
+    'INTEGRATION_PASS.payload',
+  );
+}
+
+/**
+ * The shared pure recomputation behind {@link computeSliceLocalCredential-
+ * Expectation}: the slice-local expectation of a v3 credential whose
+ * execution binding was computed by its admission consumer against a given
+ * base snapshot. Every read-side consumer MUST pass the credential's OWN
+ * payload `snapshot_digest` as the base (the historical value the admission
+ * consumer computed against) — NEVER the current authority snapshot: after
+ * an integration commit + fresh SPV the current snapshot legitimately
+ * advances while the historical credential stays bound to its own
+ * snapshot, and a base-snapshot mismatch would wrongly reject an
+ * integrated CURRENT slice (FR-020). A tampered credential (wrong
+ * stage/slice contract digests or a non-recomputable execution binding)
+ * still fails closed.
+ */
+export function computeSliceLocalCredentialExpectationForBase(
+  manifest: VNextManifest,
+  sliceId: string,
+  dependencyBindings: readonly VNextDependencyBinding[],
+  baseSnapshotDigest: string,
+  label = 'INTEGRATION_PASS.payload',
+): VNextSliceLocalBindingExpectation {
+  if (manifest.binding === undefined) {
+    failAdmission('slice-local binding expectation requires a Manifest binding');
+  }
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) {
+    failAdmission(`Manifest does not declare slice ${sliceId}`);
+  }
+  const stageContractDigest = requireSha256Digest(
+    manifest.binding.stage_contract_digest,
+    'Manifest binding.stage_contract_digest',
+  );
+  const sliceContractDigest = requireSha256Digest(
+    slice.slice_contract_digest,
+    `Manifest slice ${sliceId}.slice_contract_digest`,
+  );
+  requireSnapshotDigest(baseSnapshotDigest, `${label}.snapshot_digest`);
+  let executionBindingDigest: string;
+  try {
+    executionBindingDigest = computeExecutionBindingDigest({
+      stage_id: manifest.stage_id,
+      slice_id: sliceId,
+      stage_contract_digest: stageContractDigest,
+      slice_contract_digest: sliceContractDigest,
+      dependency_bindings: [...dependencyBindings],
+      base_snapshot_digest: baseSnapshotDigest,
+    });
+  } catch (error) {
+    failAdmission(
+      `${label} execution binding could not be recomputed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  return { stageContractDigest, sliceContractDigest, executionBindingDigest };
+}
+
+/**
  * Closed v2 CV_RESULT payload validation for a persisted CV Receipt.
  *
  * The check covers the full closed field set CV admission enforces:
@@ -352,10 +700,13 @@ export function assertClosedVNextCvPayload(
       failAdmission(`CV Receipt payload contains unknown field "${key}"`);
     }
   }
-  if (payload.schema_version !== VNEXT_CV_SCHEMA_VERSION) {
-    failAdmission(
-      `CV Receipt payload is not the closed v2 CV_RESULT schema (schema_version must be ${VNEXT_CV_SCHEMA_VERSION})`,
-    );
+  assertCredentialSchemaVersion(payload, 'CV_RESULT');
+  // S12-D-T04 (§8.3, S12-D REPLAN): when the caller supplies the slice-local
+  // binding expectation (slice-local Stage), a v3 CV credential must bind the
+  // Manifest contract digests and the recomputed execution binding; a v2
+  // credential carrying binding fields was already rejected above.
+  if (binding !== undefined && binding.sliceLocalBinding !== undefined) {
+    assertSliceLocalCredentialBindingFields(payload, 'CV_RESULT', binding.sliceLocalBinding);
   }
   if (payload.type !== VNEXT_CV_RESULT_TYPE) {
     failAdmission(
@@ -484,6 +835,370 @@ export function assertVNextCvReceiptTypeVerdict(
       `CV Receipt type ${receiptType} does not match the payload verdict ${String(verdict)}`,
     );
   }
+}
+
+/**
+ * S12-E REPAIR-FINAL — upstream credential semantic validation.
+ *
+ * A persisted INTEGRATION_PASS credential is only CURRENT when the upstream
+ * fact chain it references (TASK_COMPLETE → CV_PASS → SLICE_COMMIT) EXISTS in
+ * its persisted chains (each chain valid) AND every upstream payload carries
+ * the complete field semantics.  Digest self-consistency (the receipt's own
+ * digest is correct) and outer chain validity are never sufficient: a forged
+ * upstream credential that is self-digest-correct but semantically incomplete
+ * (missing fields / missing CV PASS / missing SLICE_COMMIT) fails closed.
+ * These helpers are shared by every INTEGRATION_PASS chain consumer
+ * (evidence-refresh rebind preflight, next slice-local chain read, A8
+ * cross-slice boundary helpers).
+ */
+
+/**
+ * S12-E REPAIR-FINAL round 3 — upstream credential semantic options.
+ *
+ * The shared upstream semantics are I/O-free; the callers supply the
+ * I/O-bound verification callback and the Manifest-derived facts they have
+ * already read:
+ *  - `verifyContextPersisted` — the context_ref file must EXIST at
+ *    `.proofloop/context/<context_digest>.json` and its content digest must
+ *    equal context_digest (context 落盘绑定). The callback throws on
+ *    failure; a context_ref naming a nonexistent or non-matching file is
+ *    never a binding.
+ *  - `expectedSliceLocalBinding` — the slice-local binding expectation
+ *    (Manifest contract digests + execution binding recomputed through the
+ *    kernel oracle) a v3 credential must exactly match (64-hex + 可重算).
+ *  - `allowedScope` — the root-relative Manifest scope (task/slice
+ *    allowedCodeScope union + evidence/plan projections) the changed_files
+ *    must stay inside.
+ */
+export interface VNextUpstreamSemanticsOptions {
+  readonly verifyContextPersisted?: (contextRef: string, contextDigest: string) => void;
+  readonly expectedSliceLocalBinding?: VNextSliceLocalBindingExpectation;
+  readonly allowedScope?: readonly string[];
+  /**
+   * S12-E REPAIR-FINAL round 4: whether the Stage is slice-local (the
+   * Manifest carries a `binding`).  Required at EVERY upstream credential
+   * read point: the schema_version ↔ Stage-mode discrimination runs here
+   * so a forged v2 (no-binding) upstream TASK_COMPLETE/CV_PASS/SLICE_COMMIT
+   * can never back a slice-local CURRENT chain (BINDING.MODE_MIXED), and a
+   * v3 credential in a legacy Stage is MODE_MIXED as well — the same
+   * closed rule every admission consumer applies to the credential itself.
+   */
+  readonly stageHasBinding: boolean;
+}
+
+/**
+ * S12-E REPAIR-FINAL round 4 — canonical root-relative normalization of one
+ * changed-file declaration, mirroring the `rootRelativePath` /
+ * `rootRelativeFactPath` semantics (no filesystem I/O, pure lexical form):
+ *  - absolute paths, `//`-leading paths, backslashes and NUL bytes are
+ *    rejected (never a canonical root-relative path);
+ *  - empty and `.` segments are rejected (a canonical root-relative path
+ *    never contains them);
+ *  - `..` segments are RESOLVED (a trailing `..` chain that would escape the
+ *    project root is rejected — the path identity must stay root-bound);
+ *  - percent-encoded separators/traversal markers (`..%2F`, `%2e%2e`,
+ *    `%252e`) are rejected — an encoded marker must never reach a scope
+ *    check as a literal segment.
+ *
+ * The scope check then runs against the CANONICAL form, so a lexical path
+ * like `<allowed-file>/../../outside.ts` — whose canonical form leaves the
+ * admitted scope — can no longer bypass the string-prefix test.
+ */
+function normalizeRootRelativeChangedFile(value: string, label: string): string {
+  if (
+    value.startsWith('/') ||
+    value.startsWith('//') ||
+    value.includes('\\') ||
+    value.includes('\u0000')
+  ) {
+    failAdmission(`${label} must be a canonical root-relative path`);
+  }
+  const parts = value.split('/');
+  if (parts.some((part) => part.length === 0 || part === '.')) {
+    failAdmission(`${label} must be a canonical root-relative path`);
+  }
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part === '..') {
+      if (stack.length === 0) {
+        failAdmission(`${label} escapes the project root`);
+      }
+      stack.pop();
+      continue;
+    }
+    if (part.includes('%')) {
+      failAdmission(`${label} contains an encoded path separator or traversal marker`);
+    }
+    stack.push(part);
+  }
+  return stack.join('/');
+}
+
+function requireUpstreamChangedFiles(
+  payload: Record<string, unknown>,
+  label: string,
+  allowedScope: readonly string[] | undefined,
+): string[] {
+  const rawChangedFiles = requireUniqueNonEmptyStringArray(payload.changed_files, `${label}.changed_files`);
+  // S12-E REPAIR-FINAL round 4: canonical root-relative normalization runs
+  // BEFORE the Manifest task/slice scope check — a lexical path such as
+  // `<allowed-file>/../../outside.ts` satisfies a naive string-prefix scope
+  // test while its canonical form leaves the admitted scope.
+  const changedFiles = rawChangedFiles.map((file, index) =>
+    normalizeRootRelativeChangedFile(file, `${label}.changed_files[${index}]`),
+  );
+  if (allowedScope === undefined) return changedFiles;
+  for (const file of changedFiles) {
+    if (!allowedScope.some((base) => file === base || file.startsWith(`${base}/`))) {
+      failAdmission(
+        `${label}.changed_files declares a file outside the admitted Manifest scope: ${file}`,
+      );
+    }
+  }
+  return changedFiles;
+}
+
+/**
+ * S12-E REPAIR-FINAL round 4 — upstream credential schema_version ↔ Stage
+ * mode discrimination plus binding-field validation, applied at EVERY
+ * upstream credential read point (TASK_COMPLETE / CV_PASS / SLICE_COMMIT):
+ *  - the shared `credentialSchemaVersionMismatch` runs FIRST: in a
+ *    slice-local Stage (stageHasBinding) a v2 (no-binding) upstream
+ *    credential fails closed as BINDING.MODE_MIXED — a forged v2 chain can
+ *    never back a slice-local CURRENT claim; in a legacy Stage a v3
+ *    credential is MODE_MIXED too, and legacy/future/malformed versions
+ *    fail closed with their explicit codes;
+ *  - after the discrimination, a v3 credential must carry the three binding
+ *    fields (64-hex always; exact Manifest contract digest match +
+ *    recomputed execution binding when the caller supplies the expectation
+ *    — 可重算); a v2 credential carrying any binding field is rejected
+ *    (never silently ignored).
+ */
+function assertUpstreamCredentialBindingFields(
+  payload: Record<string, unknown>,
+  label: string,
+  stageHasBinding: boolean,
+  expectedSliceLocalBinding: VNextSliceLocalBindingExpectation | undefined,
+): void {
+  const schemaMismatch = credentialSchemaVersionMismatch(payload.schema_version, stageHasBinding, label);
+  if (schemaMismatch !== null) {
+    failAdmission(schemaMismatch.message);
+  }
+  if (payload.schema_version === VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) {
+    assertSliceLocalCredentialBindingFields(payload, label, expectedSliceLocalBinding);
+  } else if (payload.schema_version === VNEXT_CREDENTIAL_SCHEMA_VERSION_V2) {
+    assertSliceLocalCredentialBindingFields(payload, label);
+  }
+}
+
+/**
+ * TASK_COMPLETE upstream credential semantics: the closed completion
+ * vocabulary (mode ∈ {implement-task, recover-task}, outcome=completed), a
+ * non-empty changed_files array inside the task/slice Manifest scope, the
+ * Manifest-bound evidence_ref, the digest-addressed context binding AND the
+ * context 落盘绑定 (the context_ref file exists and its content digest equals
+ * context_digest — verified by the I/O-bound caller through
+ * `verifyContextPersisted`).  `expectedEvidencePath` (when supplied) binds
+ * evidence_ref to the Manifest Slice evidence path.
+ */
+export function assertUpstreamTaskCompleteSemantics(
+  payload: unknown,
+  expectedEvidencePath: string | undefined,
+  label: string,
+  options: VNextUpstreamSemanticsOptions,
+): void {
+  if (!isRecord(payload)) {
+    failAdmission(`${label} payload must be a JSON object`);
+  }
+  const mode = payload.mode;
+  if (mode !== 'implement-task' && mode !== 'recover-task') {
+    failAdmission(`${label}.mode is outside the closed completion vocabulary (implement-task|recover-task)`);
+  }
+  if (payload.outcome !== 'completed') {
+    failAdmission(`${label}.outcome must be 'completed'`);
+  }
+  requireNonEmptyString(payload.task_id, `${label}.task_id`);
+  requireUpstreamChangedFiles(payload, label, options?.allowedScope);
+  if (expectedEvidencePath !== undefined && payload.evidence_ref !== expectedEvidencePath) {
+    failAdmission(`${label}.evidence_ref is not bound to the Manifest Slice evidence path`);
+  }
+  const contextRef = payload.context_ref;
+  const contextDigest = payload.context_digest;
+  if (
+    typeof contextRef !== 'string' ||
+    contextRef.length === 0 ||
+    typeof contextDigest !== 'string' ||
+    !SHA256_RE.test(contextDigest)
+  ) {
+    failAdmission(`${label}.context_ref/context_digest are required (context binding)`);
+  }
+  if (contextRef !== `.proofloop/context/${contextDigest}.json`) {
+    failAdmission(`${label}.context_ref is not digest-addressed by context_digest`);
+  }
+  if (options.verifyContextPersisted !== undefined) {
+    options.verifyContextPersisted(contextRef, contextDigest);
+  }
+  assertUpstreamCredentialBindingFields(payload, label, options.stageHasBinding, options.expectedSliceLocalBinding);
+}
+
+/**
+ * CV_RESULT upstream credential semantics: only a CV_PASS fact with verdict
+ * PASS whose worker_receipt_digest is bound to the Worker chain tip is a
+ * CURRENT upstream credential.  A CV_REPAIR — or a PASS missing the tip
+ * binding — never backs a CURRENT claim.
+ */
+export function assertUpstreamCvPassSemantics(
+  payload: unknown,
+  label: string,
+  options: VNextUpstreamSemanticsOptions,
+  expectedWorkerTipDigest?: string,
+): void {
+  if (!isRecord(payload)) {
+    failAdmission(`${label} payload must be a JSON object`);
+  }
+  if (payload.verdict !== 'PASS') {
+    failAdmission(`${label}.verdict must be PASS for a CURRENT CV credential`);
+  }
+  const workerReceiptDigest = payload.worker_receipt_digest;
+  if (typeof workerReceiptDigest !== 'string' || !SHA256_RE.test(workerReceiptDigest)) {
+    failAdmission(`${label}.worker_receipt_digest is required and must be a SHA-256 digest`);
+  }
+  if (expectedWorkerTipDigest !== undefined && workerReceiptDigest !== expectedWorkerTipDigest) {
+    failAdmission(`${label}.worker_receipt_digest is not bound to the Worker chain tip`);
+  }
+  assertUpstreamCredentialBindingFields(payload, label, options.stageHasBinding, options.expectedSliceLocalBinding);
+}
+
+/**
+ * SLICE_COMMIT upstream credential semantics: the commit boundary field must
+ * be present and well-formed (Git existence/ancestry is verified by the
+ * I/O-bound callers — `commit_sha 真实 Git 祖先`), the changed_files must be
+ * non-empty and stay inside the Slice Manifest scope, and a v3 credential
+ * must carry the three binding fields.
+ */
+export function assertUpstreamSliceCommitSemantics(
+  payload: unknown,
+  label: string,
+  options: VNextUpstreamSemanticsOptions,
+): void {
+  if (!isRecord(payload)) {
+    failAdmission(`${label} payload must be a JSON object`);
+  }
+  const commitSha = payload.commit_sha;
+  if (typeof commitSha !== 'string' || !GIT_SHA_RE.test(commitSha)) {
+    failAdmission(`${label}.commit_sha is required and must be a Git commit SHA`);
+  }
+  requireUpstreamChangedFiles(payload, label, options.allowedScope);
+  assertUpstreamCredentialBindingFields(payload, label, options.stageHasBinding, options.expectedSliceLocalBinding);
+}
+
+/**
+ * The ordered Task ids of one Slice (proof_index.task_refs order).
+ */
+export function vnextTaskIdsForSlice(manifest: VNextManifest, slice: VNextManifestSlice): string[] {
+  return slice.proof_index.task_refs.map((refId) => {
+    const descriptor = manifest.reference_index[refId];
+    const match = descriptor === undefined ? undefined : /#\/entities\/([^/]+)$/.exec(descriptor.ref);
+    if (descriptor?.kind !== 'task' || match?.[1] === undefined) {
+      failAdmission(`Slice "${slice.slice_id}" contains an invalid vNext task anchor`);
+    }
+    return match[1];
+  });
+}
+
+function vnextTaskCodeTestScope(manifest: VNextManifest, taskId: string): string[] {
+  const binding = manifest.task_scopes[taskId];
+  if (binding === undefined) {
+    failAdmission(`Task "${taskId}" has no bound execution scope`);
+  }
+  const scope = binding.execution_scope;
+  if (
+    scope.kind !== 'implementation' ||
+    scope.code_paths.length === 0 ||
+    scope.test_paths.length === 0
+  ) {
+    failAdmission(`Task "${taskId}" has no non-empty implementation code/test scope`);
+  }
+  return [...scope.code_paths, ...scope.test_paths];
+}
+
+/**
+ * S12-E REPAIR-FINAL round 3: the root-relative Manifest allowed scope of
+ * ONE Task — its own code/test paths, the code/test paths of every PRIOR
+ * task of the same Slice (a later task's TASK_COMPLETE may legitimately
+ * carry the uncommitted output of earlier tasks — the same prior-scope
+ * extension the admission consumers apply), plus the Slice Evidence and
+ * Plan projection paths.
+ */
+export function vnextTaskAllowedScope(manifest: VNextManifest, sliceId: string, taskId: string): string[] {
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) {
+    failAdmission(`Manifest does not declare Slice ${sliceId}`);
+  }
+  const taskIds = vnextTaskIdsForSlice(manifest, slice);
+  const index = taskIds.indexOf(taskId);
+  if (index === -1) {
+    failAdmission(`Task "${taskId}" is not bound to Slice "${sliceId}"`);
+  }
+  const prior = taskIds.slice(0, index).flatMap((priorTaskId) => vnextTaskCodeTestScope(manifest, priorTaskId));
+  return uniqueValues([...prior, ...vnextTaskCodeTestScope(manifest, taskId), slice.evidence_path, manifest.plan.ref]);
+}
+
+/**
+ * S12-E REPAIR-FINAL round 3: the root-relative Manifest allowed scope of
+ * one Slice — the union of every Task's allowedCodeScope plus the Slice
+ * Evidence and Plan projection paths (the A8/upstream changed_files
+ * boundary: 该 slice 所有 task 的 allowedCodeScope 并集 + evidence/plan 投影).
+ */
+export function vnextSliceAllowedScope(manifest: VNextManifest, sliceId: string): string[] {
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) {
+    failAdmission(`Manifest does not declare Slice ${sliceId}`);
+  }
+  const taskIds = vnextTaskIdsForSlice(manifest, slice);
+  if (taskIds.length === 0) {
+    failAdmission(`Slice "${sliceId}" declares no tasks`);
+  }
+  return uniqueValues([
+    ...taskIds.flatMap((taskId) => vnextTaskCodeTestScope(manifest, taskId)),
+    slice.evidence_path,
+    manifest.plan.ref,
+  ]);
+}
+
+function uniqueValues(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
+/**
+ * S12-E REPAIR-FINAL round 3: the slice-local binding expectation a v3
+ * UPSTREAM credential (TASK_COMPLETE / CV_RESULT / SLICE_COMMIT) must
+ * exactly match — computed through the kernel oracle over the Slice's
+ * receipt-bound dependency bindings and the credential's OWN payload
+ * snapshot (the historical base the admission consumer computed against).
+ * Returns undefined for a legacy Manifest or a non-v3 credential (the
+ * binding fields do not apply to those shapes).
+ */
+export function vnextUpstreamSliceLocalBindingExpectation(
+  manifest: VNextManifest,
+  sliceId: string,
+  dependencyBindings: readonly VNextDependencyBinding[],
+  payload: Record<string, unknown>,
+  label: string,
+): VNextSliceLocalBindingExpectation | undefined {
+  if (
+    manifest.binding === undefined ||
+    payload.schema_version !== VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL
+  ) {
+    return undefined;
+  }
+  return computeSliceLocalCredentialExpectationForBase(
+    manifest,
+    sliceId,
+    dependencyBindings,
+    requireSnapshotDigest(payload.snapshot_digest, `${label}.snapshot_digest`),
+    label,
+  );
 }
 
 /**

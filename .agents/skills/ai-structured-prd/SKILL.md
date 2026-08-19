@@ -136,6 +136,13 @@ Output:
 4. Critical gaps, contradictions, terminology conflicts, and scenario pressure tests.
 5. Recommended next step.
 
+## Downstream entity markers
+
+When a PRD entity will be referenced by a Manifest or Plan, load and apply
+`.agents/contracts/brain/authority-entity-markers.md`. The Contract is the single
+source for marker syntax, allowed kinds, canonical refs, and completion checks;
+this Skill owns when the rule applies to PRD output.
+
 ## Reference files
 
 - `references/prd-context-template.md`: load when creating or updating the rolling PRD Context.

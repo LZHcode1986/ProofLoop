@@ -361,9 +361,24 @@ export interface ProjectVNextWorkerDispatchInput {
 // vNext Code Verifier result contract
 // ---------------------------------------------------------------------------
 
-/** The only schema version admitted by the vNext CV result consumer. */
+/** The schema version the vNext CV result consumer persists (v2 receipts). */
 export const VNEXT_CV_SCHEMA_VERSION = 2 as const;
 export type VNextCvSchemaVersion = typeof VNEXT_CV_SCHEMA_VERSION;
+
+/**
+ * Slice-local CV envelope schema version (3, §8.3). The shared closed
+ * validator accepts a well-formed v3 envelope (binding fields required).
+ * Per the S12-D REPLAN, schema_version 3 IS the slice-local credential
+ * version: a v3 CV envelope in a slice-local Stage is the legal credential
+ * of that Stage (binding fields validated and bound to the Manifest
+ * contract digests), and v3 CV receipts are persisted in slice-local mode.
+ */
+export const VNEXT_CV_SCHEMA_VERSION_SLICE_LOCAL = 3 as const;
+
+/** Closed schema_version vocabulary of the CV envelope seam (2 | 3). */
+export type VNextCvEnvelopeSchemaVersion =
+  | typeof VNEXT_CV_SCHEMA_VERSION
+  | typeof VNEXT_CV_SCHEMA_VERSION_SLICE_LOCAL;
 
 /** Explicit discriminator; this envelope is never a legacy CV request. */
 export const VNEXT_CV_RESULT_TYPE = 'CV_RESULT' as const;
@@ -396,7 +411,7 @@ export interface VNextCvRiskReference {
  * which references and result observations it actually supplied.
  */
 export interface VNextCvResultEnvelopeBase {
-  readonly schema_version: VNextCvSchemaVersion;
+  readonly schema_version: VNextCvEnvelopeSchemaVersion;
   readonly type: VNextCvResultType;
   readonly stage_id: string;
   readonly slice_id: string;
@@ -472,6 +487,65 @@ export type VNextCvResultEnvelope =
 /** Upper-case acronym alias for consumers that use `CV` in type names. */
 export type VNextCVResultEnvelope = VNextCvResultEnvelope;
 export type VNextCvResult = VNextCvResultEnvelope;
+
+// ---------------------------------------------------------------------------
+// Credential payload schema_version and binding vocabulary (S12-D-T04, §8.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Closed schema_version vocabulary of every credential (Receipt) payload
+ * (§8.3): 1 = legacy / 2 = current vNext / 3 = slice-local. Values > 3 are
+ * unknown future schema versions and fail closed in every consumer.
+ */
+export const VNEXT_CREDENTIAL_SCHEMA_VERSIONS = [1, 2, 3] as const;
+export type VNextCredentialSchemaVersion = (typeof VNEXT_CREDENTIAL_SCHEMA_VERSIONS)[number];
+
+/** 1 = legacy credential (no binding fields; the legacy consumer blocks ≠ 1 whole-chain). */
+export const VNEXT_CREDENTIAL_SCHEMA_VERSION_LEGACY = 1 as const;
+/** 2 = current vNext credential (no binding fields; S12's own credential mode). */
+export const VNEXT_CREDENTIAL_SCHEMA_VERSION_V2 = 2 as const;
+/** 3 = slice-local credential; the three binding fields are required (§8.3). */
+export const VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL = 3 as const;
+
+/**
+ * Closed slice-local binding field names carried by schema_version 3
+ * credential payloads (§8.3): stage_contract_digest / slice_contract_digest /
+ * execution_binding_digest, each a 64-hex digest. A v2 consumer that sees
+ * these fields must fail closed (BINDING.SCHEMA_FUTURE / MODE_MIXED), never
+ * silently ignore them; every v3-aware consumer validates them (64-hex,
+ * Manifest contract digest consistency, recomputed execution binding).
+ */
+export const VNEXT_CREDENTIAL_BINDING_FIELDS = [
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
+] as const;
+export type VNextCredentialBindingField = (typeof VNEXT_CREDENTIAL_BINDING_FIELDS)[number];
+
+export const VNEXT_BINDING_FIELD_STAGE_CONTRACT_DIGEST = 'stage_contract_digest' as const;
+export const VNEXT_BINDING_FIELD_SLICE_CONTRACT_DIGEST = 'slice_contract_digest' as const;
+export const VNEXT_BINDING_FIELD_EXECUTION_BINDING_DIGEST = 'execution_binding_digest' as const;
+
+/**
+ * Closed BINDING error-code vocabulary finalized at implementation time
+ * (§8.4). The admission consumers use SCHEMA_FUTURE and MODE_MIXED; the
+ * STALE codes belong to the slice currentness layer (S12-D-T01/T02).
+ */
+export const VNEXT_BINDING_ERROR_CODES = [
+  'BINDING.STAGE_CONTRACT_STALE',
+  'BINDING.SLICE_CONTRACT_STALE',
+  'BINDING.EXECUTION_BINDING_STALE',
+  'BINDING.MODE_MIXED',
+  'BINDING.SCHEMA_FUTURE',
+] as const;
+export type VNextBindingErrorCode = (typeof VNEXT_BINDING_ERROR_CODES)[number];
+
+/** The slice-local credential binding payload fields (schema_version 3, §8.3). */
+export interface VNextCredentialBindingFields {
+  readonly stage_contract_digest: string;
+  readonly slice_contract_digest: string;
+  readonly execution_binding_digest: string;
+}
 
 // ---------------------------------------------------------------------------
 // vNext Stage Close result contract (P-11)

@@ -11,6 +11,8 @@
 4. **Integration and polish**: AWI-013..016（parity、git workflow、恢复、token benchmark）
 5. **Final verification**: AWI-017（host integration + 发布清单 + 全量验证）
 6. **pluginv2 active vNext boundary and CLI-first cutover**: AWI-018..024（显式分流、Stage Plan admission、Context handoff、正式执行链、executable proof bootstrap、harness-neutral 通用 CLI/self-host/cutover）
+7. **整改（2026-08-15，Slice 级证明绑定 Phase 1 串行）**: AWI-025..030（测试基线自包含 → kernel binding contract → Manifest/Compiler binding 输出 → serial currentness → replan 端到端 → 流程执行问题整改）
+8. **分级 Replan epoch 与永久 slice-local CV（2026-08-17，S13 前置）**: AWI-032..034（影响判定与 epoch authority → Evidence rotation → current epoch downstream/CV/Gate/Review）
 
 ## Matrix
 
@@ -41,6 +43,16 @@
 | AWI-022 | vNext Stage formal execution loop | AWI-018..021 | Runtime vNext state machine、Worker/CV/Commit/Integration/Gate/Review admission、expected-dirty recovery | Stage Plan admission 后，Runtime 必须从 persisted facts 依次投影 Worker → CV → Slice Commit → Integration → Gate → Review；执行期允许且只允许声明 scope 内 dirty diff；每个结果绑定 Manifest/Plan/Context/snapshot，v1 consumer 不得读取 v2 facts | PRD FR-003/004/011/014/015/016/017/018；architecture S08-E oracle；Contract S08-E seam；HP-009/010/011/014 | 不用 clean-worktree planning gate 阻断合法执行 diff；不以 checkbox/narrative 推进状态；不把 v2 结果送入 legacy reconcile；不缺失 CV/Commit/Integration/Gate/Review 的 vNext admission |
 | AWI-023 | harness-neutral ProofLoop v2 通用 CLI 与 CLI-first self-host | AWI-013/017/021/022/024 | `packages/runtime` stable CLI dispatcher/I/O/commands、Context Resolver、plan materializer/admission、stage/review/project/doctor Runtime seams、process/restart fixtures、legacy cleanup | `proofloop <domain> <operation>` 以统一 closed JSON/exit/ref+digest 合同覆盖 Authority/Plan、角色 Context、Worker/CV/Commit/Integration、Gate、Stage Review、Project Acceptance、recovery/doctor；不 import harness SDK；S10 Manifest 含真实 executable proof，S10-A 集成后全部机械动作使用该 CLI 自举；同一 fixture 在 OpenCode/Pi/Claude agent caller 模型下不改 command/schema；非法转换 no-write；全链 oracle 通过后删除 v1 stage CLI/legacy CV 残留；三个既有 Host 失败以 CLI 判根因，Runtime/CLI 问题修复，adapter-only 问题后置；AWI-023 验收依据含 git_facts 兜底 Gate + 受限 Stage Close（2026-08-14 用户裁决新先例，见 PLUGINV2-S08B-CLI-ACCEPTANCE 实体） | PRD FR-002..006/010/014/016..019；architecture S10 harness-neutral CLI oracle；Contract §0/§5.2 S10 seam；HP-004/010/011/014/015；S08-D/E risk | 不以 OpenCode `proofloop_*` tool 或 harness adapter 补 CLI 缺口；不用 all-skipped Gate 证明 S10；不提供任意文件写；不把同一 Context 发给全部角色；不在 self-host/oracle 前删除旧入口；不静默解释旧 artifact；不为全仓绿混入 Plugin 实现或放宽 CLI 断言；不在本项回填 S08-REVIEW-010 |
 | AWI-024 | S09 executable Runtime Proof、canonical Stage ID 与 Evidence refresh bootstrap | AWI-019/022 | vNext candidate parser/compiler/dispatch、Gate proof executor、Stage ID validators、Evidence initializer/refresh、active Materializer contract/helper、built CLI bootstrap entry | active candidate closed 接受 canonical executable proof step，Runtime 独占 proof digest，dispatch/Gate 使用同一 `command\|service_start\|service_stop\|probe` schema；candidate/compiler/Validator/status/admit 共用 `^S\d+$` Stage ID grammar；`plan refresh-evidence` 仅对 pre-admission pristine skeleton 执行 root-bound、journaled、expected-binding refresh，non-pristine/stale/symlink/interrupted transaction fail closed；S09 restricted close 后 S10 可 replan 为真实 executable proof | architecture S09 bootstrap oracle；Contract §5.3 seam；HP-015；S09 acceptance；source/built PASS+FAIL、digest/type、Stage ID parity、refresh/restart/transaction tests | 不手写 Manifest/proof digest/Evidence；不维护第二套 proof type/Stage ID grammar；不覆盖已有执行内容；不 post-admission refresh；不把 S09 的 `not_applicable` 例外复用到 S10 或项目验收 |
+| AWI-025 | 测试基线自包含与隔离（Task 0） | — | vnext/CLI 测试 fixture 生成、测试环境隔离（临时 HOME/配置目录） | fresh clone（无本地 `.proofloop`）后全量测试绿；测试不写项目配置 | fresh clone 冒烟全量 vitest 绿；配置无污染断言 | 把 `.proofloop` 加进 git；继续依赖本地遗留文件；跳过失败测试（HP-019） |
+| AWI-026 | Kernel binding contract（Task A） | AWI-025 | `packages/kernel/src/vnext/bindings.ts`（新增）、`types.ts`、`manifest.ts`、`index.ts` | 三级指纹 canonical projection + digest + closed validators；唯一 oracle；单测全绿 | bindings.spec.ts：只改 C 不影响 A/B/stage 契约；畸形输入 fail-closed | 复制 hash 逻辑；非 canonical 投影；宽松校验（HP-016 前置） |
+| AWI-027 | Manifest/Compiler binding 输出（Task B） | AWI-026 | `packages/runtime/src/vnext/compiler.ts`、kernel manifest validator | compile 输出 `binding{version:1,mode:"slice-local",stage_contract_digest}` + 每 slice `slice_contract_digest`；旧 Manifest（无 binding）仍可读取 | compile 输出断言 + legacy manifest 兼容测试 + 畸形 binding fail-closed | 输出非 closed 字段；破坏旧 manifest 读取 |
+| AWI-028 | Serial currentness 消费（Task C） | AWI-027 | `packages/runtime/src/vnext/binding-currentness.ts`（新增）、`next.ts`、`validate-vnext-stage.ts` | next.ts 约 20 处整本 digest 绑定改 slice 级 currentness（legacy 路径不动）；validate 对已受理且 current 的 Slice 豁免（FR-023）；单 active Slice 不变 | Case 1/2/5 currentness 单测 + legacy 回归全绿 + 改造点清单 | 漏改绑定点；legacy 路径行为漂移；豁免写成无条件（HP-016） |
+| AWI-029 | REPLAN 端到端 fixture（Task D） | AWI-028 | fixture 测试集（A/B 完成、C replan）、refresh-vnext-slice-evidence 接入、admission 消费 binding、凭证 v3 判别 | A/B 集成完成、C replan → refresh C evidence → fresh SPV → 新 admission → A/B current、C 重跑；凭证 schema_version 3 判别与 fail-closed；Case 6 回归 | Case 1-5 端到端 fixture + Case 6 回归 + v3 混链拒绝测试 | 手工改 evidence 绑定；复用旧 SPV/admission；跳过 refresh；无条件豁免（HP-017/018） |
+| AWI-030 | 流程执行问题整改（FR-021/022/024） | AWI-028（FR-021 验收依赖） | worker 派发模板、admission 错误信息、proofloop-plan/execute 技能、brain-workflow、纪律对照表文档 | FR-021：replan 后已受理 Slice 状态由 Receipt 推导不丢；materialize 禁令入技能；FR-022：模板固化 Evidence 标题规则 + 受理错误明确提示；FR-024：13 条问题 → 防复发机制 → 固化位置对照表入权威 | FR-021/022 验收测试 + 对照表文档评审（Stage Review 可审计） | 只写文档不验证；对照表无落点；纪律仅口号 |
+| AWI-031 | Candidate binding mode 传播与 S13 首用前置 | AWI-027/030 | active candidate schema/materializer、`packages/runtime/src/vnext/candidate-input.ts`、public `plan compile` adapter、source/dist/CLI parity tests | candidate input 明确传 `binding_mode: "slice-local"` 时，真实 `plan materialize` → `plan compile` 输出 slice-local Manifest 与每 Slice binding；缺省保持 legacy；未知值、类型错误或字段静默丢弃均 fail-closed；S12 历史证据不迁移 | candidate contract/materializer test + candidate adapter/compiler test + built public CLI E2E；三分支（slice-local/legacy/unknown）均有证据 | 直接调用内部 Compiler；把未知值降级 legacy；只改 fixture 不改 public path；用 progress/叙事声明模式 |
+| AWI-032 | 分级 Replan impact classifier 与 epoch authority | AWI-028/030/031 | `packages/runtime/src/vnext/replan-impact.ts`、`replan-epoch.ts`、现有 `plan admit-spv` / `admit-stage-plan` seams、Runtime epoch schema/reader | Runtime 从 current 与候选 Manifest 的 Task contract/依赖闭包机械判定 `task-local` / `slice-wide`；生成 parent-bound disposition/epoch preparation fact；不接受 caller 派生集合；旧 Receipt write-once、initial/legacy 零行为变化；public operation set 不增加 | Task-local/Slice-wide/unresolved/parent-mismatch 单测；epoch/disposition digest/parent-chain/readback；source/dist/public CLI parity；legacy/initial 回归；伪造 disposition no-write；跨 Stage/path epoch 拒绝 | 新增 public CLI；把逻辑放入 Materializer；Agent 自报影响；覆盖旧 Receipt；mutable current pointer；新 Stage 逃避 Replan（HP-021） |
+| AWI-033 | Runtime Evidence rotation 与 mutable projection 恢复 | AWI-032 | `packages/runtime/src/vnext/evidence-refresh.ts`、`evidence-rotation.ts`、`packages/runtime/src/cli/refresh-vnext-slice-evidence.ts`、Evidence history、bounded mutable projection writer、transaction journal/restart tests | 现有 `plan refresh-evidence(mode=replan)` 在 post-admission 安全归档旧 Evidence、生成当前 canonical skeleton，并只恢复 carry-forward Task projection；Runtime 派生 disposition；root/identity/CAS/journal/rollback/restart 完整；旧 Evidence/Receipt 不覆盖或删除 | pristine/non-pristine、symlink、identity mismatch、competitor、interruption/restart、历史归档 digest、carry-forward/current Task 对照；closed request/result；built CLI process E2E；rotation 中断后 zero-write/rollback | 手工 Evidence/header；覆盖 non-pristine；把旧 Evidence 当当前；扩大 mutable scope；caller 提供派生集合；无 journal 的多文件写（HP-021） |
+| AWI-034 | Current epoch downstream、永久 slice-local CV v3 route 与 Gate/Review/Close | AWI-032/033 | `packages/runtime/src/vnext/next.ts`、`cv-admission.ts`、`cv-validation.ts`、Worker/CV/Commit/Integration consumers、`packages/runtime/src/cli/proofloop-stage.ts`、Gate/Review/Stage Close admission、S13 E2E fixture | next/所有下游 admission/Gate/Review/Close 只消费 current epoch；旧 Gate/Review 不复用；当前 Task 重做、此前边界未变 Task 可继承；nested `CV_RESULT` v3 经过 outer CLI schema 2 的 public `stage admit-cv` route、shared validator、Stage/path oracle 后受理；完整链可达 current epoch Gate PASS→Review ACCEPTED→Close | S13 T01/T02 full built CLI chain；v2/v3 mode matrix；old Gate/Review refusal；Task-local/Slice-wide currentness；Stage/path/Worker-tip/three-digest mismatch zero-write；current HEAD/clean boundary/fresh SPV；legacy v1/v2 isolation；Gate→Review→Close restart/parity | 用 progress/checkbox；复用旧 Gate/Review；把 Worker patch 伪装 carry-forward；直接注入 Manifest/CV fixture 或调用内部 consumer；把外层 CLI schema 改为 3；跳过 public CV route（HP-022） |
 
 ## 暂停 Stage 关闭登记（2026-08-14 用户裁决：S4/S5/S6 不再实施）
 
@@ -278,3 +290,164 @@ HP-012/HP-015。
 - [x] 每个 AWI 有 acceptance evidence
 - [x] 基础工作项（AWI-001..004）不与功能切片混合
 - [x] 没有只写 "implement X" 的工作项（全部有文件/模块与验收）
+
+## 整改 AWI 机器可读实体（2026-08-15）
+
+### AWI-025 goal
+<!-- proofloop:entity id="AWI-025" kind="goal" -->
+测试基线必须自包含且环境隔离：fresh clone（无本地 `.proofloop`）后全量测试绿，测试不写项目配置。Authority refs：`PRD.md` FR-020..024、初步实施方案 §8.2、HP-019。
+
+### AWI-026 goal
+<!-- proofloop:entity id="AWI-026" kind="goal" -->
+Kernel 必须以唯一 canonical oracle 实现三级绑定指纹（stage_contract / slice_contract / execution_binding）及 closed validators，投影为 closed 字段清单。Authority refs：`PRD.md` FR-020、架构 §10.2/§10.7、契约 §8.2、HP-016。
+
+### AWI-027 goal
+<!-- proofloop:entity id="AWI-027" kind="goal" -->
+Compiler/Manifest 必须在 slice-local 模式输出 `binding{version:1,mode:"slice-local",stage_contract_digest}` 与每 slice `slice_contract_digest`，且 legacy Manifest（无 binding）仍可读取、行为零变化。Authority refs：`PRD.md` FR-020 Case 6、架构 §10.3、契约 §8.1。
+
+### AWI-028 goal
+<!-- proofloop:entity id="AWI-028" kind="goal" -->
+Runtime 必须以 slice 级 currentness 消费历史 Slice 证明（legacy 路径不动）：已集成且契约未变、依赖绑定仍 current 的 Slice 不因整本 plan/manifest digest 变化而失效；validate 对已受理且 current 的 Slice 豁免绑定校验。Authority refs：`PRD.md` FR-020 Case 1/2/3/5、FR-023、架构 §10.5/§10.6、契约 §8.4/§8.5/§8.6、HP-016。
+
+### AWI-029 goal
+<!-- proofloop:entity id="AWI-029" kind="goal" -->
+REPLAN 端到端必须闭环：A/B 集成完成、C replan 后，refresh C evidence → fresh SPV → 新 admission → A/B 保持 current、C 单独重跑；凭证 schema_version 3 判别 fail-closed（不得混链）；旧模式 Case 6 零变化。Authority refs：`PRD.md` FR-020 全部验收、FR-023、架构 §10.4/§10.5、契约 §8.3/§8.6、HP-017/HP-018。
+
+### AWI-030 goal
+<!-- proofloop:entity id="AWI-030" kind="goal" -->
+流程执行问题整改必须闭环：replan 后已受理 Slice 状态由 Receipt 推导不丢（FR-021）；Evidence 标题规则固化到 Worker 派发模板且受理错误明确提示（FR-022）；13 条问题 → 防复发机制 → 固化位置对照表入权威并可审计（FR-024）。Authority refs：`PRD.md` FR-021/022/024、架构 §10.8、HP-016 相关。
+
+### AWI-031 goal
+<!-- proofloop:entity id="AWI-031" kind="goal" -->
+Candidate planning 的 binding mode 必须从 `candidate-input.json` 经 active Materializer 与 Runtime candidate adapter 完整传递到 public `plan compile`：`binding_mode: "slice-local"` 输出 slice-local Manifest 与三层绑定，缺省保持 legacy，未知值和静默丢弃 fail-closed。Authority refs：架构 §10.3/§10.9/§10.10、契约 §8.1/§8.1.1、HP-020。
+
+### AWI-032 goal
+<!-- proofloop:entity id="AWI-032" kind="goal" -->
+Runtime 必须在不新增 public CLI/operation、且不扩大 Materializer 职责的前提下，从 current 与候选
+Manifest 的 Task contract/依赖闭包机械判定 `task-local` / `slice-wide` Replan，建立 parent-bound
+append-only epoch authority；此前边界未变的 `TASK_COMPLETE` 可继承，当前/受影响 Task 不得继承，
+无法判定必须 fail-closed。Authority refs：`PRD.md` FR-016/017/020/021 Case 8/9、架构 §10.10、
+契约 §0.3/§4/§8.8、HP-021、`PLUGINV2-REPLAN-EPOCH-CONTRACT-SEAM`。
+
+### AWI-033 goal
+<!-- proofloop:entity id="AWI-033" kind="goal" -->
+Runtime 必须通过既有 `plan refresh-evidence(mode=replan)` 完成 post-admission Evidence 安全轮换：
+旧 Evidence 归档、当前 canonical path 生成新 skeleton、carry-forward Task projection bounded 恢复，
+并以 root-bound identity/CAS/journal/restart 保障不覆盖历史事实、不报告部分成功。Authority refs：
+`PRD.md` FR-016/017/021、架构 §10.10、契约 §3/§4/§5.3/§8.8、HP-021、
+`PLUGINV2-REPLAN-ROTATION-CONTRACT-SEAM`、`PLUGINV2-REPLAN-ROTATION-ORACLE`。
+
+### AWI-034 goal
+<!-- proofloop:entity id="AWI-034" kind="goal" -->
+所有 current epoch downstream consumer、Stage Gate、Stage Review 和 Stage Close 必须只消费最新
+epoch；旧 Gate/Review 不复用；S13 的 public CV route 必须走 candidate → Materializer → public
+compile → admission 的真实链，完成当前 Task/继承未受影响 Task 后可达 Gate PASS → Review ACCEPTED
+→ Close。Authority refs：`PRD.md` FR-016/017/020/021、架构 §10.4/§10.6/§10.7/§10.10、契约 §0.3/§8.3/§8.6/§8.7/§8.8、HP-021/HP-022、
+`PLUGINV2-SLICE-LOCAL-CV-SEAM`、`PLUGINV2-SLICE-LOCAL-CV-ORACLE`、
+`PLUGINV2-SLICE-LOCAL-CV-CONTRACT-SEAM`、`PLUGINV2-SLICE-LOCAL-CV-CONTRACT-ORACLE`。
+
+### PLUGINV2-S12-BINDING-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-BINDING-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-026/027。
+- Acceptance：三级指纹 canonical projection 为 closed 字段；只改 Slice C 时 A/B 与 stage 契约不变；binding 字段未知/缺失/畸形 fail-closed；legacy Manifest（无 binding）可读且行为零变化。
+- Required evidence：bindings.spec（隔离性 + 畸形输入）+ compiler 输出断言 + legacy 兼容回归；不接受手工构造 digest。
+
+### PLUGINV2-S12-CURRENTNESS-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-CURRENTNESS-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-028。
+- Acceptance：已集成且 current 的 Slice 不因整本 plan/manifest digest 变化失效（Case 1/2/5）；validate 豁免仅限"已受理且 current"；legacy 路径行为零变化；单 active Slice 语义不变。
+- Required evidence：Case 1/2/5 currentness 单测 + legacy 全量回归 + 改造点清单核对。
+
+### PLUGINV2-S12-REPLAN-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-REPLAN-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-029。
+- Acceptance：A/B 集成完成、C replan → A/B current、C 重跑；凭证 schema_version 3 进入 v2 消费端 fail-closed；同一 Stage 混用两种模式凭证被拒；Case 6（旧模式）回归零变化。
+- Required evidence：端到端 fixture（Case 1-5）+ 回归（Case 6）+ v3 混链拒绝测试。
+
+### PLUGINV2-S12-PROCESS-FIX-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-PROCESS-FIX-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-030。
+- Acceptance：FR-021（replan 后已受理 Slice 状态不丢）、FR-022（Evidence 标题规则 + 明确错误提示）、FR-024（13 条问题 → 防复发机制 → 固化位置对照表）完成；对照表随流程文档可审计。
+- Required evidence：FR-021/022 验收测试 + 对照表文档评审（Stage Review）。
+
+### PLUGINV2-S13-BINDING-MODE-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S13-BINDING-MODE-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-031。
+- Acceptance：真实 candidate input → Materializer → Runtime adapter → public `plan compile` 路径保留 `binding_mode: "slice-local"`，产出 Manifest `binding.mode: "slice-local"` 与每 Slice `slice_contract_digest`；缺省 input 维持 legacy；未知/类型错误/静默丢弃 fail-closed；S12 legacy 历史证据不被迁移或覆盖。
+- Required evidence：active Materializer contract/schema 测试、candidate adapter/compiler 测试、built public CLI 三分支 E2E（slice-local / legacy / unknown），不接受只调用内部 Compiler 的 fixture。
+
+### PLUGINV2-REPLAN-EPOCH-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-REPLAN-EPOCH-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-032。
+- Acceptance：不增加 public CLI/operation；Runtime 对前后 Task contract/依赖闭包稳定地产生
+  `task-local` / `slice-wide` disposition 与 parent-bound epoch；此前边界未变的 `TASK_COMPLETE`
+  可继承，当前/受影响 Task 不继承；unresolved、parent mismatch、caller 伪造派生集合均
+  fail-closed；旧 Receipt 与 initial/legacy 路径零变化。
+- Required evidence：source/dist/public CLI parity、Task-local/Slice-wide/unresolved/parent-mismatch
+  matrix、epoch digest/parent-chain readback、旧 Receipt 不覆盖、legacy/initial regression。
+
+### PLUGINV2-REPLAN-EVIDENCE-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-REPLAN-EVIDENCE-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-033。
+- Acceptance：`plan refresh-evidence(mode=replan)` 在 post-admission 只由 Runtime 执行；旧 Evidence
+  归档至 epoch history，当前 canonical path 生成新 skeleton；carry-forward Task 的内容与 bounded
+  projection 保持，当前/invalidated Task 不复用；non-pristine、identity、symlink、竞态、中断和
+  journal recovery 均 fail-closed/no-partial-success。
+- Required evidence：Evidence history digest、rotation 正向/失败/中断重启、CAS/identity/symlink
+  matrix、Runtime 派生 disposition closed result、carry-forward/current Task 对照、built CLI E2E；
+  不得手工改 header、提供派生集合或覆盖旧 Evidence。
+
+### PLUGINV2-REPLAN-CURRENT-EPOCH-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-REPLAN-CURRENT-EPOCH-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-034。
+- Acceptance：`next`、Worker/CV/Commit/Integration、Gate、Review、Close 只消费最新 epoch；旧
+  Gate/Review 拒绝复用；S13 T01/T02 通过 candidate → Materializer → public compile → public CV
+  route → current epoch Gate PASS → Review ACCEPTED → Close；旧模式、stale HEAD、dirty boundary、
+  legacy/vNext 混链均 fail-closed。
+- Required evidence：真实 built CLI full chain、current HEAD/clean boundary/fresh SPV、old Gate/Review
+  refusal、Task-local/Slice-wide、restart/parity、legacy isolation 与 Stage Close receipts。
+
+### PLUGINV2-SLICE-LOCAL-CV-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-SLICE-LOCAL-CV-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-034。
+- Acceptance：outer CLI result envelope 保持 schema 2；nested `CV_RESULT` 在 slice-local Manifest
+  使用 schema 3 + 三个 binding digests，经 `proofloop-stage.ts` → shared validator → vNext CV
+  consumer 真实 public route 受理；legacy/v2 零行为变化；Stage/path-bound current epoch、
+  Worker tip、Context、Proof Index、snapshot 和 Receipt chain 全部匹配。
+- Required evidence：built/source/public parity；v3 正向；v3→legacy、v2→slice-local、其他 Stage
+  epoch、过期 Worker tip、digest mismatch、mixed-mode、重复 Receipt 的 zero-write；独立 CV
+  refutation observation 不得被 Worker Evidence 替代；restart reader 与 legacy regression。
+
+## 整改 Traceability（FR-016..024 → AWI）
+
+| PRD 需求 | 架构 | 契约 | AWI | 验收证据 |
+|---|---|---|---|---|
+| FR-020 slice 绑定 | 架构 §10.2/10.3/10.5/10.10 | 契约 §8.1/8.2/8.6/8.8 | AWI-026..034 | Case 1-9 fixture + bindings.spec + epoch matrix |
+| S13 首用模式传播 | 架构 §10.3/10.9/10.10 | 契约 §8.1.1 | AWI-031 | candidate → Materializer → adapter → public compile 三分支 E2E |
+| FR-021 replan 保留状态 | 架构 §10.5/10.8/10.10 | 契约 §5.3/§8.5/§8.8 | AWI-028/030/032..034 | Task carry-forward、Evidence rotation、投影恢复与 current epoch 测试 |
+| 永久 slice-local CV v3 route | 架构 §10.4/§10.6/§10.7/ADR-026 | 契约 §0.3/§4/§8.3/§8.4/§8.8 | AWI-021/034 | outer schema 2 + nested v3 public route、Stage/path oracle、source/dist/public parity、legacy/mixed-mode zero-write |
+| FR-022 Evidence 规则 | 架构 §10.8 | 契约 §8.4 | AWI-030 | 模板 + 错误提示测试 |
+| FR-023 validate 豁免 | 架构 §10.6/10.10 | 契约 §8.4/8.6/8.8 | AWI-028/029/034 | 豁免 + refresh/rotation + current epoch 路径测试 |
+| FR-024 纪律防复发 | 架构 §10.8 | — | AWI-025/030 | 对照表 + 回归 |
+| FR-016/017 会话恢复与单一权威 | 架构 §10.10 | 契约 §4/§5.3/§8.8 | AWI-032..034 | epoch parent-chain、Evidence rotation、current epoch restart/parity |
+| FR-020/021 Task-local / Slice-wide Replan | 架构 §10.5/§10.6/§10.10 | 契约 §8.5/§8.6/§8.8 | AWI-032..034 | Case 8/9、carry-forward、当前 Task 失效、Gate/Review/Close |
+
+## Gate（整改增补）
+
+- [x] 每个整改 PRD 需求（FR-020..024）映射到至少一个 AWI（Traceability 全行覆盖）
+- [x] 每个整改 AWI 有 definition of done / acceptance evidence / forbidden shortcuts
+- [x] 基础工作项（AWI-025/026）不与功能切片混合
+- [x] 依赖顺序正确：AWI-025（HP-019）→ 026 → 027 → 028 → 029；AWI-030 的 FR-021 验收依赖 AWI-028；AWI-032 → 033 → 034 且均依赖现有 currentness/binding 基础
+- [x] 机器可读 goal/acceptance entities 已登记 marker（AWI-025..034 goal、PLUGINV2-S12-* / PLUGINV2-S13-* / PLUGINV2-REPLAN-* / PLUGINV2-SLICE-LOCAL-CV-* acceptance）
+
+### PLUGINV2-S12-TEST-BASELINE-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-TEST-BASELINE-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-025。
+- Acceptance：fresh clone（无本地 `.proofloop` 遗留文件）后全量测试绿；测试不写项目真实配置；`.proofloop/**` 保持 gitignore，不加入 git。
+- Required evidence：fresh clone 冒烟全量 vitest 绿 + 配置无污染断言。
+
+### PLUGINV2-S12-SCHEMA-V3-ACCEPTANCE（acceptance）
+<!-- proofloop:entity id="PLUGINV2-S12-SCHEMA-V3-ACCEPTANCE" kind="acceptance" -->
+- AWI：AWI-028（receipt payload binding 字段）/ AWI-029（v3 判别与混链拒绝）。
+- Acceptance：slice-local 模式 receipt payload 携带 binding 三字段（stage/slice/execution binding digest 必填校验）；schema_version 3 判别——v2 消费端遇 3 显式 fail-closed（BINDING.SCHEMA_FUTURE）；同一 Stage 混用两种模式凭证被拒（BINDING.MODE_MIXED）；legacy 对 ≠1 整链阻塞保持；共享 CV 校验器接受 v3 且不产生第二套校验逻辑。
+- Required evidence：v3 进入 v2 消费端被拒测试；混模式拒绝测试；cv-validation 共享 seam 覆盖 v3 测试；binding 字段缺失/畸形 fail-closed 测试。

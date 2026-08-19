@@ -21,9 +21,9 @@ description: STAGE_EXECUTION 阶段技能：ProofLoop 的执行指导：以 Runt
 Brain 负责：
 
 - Stage 入口条件和全局路由；
-- 加载本技能和对应 role template；
-- 直接调度 Worker、Code Verifier、Committer、Stage Reviewer；
-- 将结构化 Agent 返回交给 Runtime admission；
+- 加载本技能、共享 `.agents/skills/proofloop-worker/SKILL.md` 和对应 role template；
+- 通过当前 Host relay 路由 Worker（`herdr` 默认，`subagent` 兼容），并直接调度 Code Verifier、Committer、Stage Reviewer；两种 Worker 路由见本技能的 `DISPATCH_WORKER` 分支；
+- 对 Worker 先按共享 Worker Skill 完成 callback → lifecycle wait → bounded Result read，再把适用的结构化返回交给正确 consumer；`repair`/`diagnose` 不送入当前 `stage admit-worker`；
 - CV repair 派发纪律：修复阶段的所有 repair 一律以 `mode: repair` 派发
   （Worker repair 行为见 references/worker-template.md）；
 - Stage Close、`progress.md` 和下一个 Stage 的重新选择。
@@ -136,7 +136,13 @@ Runtime 返回的 `context_ref` 是 Agent 的最小上下文入口。
 
 ```text
 DISPATCH_WORKER
-→ references/worker-template.md
+→ resolve host_relay.transport
+→ `herdr`: `.agents/skills/herdr/SKILL.md`
+→ `.agents/skills/proofloop-worker/SKILL.md`
+→ `.agents/skills/proofloop-execute/references/worker-template.md`
+→ `herdr`: `.agents/skills/proofloop-execute/references/herdr-worker-template.md`
+→ callback: wait `idle`/`done` → read bounded Result → re-read durable facts
+→ `subagent`: harness-native Worker wrapper with the same Result Contract
 
 RUN_CV
 → references/code-verifier-template.md
@@ -167,7 +173,10 @@ VALIDATE
 
 Worker 每次只接收一个 Runtime 指定的 Task，并且只接收 admitted Plan 投影的
 immutable execution scope（dispatch packet、`mode` 语义和 Worker 角色规则见
-`references/worker-template.md`）：
+`references/worker-template.md`）。Stage 支持两种显式 Worker route：默认
+`host_relay.transport: herdr`（本次使用 `agent_kind: agy`）和迁移兼容的
+`host_relay.transport: subagent`。transport 在 Session 创建时固定；缺少所选
+route 的 Contract、环境守卫或 adapter 时返回 bounded blocker，不隐式切换 route。
 
 ```text
 DISPATCH_WORKER
@@ -206,25 +215,13 @@ admission（见「动作路由」），其余 verdict 只能进入 Brain 路由�
 修复：
 
 - 首次 CV `REPAIR` 使用 `references/worker-template.md` 的正常 `mode: repair`
-  上下文；Worker repair 后必须 fresh bounded recheck；
+  上下文；Worker repair 的 Result 经过 callback/read 协议后不能送入当前
+  `stage admit-worker`，必须由 Runtime 触发 fresh bounded CV recheck；
 - Goal、Authority refs、Proof Index、Manifest、Plan、Context 或验证边界变化时，必须重新 initial CV；
-- Worker repair 后的 fresh CV recheck 再次返回 `REPAIR` 时，进入多轮修复处理。
-  Brain 不得继续只把最新反例转发给 Worker；必须先读取当前 Slice 全部已接纳的
-  `CV_REPAIR`、相关 Authority refs、当前代码、测试和累计 Git diff，判断跨轮共同根因
-  以及上一轮修复方向未能收敛的原因；
-- 多轮修复使用 `.agents/contracts/brain/multi-round-repair.md`。常规 Worker template
-  不承担多轮历史上下文；
-- 多轮修复的收敛分析由 Brain 负责；Worker 仍负责加载 `diagnose`，复现具体故障、
-  实现 bounded 修复并验证。Brain 不替代 Worker 修改生产代码；
-- “不重复 Worker 的根因诊断”只表示 Brain 不重复具体技术复现和实现工作；不禁止
-  Brain 只读核对 Authority、Schema、真实生产端、消费端、测试和 Git diff；
-- Brain 必须区分：上一轮遗漏的同一问题族、CV 新发现的独立问题、修复所需路径超出
-  admitted execution scope、Plan/Authority 缺口。对同一问题族必须形成一个完整修复方向；
-  独立新问题可以单独 bounded repair；scope、Plan 或 Authority 缺口使用现有 route，
-  不得继续派发 Worker 或自行扩大权限；
-- 不设置固定重试次数，也不增加新的 Runtime Gate。完整修复后再次出现同一问题族时，
-  Brain 必须先说明上一轮修复方向遗漏了什么，再决定继续 repair 或使用现有 route；
-  不得只追加最新反例后机械重派 Worker。
+- Worker repair 后的 fresh CV recheck 再次返回 `REPAIR` 时，Brain 必须加载
+  `.agents/contracts/brain/multi-round-repair.md`；该 Contract 负责跨轮 history、
+  root-cause synthesis、scope decision、Worker dispatch 和下一轮路由。常规
+  Worker template 不承担多轮历史上下文，也不新增 Runtime 状态或 Gate。
 
 ## 提交、集成与 Gate
 

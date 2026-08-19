@@ -57,6 +57,7 @@ Conditional requirements per boundary type:
 | `prototype-checkpoint` | Prototype validation in isolated worktree | worktree-local — no production boundary |
 | `stage-close` | Stage Review accepted by Brain | `delivery/stages/<stage>/*` — close boundary, `progress.md` summary |
 | `direct-fix` | General direct fix complete | bounded scope per task |
+| `runtime-repair` | User-confirmed Runtime/Host repair under an explicit recovery Contract | exact Runtime/Host implementation and test paths only; no Stage Receipt or authority artifact |
 
 Note: `slice-output` is dispatched by Executor, not Brain, and is not part of this contract.
 
@@ -183,6 +184,23 @@ git commit -m "direct-fix: <description>"
 git status --short --untracked-files=all
 ```
 
+### runtime-repair
+
+```text
+git add -- <exact Runtime/Host repair files>
+git diff --cached --name-status
+git diff --cached --check
+git commit -m "runtime-repair: <description>"
+git status --short --untracked-files=all
+```
+
+`runtime-repair` is allowed only when the dispatch packet names the governing recovery
+Contract, exact stage/recovery boundary, exact changed files, pre-commit HEAD and test
+evidence. Committer must not stage Stage Plan, tasks projection, Evidence, Manifest,
+Context, Receipt, authority or agent-configuration files. The commit is a Runtime/Host
+repair Git boundary, not a Slice Commit; Runtime must later require fresh SPV/Stage Plan
+admission after the HEAD change.
+
 ### prototype-checkpoint
 
 ```text
@@ -207,6 +225,7 @@ git status --short --untracked-files=all
 | `stage-plan` | `stage_id`, `manifest_digest` |
 | `artifact-archive` | `stage_id`, `invalidation_finding`, `old_manifest_digest`, exact `source_paths`, exact `destination_paths`, `expected_head` |
 | `stage-close` | `stage_id`, `manifest_digest`, `stage_gate_receipt` (path), `stage_review_receipt` (path), `integrated_snapshot` (digest) |
+| `runtime-repair` | `stage_id`, `recovery_contract`, exact `changed_files`, `pre_commit_head`, `test_evidence` |
 
 ## Expected results
 

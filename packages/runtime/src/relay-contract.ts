@@ -147,7 +147,7 @@ export interface WorkerRelayStepResult {
   readonly execution: WorkerExecution;
   readonly relay: WorkerRelayKind;
   readonly lineageContinued: boolean;
-  readonly workerResult?: WorkerResultEnvelope;
+  readonly workerResult?: WorkerResultEnvelope | VNextWorkerResultEnvelope;
   readonly attention?: WorkerRelayAttention;
   readonly diagnostics: WorkerRelayDiagnostics;
 }

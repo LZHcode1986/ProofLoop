@@ -3,7 +3,7 @@ description: Committer — Git boundary closure agent.
 tools: read, bash, grep, find, ls
 extensions: false
 skills: false
-model: opencode-go/deepseek-v4-flash
+model: sensenova/deepseek-v4-flash
 thinking: high
 prompt_mode: replace
 inherit_context: false

@@ -41,9 +41,16 @@ import {
 } from './dispatch';
 import {
   assertClosedVNextCvPayload,
+  assertSliceLocalCredentialBindingFields,
   assertVNextCvChainSequence,
   assertVNextCvProofIndexBindings,
+  credentialSchemaVersionMismatch,
 } from './cv-validation';
+import type { VNextSliceLocalBindingExpectation } from './cv-validation';
+// S12-D-T04 (S12-D REPLAN): the slice-local binding expectation (stage/slice
+// contract digests + recomputed execution binding) is the single shared
+// computation of the Worker/CV/Commit/Integration credential consumers.
+import { computeSliceLocalBindingExpectation } from './worker-admission';
 import { readVNextAdmissionAuthority } from './next';
 import {
   VNEXT_WORKER_COMPLETION_MODES,
@@ -85,6 +92,12 @@ const KNOWN_FIELDS = new Set([
   'required_recheck_scope',
   'previous_failure_signature',
   'repair_diff_digest',
+  // S12-D-T04 (§8.3): slice-local binding fields — admissible only on a
+  // schema_version 3 payload (the shared cv-validation module enforces the
+  // branch rule; this pre-check only admits the field names).
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
 ]);
 
 const IDENTIFIER_RE = /^[A-Za-z0-9_-]+$/;
@@ -348,6 +361,13 @@ const WORKER_PAYLOAD_FIELDS = new Set([
   'snapshot_digest',
   'context_ref',
   'context_digest',
+  // S12-D-T04 (§8.3, S12-D REPLAN): slice-local binding fields — admissible
+  // only on a schema_version 3 TASK_COMPLETE credential (the shared
+  // assertSliceLocalCredentialBindingFields enforces the v3-only rule; the
+  // schema_version discrimination runs before this exact-field set).
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
 ]);
 
 function fail(code: CvAdmissionCode, message: string): never {
@@ -564,16 +584,24 @@ function sliceBinding(root: string, manifest: VNextManifest, sliceId: string): S
   const tasks = taskIdsAndBindings(root, manifest, slice);
   const planPath = rootRelativePath(root, manifest.plan.ref, 'Manifest.plan.ref');
   const evidencePath = rootRelativePath(root, slice.evidence_path, 'Manifest Slice Evidence path');
-  const allCodeScope = unique(tasks.flatMap((task) => task.allowedCodeScope));
-  const allForbidden = unique([
-    ...tasks.flatMap((task) => task.executionScope.forbidden_paths),
-    ...canonicalSystemForbiddenPaths(root),
-  ]);
-  const allowed = unique([...allCodeScope, evidencePath, planPath]);
-  for (const permitted of allowed) {
-    for (const forbidden of allForbidden) {
-      if (pathsOverlap(permitted, forbidden)) {
-        fail('RUNTIME.SCHEMA_MISMATCH', `Manifest execution scope overlaps forbidden path: ${permitted}`);
+  // Execution scope is task-level: every task may touch only its own
+  // code/test scope plus the shared Evidence/Plan projection, and must not
+  // overlap its own forbidden list or the system forbidden paths.  Merging
+  // all tasks' allowed/forbidden lists across the Slice would falsely reject
+  // legal task-level scopes — one task may be admitted to edit a path that
+  // another task must not touch (S12-D: T02 edits next.ts while T01/T04
+  // forbid it) — so the overlap check runs per task.
+  for (const task of tasks) {
+    const taskAllowed = unique([...task.allowedCodeScope, evidencePath, planPath]);
+    const taskForbidden = unique([
+      ...task.executionScope.forbidden_paths,
+      ...canonicalSystemForbiddenPaths(root),
+    ]);
+    for (const permitted of taskAllowed) {
+      for (const forbidden of taskForbidden) {
+        if (pathsOverlap(permitted, forbidden)) {
+          fail('RUNTIME.SCHEMA_MISMATCH', `Manifest execution scope overlaps forbidden path: ${permitted}`);
+        }
       }
     }
   }
@@ -583,8 +611,15 @@ function sliceBinding(root: string, manifest: VNextManifest, sliceId: string): S
     proofIndexDigest: computeDigest(slice.proof_index),
     planPath,
     evidencePath,
-    allowedExecutionScope: allowed,
-    forbiddenExecutionScope: allForbidden,
+    allowedExecutionScope: unique([
+      ...tasks.flatMap((task) => task.allowedCodeScope),
+      evidencePath,
+      planPath,
+    ]),
+    forbiddenExecutionScope: unique([
+      ...tasks.flatMap((task) => task.executionScope.forbidden_paths),
+      ...canonicalSystemForbiddenPaths(root),
+    ]),
   };
 }
 
@@ -843,8 +878,12 @@ function assertTuple(
   envelope: VNextCvResultEnvelope,
   label: string,
 ): void {
+  // S12-D-T04 (S12-D REPLAN): the tuple binding is credential-version
+  // agnostic — a v2 (legacy/current vNext) or v3 (slice-local) credential
+  // must bind the SAME stage/slice digest tuple. The credential version is
+  // discriminated separately through credentialSchemaVersionMismatch.
   if (
-    value.schema_version !== 2 ||
+    (value.schema_version !== 2 && value.schema_version !== 3) ||
     value.manifest_digest !== envelope.manifest_digest ||
     value.plan_digest !== envelope.plan_digest ||
     value.proof_index_digest !== envelope.proof_index_digest ||
@@ -854,27 +893,12 @@ function assertTuple(
   }
 }
 
-function assertPathsWithinScope(
-  paths: readonly string[],
-  allowed: readonly string[],
-  forbidden: readonly string[],
-  label: string,
-): void {
-  for (const value of paths) {
-    if (forbidden.some((base) => pathsOverlap(value, base))) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `${label} contains a forbidden path: ${value}`);
-    }
-    if (!allowed.some((base) => pathWithin(value, base))) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `${label} expands beyond the admitted execution scope: ${value}`);
-    }
-  }
-}
-
 function validateWorkerChain(
   root: string,
   manifest: VNextManifest,
   slice: SliceBinding,
   envelope: VNextCvResultEnvelope,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): WorkerChainFacts {
   const chain = readReceiptChain(
     root,
@@ -903,6 +927,31 @@ function validateWorkerChain(
       fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a legacy, mixed, or wrong-slice Receipt');
     }
     const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${index}].payload`);
+    // S12-D-T04 (§8.3): the credential schema_version discrimination runs
+    // BEFORE the exact-field set so a slice-local (v3) payload carrying the
+    // binding fields fails with the explicit BINDING code, not as an
+    // unknown-field rejection.
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      payload.schema_version,
+      manifest.binding !== undefined,
+      `TASK_COMPLETE[${index}].payload`,
+    );
+    if (schemaMismatch !== null) {
+      // The BINDING.* code is carried in the finding message: the canonical
+      // FindingCode vocabulary is a closed kernel union (§7), so the
+      // admission finding code stays RUNTIME.SCHEMA_MISMATCH.
+      fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
+    }
+    // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode every v3 Worker
+    // credential must carry the slice-local binding fields and bind the SAME
+    // Manifest contract digests and recomputed execution binding; a v2
+    // credential carrying binding fields is rejected (never silently
+    // ignored).
+    assertSliceLocalCredentialBindingFields(
+      payload,
+      `TASK_COMPLETE[${index}].payload`,
+      sliceLocalBinding,
+    );
     assertExactFields(payload, WORKER_PAYLOAD_FIELDS, `TASK_COMPLETE[${index}].payload`);
     const task = slice.tasks[index];
     if (task === undefined) {
@@ -931,13 +980,61 @@ function validateWorkerChain(
     }
     const changedFiles = requireStringArray(payload.changed_files, `TASK_COMPLETE[${index}].changed_files`, true)
       .map((item, fileIndex) => rootRelativePath(root, item, `TASK_COMPLETE[${index}].changed_files[${fileIndex}]`));
-    assertPathsWithinScope(
-      changedFiles,
-      slice.allowedExecutionScope,
-      slice.forbiddenExecutionScope,
-      `TASK_COMPLETE[${index}].changed_files`,
+    // Task-level scope: a TASK_COMPLETE fact declares the files its task
+    // changed, so it is bounded by the task's OWN allowed scope — its
+    // code/test paths plus the shared Evidence/Plan projection, extended by
+    // the scopes of prior tasks whose uncommitted output the worktree still
+    // carries.  Another task's forbidden list must not veto this task's
+    // admitted files (S12-D: T01/T04 forbid next.ts while T02 is admitted
+    // to edit it).
+    const priorCodeAndTest = unique(
+      slice.tasks.slice(0, index).flatMap((prior) => prior.allowedCodeScope),
     );
-    if (!changedFiles.includes(slice.evidencePath) || !changedFiles.includes(slice.planPath)) {
+    const taskAllowed = unique([
+      ...priorCodeAndTest,
+      ...task.allowedCodeScope,
+      slice.evidencePath,
+      slice.planPath,
+    ]);
+    // User authorization A4 (same semantics as worker-admission A3): the
+    // task-level forbidden list constrains the CURRENT task's own behavior,
+    // not the worktree's historical state.  A declared file that belongs to
+    // a prior task's code/test scope — and not to the current task's own
+    // scope — is exempt from the current task's forbidden check (S12-D: T04
+    // must declare T02's next.ts output while T04's own forbidden covers
+    // next.ts).  The system forbidden paths and the allowed-scope check
+    // still bind every declared file, and the current task's own files stay
+    // bound by its own forbidden list.
+    const taskLevelForbidden = unique(task.executionScope.forbidden_paths);
+    const systemForbidden = unique(canonicalSystemForbiddenPaths(root));
+    const changedFilesLabel = `TASK_COMPLETE[${index}].changed_files`;
+    for (const changed of changedFiles) {
+      if (systemForbidden.some((base) => pathsOverlap(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} contains a forbidden path: ${changed}`);
+      }
+      const priorOwned =
+        priorCodeAndTest.some((base) => pathWithin(changed, base)) &&
+        !task.allowedCodeScope.some((base) => pathWithin(changed, base));
+      if (!priorOwned && taskLevelForbidden.some((base) => pathsOverlap(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} contains a forbidden path: ${changed}`);
+      }
+      if (!taskAllowed.some((base) => pathWithin(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} expands beyond the admitted execution scope: ${changed}`);
+      }
+    }
+    // User authorization A6 (admission counterpart): the Evidence/Plan
+    // projection must be declared only when it is part of the current
+    // worktree changes; an already-committed projection (HEAD-consistent)
+    // satisfies the contract via the persisted snapshot.
+    const worktreeChanges = new Set(
+      gitChangedPaths(root).map((value, fileIndex) =>
+        rootRelativePath(root, value, `Git changed path[${fileIndex}]`),
+      ),
+    );
+    if (
+      (worktreeChanges.has(slice.evidencePath) && !changedFiles.includes(slice.evidencePath)) ||
+      (worktreeChanges.has(slice.planPath) && !changedFiles.includes(slice.planPath))
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', `TASK_COMPLETE[${index}].changed_files omits the Evidence or Plan projection`);
     }
     if (!Array.isArray(payload.verification_runs)) {
@@ -989,8 +1086,10 @@ function assertCvProofBindings(envelope: VNextCvResultEnvelope, slice: SliceBind
 function validateCvHistory(
   root: string,
   slice: SliceBinding,
+  stageHasBinding: boolean,
   envelope: VNextCvResultEnvelope,
   worker: WorkerChainFacts,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): CvHistoryFacts {
   const chain = readReceiptChain(
     root,
@@ -1017,6 +1116,27 @@ function validateCvHistory(
         `vNext CV Receipt ${index} is not a valid closed CV envelope: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    // S12-D-T04 (§8.3): a v3 (or unknown-future) credential in the persisted
+    // CV history is discriminated against the Stage mode before any tuple
+    // binding is asserted.
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      prior.schema_version,
+      stageHasBinding,
+      `CV Receipt ${index}.payload`,
+    );
+    if (schemaMismatch !== null) {
+      // The BINDING.* code is carried in the finding message: the canonical
+      // FindingCode vocabulary is a closed kernel union (§7).
+      fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
+    }
+    // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode every persisted v3
+    // CV credential must bind the Manifest contract digests and the
+    // recomputed execution binding (same single-truth as the candidate).
+    assertSliceLocalCredentialBindingFields(
+      prior as unknown as Record<string, unknown>,
+      `CV Receipt ${index}.payload`,
+      sliceLocalBinding,
+    );
     if (prior.verdict === 'PASS' && receipt.type !== 'CV_PASS') {
       fail('RUNTIME.SCHEMA_MISMATCH', `CV Receipt ${index} discriminator does not match verdict PASS`);
     }
@@ -1132,6 +1252,23 @@ function validateFacts(
   if (manifest.version !== 2 || manifest.plan.schema_version !== 2) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'CV admission accepts only an explicit vNext schema-v2 Manifest');
   }
+  // S12-D-T04 (§8.3): the candidate CV credential is discriminated against
+  // the Stage mode before any fact is read — a v3 envelope in a legacy Stage
+  // is BINDING.MODE_MIXED, a v3 envelope in a slice-local Stage is the legal
+  // slice-local credential (its binding fields are validated against the
+  // Manifest and recomputed execution binding below), and unknown future
+  // versions fail closed explicitly. A v2 credential in a slice-local Stage
+  // is BINDING.MODE_MIXED (no Phase-1 acceptance policy, S12-D repair).
+  const candidateSchemaMismatch = credentialSchemaVersionMismatch(
+    value.schema_version,
+    manifest.binding !== undefined,
+    'CV result envelope',
+  );
+  if (candidateSchemaMismatch !== null) {
+    // The BINDING.* code is carried in the finding message: the canonical
+    // FindingCode vocabulary is a closed kernel union (§7).
+    fail('RUNTIME.SCHEMA_MISMATCH', candidateSchemaMismatch.message);
+  }
   if (manifest.stage_id !== value.stage_id) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Manifest stage_id does not match the CV result');
   }
@@ -1169,11 +1306,25 @@ function validateFacts(
     fail('RUNTIME.SCHEMA_MISMATCH', 'Stage Plan authority is not bound to the fresh SPV_PASS Receipt');
   }
 
+  // S12-D-T04 (S12-D REPLAN): slice-local mode — every credential of the
+  // Slice (Worker chain, candidate CV envelope, persisted CV history) must
+  // bind the SAME Manifest contract digests and the recomputed execution
+  // binding. The base snapshot is the admitted SPV snapshot (the Stage's
+  // canonical integration HEAD at admission), stable for the whole Stage.
+  const sliceLocalBinding =
+    manifest.binding !== undefined
+      ? computeSliceLocalBindingExpectation(
+          root,
+          manifest,
+          value.slice_id,
+          authority.spv.snapshot_digest,
+        )
+      : undefined;
   const slice = sliceBinding(root, manifest, value.slice_id);
   if (value.proof_index_digest !== slice.proofIndexDigest) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'proof_index_digest does not match the Manifest Slice Proof Index');
   }
-  const worker = validateWorkerChain(root, manifest, slice, value);
+  const worker = validateWorkerChain(root, manifest, slice, value, sliceLocalBinding);
   if (value.worker_receipt_digest !== worker.tipDigest) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'worker_receipt_digest does not match the current Worker Receipt chain tip');
   }
@@ -1200,6 +1351,7 @@ function validateFacts(
       expectedOracleRefs: slice.slice.proof_index.oracle_refs,
       expectedRiskRefs: slice.slice.proof_index.risk_refs.map((risk) => risk.ref_id),
       expectedContextDigest: latestContext.digest,
+      sliceLocalBinding,
     });
   } catch (error) {
     if (error instanceof VNextHandoffError) {
@@ -1221,7 +1373,14 @@ function validateFacts(
     ),
   );
 
-  const history = validateCvHistory(root, slice, value, worker);
+  const history = validateCvHistory(
+    root,
+    slice,
+    manifest.binding !== undefined,
+    value,
+    worker,
+    sliceLocalBinding,
+  );
   // A Worker repair does not produce a new Worker Receipt, so a legal
   // REPAIR → recheck sequence binds the recheck to the SAME Worker Receipt
   // tip as the preceding CV_REPAIR — and that successor relation may repeat
@@ -1412,3 +1571,27 @@ export function admitVNextCVResult(
 
 /** Lower-case acronym alias retained for Runtime naming symmetry. */
 export const admitVNextCvResult = admitVNextCVResult;
+
+function gitChangedPaths(root: string): string[] {
+  let gitRoot: string;
+  try {
+    gitRoot = resolveGitRoot(root);
+  } catch (error) {
+    throw new VNextHandoffError('manifest-binding', `Git root is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const run = (args: readonly string[]): string[] => {
+    try {
+      const output = execFileSync('git', ['-C', gitRoot, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return output.split('\0').filter((entry) => entry.length > 0);
+    } catch (error) {
+      throw new VNextHandoffError('manifest-binding', `Git changed-file scope is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  return unique([
+    ...run(['diff', '--name-only', '-z', '--diff-filter=ACDMRTUXB', 'HEAD', '--']),
+    ...run(['ls-files', '--others', '--exclude-standard', '-z']),
+  ]).map((value, index) => rootRelativePath(root, value, `Git changed path[${index}]`));
+}

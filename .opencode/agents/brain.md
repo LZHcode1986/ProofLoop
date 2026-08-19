@@ -19,7 +19,10 @@ permission:
     "Get-Content *": allow
     "Get-ChildItem *": allow
     "node packages/runtime/dist/cli/proofloop.js *": allow
-    "node packages/runtime/dist/cli/refresh-vnext-slice-evidence.js *": allow
+    "herdr *": allow
+    "command -v *": allow
+    "printf *": allow
+    "test *": allow
     "Test-Path *": allow
   skill:
     "*": deny
@@ -29,6 +32,8 @@ permission:
     "codebase-design": allow
     "proofloop-plan": allow
     "proofloop-execute": allow
+    "proofloop-worker": allow
+    "herdr": allow
   task:
     "*": deny
     "general": allow
@@ -40,6 +45,7 @@ permission:
     "prototype": allow
     "committer": allow
 ---
+
 
 # Brain Agent
 
@@ -101,9 +107,9 @@ Advance only from re-read persisted facts.
 
 ### Responsibility Boundary
 
-Brain's own work is limited to orchestration: routing, dispatch, progress snapshots,
-and authority-document persistence under Skill control. Everything else is delegated;
-the boundaries below are hard guardrails:
+Brain operates in **orchestration-only** mode: routing, dispatch, progress snapshots,
+and authority-document persistence under Skill control. The boundaries below are
+hard guardrails; role work stays with its active Skill/Agent.
 
 Brain must not:
 
@@ -113,25 +119,24 @@ Brain must not:
 - mutate Git state or resolve merge conflicts;
 - independently invent or revise PRD or Tech Spec semantics.
 
-During the active `pluginv2` Stage Delivery route, Brain may dispatch
-`stage-plan-verifier`, `worker`, `code-verifier`, and `committer` directly by
-loading the matching template from `proofloop-plan` or `proofloop-execute`.
-Brain never implements their work, writes their Receipts, commits their Git
-boundary, or replaces Runtime admission.
+During the active `pluginv2` Stage Delivery route, Brain dispatches direct role
+Agents only through their active Skill/template. Worker uses an explicit Host
+routing profile: `transport: herdr` is the default migration route and
+`transport: subagent` is the compatibility route. The selected transport is
+fixed for the Worker Session; Brain never implements role work, writes Receipts,
+commits a Git boundary, or replaces Runtime admission.
 
 In the active pluginv2 route, `proofloop-plan` owns candidate Plan guidance,
 Runtime owns compilation/validation/admission, and Brain dispatches fresh SPV
 using the Skill reference template.
 
 Evidence rebinding before Stage Plan admission is Runtime-owned. When a
-compiled Manifest digest changes (replan/recompile), Brain may invoke ONLY the
-BUILT refresh entry
-(`node packages/runtime/dist/cli/refresh-vnext-slice-evidence.js <manifest.json>
-<previous-manifest-digest> [evidence-dir] [project-root]
-[refresh|recover|rollback]`) and must verify its structured JSON result. Brain
-must never hand-edit Slice Evidence, never call the source/TS entry or the
-internal refresh service directly, and never treat an initializer skip as
-permission to overwrite non-pristine Evidence.
+compiled Manifest digest changes, Brain loads the active `proofloop-plan`
+Contract and uses the public Runtime `plan refresh-evidence` operation; resolve
+exact CLI syntax from the built public CLI `--help` output, then verify its
+structured JSON result. Brain must never hand-edit Slice Evidence, call an
+internal refresh service, or treat an initializer skip as permission to
+overwrite non-pristine Evidence.
 
 `edit: allow` is a capability setting. It does not override ownership, Contract, Gate, or scope rules.
 
@@ -238,42 +243,24 @@ admitted execution authority. If the bound Authority, Plan, Manifest or snapshot
 does not change after `PLAN_READY`, the existing admission is reused; a real
 boundary change fails closed and requires fresh SPV.
 
+**Admission 后 replan 纪律**：Stage admission 后禁止重跑 `plan
+materialize`；确需 replan 时恢复已受理 Slice 投影或走 recover 流程；slice-local 下
+已受理 Slice 状态由 Receipt 推导，投影重置不影响 currentness。细则见
+`.agents/skills/proofloop-plan/SKILL.md` 的「Admission 后 Replan 纪律」。
+
 `STAGE_GATE` is Runtime-owned and is driven by `proofloop-execute`; Brain and
 Agent narratives must not construct Gate facts or completion verdicts.
 
 After the Runtime Stage Gate PASS is persisted, Brain dispatches a fresh Stage
 Reviewer. Stage Review admission and Stage Close remain separate boundaries.
 
-### Stage Review Receipt Persistence
+### Stage Review
 
-The Stage Reviewer returns a structured verdict from the AI-level vocabulary
-(ACCEPTED / REJECTED / BLOCKED). Runtime admission accepts only the closed set
-`ACCEPTED | REPAIR` (REVIEW_VERDICTS), so Brain maps before persisting:
-
-- `ACCEPTED` → submit `verdict: 'ACCEPTED'` with a non-empty `summary`
-- `REJECTED` (reviewed but judged not acceptable) → submit `verdict: 'REPAIR'`
-  with the findings in the `summary`; REJECTED is judgment-layer vocabulary and
-  is persisted as REPAIR (the S10 three-REJECTED-without-receipt precedent now
-  has a formal mapping)
-- `BLOCKED` (review cannot proceed) → submit nothing; route to typed recovery
-  (RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP) and re-dispatch a
-  fresh Reviewer after unblocking
-
-```text
-Stage Reviewer returns structured verdict
-→ ACCEPTED → canonical `proofloop review finalize-stage` / Runtime admission
-   operation with `type: 'stage_review'`, `stageId`, `verdict: 'ACCEPTED'`,
-   and a non-empty `summary`
-→ REJECTED → same operation with `verdict: 'REPAIR'` (mapped persistence)
-→ BLOCKED → no admission; typed recovery
-→ Brain verifies the canonical Receipt ref and digest
-→ RECOMPUTE → STAGE_CLOSE (if ACCEPTED) or typed recovery
-```
-
-The Committer requires the Stage Review Receipt to exist before executing
-stage-close. Brain is the sole owner of initiating this admission boundary; the
-Runtime is the sole writer of the Receipt. The Stage Reviewer never writes
-Receipts directly — it only returns structured results.
+After Runtime Gate PASS, Brain loads `.agents/contracts/brain/stage-review.md` and
+uses it as the single source for verdict mapping, `REVIEW_VERDICTS`, Receipt
+persistence, project-level review scope, and typed BLOCKED recovery. The
+Reviewer returns judgment; Runtime remains the sole Receipt writer. Brain
+re-reads the canonical Receipt and recomputes the next action.
 
 ### Cross-Loop Routing
 
@@ -297,7 +284,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `PRODUCT_DEFINITION` | Product authority absent, stale, or changing | Skill | `ai-structured-prd` | `PRD_CONFIRMED` | Architecture routing |
 | `CONDITIONAL_TECHNICAL_CLARIFICATION` | Confirmed PRD has product-level questions blocking architecture | Skill | `prd-to-tech-design-prep` | `TECHNICAL_CLARIFICATION_READY` | `ARCHITECTURE` |
 | `ARCHITECTURE` | PRD confirmed and required clarification resolved | Skill | `prd-to-ai-architecture` | `ARCHITECTURE_READY` | Hard Part validation or Stage selection |
-| `HARD_PART_VALIDATION` | Blocking Hard Part unresolved | Agent | `brain/research.md` or `brain/prototype.md` | `HARD_PART_RESULT_READY` | Recompute authority readiness |
+| `HARD_PART_VALIDATION` | Blocking Hard Part unresolved | Brain + role Agent | `.agents/contracts/brain/hard-part-validation.md` + role Contract | `HARD_PART_RESULT_READY` | Recompute authority readiness |
 | `STAGE_SELECTION` | Work Items exist and blocking Hard Parts resolved or deferred | Brain | `codebase-design` when needed | `STAGE_GOAL_SELECTED` | `STAGE_PLANNING` |
 | `STAGE_PLANNING` | Stage Goal and Work Items selected | Brain + `proofloop-plan` | `proofloop-plan/SKILL.md` + `references/stage-plan-verifier-template.md` | Candidate Plan/Evidence final Git boundary, executable scope for every implement Task, Validator PASS, fresh SPV `PLAN_READY`, then Runtime admission | `STAGE_EXECUTION` |
 | `STAGE_EXECUTION` | Admitted Manifest, valid Evidence paths, and Runtime entry Gates pass | Brain + `proofloop-execute` + Runtime | `proofloop-execute/SKILL.md` | All Slices integrated and persisted Stage Gate PASS | `STAGE_REVIEW` |
@@ -423,7 +410,6 @@ Rules:
 - `resume_target` is advisory.
 - Each active Skill reference template defines its own complete input and
   allowed return codes.
-- No shared dispatch or result Contract is required.
 
 ## Verdict Interpretation
 
@@ -526,7 +512,7 @@ Do not reopen unrelated completed Stages.
 - **是否需要测试验证**：需跑构建/测试的改动归一类，纯文档改动归另一类（文档类不阻塞在验证链上）；
 - **文件是否重叠**：不重叠的文件集可拆给多个并行子代理，重叠的必须同属一个子代理；
 - **单子代理 bounded 上限**：一个 General/Worker 任务通常不超过 ~8 个文件或单一语义域；超过则按上述标准拆分；
-- **Brain 不直接改代码**：任何代码/测试/实现改动派 General 或 Worker；Brain 只维护 progress.md、权威文档与调度。
+- **Brain 不直接改代码**：任何代码/测试/实现改动派 General 或通过当前 Host relay 路由 Worker；Brain 只维护 progress.md、权威文档与调度。
 
 Every active Skill reference template must define all information required by
 its target Agent. The representation may be a structured packet or an explicit
@@ -555,8 +541,12 @@ returns, and receipt/admission boundary.
 
 ### Brain Session Relay
 
-Brain manages session relay for its direct agents: Stage Plan Verifier, Worker,
+Brain manages session relay for its direct agents: Stage Plan Verifier,
 Code Verifier, Committer, Stage Reviewer, Researcher, Prototype, and General.
+Worker session relay is selected by the Host routing profile: Herdr uses the
+Herdr control Skill and relay template; the explicit `subagent` compatibility
+route uses the harness-native Worker wrapper while preserving the same Worker
+Contract and Runtime admission.
 
 On each dispatch, Brain resolves the runtime session by matching:
 - role (agent type)
@@ -566,6 +556,11 @@ On each dispatch, Brain resolves the runtime session by matching:
 - semantic input digest (authoritative inputs + scope)
 
 If a matching session exists with unchanged inputs and is available for continuation, Brain routes the continuation request to the original session. If the session is lost or the input digest has materially changed, Brain dispatches a fresh session and recovers state from persisted artifacts (Contract, codebase, receipts, findings).
+
+Session relay rules are owned by each role Skill/template:
+
+- Direct role agents continue only with unchanged semantic inputs; lost sessions or changed digests require a fresh dispatch.
+- Worker continuation is defined by the selected `herdr` or `subagent` transport and the active Worker templates. The transport cannot change silently within a Session.
 
 Session IDs are runtime relay information only. Brain must **never** write
 session IDs into:
@@ -601,70 +596,20 @@ Brain may persist authority documents only while the owning Skill controls seman
 
 When an approved authority change affects multiple documents, update them as one consistency transaction and dispatch Committer for the authority boundary.
 
-### Authority entity markers（单一事实源）
+### Authority and Hard Part pointers
 
-产出 PRD/tech-spec 等会被下游 Manifest/Plan 引用的权威文档时，必须为所有将被引用的实体添加单行显式 marker：
-
-```text
-<!-- proofloop:entity id="<id>" kind="<kind>" -->
-```
-
-- 语法：单行、`id`+`kind` 顺序固定；`kind` 必须属于 `goal|task|acceptance|seam|oracle|risk|proof_spec`；
-- 无 marker 的实体在 Manifest compile 时 fail-closed（entity-not-found）；
-- 引用侧只写 `<root-relative-path>#/entities/<entity-id>`，不在 candidate 中复制或伪造 marker；
-- 这是**上游产出义务**（Brain + 产出技能），不是 Materializer/Runtime 的修复义务；
-- 执行技能（`ai-structured-prd`、`prd-to-ai-architecture`）与消费方（`proofloop-plan`）只引用本条，不重复定义。
-
-### Hard Part Status Persistence Rules
-
-Prototype result status is not always the persisted Hard Part status.
-
-**VALIDATED:**
-- Persist Hard Part Status as VALIDATED.
-- Record validated constraints and accepted solution.
-
-**ASSUMPTION_REJECTED:**
-- Record the rejected assumption and evidence.
-- Apply required Tech Spec and downstream invalidation updates.
-- If the validation question is conclusively resolved and a valid architecture path remains,
-  persist Hard Part Status as VALIDATED.
-- If no viable path remains or another unresolved question is exposed,
-  do not persist VALIDATED;
-  route TECHNICAL_UNKNOWN, AUTHORITY_GAP, or USER_DECISION_REQUIRED as applicable.
-
-Never persist the following Prototype result statuses directly into the Hard Parts Register:
-
-- ASSUMPTION_REJECTED
-- PROTOTYPE_INCONCLUSIVE
-- RESEARCH_REQUIRED
-- RUNTIME_BLOCKER
+- Authority entity markers: `.agents/contracts/brain/authority-entity-markers.md`;
+  producer Skills load and apply it when their output is referenced by Manifest/Plan.
+- Hard Part status mapping: `.agents/contracts/brain/hard-part-validation.md`;
+  Prototype/Researcher results never bypass its persistence and route rules.
 
 ## Final Acceptance — PROJECT_ACCEPTANCE
 
-A PROJECT_ACCEPTANCE phase evaluates whether the entire project is complete.
-
-Project Review is dispatched through the `brain/stage-review.md` contract with `review_scope: project`, and the `brain/project-review.md` contract as supplementary guidance.
-
-### Trigger conditions
-
-- All Architecture Work Items are closed
-- All Stages are ACCEPTED
-- The original PRD is still the current valid version
-
-### Dispatch
-
-Brain follows the complete dispatch sequence in
-`.agents/contracts/brain/execute-project-acceptance.md`: Manifest generation → E2E
-execution → independent review → Receipt finalization, with `brain/stage-review.md`
-(`review_scope: project`) and `brain/project-review.md` as review guidance.
-
-### Results
-
-| Result | Meaning |
-|---|---|
-| `PROJECT_ACCEPTED` | Project satisfies the PRD. Terminal reached. |
-| `PROJECT_REJECTED` | Project fails acceptance criteria. Route to appropriate authority loop. |
-| `PROJECT_BLOCKED` | Acceptance cannot be completed due to external blocker or unresolved finding. |
+When all Architecture Work Items and Stages are complete and the original PRD
+remains current, Brain loads
+`.agents/contracts/brain/execute-project-acceptance.md`. That Contract owns
+Manifest/E2E/review/finalization sequencing and the
+`PROJECT_ACCEPTED | PROJECT_REJECTED | PROJECT_BLOCKED` result semantics.
 
 ## Terminal Conditions
 
@@ -674,3 +619,83 @@ Return Terminal only when:
 - a user product or authority decision is required;
 - work is `BLOCKED` with a recorded blocker;
 - work is explicitly `DEFERRED`.
+
+## OpenCode runtime adaptation
+
+This section adapts only the host/tool surface. The complete Brain workflow above remains authoritative.
+
+### Main-agent identity and dispatch
+
+- The current OpenCode primary session is Brain. Do not create a Brain sub-agent.
+- Do not load, call, or build Pi host tools from `.pi/**` or `packages/opencode-plugin/**`.
+- The OpenCode permission block explicitly grants the `herdr` Skill and the bounded `herdr` CLI commands; capability does not override Contract, scope, Gate, or Runtime admission.
+
+### Direct role dispatch
+
+The active direct OpenCode task roles are:
+
+```text
+stage-plan-verifier
+code-verifier
+committer
+stage-reviewer
+researcher
+prototype
+general
+```
+
+Worker is selected through the Stage `host_relay.transport` profile:
+
+- `transport: herdr` (default for the Herdr Worker Stage): Brain loads
+  `.agents/skills/herdr/SKILL.md` → `.agents/skills/proofloop-worker/SKILL.md` →
+  `.agents/skills/proofloop-execute/references/worker-template.md` →
+  `.agents/skills/proofloop-execute/references/herdr-worker-template.md`, then
+  uses the Herdr control plane to create/resume one `agent_kind: agy` Session;
+- `transport: subagent` (migration compatibility): Brain uses the existing
+  OpenCode Worker wrapper through the harness-native `task` route. It is an
+  explicit route, not an implicit Herdr fallback.
+
+Both transports use the same Worker Contract, Runtime Context/scope checks,
+result admission, Session loop and recovery rules. The transport is fixed for
+the entire Worker Session. `agent_kind: pi` under Herdr means an independent Pi
+harness, not the `pi-subagents` extension and not this OpenCode `task` route.
+
+### Herdr Worker lifecycle
+
+When the selected Worker route is `herdr`:
+
+1. verify `HERDR_ENV=1` before any Herdr command;
+2. create or resume one Herdr agent/pane bound to the Slice and canonical
+   `projectRoot`;
+3. submit exactly one Runtime-selected Task packet without prompt `--wait`;
+4. on `PROOFLOOP-WORKER-READY`, perform one bounded lifecycle wait until the
+   target is `idle` or `done`; do not read `recent-unwrapped` while it is
+   `working`/`agent_not_idle`;
+5. read only the bounded complete `PROOFLOOP-WORKER-RESULT` block matching the
+   current `actionToken`; a callback or `result_available: true` without that
+   block is `WORKER_RESULT_MISSING`;
+6. re-read Context, Evidence, mutable tasks projection, Git/diff and Receipts
+   before routing: `implement-task`/`recover-task` may use Worker Result
+   admission, while `repair`/`diagnose` go to fresh CV recheck and never to the
+   current `stage admit-worker`;
+7. keep the same Session idle for the next Task, `finalize-slice` and CV repair;
+8. release the agent/pane only after Runtime admits canonical CV `PASS`.
+
+Herdr lifecycle, terminal text, model narrative and raw `git diff` never authorize
+state migration. Missing, duplicate, truncated, stale or schema-invalid blocks
+fail closed. A Herdr failure never silently changes the transport; an explicit
+new/recovery Session must preserve the original action and use `recover-task` when
+成果 already exist.
+
+### OpenCode Runtime CLI
+
+Brain is the only role that invokes the canonical public Runtime CLI:
+
+```text
+node packages/runtime/dist/cli/proofloop.js
+```
+
+Resolve exact domain/operation request fields from the built public CLI `--help`
+output and the active Contract. Consume the canonical JSON envelope and real exit
+code. Do not hand-write Runtime-owned Manifest, Context, State, Receipt, Gate or
+Review artifacts.

@@ -21,6 +21,19 @@ import {
   VNextHandoffError,
 } from "./dispatch";
 import { readGitHead, resolveGitRoot } from "../git-source";
+// S14-A-T02 — replan epoch authority (append-only). The Runtime derives the
+// epoch digest, verifies the parent chain and recomputes the impact set; a
+// replan request can never declare a derived fact (epoch digest, impact
+// scope, carry-forward/invalidated sets).
+import {
+  ReplanEpochError,
+  computeReplanEpochDigest,
+  persistReplanEpochAuthority,
+  readCurrentEpoch,
+  verifyReplanAdmissionFact,
+  validateVNextReplanAdmissionDeclaration,
+} from "./replan-epoch";
+import type { ReplanCurrentEpoch, VNextReplanAdmissionDeclaration } from "./replan-epoch";
 
 export interface VNextStagePlanAdmissionRequest {
   readonly version: 2;
@@ -33,6 +46,12 @@ export interface VNextStagePlanAdmissionRequest {
   readonly plan_digest: string;
   readonly snapshot_digest: string;
   readonly spv: VNextSpvPassReceipt;
+  /**
+   * Optional replan declaration (§8.8): ONLY parent_epoch_digest plus the
+   * Runtime preparation disposition ref/digest. The epoch digest and every
+   * derived set are recomputed by the Runtime and never declarable.
+   */
+  readonly replan?: VNextReplanAdmissionDeclaration;
 }
 
 export interface VNextStagePlanAdmissionSuccess {
@@ -45,6 +64,10 @@ export interface VNextStagePlanAdmissionSuccess {
   readonly stage_plan_receipt_path: string;
   readonly spv: VNextSpvPassReceipt;
   readonly stage_plan: VNextStagePlanReceipt;
+  /** Present only for replan admissions: the derived epoch digest. */
+  readonly replan_epoch_digest?: string;
+  /** Present only for replan admissions: the epoch refs authority path. */
+  readonly epoch_refs_path?: string;
 }
 
 export interface VNextStagePlanAdmissionFailure {
@@ -71,7 +94,12 @@ export class VNextStagePlanAdmissionError extends Error {
     | "worktree-dirty"
     | "snapshot-binding"
     | "already-admitted"
-    | "write-failed";
+    | "write-failed"
+    | "replan-invalid"
+    | "replan-parent"
+    | "replan-fact"
+    | "replan-impact"
+    | "replan-epoch";
 
   constructor(code: VNextStagePlanAdmissionError["code"], message: string) {
     super(message);
@@ -83,6 +111,7 @@ export class VNextStagePlanAdmissionError extends Error {
 const REQUEST_FIELDS = new Set([
   "version", "schema_version", "type", "project_root", "manifest_path",
   "stage_id", "manifest_digest", "plan_digest", "snapshot_digest", "spv",
+  "replan",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -108,6 +137,10 @@ export function validateVNextStagePlanAdmissionRequest(value: unknown): VNextSta
   if (typeof value.snapshot_digest !== "string" || !/^[a-f0-9]{40}$/.test(value.snapshot_digest)) fail("request-invalid", "snapshot_digest must be a canonical Git HEAD digest");
   try { validateVNextSpvPassReceipt(value.spv); }
   catch (error) { fail("spv-invalid", "SPV_PASS authority is invalid: " + (error instanceof Error ? error.message : String(error))); }
+  if (value.replan !== undefined) {
+    try { validateVNextReplanAdmissionDeclaration(value.replan); }
+    catch (error) { fail("replan-invalid", "replan declaration is invalid: " + (error instanceof Error ? error.message : String(error))); }
+  }
   return value as unknown as VNextStagePlanAdmissionRequest;
 }
 
@@ -213,6 +246,8 @@ function admitValidated(request: VNextStagePlanAdmissionRequest): VNextStagePlan
     fail("spv-binding", "fresh SPV_PASS is not bound to the Stage, Manifest, Plan, and snapshot");
   }
 
+  if (request.replan !== undefined) return admitReplanValidated(request, spv);
+
   const stagePlanWithoutDigest: Omit<VNextStagePlanReceipt, "digest"> = {
     version: 2,
     schema_version: 2,
@@ -252,6 +287,130 @@ function admitValidated(request: VNextStagePlanAdmissionRequest): VNextStagePlan
     stage_plan_receipt_path: stagePlanPath,
     spv,
     stage_plan: stagePlan,
+  };
+}
+
+function mapReplanEpochError(error: unknown): VNextStagePlanAdmissionError["code"] {
+  if (error instanceof ReplanEpochError) {
+    switch (error.code) {
+      case "REPLAN.ROOT_ESCAPE": return "root-escape";
+      case "REPLAN.EPOCH_NO_AUTHORITY": return "replan-parent";
+      case "REPLAN.EPOCH_CHAIN_BROKEN":
+      case "REPLAN.EPOCH_CHAIN_AMBIGUOUS":
+      case "REPLAN.EPOCH_ORPHAN":
+      case "REPLAN.EPOCH_INVALID":
+      case "REPLAN.EPOCH_ALREADY_ADMITTED":
+      case "REPLAN.PERSIST_FAILED": return "replan-epoch";
+      case "REPLAN.FACT_INVALID":
+      case "REPLAN.FACT_MISSING": return "replan-fact";
+      case "REPLAN.EPOCH_INPUT_INVALID": return "replan-invalid";
+    }
+  }
+  return "replan-epoch";
+}
+
+/**
+ * S14-A-T02 — replan Stage Plan admission. The Runtime:
+ *  1. reads the current epoch through the validated parent chain and requires
+ *     the declared parent_epoch_digest to match it (parent mismatch fails
+ *     closed);
+ *  2. reads + verifies the digest-addressed Runtime preparation disposition
+ *     fact and RECOMPUTES the impact set; caller-forged derived sets fail
+ *     closed;
+ *  3. derives the epoch digest itself and persists the epoch-qualified
+ *     SPV_PASS / STAGE_PLAN authority append-only under
+ *     `.proofloop/receipts/plan/<stage>/epochs/<epoch_digest>/` — the initial
+ *     canonical receipts are never touched (旧 Receipt 不覆盖).
+ */
+function admitReplanValidated(request: VNextStagePlanAdmissionRequest, spv: VNextSpvPassReceipt): VNextStagePlanAdmissionSuccess {
+  const root = request.project_root;
+  const replan = request.replan as VNextReplanAdmissionDeclaration;
+
+  let current: ReplanCurrentEpoch;
+  try { current = readCurrentEpoch(root, request.stage_id); }
+  catch (error) { fail(mapReplanEpochError(error), "current epoch is unavailable: " + (error instanceof Error ? error.message : String(error))); }
+  if (current.epoch_digest !== replan.parent_epoch_digest) {
+    fail(
+      "replan-parent",
+      `replan parent_epoch_digest "${replan.parent_epoch_digest}" does not match the current epoch "${current.epoch_digest}"`,
+    );
+  }
+
+  let verified: ReturnType<typeof verifyReplanAdmissionFact>;
+  try {
+    verified = verifyReplanAdmissionFact(
+      root,
+      replan.disposition_ref,
+      replan.disposition_digest,
+      {
+        stage_id: request.stage_id,
+        parent_epoch_digest: replan.parent_epoch_digest,
+        manifest_digest: request.manifest_digest,
+        plan_digest: request.plan_digest,
+        snapshot_digest: request.snapshot_digest,
+      },
+      request.manifest_path,
+    );
+  } catch (error) {
+    if (error instanceof ReplanEpochError && error.code === "REPLAN.FACT_INVALID" && /unresolved/.test(error.message)) {
+      fail("replan-impact", error.message);
+    }
+    fail(mapReplanEpochError(error), "replan disposition fact verification failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+
+  const stagePlanWithoutDigest: Omit<VNextStagePlanReceipt, "digest"> = {
+    version: 2,
+    schema_version: 2,
+    type: "STAGE_PLAN",
+    stage_id: request.stage_id,
+    manifest_digest: request.manifest_digest,
+    plan_digest: request.plan_digest,
+    snapshot_digest: request.snapshot_digest,
+    spv_receipt_digest: spv.digest,
+  };
+  const stagePlan: VNextStagePlanReceipt = { ...stagePlanWithoutDigest, digest: computeVNextStagePlanReceiptDigest(stagePlanWithoutDigest) };
+  validateVNextStagePlanReceipt(stagePlan);
+
+  const epochDigest = computeReplanEpochDigest({
+    stage_id: request.stage_id,
+    parent_epoch_digest: replan.parent_epoch_digest,
+    disposition_digest: replan.disposition_digest,
+    manifest_digest: request.manifest_digest,
+    plan_digest: request.plan_digest,
+    snapshot_digest: request.snapshot_digest,
+  });
+
+  let persisted: ReturnType<typeof persistReplanEpochAuthority>;
+  try {
+    persisted = persistReplanEpochAuthority({
+      root,
+      stage_id: request.stage_id,
+      epoch_digest: epochDigest,
+      parent_epoch_digest: replan.parent_epoch_digest,
+      disposition_ref: replan.disposition_ref,
+      disposition_digest: replan.disposition_digest,
+      manifest_digest: request.manifest_digest,
+      plan_digest: request.plan_digest,
+      snapshot_digest: request.snapshot_digest,
+      spv,
+      stage_plan: stagePlan,
+    });
+  } catch (error) {
+    fail(mapReplanEpochError(error), "replan epoch authority could not be persisted: " + (error instanceof Error ? error.message : String(error)));
+  }
+
+  return {
+    accepted: true,
+    stage_id: request.stage_id,
+    manifest_digest: request.manifest_digest,
+    plan_digest: request.plan_digest,
+    snapshot_digest: request.snapshot_digest,
+    spv_receipt_path: persisted.spv_receipt_path,
+    stage_plan_receipt_path: persisted.stage_plan_receipt_path,
+    spv,
+    stage_plan: stagePlan,
+    replan_epoch_digest: epochDigest,
+    epoch_refs_path: persisted.epoch_refs_path,
   };
 }
 

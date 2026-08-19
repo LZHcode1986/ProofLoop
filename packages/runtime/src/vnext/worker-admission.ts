@@ -16,6 +16,18 @@ import type {
   VNextExecutionScope,
   VNextManifest,
 } from '@proofloop/kernel';
+// S12-D-T04: the slice-local execution binding digest is computed ONLY
+// through the kernel bindings.ts oracle (`@proofloop/kernel/dist/vnext` — the
+// S12-B forward note: runtime consumes the built subpath surface). The
+// runtime never re-implements hash logic and never accepts caller-supplied
+// digests as computation.
+import {
+  computeExecutionBindingDigest,
+  validateDependencyBinding,
+} from '@proofloop/kernel/dist/vnext';
+import type {
+  VNextDependencyBinding,
+} from '@proofloop/kernel/dist/vnext';
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import { readGitHead, resolveGitRoot } from '../git-source';
 import { readReceiptCategory } from '../receipt-reader';
@@ -30,6 +42,11 @@ import {
   assertVNextManifestReferenceBindings,
   readVNextManifest,
 } from './dispatch';
+import {
+  assertSliceLocalCredentialBindingFields,
+  credentialSchemaVersionMismatch,
+} from './cv-validation';
+import type { VNextSliceLocalBindingExpectation } from './cv-validation';
 import { assertIgnoredProtectedPaths, readVNextAdmissionAuthority } from './next';
 import type {
   VNextAdmissionAuthority,
@@ -42,6 +59,10 @@ import {
 import type { VNextWorkerResultEnvelope } from '../relay-contract';
 import { VNEXT_WORKER_COMPLETION_MODES } from './types';
 import type { VNextWorkerCompletionMode } from './types';
+import {
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL,
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_V2,
+} from './types';
 
 export interface VNextWorkerAdmissionDependencies {
   readonly projectRoot: string;
@@ -775,7 +796,9 @@ function protectedEvidenceProjection(content: string, allowedTaskIds: readonly s
     const match = /^###\s+(\S+)(?:\s|$)/.exec(lines[index].trim());
     if (match !== null && allowedTaskIds.includes(match[1])) {
       if (allowedTaskHeadings.has(match[1])) {
-        mismatch(`Manifest Slice Evidence contains duplicate Task Evidence for ${match[1]}`);
+        mismatch(
+          `Manifest Slice Evidence 包含重复的 \`### ${match[1]}\` 标题（位置：行 ${index + 1}）——任务内子记录必须用 \`####\` 或 \`- label:\`，不得重复使用 \`###\`；admission 拒绝`,
+        );
       }
       allowedTaskHeadings.set(match[1], index);
     }
@@ -838,8 +861,16 @@ function assertCurrentTaskEvidence(
     const match = /^###\s+(\S+)(?:\s|$)/.exec(lines[index].trim());
     if (match?.[1] === task.taskId) matchingTaskHeadings.push(index);
   }
-  if (matchingTaskHeadings.length !== 1) {
-    mismatch(`Manifest Slice Evidence is missing the current Task Evidence subsection for ${task.taskId}`);
+  if (matchingTaskHeadings.length === 0) {
+    mismatch(
+      `Manifest Slice Evidence for ${task.taskId}：Task Evidence 缺少 \`### ${task.taskId}\` 标题（应为 ### ${task.taskId}）；Task Evidence 小节起始行 ${taskEvidenceHeadings[0].index + 1}——admission 拒绝`,
+    );
+  }
+  if (matchingTaskHeadings.length > 1) {
+    const positions = matchingTaskHeadings.map((index) => `行 ${index + 1}`).join('、');
+    mismatch(
+      `Manifest Slice Evidence for ${task.taskId} 包含重复的 \`### ${task.taskId}\` 标题（位置：${positions}）——任务内子记录必须用 \`####\` 或 \`- label:\`，不得重复使用 \`###\`；admission 拒绝`,
+    );
   }
 
   const taskStart = matchingTaskHeadings[0] + 1;
@@ -1188,12 +1219,146 @@ function manifestSliceTaskIds(manifest: VNextManifest, sliceId: string): string[
   });
 }
 
+/**
+ * Read the receipt-bound dependency integration facts (§8.2
+ * `dependency_bindings`) of one Slice's declared dependencies, from the
+ * persisted INTEGRATION_PASS receipt chain of each dependency Slice.
+ *
+ * S12-D-T04 (S12-D REPLAN): the Worker/CV/Commit/Integration credentials in
+ * slice-local mode carry an execution binding computed over these facts, so
+ * every consumer reads the SAME persisted facts (single source of truth):
+ *  - a dependency Slice with a valid INTEGRATION_PASS chain contributes one
+ *    binding entry ({slice_id, slice_contract_digest (receipt-bound),
+ *    integration_receipt_digest, integration_head_sha});
+ *  - a dependency declared by the CURRENT Manifest that has no integration
+ *    receipt fails closed — a slice-local execution binding cannot prove a
+ *    declared dependency without its integration facts (serial execution
+ *    order: dependencies integrate before dependents execute);
+ *  - a dependency outside the current Manifest (legacy/external, e.g. the
+ *    S04 fixture's S0-A) contributes no entry when no receipt exists.
+ *
+ * Malformed chains, foreign credentials and malformed entries fail closed;
+ * every entry is validated through the kernel closed validator
+ * (`validateDependencyBinding`).
+ */
+export function readSliceLocalDependencyBindings(
+  root: string,
+  manifest: VNextManifest,
+  sliceId: string,
+): VNextDependencyBinding[] {
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) mismatch(`Manifest does not declare slice ${sliceId}`);
+  const dependencies = slice.depends_on ?? [];
+  const bindings: VNextDependencyBinding[] = [];
+  for (const dependencyId of dependencies) {
+    const category = readReceiptCategory({
+      projectRoot: root,
+      category: 'integration',
+      stageId: manifest.stage_id,
+      sliceId: dependencyId,
+    });
+    if (!category.chainValid || category.invalidFiles.length > 0 || category.misplaced.length > 0) {
+      mismatch(
+        `dependency slice ${dependencyId} integration Receipt chain is not a valid chain; ` +
+        `the slice-local execution binding cannot be computed`,
+      );
+    }
+    const tip = category.latest;
+    if (tip === null) {
+      if (manifest.slices.some((candidate) => candidate.slice_id === dependencyId)) {
+        mismatch(
+          `dependency slice ${dependencyId} has no current INTEGRATION_PASS Receipt; ` +
+          `a slice-local execution binding cannot prove the declared dependency (serial order: integrate the dependency first)`,
+        );
+      }
+      // Dependency outside the current Manifest (legacy/external): no
+      // binding facts are available, contribute no entry.
+      continue;
+    }
+    const payload = tip.receipt.payload;
+    if (!isRecord(payload)) {
+      mismatch(`dependency slice ${dependencyId} INTEGRATION_PASS payload must be a JSON object`);
+    }
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      payload.schema_version,
+      manifest.binding !== undefined,
+      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}`,
+    );
+    if (schemaMismatch !== null) mismatch(schemaMismatch.message);
+    const sliceContractDigest = requireString(
+      payload.slice_contract_digest,
+      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}.slice_contract_digest`,
+    );
+    const integrationHeadSha = requireString(
+      payload.commit_sha,
+      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}.commit_sha`,
+    );
+    const entry: VNextDependencyBinding = {
+      slice_id: dependencyId,
+      slice_contract_digest: sliceContractDigest,
+      integration_receipt_digest: tip.receipt.digest,
+      integration_head_sha: integrationHeadSha,
+    };
+    try {
+      validateDependencyBinding(entry);
+    } catch (error) {
+      mismatch(
+        `dependency slice ${dependencyId} integration binding is malformed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    bindings.push(entry);
+  }
+  return bindings;
+}
+
+/**
+ * Compute the slice-local credential binding expectation (§8.2/§8.3) of one
+ * Slice: the Manifest stage/slice contract digests plus the execution
+ * binding digest recomputed through the kernel bindings.ts oracle from the
+ * persisted dependency integration facts and the admitted base snapshot
+ * (the Stage's canonical integration HEAD at admission). Every v3 credential
+ * writer and consumer shares this single computation.
+ *
+ * Slice-local mode only; a legacy Manifest (no `binding`) fails closed.
+ */
+export function computeSliceLocalBindingExpectation(
+  root: string,
+  manifest: VNextManifest,
+  sliceId: string,
+  baseSnapshotDigest: string,
+): VNextSliceLocalBindingExpectation {
+  if (manifest.binding === undefined) {
+    mismatch(`slice-local binding expectation requires a Manifest binding for ${sliceId}`);
+  }
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) mismatch(`Manifest does not declare slice ${sliceId}`);
+  const sliceContractDigest = slice.slice_contract_digest;
+  if (sliceContractDigest === undefined) {
+    mismatch(`Manifest slice ${sliceId} has no slice_contract_digest in slice-local mode`);
+  }
+  const stageContractDigest = manifest.binding.stage_contract_digest;
+  const executionBindingDigest = computeExecutionBindingDigest({
+    stage_id: manifest.stage_id,
+    slice_id: sliceId,
+    stage_contract_digest: stageContractDigest,
+    slice_contract_digest: sliceContractDigest,
+    dependency_bindings: readSliceLocalDependencyBindings(root, manifest, sliceId),
+    base_snapshot_digest: baseSnapshotDigest,
+  });
+  return {
+    stageContractDigest,
+    sliceContractDigest,
+    executionBindingDigest,
+  };
+}
+
 /** Read already-admitted vNext facts so later Worker results can retain scope-bound dirty paths. */
 function priorVNextTaskIds(
   root: string,
   manifest: VNextManifest,
   envelope: VNextWorkerResultEnvelope,
   currentTaskId: string,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): string[] {
   const category = readReceiptCategory({
     projectRoot: root,
@@ -1212,9 +1377,29 @@ function priorVNextTaskIds(
       mismatch('existing Worker Receipt stage/slice binding does not match the active result');
     }
     const payload = receipt.payload;
-    if (payload.schema_version !== 2) {
-      mismatch('legacy or unknown Worker Receipt facts cannot be mixed into a vNext Worker chain');
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      payload.schema_version,
+      manifest.binding !== undefined,
+      'existing TASK_COMPLETE.payload',
+    );
+    if (schemaMismatch !== null) {
+      // The BINDING.* code is carried in the finding message: the canonical
+      // FindingCode vocabulary is a closed kernel union (§7).
+      mismatch(schemaMismatch.message);
     }
+    // S12-D-T04 (§8.3, S12-D REPLAN): a v3 prior credential must carry the
+    // slice-local binding fields and bind the SAME Manifest contract digests
+    // and recomputed execution binding as the current execution tuple; a v2
+    // credential carrying binding fields is rejected (never silently
+    // ignored).
+    if (!isRecord(payload)) {
+      mismatch('existing TASK_COMPLETE.payload must be a JSON object');
+    }
+    assertSliceLocalCredentialBindingFields(
+      payload as Record<string, unknown>,
+      'existing TASK_COMPLETE.payload',
+      sliceLocalBinding,
+    );
     const taskId = requireString(payload.task_id, 'existing TASK_COMPLETE.task_id');
     if (!taskIds.includes(taskId)) {
       mismatch(`existing TASK_COMPLETE task ${taskId} is not declared by the Manifest Slice`);
@@ -1282,25 +1467,39 @@ function assertChangedFiles(
         ];
       }),
   );
-  const forbidden = unique([
-    ...task.executionScope.forbidden_paths,
-    ...allowedTaskIds
-      .filter((taskId) => taskId !== task.taskId)
-      .flatMap((taskId) => {
-        const binding = manifest.task_scopes[taskId];
-        if (binding === undefined) mismatch(`Manifest execution scope is unavailable for prior task ${taskId}`);
-        return binding.execution_scope.forbidden_paths.map((value, index) =>
-          rootRelativePath(root, value, `prior task ${taskId}.execution_scope.forbidden_paths[${index}]`),
-        );
-      }),
-    ...PROTECTED_PATHS.map((value) => rootRelativePath(root, value, 'system forbidden path')),
-  ]);
+  // Forbidden scope is task-level (user authorization A2): the current task
+  // is bound only by its OWN forbidden list plus the system forbidden paths.
+  // A prior task's forbidden list must not veto this task's admitted files —
+  // one task may be admitted to edit a path that another task must not touch
+  // (S12-D: T02 edits next.ts while T01/T04 forbid it).  The task-level
+  // allowed scope above (current + prior code/test plus the shared
+  // Evidence/Plan projection) already bounds what the Worker may touch.
+  const taskForbidden = unique(task.executionScope.forbidden_paths);
+  const systemForbidden = unique(
+    PROTECTED_PATHS.map((value) => rootRelativePath(root, value, 'system forbidden path')),
+  );
   const allowed = [...codeAndTest, ...priorCodeAndTest, task.evidencePath, task.planPath];
   const isUnder = (value: string, base: string): boolean =>
     value === base || value.startsWith(`${base}/`);
 
   for (const changed of declared) {
-    if (forbidden.some((base) => pathsOverlap(changed, base))) {
+    // System forbidden paths bind EVERY declared file, including prior-task
+    // output: the Runtime-owned areas are untouchable by anyone (A3 keeps
+    // this — a prior file can never be a system path).
+    if (systemForbidden.some((base) => pathsOverlap(changed, base))) {
+      mismatch(`changed_files contains a system forbidden protected path: ${changed}`);
+    }
+    // Task-level forbidden constrains the CURRENT task's behavior, not the
+    // worktree's historical state (user authorization A3): a declared file
+    // that belongs to ANOTHER task's code/test scope — and not to the
+    // current task's — is exempt from the current task's forbidden check.
+    // S12-D: T04 must declare T02's next.ts output while T04's own forbidden
+    // covers next.ts; the current task's own code/test stays bound by its
+    // own forbidden list.
+    const priorOwned =
+      priorCodeAndTest.some((base) => isUnder(changed, base)) &&
+      !codeAndTest.some((base) => isUnder(changed, base));
+    if (!priorOwned && taskForbidden.some((base) => pathsOverlap(changed, base))) {
       mismatch(`changed_files contains a forbidden protected path: ${changed}`);
     }
     if (!allowed.some((base) => isUnder(changed, base))) {
@@ -1309,8 +1508,22 @@ function assertChangedFiles(
   }
 
   const declaredSet = new Set(declared);
-  if (!declaredSet.has(task.evidencePath)) {
+  // User authorization A5/A6: the Evidence/Plan projection must be declared
+  // only when it is part of the current worktree changes (dirty).  When it
+  // was already committed and matches HEAD (no worktree change), the
+  // declaration contract is satisfied by the persisted snapshot; a stale
+  // worktree change without declaration still fails closed below via the
+  // subset check.
+  const actual = unique(gitChangedPaths(root).map((value, index) =>
+    changedFilePath(root, value, `Git changed path[${index}]`),
+  ));
+  const actualSet = new Set(actual);
+  if (actualSet.has(task.evidencePath) && !declaredSet.has(task.evidencePath)) {
     mismatch('changed_files must include the current Manifest Slice Evidence path');
+  }
+  // User authorization A5/A6: same semantics for the Plan projection.
+  if (actualSet.has(task.planPath) && !declaredSet.has(task.planPath)) {
+    mismatch('changed_files must include the current Manifest plan projection path');
   }
   assertIgnoredProtectedPaths(root, [{
     stageId: envelope.stageId,
@@ -1324,12 +1537,20 @@ function assertChangedFiles(
     // closed completion vocabulary {implement-task, recover-task}.
     mode: envelope.mode as VNextWorkerCompletionMode,
   }]);
-  const actual = unique(gitChangedPaths(root).map((value, index) =>
-    changedFilePath(root, value, `Git changed path[${index}]`),
-  ));
-  const actualSet = new Set(actual);
-  if (declared.length !== actual.length || declared.some((value) => !actualSet.has(value)) || actual.some((value) => !declaredSet.has(value))) {
-    mismatch(`changed_files does not exactly describe the current Git worktree changes (declared=${declared.join(',')} actual=${actual.join(',')})`);
+  // User authorization A5+A7: changed_files must be a SUBSET of the current
+  // Git worktree changes UNION the Evidence/Plan projections (declared ⊆
+  // actual ∪ {evidence, plan}) — a Worker may never declare a code file it
+  // did not actually change, but the Evidence/Plan projections are always
+  // declarable (ADR-021 requires every receipt to declare them, even when
+  // HEAD-clean).  The reverse direction is deliberately NOT required: in a
+  // multi-task Slice recovered in one pass the worktree holds every task's
+  // output, and another task's files are worktree state, not a change the
+  // current task must declare (S12-D recover deadlock).
+  const alwaysDeclarable = new Set([task.evidencePath, task.planPath]);
+  for (const value of declared) {
+    if (!actualSet.has(value) && !alwaysDeclarable.has(value)) {
+      mismatch(`changed_files declares a path that is not in the current Git worktree changes (declared=${value} actual=${actual.join(',')})`);
+    }
   }
 
   validateMutablePlanProjection(root, task.planPath, task.taskId, envelope.sliceId, allowedTaskIds);
@@ -1387,7 +1608,25 @@ function validateFacts(
   const task = taskBinding(root, manifest, envelope, context);
   assertContextTaskBinding(root, manifest, envelope, context, task);
   const allowedTaskIds = unique([
-    ...priorVNextTaskIds(root, manifest, envelope, task.taskId),
+    ...priorVNextTaskIds(
+      root,
+      manifest,
+      envelope,
+      task.taskId,
+      // S12-D-T04 (S12-D REPLAN): slice-local mode — every v3 credential of
+      // the Slice (including the prior Worker facts) must bind the SAME
+      // Manifest contract digests and the recomputed execution binding. The
+      // base snapshot is the admitted SPV snapshot (the Stage's canonical
+      // integration HEAD at admission), stable for the whole Stage.
+      manifest.binding !== undefined
+        ? computeSliceLocalBindingExpectation(
+            root,
+            manifest,
+            envelope.sliceId,
+            authority.spv.snapshot_digest,
+          )
+        : undefined,
+    ),
     task.taskId,
   ]);
   assertCurrentTaskEvidence(root, task, allowedTaskIds);
@@ -1438,28 +1677,53 @@ function workerReceipt(
   envelope: VNextWorkerResultEnvelope,
   facts: ValidatedWorkerFacts,
 ): ReceiptBuild {
+  // S12-D-T04 (S12-D REPLAN): the credential schema_version follows the
+  // Stage credential mode. Legacy Manifest (no binding) → v2 credential
+  // (zero behavior change). Slice-local Manifest (binding present) → v3
+  // credential carrying the three binding fields: stage_contract_digest /
+  // slice_contract_digest from the Manifest (compiler-computed through the
+  // kernel oracle, S12-C) and execution_binding_digest recomputed here
+  // through the kernel bindings.ts oracle (never re-implemented).
+  const sliceLocalBinding =
+    facts.manifest.binding !== undefined
+      ? computeSliceLocalBindingExpectation(
+          facts.root,
+          facts.manifest,
+          envelope.sliceId,
+          facts.authority.spv.snapshot_digest,
+        )
+      : undefined;
+  const payload: Record<string, unknown> = {
+    schema_version:
+      sliceLocalBinding !== undefined
+        ? VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL
+        : VNEXT_CREDENTIAL_SCHEMA_VERSION_V2,
+    action_token: envelope.actionToken,
+    mode: envelope.mode,
+    outcome: envelope.outcome,
+    task_id: facts.task.taskId,
+    evidence_ref: facts.task.evidencePath,
+    changed_files: [...facts.changedFiles],
+    verification_runs: envelope.verificationRuns,
+    summary: envelope.summary,
+    manifest_digest: envelope.manifestDigest,
+    plan_digest: envelope.planDigest,
+    proof_index_digest: envelope.proofIndexDigest,
+    snapshot_digest: envelope.snapshotDigest,
+    context_ref: envelope.contextRef,
+    context_digest: envelope.contextDigest,
+  };
+  if (sliceLocalBinding !== undefined) {
+    payload.stage_contract_digest = sliceLocalBinding.stageContractDigest;
+    payload.slice_contract_digest = sliceLocalBinding.sliceContractDigest;
+    payload.execution_binding_digest = sliceLocalBinding.executionBindingDigest;
+  }
   return {
     type: 'TASK_COMPLETE',
     stage_id: envelope.stageId,
     slice_id: envelope.sliceId,
     timestamp: new Date().toISOString(),
-    payload: {
-      schema_version: 2,
-      action_token: envelope.actionToken,
-      mode: envelope.mode,
-      outcome: envelope.outcome,
-      task_id: facts.task.taskId,
-      evidence_ref: facts.task.evidencePath,
-      changed_files: [...facts.changedFiles],
-      verification_runs: envelope.verificationRuns,
-      summary: envelope.summary,
-      manifest_digest: envelope.manifestDigest,
-      plan_digest: envelope.planDigest,
-      proof_index_digest: envelope.proofIndexDigest,
-      snapshot_digest: envelope.snapshotDigest,
-      context_ref: envelope.contextRef,
-      context_digest: envelope.contextDigest,
-    },
+    payload,
   };
 }
 

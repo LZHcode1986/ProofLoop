@@ -20,7 +20,6 @@ snapshot_digest: <40-hex current Git HEAD>
 authority_refs: []
 reference_index_digest: <sha256>
 proof_index_digest: <sha256>
-runtime_proof_digest: <sha256>
 boundary_check_helper: .agents/skills/proofloop-plan/references/active-spv-boundary-check.mjs
 selected_work_item_refs: []
 blocking_hard_parts: []
@@ -65,11 +64,11 @@ console.log('plan_digest            ', m.plan.plan_digest);
 console.log('manifest_digest        ', computeDigest(m));
 console.log('reference_index_digest', computeDigest(m.reference_index));
 console.log('proof_index_digest     ', computeDigest(m.slices.map(s => s.proof_index)));
-console.log('runtime_proof_digest   ', m.runtime_proof.proof_digest);
-// 交叉验证：runtime_proof_digest 应等于 body 投影重算值
-console.log('runtime_proof body     ', computeDigest({ spec_refs: m.runtime_proof.spec_refs, resolved_steps: m.runtime_proof.resolved_steps }));
 "
 ```
+
+注：Manifest runtime_proof 字段已随 b6b0d3a（S08-REVIEW-010 关闭）删除，不再提取
+runtime_proof_digest；boundary helper 亦不再校验它（active-spv-boundary-check.mjs 头部注释）。
 
 `<root>` 是 canonical trust root；`snapshot_digest` 取当前 Git HEAD（`git rev-parse HEAD`）。
 helper 会重算比对，误传 digest 会 fail closed，所以提取值必须来自上述同一 Manifest 文件。
@@ -96,7 +95,8 @@ SPV 必须在 stable Git boundary 后 fresh、只读，并按以下顺序验证�
 7. 验证每个 `implementation` Task 的 immutable `execution_scope` 存在，`code_paths`
    和 `test_paths` 非空、root-bound、无 forbidden overlap，并且 scope 参与
    `plan_digest`；`evidence-only` Task 不得被投影为 `implement-task`；
-8. 验证 Runtime Proof 只引用结构化 `ProofSpecification`；
+8. ~~验证 Runtime Proof 只引用结构化 `ProofSpecification`~~（b6b0d3a 移除：Manifest/Gate 不再有
+   runtime proof；candidate input 亦不接受 runtime_proof 投影）；
 9. 验证 candidate Plan 没有被当作 admitted Plan；
 10. 验证没有 CV Level、Proof Profile 或自然语言命令推断依赖。
 

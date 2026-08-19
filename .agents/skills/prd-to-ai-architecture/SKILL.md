@@ -114,6 +114,13 @@ After the last artifact is confirmed, present the phase checkpoint:
 2. Preview the next phase: which skill will be loaded (stage selection, with `codebase-design` when needed, then `proofloop-plan`) and what it will produce.
 3. Wait for the user's explicit confirmation (`ARCHITECTURE_READY`) before loading the next phase's skill. If the user asks for changes, continue in this phase, or return to an upstream phase's skill as directed.
 
+## Downstream entity markers
+
+When a PRD/Tech Spec entity will be referenced by a Manifest or Plan, load and
+apply `.agents/contracts/brain/authority-entity-markers.md`. The Contract is the
+single source for marker syntax, allowed kinds, canonical refs, and completion
+checks; this Skill owns applying the rule to architecture output.
+
 ## Required Outputs
 
 Produce these artifacts unless the user asks for a smaller scope (they should be placed under the `tech-spec/` directory):

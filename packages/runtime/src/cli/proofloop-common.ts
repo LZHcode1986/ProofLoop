@@ -528,6 +528,18 @@ export interface CliRequestInput {
   readonly evidence_dir: string | undefined;
   /** S10-B-T01: refresh transaction mode (refresh | recover | rollback). */
   readonly mode: string | undefined;
+  /**
+   * S15-A-T02 (optional superset, same precedent as the project-domain
+   * fields): mode=replan — root-relative, digest-addressed Runtime
+   * preparation disposition fact ref (`.proofloop/runtime/replan/**`),
+   * its content digest and the rotation transaction phase
+   * (rotate | recover | rollback).  Optional so existing `CliRequestInput`
+   * literals outside the plan domain stay valid; the closed schema
+   * validation below enforces the mode=replan tuple.
+   */
+  readonly disposition_ref?: string | undefined;
+  readonly disposition_digest?: string | undefined;
+  readonly replan_phase?: string | undefined;
   /** S10-B-T01: root-relative candidate input path for `plan compile`. */
   readonly input_path: string | undefined;
   /** S10-B-T01: root-relative Manifest output path for `plan compile`. */
@@ -599,6 +611,9 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
     'previous_manifest_digest',
     'evidence_dir',
     'mode',
+    'disposition_ref',
+    'disposition_digest',
+    'replan_phase',
     'input_path',
     'output_path',
     'check',
@@ -781,6 +796,32 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
       }
       continue;
     }
+    // S15-A-T02: the plan-domain `disposition_digest` is the content digest
+    // of the Runtime preparation disposition fact (mode=replan); a malformed
+    // digest fails closed before any handler runs.  The `replan_phase` field
+    // is the closed rotation phase enum (rotate | recover | rollback) and is
+    // only legal together with mode=replan; mode=replan itself requires the
+    // disposition ref/digest.  Only the plan domain registers these keys.
+    if (key === 'disposition_digest') {
+      if (typeof record[key] !== 'string' || !/^[a-f0-9]{64}$/.test(record[key] as string)) {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: 'request field "disposition_digest" must be a lowercase SHA-256 (64 hex) digest of the Runtime preparation disposition fact',
+        };
+      }
+      continue;
+    }
+    if (key === 'replan_phase') {
+      if (record[key] !== 'rotate' && record[key] !== 'recover' && record[key] !== 'rollback') {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: `request field "replan_phase" must be one of rotate|recover|rollback, received "${String(record[key])}"`,
+        };
+      }
+      continue;
+    }
     if (typeof record[key] !== 'string') {
       return {
         ok: false,
@@ -797,6 +838,9 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     previous_manifest_digest: record.previous_manifest_digest as string | undefined,
     evidence_dir: record.evidence_dir as string | undefined,
     mode: record.mode as string | undefined,
+    disposition_ref: record.disposition_ref as string | undefined,
+    disposition_digest: record.disposition_digest as string | undefined,
+    replan_phase: record.replan_phase as string | undefined,
     input_path: record.input_path as string | undefined,
     output_path: record.output_path as string | undefined,
     role: record.role as string | undefined,
@@ -819,12 +863,33 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     reviewer_result_path: record.reviewer_result_path as string | undefined,
     output_dir: record.output_dir as string | undefined,
   };
-  if (request.mode !== undefined && !['refresh', 'recover', 'rollback'].includes(request.mode)) {
+  if (request.mode !== undefined && !['refresh', 'recover', 'rollback', 'replan'].includes(request.mode)) {
     return {
       ok: false,
       code: 'RUNTIME.INPUT_INVALID',
-      message: `request field "mode" must be one of refresh|recover|rollback, received "${request.mode}"`,
+      message: `request field "mode" must be one of refresh|recover|rollback|replan, received "${request.mode}"`,
     };
+  }
+  // S15-A-T02: the replan fields are a closed tuple — `replan_phase` is only
+  // legal with mode=replan, and mode=replan requires the Runtime preparation
+  // disposition ref + digest (derived sets are never request fields, §8.8).
+  if (request.replan_phase !== undefined && request.mode !== 'replan') {
+    return {
+      ok: false,
+      code: 'RUNTIME.INPUT_INVALID',
+      message: 'request field "replan_phase" is only legal with mode=replan',
+    };
+  }
+  if (request.mode === 'replan') {
+    if (request.disposition_ref !== undefined && request.disposition_ref.length > 0) {
+      if (request.disposition_digest === undefined) {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: 'mode=replan requires the preparation disposition digest when disposition_ref is provided (request field "disposition_digest")',
+        };
+      }
+    }
   }
   // S10-E-T02 repair: cutover 域 closed 字段（confirmed/delete_list）经超集
   // cast 附着到 request（与 S10-D project 域先例一致 —— 不动
@@ -912,6 +977,9 @@ export function resolveRequestInput(
         previous_manifest_digest: undefined,
         evidence_dir: undefined,
         mode: undefined,
+        disposition_ref: undefined,
+        disposition_digest: undefined,
+        replan_phase: undefined,
         input_path: undefined,
         output_path: undefined,
         role: undefined,

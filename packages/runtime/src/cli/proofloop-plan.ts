@@ -58,10 +58,17 @@ export interface PlanOperationParams {
   readonly manifest?: string;
   /** `plan refresh-evidence`: previous Manifest digest the skeletons still bind. */
   readonly previous_manifest_digest?: string;
-  /** Explicit evidence directory（default derived from the Manifest）。 */
+  /** Explicit evidence directory (default derived from the Manifest). */
   readonly evidence_dir?: string;
-  /** `plan refresh-evidence`: transaction mode（refresh | recover | rollback）。 */
-  readonly mode?: 'refresh' | 'recover' | 'rollback';
+  /** `plan refresh-evidence`: transaction mode（refresh | recover | rollback | replan）。 */
+  readonly mode?: 'refresh' | 'recover' | 'rollback' | 'replan';
+  /** S15-A-T02 (`plan refresh-evidence` mode=replan): root-relative,
+   *  digest-addressed Runtime preparation disposition fact ref. */
+  readonly disposition_ref?: string;
+  /** S15-A-T02 (mode=replan): content digest of the preparation fact. */
+  readonly disposition_digest?: string;
+  /** S15-A-T02 (mode=replan): rotation transaction phase（rotate | recover | rollback）。 */
+  readonly replan_phase?: 'rotate' | 'recover' | 'rollback';
   /** `plan materialize`: read-only recheck mode（CANDIDATE_CHECKED，零写入）。
    * closed request schema 已登记 check 字段（A1 步骤 5 完成；boolean，非法值在
    * parseClosedRequestObject fail-closed），collectPlanParams 透传。 */
@@ -90,6 +97,9 @@ export function collectPlanParams(
     previous_manifest_digest: request.previous_manifest_digest,
     evidence_dir: request.evidence_dir,
     mode: request.mode as PlanOperationParams['mode'],
+    disposition_ref: request.disposition_ref,
+    disposition_digest: request.disposition_digest,
+    replan_phase: request.replan_phase as PlanOperationParams['replan_phase'],
     check: typeof declaredCheck === 'boolean' ? declaredCheck : undefined,
     input_path: request.input_path,
     output_path: request.output_path,
@@ -578,6 +588,17 @@ function runPlanRefresh(root: string, command: CliCommand, params: PlanOperation
       'plan refresh-evidence requires the previous Manifest digest (request field "previous_manifest_digest")',
     );
   }
+  if (params.mode === 'replan') {
+    if (params.disposition_ref !== undefined && params.disposition_ref.length > 0) {
+      if (params.disposition_digest === undefined || !/^[a-f0-9]{64}$/.test(params.disposition_digest)) {
+        return errorEnvelope(
+          command,
+          'PLAN.DISPOSITION_REQUIRED',
+          'plan refresh-evidence mode=replan requires the preparation disposition digest when disposition_ref is provided (request field "disposition_digest", 64-hex sha256)',
+        );
+      }
+    }
+  }
   const resolved = resolveManifestPath(root, params);
   if (!resolved.ok) return errorEnvelope(command, resolved.code, resolved.message);
 
@@ -598,6 +619,9 @@ function runPlanRefresh(root: string, command: CliCommand, params: PlanOperation
     evidenceDir: params.evidence_dir,
     projectRoot: root,
     mode: params.mode ?? 'refresh',
+    dispositionRef: params.disposition_ref,
+    dispositionDigest: params.disposition_digest,
+    replanPhase: params.replan_phase,
   });
   if (result.success) {
     return okEnvelopeWithRefs(command, result, [{ ref: resolved.path, digest: read.digest }]);

@@ -14,6 +14,9 @@ import {
   computeDigest,
   type VNextManifest,
 } from '@proofloop/kernel';
+// S13: strict seam validates optional `binding_mode` against the kernel's
+// closed vocabulary; no second mode/digest oracle lives in the CLI layer.
+import { VNEXT_BINDING_MODES } from '@proofloop/kernel/dist/vnext';
 import {
   parseEntityRef,
   writeVNextManifest,
@@ -50,6 +53,8 @@ const INPUT_FIELDS = new Set([
   'slices',
   'authority_ref_ids',
   'compiled_by',
+  // S13: optional; only "slice-local" is admitted, omitted means legacy.
+  'binding_mode',
 ]);
 
 const REF_FIELDS = new Set(['ref_id', 'kind', 'ref']);
@@ -185,6 +190,17 @@ export function assertStrictCompileInput(value: unknown, projectRoot: string): C
   }
   if (value.compiled_by !== undefined && typeof value.compiled_by !== 'string') {
     throw new Error('structured input.compiled_by must be a string when present');
+  }
+  // S13: optional binding-mode discriminator on the strict structured seam.
+  // Omitted = legacy stage-wide; anything present must be exactly the kernel
+  // closed set's "slice-local" — unknown values/type errors fail closed.
+  if (value.binding_mode !== undefined) {
+    if (
+      typeof value.binding_mode !== 'string' ||
+      !(VNEXT_BINDING_MODES as readonly string[]).includes(value.binding_mode)
+    ) {
+      throw new Error('structured input.binding_mode must be "slice-local" when present (omitted means legacy)');
+    }
   }
 
   return value as unknown as CompileVNextManifestInput;

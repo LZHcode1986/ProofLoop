@@ -18,6 +18,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+// S13: the closed binding-mode oracle lives in the kernel (`VNEXT_BINDING_MODES`
+// is the single source of truth; only "slice-local" is admitted).  The
+// materializer reuses it and never copies a second mode/digest vocabulary.
+import { VNEXT_BINDING_MODES, type VNextBindingMode } from '@proofloop/kernel/dist/vnext';
 
 const OWNER = 'pluginv2-active-plan-materializer';
 const CALLER = 'brain';
@@ -30,6 +34,11 @@ const ENTITY_MARKER_RE = /^<!--\s*proofloop:entity\s+id="([^"]+)"\s+kind="([^"]+
 const TOP_LEVEL_FIELDS = new Set([
   'schema_version',
   'mode',
+  // S13: optional top-level discriminator.  Omitted = legacy stage-wide;
+  // only `"slice-local"` is admitted (kernel oracle).  Never rendered into
+  // tasks.md — the field is preserved on the normalized plan for Runtime
+  // compile only.
+  'binding_mode',
   'caller',
   'owner',
   'project_root',
@@ -436,6 +445,8 @@ export interface MaterializerStageGoal {
 export interface MaterializerPlan {
   readonly schema_version: 2;
   readonly mode: 'initial' | 'replan';
+  /** S13: preserved from the closed input; `null` = legacy (omitted). */
+  readonly binding_mode: VNextBindingMode | null;
   readonly caller: 'brain';
   readonly owner: 'pluginv2-active-plan-materializer';
   readonly project_root: string;
@@ -466,6 +477,25 @@ export function validateInput(input: unknown): MaterializerPlan {
   }
   if (input.mode !== 'initial' && input.mode !== 'replan') {
     fail('PLAN_DEFECT', 'PLAN_GAP', 'CANDIDATE_SCHEMA_INVALID', 'input.mode must be initial or replan');
+  }
+  // S13: optional binding-mode discriminator.  Omitted → legacy stage-wide;
+  // the ONLY admitted value is the kernel closed set's "slice-local".  Any
+  // unknown value or type error fails closed here — never a silent fallback
+  // to legacy.
+  let bindingMode: VNextBindingMode | null = null;
+  if (input.binding_mode !== undefined) {
+    if (
+      typeof input.binding_mode !== 'string' ||
+      !(VNEXT_BINDING_MODES as readonly string[]).includes(input.binding_mode)
+    ) {
+      fail(
+        'PLAN_DEFECT',
+        'PLAN_GAP',
+        'CANDIDATE_SCHEMA_INVALID',
+        'input.binding_mode must be "slice-local" when present (omitted means legacy)',
+      );
+    }
+    bindingMode = input.binding_mode as VNextBindingMode;
   }
   if (input.caller !== CALLER) {
     fail('BLOCKED', 'OWNER_MISMATCH', 'ACTIVE_PLAN_MATERIALIZER_UNRESOLVED', 'input.caller must be brain');
@@ -780,6 +810,7 @@ export function validateInput(input: unknown): MaterializerPlan {
   return {
     schema_version: SCHEMA_VERSION,
     mode: input.mode as 'initial' | 'replan',
+    binding_mode: bindingMode,
     caller: CALLER,
     owner: OWNER,
     project_root: root,

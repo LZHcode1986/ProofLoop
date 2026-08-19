@@ -1,7 +1,7 @@
 ---
 description: Stage Plan Verifier — reverse-validates pluginv2 Brain plan output before execution.
 mode: subagent
-model: openai/gpt-5.6-luna-fast
+model: openai/gpt-5.6-luna
 variant: max
 hidden: true
 permission:

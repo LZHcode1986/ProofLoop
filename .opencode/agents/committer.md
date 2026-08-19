@@ -1,7 +1,7 @@
 ---
 description: Committer — Git boundary closure agent.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
+model: sensenova/deepseek-v4-flash
 variant: high
 hidden: true
 temperature: 0.0

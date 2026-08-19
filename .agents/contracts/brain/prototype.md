@@ -40,8 +40,8 @@ recommended_tech_spec_changes: <list>
 remaining_unknowns: <list>
 
 > `ASSUMPTION_REJECTED` is a Prototype result status, not a persisted Hard Part Register status.
-> Brain maps it to `VALIDATED` only when the validation question has been conclusively resolved
-> and a viable architecture path remains.
+> Brain applies `.agents/contracts/brain/hard-part-validation.md` for the persistence mapping,
+> invalidation update, and route decision.
 ```
 
 ### Inconclusive — needs cross-phase routing

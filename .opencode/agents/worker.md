@@ -1,7 +1,7 @@
 ---
 description: Worker — implements exactly one Task per dispatch, writes Evidence, checks checkbox.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
+model: opencode/deepseek-v4-flash-free
 variant: max
 hidden: true
 permission:
@@ -18,6 +18,7 @@ permission:
     "*": deny
     "test-driven-development": allow
     "diagnose": allow
+    "proofloop-worker": allow
   external_directory: deny
   question: deny
 ---
@@ -31,11 +32,20 @@ You are the Worker. You implement exactly one Task per dispatch.
 ### pluginv2 Brain mode
 
 When the packet contains `contract_mode: vnext-template` and
-`skill: proofloop-execute`, read and validate:
+`skill: proofloop-execute`, first load the shared Worker Skill and then read and
+validate the Worker Contract:
 
 ```text
+.agents/skills/proofloop-worker/SKILL.md
 .agents/skills/proofloop-execute/references/worker-template.md
 ```
+
+For `transport: herdr`, the Host relay additionally loads
+`.agents/skills/herdr/SKILL.md` and
+`.agents/skills/proofloop-execute/references/herdr-worker-template.md`. The
+shared Skill's visible Result → callback → lifecycle wait → bounded read order
+is mandatory; a `PROOFLOOP-WORKER-READY` callback without a readable complete
+Result block is `WORKER_RESULT_MISSING`.
 
 Brain owns the Worker session relay for this mode. Runtime remains the owner of
 admission, Receipt writing and completion judgment. The vNext template takes

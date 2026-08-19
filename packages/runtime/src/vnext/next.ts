@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   computeDigest,
+  SchemaValidationError,
   validateReceipt,
   validateVNextManifest,
   validateVNextSpvPassReceipt,
@@ -17,10 +18,18 @@ import type {
   VNextManifest,
   VNextManifestSlice,
 } from '@proofloop/kernel';
+// S12-D-T02: the slice-local currentness oracle (S12-D-T01) is consumed at
+// the slice level; the kernel closed dependency-binding validator is applied
+// to the receipt-bound dependency facts before they enter the oracle.
+import {
+  validateDependencyBinding,
+  type VNextDependencyBinding,
+} from '@proofloop/kernel/dist/vnext';
+import { isIntegratedSliceCurrent, type IntegrationReceiptRef } from './binding-currentness';
 import type { Finding } from '@proofloop/kernel';
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import { readGitHead, resolveGitRoot } from '../git-source';
-import { committerReceiptDir, cvReceiptDir, tasksReceiptDir } from '../receipt-layout';
+import { committerReceiptDir, cvReceiptDir, integrationReceiptDir, tasksReceiptDir } from '../receipt-layout';
 import {
   assertVNextManifestReferenceBindings,
   projectVNextWorkerDispatch,
@@ -34,8 +43,16 @@ import type {
 import { assertStableGitBoundary } from './admission';
 import {
   assertClosedVNextCvPayload,
+  assertSliceLocalCredentialBindingFields,
+  assertUpstreamCvPassSemantics,
+  assertUpstreamSliceCommitSemantics,
+  assertUpstreamTaskCompleteSemantics,
   assertVNextCvChainSequence,
   assertVNextCvReceiptTypeVerdict,
+  computeSliceLocalCredentialExpectation,
+  credentialSchemaVersionMismatch,
+  vnextSliceAllowedScope,
+  vnextUpstreamSliceLocalBindingExpectation,
 } from './cv-validation';
 import type { VNextCvPayloadBinding } from './cv-validation';
 import { VNEXT_WORKER_COMPLETION_MODES } from './types';
@@ -700,6 +717,7 @@ function assertWorkerContextBinding(
   root: string,
   manifest: VNextManifest,
   manifestDigest: string,
+  planDigest: string,
   snapshotDigest: string,
   slice: VNextManifestSlice,
   taskId: string,
@@ -736,7 +754,7 @@ function assertWorkerContextBinding(
     context.task_id !== taskId ||
     context.task_ref !== taskRef ||
     context.manifest_digest !== manifestDigest ||
-    context.plan_digest !== manifest.plan.plan_digest ||
+    context.plan_digest !== planDigest ||
     context.proof_index_digest !== proofIndexDigest ||
     context.snapshot_digest !== snapshotDigest
   ) {
@@ -750,30 +768,644 @@ function assertWorkerContextBinding(
   }
 }
 
+/**
+ * S12-E REPAIR-FINAL round 3 — context 落盘绑定: the context_ref file must
+ * EXIST at `.proofloop/context/<context_digest>.json` and its content digest
+ * must equal context_digest.  A TASK_COMPLETE credential whose Context was
+ * never persisted — or whose persisted content does not match the digest —
+ * is never a CURRENT upstream credential and fails closed.
+ */
+function assertUpstreamContextPersisted(root: string, contextRef: string, contextDigest: string): void {
+  const context = readRootBoundRecord(root, contextRef, 'TASK_COMPLETE Context');
+  const withoutDigest = { ...context };
+  delete withoutDigest.context_digest;
+  if (context.context_digest !== contextDigest || computeDigest(withoutDigest) !== contextDigest) {
+    throw new VNextHandoffError(
+      'manifest-binding',
+      'TASK_COMPLETE Context is not persisted at its digest address (content digest mismatch)',
+    );
+  }
+}
+
+// ============================================================
+// Slice-local currentness consumption (S12-D-T02)
+// ============================================================
+
+/**
+ * One entry of the Stage's persisted integration receipt chain, together
+ * with the receipt-bound dependency integration facts of the Slice's
+ * execution binding (§8.2 `dependency_bindings`).
+ */
+interface VNextSliceLocalChainEntry {
+  readonly ref: IntegrationReceiptRef;
+  readonly dependencyBindings: readonly VNextDependencyBinding[];
+}
+
+/**
+ * S12-E REPAIR-FINAL: read ONE receipt addressed by digest from a persisted
+ * receipt category chain (the chain must be valid).  Returns null when the
+ * digest-addressed receipt does not exist; a broken chain or an unreadable /
+ * non-root-bound file fails closed.
+ */
+interface VNextUpstreamChainReceipt {
+  readonly digest: string;
+  readonly type: string;
+  readonly stage_id: string;
+  readonly slice_id: string | undefined;
+  readonly payload: Record<string, unknown>;
+}
+
+function readUpstreamReceipt(
+  root: string,
+  directory: string,
+  digest: string,
+  category: string,
+): VNextUpstreamChainReceipt | null {
+  const chainResult = verifyReceiptChain(directory);
+  if (!chainResult.valid) {
+    throw new VNextHandoffError('admission-invalid', `${category} Receipt chain is invalid`);
+  }
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new VNextHandoffError(
+      'admission-invalid',
+      `${category} Receipt directory could not be read: ${directory}`,
+    );
+  }
+  const file = names.find((name) => name === `${digest}.json`);
+  if (file === undefined) return null;
+  const fullPath = path.join(directory, file);
+  const opened = openNoFollowRead(root, fullPath);
+  if (!opened.ok) {
+    throw new VNextHandoffError('path-escape', `${category} Receipt is not root-bound: ${file}`);
+  }
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(opened.fd, 'utf8'));
+    const receipt = validateReceipt(parsed);
+    if (receipt.digest !== digest) {
+      throw new VNextHandoffError(
+        'admission-invalid',
+        `${category} Receipt ${file} is not digest-addressed by ${digest}`,
+      );
+    }
+    if (!verifyReceiptDigest(fullPath)) {
+      throw new VNextHandoffError('admission-invalid', `${category} Receipt ${file} has an invalid digest`);
+    }
+    const payload = receipt.payload;
+    if (!isRecord(payload)) {
+      throw new VNextHandoffError('admission-invalid', `${category} Receipt payload must be a JSON object`);
+    }
+    return {
+      digest: receipt.digest,
+      type: receipt.type,
+      stage_id: receipt.stage_id,
+      slice_id: receipt.slice_id,
+      payload,
+    };
+  } catch (error) {
+    if (error instanceof VNextHandoffError) throw error;
+    throw new VNextHandoffError(
+      'admission-invalid',
+      `${category} Receipt ${file} is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    fs.closeSync(opened.fd);
+  }
+}
+
+/** The digest of the Worker (TASK_COMPLETE) chain tip of one Slice (null
+ *  when no Worker receipts exist). */
+function workerReceiptChainTipDigest(root: string, stageId: string, sliceId: string): string | null {
+  const directory = tasksReceiptDir(root, stageId, sliceId);
+  const chainResult = verifyReceiptChain(directory);
+  if (!chainResult.valid) {
+    throw new VNextHandoffError(
+      'admission-invalid',
+      `vNext Worker Receipt chain is invalid for ${stageId}/${sliceId}`,
+    );
+  }
+  const tipPath = chainResult.receipts[chainResult.receipts.length - 1];
+  if (tipPath === undefined) return null;
+  return path.basename(tipPath).replace(/\.json$/, '');
+}
+
+/**
+ * Read the current INTEGRATION_PASS receipt chain of every Slice (slice-local
+ * mode only, §8.7). Each persisted receipt must carry the receipt-bound
+ * stage/slice contract digests and the merged canonical HEAD (`commit_sha`)
+ * the slice-level currentness criterion consumes; a legacy/v2 Integration
+ * Receipt without the binding fields can never back a slice-local
+ * currentness claim and fails closed (never guessed around).
+ *
+ * S12-D-T02 (§8.3) + T04b (user authorization): the payload schema_version
+ * is discriminated FIRST through the shared credential helper — v2 receipts
+ * carrying binding fields are illegal credentials in a slice-local Stage
+ * (BINDING.MODE_MIXED), a schema_version 3 receipt IS the legal slice-local
+ * credential (its three binding fields are validated against the Manifest
+ * contract digests and the recomputed execution binding through the shared
+ * cv-validation helpers), and unknown future versions (>3) fail closed
+ * explicitly (BINDING.SCHEMA_FUTURE).
+ */
+function readVNextIntegrationReceiptChain(
+  root: string,
+  manifest: VNextManifest,
+): VNextSliceLocalChainEntry[] {
+  const chain: VNextSliceLocalChainEntry[] = [];
+  for (const slice of manifest.slices) {
+    const directory = integrationReceiptDir(root, manifest.stage_id, slice.slice_id);
+    if (canonicalPathWithinRoot(root, directory) === null) {
+      throw new VNextHandoffError('path-escape', 'vNext Integration Receipt directory escapes the project root');
+    }
+    let names: string[];
+    try {
+      names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw new VNextHandoffError(
+        'admission-invalid',
+        `vNext Integration Receipt directory could not be read: ${directory}`,
+      );
+    }
+    if (names.length === 0) continue;
+
+    const chainResult = verifyReceiptChain(directory);
+    if (!chainResult.valid) {
+      throw new VNextHandoffError(
+        'admission-invalid',
+        `vNext Integration Receipt chain is invalid for ${manifest.stage_id}/${slice.slice_id}`,
+      );
+    }
+    // S12-E REPAIR-FINAL: only the INTEGRATION_PASS chain TIP is a CURRENT
+    // credential.  Historical chain members are still fully validated below
+    // (schema, digest, stage/slice, binding fields) but never contribute
+    // currentness facts.
+    const orderedChainPaths = chainResult.receipts;
+    const tipPath = orderedChainPaths[orderedChainPaths.length - 1];
+    const tipName = tipPath === undefined ? null : path.basename(tipPath);
+    for (const name of names) {
+      const file = path.join(directory, name);
+      const opened = openNoFollowRead(root, file);
+      if (!opened.ok) {
+        throw new VNextHandoffError('path-escape', `vNext Integration Receipt is not root-bound: ${name}`);
+      }
+      try {
+        const parsed: unknown = JSON.parse(fs.readFileSync(opened.fd, 'utf8'));
+        const receipt = validateReceipt(parsed);
+        if (receipt.type !== 'INTEGRATION_PASS') {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            `Receipt ${name} is not an INTEGRATION_PASS fact in the integration category`,
+          );
+        }
+        if (!verifyReceiptDigest(file)) {
+          throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid digest`);
+        }
+        if (receipt.stage_id !== manifest.stage_id || receipt.slice_id !== slice.slice_id) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'vNext Integration Receipt stage/slice binding is invalid',
+          );
+        }
+        const payload = receipt.payload;
+        if (!isRecord(payload)) {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS payload must be a JSON object',
+          );
+        }
+        // S12-D-T02 (§8.3) + T04b (user authorization): explicit credential
+        // schema_version discrimination runs BEFORE the binding-field reads —
+        // a v2 receipt carrying binding fields is an illegal credential in a
+        // slice-local Stage (BINDING.MODE_MIXED), a slice-local (3) receipt
+        // IS the legal credential of a slice-local Stage (S12-D REPLAN), and
+        // an unknown future version (>3) fails closed explicitly. Same
+        // semantics as the shared credentialSchemaVersionMismatch helper.
+        const schemaMismatch = credentialSchemaVersionMismatch(
+          payload.schema_version,
+          manifest.binding !== undefined,
+          'INTEGRATION_PASS.payload',
+        );
+        if (schemaMismatch !== null) {
+          throw new VNextHandoffError('admission-invalid', schemaMismatch.message);
+        }
+        if (payload.receipt_chain_valid !== true) {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS Receipt does not assert a valid vNext Receipt chain',
+          );
+        }
+        // Slice-local currentness requires the receipt-bound contract
+        // digests (§8.5); a legacy/v2 Receipt without them cannot be
+        // consumed by the slice-local path and fails closed.
+        const stageContractDigest = factDigest(
+          payload.stage_contract_digest,
+          'INTEGRATION_PASS.stage_contract_digest',
+          64,
+        );
+        const sliceContractDigest = factDigest(
+          payload.slice_contract_digest,
+          'INTEGRATION_PASS.slice_contract_digest',
+          64,
+        );
+        const integrationHead = factDigest(payload.commit_sha, 'INTEGRATION_PASS.commit_sha', 40);
+        // §8.2 dependency_bindings (Phase 1 serial execution: empty or a
+        // single dependency). Kernel closed validator, fail-closed shape.
+        // S12-D repair (v3 consumer chain, read-side fail-closed): a v3
+        // INTEGRATION_PASS credential MUST carry the field — the write side
+        // always persists it (an empty array for a no-dependency slice), so
+        // a missing or non-array value is an explicit rejection, never a
+        // silent empty-list recompute (an empty-list recompute would
+        // wrongly exempt a dependency slice whose persisted binding facts
+        // were dropped, and would diverge from the write-side gate).
+        const rawDependencies = payload.dependency_bindings;
+        if (rawDependencies === undefined || !Array.isArray(rawDependencies)) {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS.dependency_bindings is required on a v3 credential and must be an array',
+          );
+        }
+        const dependencyBindings: VNextDependencyBinding[] = [];
+        for (const [index, raw] of rawDependencies.entries()) {
+          try {
+            validateDependencyBinding(raw);
+          } catch (error) {
+            throw new VNextHandoffError(
+              'admission-invalid',
+              `INTEGRATION_PASS.dependency_bindings[${index}] is malformed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          dependencyBindings.push(raw as VNextDependencyBinding);
+        }
+        // T04b (user authorization): in slice-local mode the v3 credential's
+        // three binding fields are validated through the SHARED cv-validation
+        // helpers (imported, never copied) — 64-hex shape, exact match with
+        // the Manifest stage/slice contract digests and the recomputed
+        // execution binding (kernel bindings.ts oracle over the
+        // receipt-bound dependency bindings and the credential's own base
+        // snapshot). A v3 credential that is not self-consistent fails
+        // closed here, before it can back a currentness claim. The schema
+        // discrimination above already rejected v2-in-slice-local
+        // (MODE_MIXED) and unknown future versions (SCHEMA_FUTURE).
+        assertSliceLocalCredentialBindingFields(
+          payload,
+          'INTEGRATION_PASS.payload',
+          manifest.binding !== undefined
+            ? computeSliceLocalCredentialExpectation(
+                manifest,
+                slice.slice_id,
+                dependencyBindings,
+                payload,
+              )
+            : undefined,
+        );
+        if (tipName !== null && name !== tipName) {
+          // Historical INTEGRATION_PASS chain member: fully validated above
+          // but never a CURRENT credential (the chain tip alone is current).
+          continue;
+        }
+        // S12-E REPAIR-FINAL — complete admission-chain semantics: the
+        // referenced upstream credentials must EXIST in their persisted
+        // chains (each chain valid), bind the same stage/slice, and carry
+        // the full field semantics (TASK_COMPLETE changed_files non-empty /
+        // evidence_ref bound / context bound / mode+outcome; CV_RESULT
+        // verdict PASS bound to the Worker chain tip; SLICE_COMMIT commit_sha
+        // a real Git commit on the current branch).  Digest self-consistency
+        // and outer chain validity are never sufficient — a semantically
+        // incomplete upstream credential fails closed and can never back a
+        // CURRENT claim.
+        const sliceCommitDigest = factDigest(
+          payload.slice_commit_receipt_digest,
+          'INTEGRATION_PASS.slice_commit_receipt_digest',
+          64,
+        );
+        const workerDigest = factDigest(
+          payload.worker_receipt_digest,
+          'INTEGRATION_PASS.worker_receipt_digest',
+          64,
+        );
+        const cvDigest = factDigest(
+          payload.cv_receipt_digest,
+          'INTEGRATION_PASS.cv_receipt_digest',
+          64,
+        );
+        const workerReceipt = readUpstreamReceipt(
+          root,
+          tasksReceiptDir(root, manifest.stage_id, slice.slice_id),
+          workerDigest,
+          'vNext Worker',
+        );
+        if (workerReceipt === null || workerReceipt.type !== 'TASK_COMPLETE') {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS references a TASK_COMPLETE Receipt that does not exist',
+          );
+        }
+        if (workerReceipt.stage_id !== manifest.stage_id || workerReceipt.slice_id !== slice.slice_id) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'INTEGRATION_PASS upstream Worker Receipt binding is invalid',
+          );
+        }
+        assertUpstreamTaskCompleteSemantics(workerReceipt.payload, slice.evidence_path, 'TASK_COMPLETE', {
+          verifyContextPersisted: (contextRef, contextDigest) =>
+            assertUpstreamContextPersisted(root, contextRef, contextDigest),
+          stageHasBinding: manifest.binding !== undefined,
+          expectedSliceLocalBinding: vnextUpstreamSliceLocalBindingExpectation(
+            manifest,
+            slice.slice_id,
+            dependencyBindings,
+            workerReceipt.payload,
+            'TASK_COMPLETE',
+          ),
+          allowedScope: vnextSliceAllowedScope(manifest, slice.slice_id),
+        });
+        const workerChainTipDigest = workerReceiptChainTipDigest(
+          root,
+          manifest.stage_id,
+          slice.slice_id,
+        );
+        if (workerChainTipDigest === null) {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS references a Worker chain that does not exist',
+          );
+        }
+        const cvReceipt = readUpstreamReceipt(
+          root,
+          cvReceiptDir(root, manifest.stage_id, slice.slice_id),
+          cvDigest,
+          'vNext CV',
+        );
+        if (cvReceipt === null || cvReceipt.type !== 'CV_PASS') {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS references a CV_PASS Receipt that does not exist',
+          );
+        }
+        if (cvReceipt.stage_id !== manifest.stage_id || cvReceipt.slice_id !== slice.slice_id) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'INTEGRATION_PASS upstream CV Receipt binding is invalid',
+          );
+        }
+        assertUpstreamCvPassSemantics(
+          cvReceipt.payload,
+          'CV_RESULT',
+          {
+            stageHasBinding: manifest.binding !== undefined,
+            expectedSliceLocalBinding: vnextUpstreamSliceLocalBindingExpectation(
+              manifest,
+              slice.slice_id,
+              dependencyBindings,
+              cvReceipt.payload,
+              'CV_RESULT',
+            ),
+          },
+          workerChainTipDigest,
+        );
+        const sliceCommitReceipt = readUpstreamReceipt(
+          root,
+          committerReceiptDir(root, manifest.stage_id, slice.slice_id),
+          sliceCommitDigest,
+          'vNext Slice Commit',
+        );
+        if (sliceCommitReceipt === null || sliceCommitReceipt.type !== 'SLICE_COMMIT') {
+          throw new VNextHandoffError(
+            'admission-invalid',
+            'INTEGRATION_PASS references a SLICE_COMMIT Receipt that does not exist',
+          );
+        }
+        if (
+          sliceCommitReceipt.stage_id !== manifest.stage_id ||
+          sliceCommitReceipt.slice_id !== slice.slice_id
+        ) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'INTEGRATION_PASS upstream SLICE_COMMIT Receipt binding is invalid',
+          );
+        }
+        assertUpstreamSliceCommitSemantics(sliceCommitReceipt.payload, 'SLICE_COMMIT', {
+          stageHasBinding: manifest.binding !== undefined,
+          expectedSliceLocalBinding: vnextUpstreamSliceLocalBindingExpectation(
+            manifest,
+            slice.slice_id,
+            dependencyBindings,
+            sliceCommitReceipt.payload,
+            'SLICE_COMMIT',
+          ),
+          allowedScope: vnextSliceAllowedScope(manifest, slice.slice_id),
+        });
+        if (sliceCommitReceipt.payload.commit_sha !== integrationHead) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'INTEGRATION_PASS.commit_sha does not match the upstream SLICE_COMMIT credential',
+          );
+        }
+        assertCommitOnCurrentHead(root, integrationHead, 'INTEGRATION_PASS.commit_sha');
+        chain.push({
+          ref: {
+            slice_id: slice.slice_id,
+            receipt_digest: receipt.digest,
+            integration_head_sha: integrationHead,
+            stage_contract_digest: stageContractDigest,
+            slice_contract_digest: sliceContractDigest,
+          },
+          dependencyBindings,
+        });
+      } catch (error) {
+        if (error instanceof VNextHandoffError) throw error;
+        throw new VNextHandoffError(
+          'admission-invalid',
+          `vNext Integration Receipt ${name} is invalid: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } finally {
+        fs.closeSync(opened.fd);
+      }
+    }
+  }
+  return chain;
+}
+
+/**
+ * The set of Slice ids that are INTEGRATED and CURRENT in slice-local mode
+ * (§8.5/§10.5): an integrated slice whose stage/slice contract, dependency
+ * bindings and integration receipt chain are current stays valid across a
+ * replan, and its historical whole-plan digest bindings are legal history.
+ *
+ * Legacy manifests (no `binding`) return the empty set: the legacy read path
+ * stays strict and untouched. Un-integrated slices are never exempted
+ * (§8.5: no auto carry-forward across Plan revisions). A slice whose
+ * currentness cannot be evaluated (malformed chain/binding facts) fails
+ * closed through the typed kernel oracle errors.
+ */
+function readVNextCurrentIntegratedSliceIds(
+  root: string,
+  manifest: VNextManifest,
+  manifestDigest: string,
+  sliceLocalChain: readonly VNextSliceLocalChainEntry[],
+): ReadonlySet<string> {
+  const current = new Set<string>();
+  if (manifest.binding === undefined) return current;
+  const chain = sliceLocalChain.length > 0 ? sliceLocalChain : readVNextIntegrationReceiptChain(root, manifest);
+  if (chain.length === 0) return current;
+  const bySlice = new Map(chain.map((entry) => [entry.ref.slice_id, entry] as const));
+  const receiptChain = chain.map((entry) => entry.ref);
+  for (const slice of manifest.slices) {
+    const entry = bySlice.get(slice.slice_id);
+    if (entry === undefined) continue; // un-integrated: strict checks stay
+    try {
+      if (
+        isIntegratedSliceCurrent({
+          manifest,
+          sliceId: slice.slice_id,
+          manifestDigest,
+          planDigest: manifest.plan.plan_digest,
+          stageContractDigest: entry.ref.stage_contract_digest,
+          sliceContractDigest: entry.ref.slice_contract_digest,
+          dependencyBindings: entry.dependencyBindings,
+          integrationReceipts: receiptChain,
+        })
+      ) {
+        current.add(slice.slice_id);
+      }
+    } catch (error) {
+      if (error instanceof SchemaValidationError) {
+        throw new VNextHandoffError(
+          'manifest-binding',
+          `Slice currentness evaluation failed closed for ${manifest.stage_id}/${slice.slice_id}: ${error.message}`,
+        );
+      }
+      throw error;
+    }
+  }
+  return current;
+}
+
+/**
+ * Slice-local (S12-D repair, v3 consumer chain): the receipt-bound
+ * dependency binding facts of one Slice, derived from the persisted
+ * INTEGRATION_PASS chain of its declared dependency slices (§8.2). The same
+ * facts the admission consumers used to compute the v3 credential's
+ * execution binding (`readSliceLocalDependencyBindings`), re-derived here
+ * from the read-side chain so `next` can recompute the expectation without
+ * any filesystem or Git I/O beyond the already-read chain. A declared
+ * dependency without a current INTEGRATION_PASS chain entry fails closed: a
+ * v3 credential bound to it could never have been admitted (serial
+ * execution order), so it is never guessed around.
+ */
+function sliceLocalDependencyBindingsForSlice(
+  sliceLocalChain: readonly VNextSliceLocalChainEntry[],
+  slice: VNextManifestSlice,
+): VNextDependencyBinding[] {
+  const bySlice = new Map(sliceLocalChain.map((entry) => [entry.ref.slice_id, entry] as const));
+  const bindings: VNextDependencyBinding[] = [];
+  for (const dependencyId of slice.depends_on ?? []) {
+    const entry = bySlice.get(dependencyId);
+    if (entry === undefined) {
+      throw new VNextHandoffError(
+        'manifest-binding',
+        `slice-local dependency ${dependencyId} of ${slice.slice_id} has no current INTEGRATION_PASS Receipt; the v3 credential binding cannot be recomputed`,
+      );
+    }
+    const binding: VNextDependencyBinding = {
+      slice_id: dependencyId,
+      slice_contract_digest: entry.ref.slice_contract_digest,
+      integration_receipt_digest: entry.ref.receipt_digest,
+      integration_head_sha: entry.ref.integration_head_sha,
+    };
+    try {
+      validateDependencyBinding(binding);
+    } catch (error) {
+      throw new VNextHandoffError(
+        'admission-invalid',
+        `dependency binding of ${slice.slice_id} is malformed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    bindings.push(binding);
+  }
+  return bindings;
+}
+
 function readVNextWorkerFacts(
   root: string,
   manifest: VNextManifest,
   manifestDigest: string,
   snapshotDigest: string,
+  currentIntegratedSliceIds: ReadonlySet<string>,
+  sliceLocalChain: readonly VNextSliceLocalChainEntry[],
 ): VNextWorkerFact[] {
   const facts: VNextWorkerFact[] = [];
+
   for (const slice of manifest.slices) {
     const receipts = readVNextTaskReceipts(root, manifest.stage_id, slice.slice_id);
     if (receipts.length === 0) continue;
     const taskIds = taskIdsForSlice(manifest, slice);
     const taskFacts = new Map<string, VNextWorkerFact>();
     const actionTokens = new Set<string>();
+    const sliceBoundTuples = new Map<
+      string,
+      { manifestDigest: string; planDigest: string; proofIndexDigest: string }
+    >();
     for (const receipt of receipts) {
       if (receipt.stage_id !== manifest.stage_id || receipt.slice_id !== slice.slice_id) {
         throw new VNextHandoffError('manifest-binding', 'TASK_COMPLETE Receipt stage/slice binding is invalid');
       }
       const payload = receipt.payload;
-      if (!isRecord(payload) || payload.schema_version !== 2) {
+      if (!isRecord(payload)) {
         throw new VNextHandoffError(
           'admission-invalid',
-          'v1 or unknown Worker Receipt facts cannot be consumed by the vNext next action',
+          'TASK_COMPLETE payload must be a JSON object',
         );
       }
+      // S12-D repair (v3 consumer chain): explicit credential schema_version
+      // discrimination through the shared helper runs BEFORE any fact read —
+      // legacy mode stays v2-only, a v2 credential in a slice-local Stage is
+      // an illegal credential (BINDING.MODE_MIXED), a slice-local (3)
+      // credential IS the legal credential of a slice-local Stage, and
+      // unknown future versions (>3) fail closed explicitly
+      // (BINDING.SCHEMA_FUTURE).
+      const schemaMismatch = credentialSchemaVersionMismatch(
+        payload.schema_version,
+        manifest.binding !== undefined,
+        'TASK_COMPLETE.payload',
+      );
+      if (schemaMismatch !== null) {
+        throw new VNextHandoffError('admission-invalid', schemaMismatch.message);
+      }
+      // S12-D repair (v3 consumer chain): in slice-local mode the v3 Worker
+      // credential's three binding fields are validated through the SHARED
+      // cv-validation helpers — 64-hex shape, exact match with the Manifest
+      // stage/slice contract digests and the recomputed execution binding
+      // (kernel bindings.ts oracle over the receipt-bound dependency
+      // bindings and the credential's OWN payload snapshot — the historical
+      // base snapshot the admission consumer computed against at write
+      // time, NOT the current authority snapshot; after an integration
+      // commit + fresh SPV the current snapshot legitimately advances while
+      // the historical credential stays bound to its own snapshot, and a
+      // base-snapshot mismatch must never block an integrated CURRENT
+      // slice, FR-020). A v3 credential that is not self-consistent fails
+      // closed before it can back any dispatch or CV projection. A v2
+      // credential carrying binding fields was already rejected by the
+      // discrimination above.
+      assertSliceLocalCredentialBindingFields(
+        payload,
+        'TASK_COMPLETE.payload',
+        manifest.binding !== undefined
+          ? computeSliceLocalCredentialExpectation(
+              manifest,
+              slice.slice_id,
+              sliceLocalDependencyBindingsForSlice(sliceLocalChain, slice),
+              payload,
+            )
+          : undefined,
+      );
       if (
         payload.outcome !== 'completed' ||
         (payload.mode !== 'implement-task' && payload.mode !== 'recover-task')
@@ -810,18 +1442,47 @@ function readVNextWorkerFacts(
       const planDigest = factDigest(payload.plan_digest, 'TASK_COMPLETE.plan_digest', 64);
       const currentProofIndexDigest = factDigest(payload.proof_index_digest, 'TASK_COMPLETE.proof_index_digest', 64);
       const currentSnapshotDigest = factDigest(payload.snapshot_digest, 'TASK_COMPLETE.snapshot_digest', 40);
+      // S12-D-T02 slice-local exemption: an INTEGRATED + CURRENT slice keeps
+      // its proof valid across a replan — the whole-plan digests bound by its
+      // historical TASK_COMPLETE facts are legal history (§8.5) and must not
+      // be rejected as stale. Un-integrated slices keep the strict check.
+      const exempt = currentIntegratedSliceIds.has(slice.slice_id);
       if (
         currentManifestDigest !== manifestDigest ||
         planDigest !== manifest.plan.plan_digest ||
         currentProofIndexDigest !== proofIndexDigest
       ) {
-        throw new VNextHandoffError('manifest-binding', 'TASK_COMPLETE Receipt is stale or not bound to the active Manifest/Plan');
+        if (!exempt) {
+          throw new VNextHandoffError('manifest-binding', 'TASK_COMPLETE Receipt is stale or not bound to the active Manifest/Plan');
+        }
+        // The exempted Slice's Worker facts must all bind the SAME
+        // historical tuple: mixing Plan revisions inside one integrated
+        // Slice is never legal history and fails closed.
+        const prior = sliceBoundTuples.get(slice.slice_id);
+        if (
+          prior !== undefined &&
+          (prior.manifestDigest !== currentManifestDigest ||
+            prior.planDigest !== planDigest ||
+            prior.proofIndexDigest !== currentProofIndexDigest)
+        ) {
+          throw new VNextHandoffError(
+            'manifest-binding',
+            'TASK_COMPLETE Receipts of the integrated Slice bind inconsistent historical Manifest/Plan tuples',
+          );
+        }
+        sliceBoundTuples.set(slice.slice_id, {
+          manifestDigest: currentManifestDigest,
+          planDigest,
+          proofIndexDigest: currentProofIndexDigest,
+        });
       }
       // A Worker fact produced during execution binds the admitted snapshot
       // (or a legal descendant execution commit). It must stay on the
       // admission snapshot's Git chain; an unrelated/reverted snapshot fails
-      // closed without discarding the already-admitted execution facts.
-      assertReceiptSnapshotOnExecutionChain(root, currentSnapshotDigest, snapshotDigest, 'TASK_COMPLETE Receipt');
+      // closed without discarding the already-admitted execution facts. For
+      // an exempted integrated slice the snapshot is historical and only
+      // needs to be reachable from the current branch.
+      assertReceiptSnapshotOnExecutionChain(root, currentSnapshotDigest, snapshotDigest, 'TASK_COMPLETE Receipt', exempt);
       const contextRef = factString(payload.context_ref, 'TASK_COMPLETE.context_ref');
       const contextDigest = factDigest(payload.context_digest, 'TASK_COMPLETE.context_digest', 64);
       const payloadMode = factString(payload.mode, 'TASK_COMPLETE.mode');
@@ -834,13 +1495,14 @@ function readVNextWorkerFacts(
       assertWorkerContextBinding(
         root,
         manifest,
-        manifestDigest,
+        exempt ? currentManifestDigest : manifestDigest,
+        exempt ? planDigest : manifest.plan.plan_digest,
         currentSnapshotDigest,
         slice,
         taskId,
         taskScope,
         taskRefDescriptor.ref,
-        proofIndexDigest,
+        exempt ? currentProofIndexDigest : proofIndexDigest,
         contextRef,
         contextDigest,
         payloadMode,
@@ -857,6 +1519,13 @@ function readVNextWorkerFacts(
         throw new VNextHandoffError('execution-scope-gap', 'TASK_COMPLETE.changed_files cannot be empty');
       }
       const changedFileSet = new Set(changedFiles);
+      // ADR-021 (user authorization A7): every admitted TASK_COMPLETE
+      // Receipt must declare the Evidence and Plan projection paths in its
+      // changed_files — the declaration is per-receipt and unconditional.
+      // The Evidence/Plan projections are always declarable regardless of
+      // worktree state (A7 worker-admission counterpart allows declaring
+      // them even when HEAD-clean), so a multi-task Slice recovered in one
+      // pass re-admits each task with its own files plus Evidence/Plan.
       for (const requiredPath of [slice.evidence_path, manifest.plan.ref]) {
         const canonicalRequiredPath = rootRelativeFactPath(root, requiredPath, 'Manifest execution projection path');
         if (!changedFileSet.has(canonicalRequiredPath)) {
@@ -929,12 +1598,14 @@ interface VNextCvReceiptFacts {
  */
 function readVNextCvReceiptFacts(
   root: string,
-  stageId: string,
+  manifest: VNextManifest,
   sliceId: string,
   binding: VNextCvPayloadBinding,
   admittedSnapshot: string,
+  sliceLocalChain: readonly VNextSliceLocalChainEntry[],
+  allowHistoricalSnapshot = false,
 ): VNextCvReceiptFacts {
-  const directory = cvReceiptDir(root, stageId, sliceId);
+  const directory = cvReceiptDir(root, manifest.stage_id, sliceId);
   if (canonicalPathWithinRoot(root, directory) === null) {
     throw new VNextHandoffError('path-escape', 'vNext CV Receipt directory escapes the project root');
   }
@@ -954,7 +1625,7 @@ function readVNextCvReceiptFacts(
   if (!chain.valid) {
     throw new VNextHandoffError(
       'admission-invalid',
-      `vNext CV Receipt chain is invalid for ${stageId}/${sliceId}`,
+      `vNext CV Receipt chain is invalid for ${manifest.stage_id}/${sliceId}`,
     );
   }
   const receipts: Receipt[] = [];
@@ -976,7 +1647,7 @@ function readVNextCvReceiptFacts(
       if (!verifyReceiptDigest(file)) {
         throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid digest`);
       }
-      if (receipt.stage_id !== stageId || receipt.slice_id !== sliceId) {
+      if (receipt.stage_id !== manifest.stage_id || receipt.slice_id !== sliceId) {
         throw new VNextHandoffError('manifest-binding', 'vNext CV Receipt stage/slice binding is invalid');
       }
       // S08-REVIEW-005/006: a self-digest-correct CV Receipt whose payload is
@@ -987,9 +1658,54 @@ function readVNextCvReceiptFacts(
       // stay on the admitted execution Git chain like every other execution
       // fact.
       assertVNextCvReceiptTypeVerdict(receipt.type, receipt.payload);
-      assertClosedVNextCvPayload(receipt.payload, binding);
+      // S12-D repair (v3 consumer chain): explicit credential schema_version
+      // discrimination through the shared helper runs BEFORE any binding-
+      // field read — legacy mode stays v2-only, a v2 credential in a
+      // slice-local Stage is an illegal credential (BINDING.MODE_MIXED), a
+      // slice-local (3) credential IS the legal credential of a slice-local
+      // Stage, and unknown future versions (>3) fail closed explicitly
+      // (BINDING.SCHEMA_FUTURE). Same discrimination every other vNext
+      // consumer applies.
+      const schemaMismatch = credentialSchemaVersionMismatch(
+        isRecord(receipt.payload) ? receipt.payload.schema_version : undefined,
+        manifest.binding !== undefined,
+        'CV_RESULT.payload',
+      );
+      if (schemaMismatch !== null) {
+        throw new VNextHandoffError('admission-invalid', schemaMismatch.message);
+      }
+      // S12-D repair (v3 consumer chain): in slice-local mode the persisted
+      // CV_RESULT credential's three binding fields are validated through
+      // the SHARED cv-validation helpers — 64-hex shape (assertCredential-
+      // SchemaVersion), exact match with the Manifest stage/slice contract
+      // digests and the recomputed execution binding (kernel bindings.ts
+      // oracle over the receipt-bound dependency bindings and the
+      // credential's OWN payload snapshot — the historical base snapshot
+      // CV admission computed against at write time, NOT the current
+      // authority snapshot; after an integration commit + fresh SPV the
+      // current snapshot legitimately advances while the historical CV
+      // credential stays bound to its own snapshot, FR-020). A v3 CV
+      // credential that is not self-consistent fails closed here and can
+      // never back a SLICE_COMMIT or a RUN_CV projection; it is never
+      // silently accepted.
+      const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+      if (slice === undefined) {
+        throw new VNextHandoffError('task-anchor-gap', `Manifest does not declare slice ${sliceId}`);
+      }
+      assertClosedVNextCvPayload(receipt.payload, {
+        ...binding,
+        sliceLocalBinding:
+          manifest.binding !== undefined && isRecord(receipt.payload)
+            ? computeSliceLocalCredentialExpectation(
+                manifest,
+                sliceId,
+                sliceLocalDependencyBindingsForSlice(sliceLocalChain, slice),
+                receipt.payload,
+              )
+            : undefined,
+      });
       const cvSnapshot = factDigest(receipt.payload.snapshot_digest, 'CV_RESULT.snapshot_digest', 40);
-      assertReceiptSnapshotOnExecutionChain(root, cvSnapshot, admittedSnapshot, 'CV_RESULT');
+      assertReceiptSnapshotOnExecutionChain(root, cvSnapshot, admittedSnapshot, 'CV_RESULT', allowHistoricalSnapshot);
       receipts.push(receipt);
     } catch (error) {
       if (error instanceof VNextHandoffError) throw error;
@@ -1016,7 +1732,7 @@ function readVNextCvReceiptFacts(
   if (genesis.length !== 1) {
     throw new VNextHandoffError(
       'admission-invalid',
-      `vNext CV Receipt chain for ${stageId}/${sliceId} must contain exactly one chain genesis`,
+      `vNext CV Receipt chain for ${manifest.stage_id}/${sliceId} must contain exactly one chain genesis`,
     );
   }
   const referencedBy = new Map<string, string>();
@@ -1026,7 +1742,7 @@ function readVNextCvReceiptFacts(
       if (prior !== undefined) {
         throw new VNextHandoffError(
           'admission-invalid',
-          `vNext CV Receipt chain for ${stageId}/${sliceId} contains a fork at predecessor ${receipt.previous_digest}`,
+          `vNext CV Receipt chain for ${manifest.stage_id}/${sliceId} contains a fork at predecessor ${receipt.previous_digest}`,
         );
       }
       referencedBy.set(receipt.previous_digest, receipt.digest);
@@ -1054,7 +1770,7 @@ function readVNextCvReceiptFacts(
   if (tip === undefined) {
     throw new VNextHandoffError(
       'admission-invalid',
-      `vNext CV Receipt chain for ${stageId}/${sliceId} has no resolvable chain tip`,
+      `vNext CV Receipt chain for ${manifest.stage_id}/${sliceId} has no resolvable chain tip`,
     );
   }
   return {
@@ -1086,9 +1802,16 @@ function readVNextCommittedSliceIds(
   planDigest: string,
   admittedSnapshot: string,
   workerFacts: readonly VNextWorkerFact[],
+  currentIntegratedSliceIds: ReadonlySet<string>,
+  sliceLocalChain: readonly VNextSliceLocalChainEntry[],
 ): Set<string> {
   const committed = new Set<string>();
   for (const slice of manifest.slices) {
+    // S12-D-T02 slice-local exemption: an INTEGRATED + CURRENT slice keeps
+    // its proof valid across a replan, so its historical SLICE_COMMIT facts
+    // (bound to the previous whole-plan tuple) are legal history. The
+    // exemption is decided BEFORE the whole-plan digest checks below.
+    const exempt = currentIntegratedSliceIds.has(slice.slice_id);
     const directory = committerReceiptDir(root, manifest.stage_id, slice.slice_id);
     if (canonicalPathWithinRoot(root, directory) === null) {
       throw new VNextHandoffError('path-escape', 'vNext Slice Commit Receipt directory escapes the project root');
@@ -1134,12 +1857,53 @@ function readVNextCommittedSliceIds(
           throw new VNextHandoffError('manifest-binding', 'SLICE_COMMIT Receipt stage/slice binding is invalid');
         }
         const payload = receipt.payload;
-        if (!isRecord(payload) || payload.schema_version !== 2) {
+        if (!isRecord(payload)) {
           throw new VNextHandoffError(
             'admission-invalid',
-            'v1 or unknown Slice Commit facts cannot be consumed by the vNext next action',
+            'Slice Commit payload must be a JSON object',
           );
         }
+        // S12-D repair (v3 consumer chain): explicit credential
+        // schema_version discrimination through the shared helper runs
+        // BEFORE any fact read — legacy mode stays v2-only, a v2 credential
+        // in a slice-local Stage is an illegal credential
+        // (BINDING.MODE_MIXED), a slice-local (3) credential IS the legal
+        // credential of a slice-local Stage, and unknown future versions
+        // (>3) fail closed explicitly (BINDING.SCHEMA_FUTURE).
+        const schemaMismatch = credentialSchemaVersionMismatch(
+          payload.schema_version,
+          manifest.binding !== undefined,
+          'SLICE_COMMIT.payload',
+        );
+        if (schemaMismatch !== null) {
+          throw new VNextHandoffError('admission-invalid', schemaMismatch.message);
+        }
+        // S12-D repair (v3 consumer chain): in slice-local mode the v3
+        // SLICE_COMMIT credential's three binding fields are validated
+        // through the SHARED cv-validation helpers against the Manifest
+        // contract digests and the recomputed execution binding (kernel
+        // oracle over the receipt-bound dependency bindings and the
+        // credential's OWN payload snapshot — the historical base snapshot
+        // commit admission computed against at write time, NOT the current
+        // authority snapshot; after an integration commit + fresh SPV the
+        // current snapshot legitimately advances while the historical
+        // SLICE_COMMIT credential stays bound to its own snapshot,
+        // FR-020). A v3 credential that is not self-consistent fails
+        // closed before it can project the Slice as committed. A v2
+        // credential carrying binding fields was already rejected by the
+        // discrimination above.
+        assertSliceLocalCredentialBindingFields(
+          payload,
+          'SLICE_COMMIT.payload',
+          manifest.binding !== undefined
+            ? computeSliceLocalCredentialExpectation(
+                manifest,
+                slice.slice_id,
+                sliceLocalDependencyBindingsForSlice(sliceLocalChain, slice),
+                payload,
+              )
+            : undefined,
+        );
         if (payload.type !== 'SLICE_COMMIT_RESULT' || payload.action !== 'SLICE_COMMIT') {
           throw new VNextHandoffError(
             'admission-invalid',
@@ -1147,10 +1911,26 @@ function readVNextCommittedSliceIds(
           );
         }
         if (payload.manifest_digest !== manifestDigest || payload.plan_digest !== planDigest) {
-          throw new VNextHandoffError('manifest-binding', 'SLICE_COMMIT Receipt is stale or not bound to the active Manifest/Plan');
+          if (!exempt) {
+            throw new VNextHandoffError('manifest-binding', 'SLICE_COMMIT Receipt is stale or not bound to the active Manifest/Plan');
+          }
+          // Exempted: the historical tuple must equal the whole-plan tuple
+          // bound by the Slice's persisted Worker facts (never a mix of Plan
+          // revisions between the Worker chain and the commit fact).
+          const boundFact = workerFacts.find((fact) => fact.slice.slice_id === slice.slice_id);
+          if (
+            boundFact === undefined ||
+            payload.manifest_digest !== boundFact.manifestDigest ||
+            payload.plan_digest !== boundFact.planDigest
+          ) {
+            throw new VNextHandoffError(
+              'manifest-binding',
+              'SLICE_COMMIT Receipt is not bound to the persisted historical execution tuple of the Slice',
+            );
+          }
         }
         const commitSnapshot = factDigest(payload.snapshot_digest, 'SLICE_COMMIT.snapshot_digest', 40);
-        assertReceiptSnapshotOnExecutionChain(root, commitSnapshot, admittedSnapshot, 'SLICE_COMMIT');
+        assertReceiptSnapshotOnExecutionChain(root, commitSnapshot, admittedSnapshot, 'SLICE_COMMIT', exempt);
         // ── Semantic bindings (S08-REVIEW-004): a self-digest-correct but
         // semantically incomplete SLICE_COMMIT record must never project the
         // Slice as committed. Every binding is revalidated against persisted
@@ -1175,7 +1955,7 @@ function readVNextCommittedSliceIds(
         // a foreign, reverted, side-branch, or non-existent commit fails
         // closed.
         const commitSha = factDigest(payload.commit_sha, 'SLICE_COMMIT.commit_sha', 40);
-        assertReceiptSnapshotOnExecutionChain(root, commitSha, admittedSnapshot, 'SLICE_COMMIT.commit_sha');
+        assertReceiptSnapshotOnExecutionChain(root, commitSha, admittedSnapshot, 'SLICE_COMMIT.commit_sha', exempt);
         assertCommitOnCurrentHead(root, commitSha, 'SLICE_COMMIT.commit_sha');
         // The declared changed_files must agree with the persisted Worker
         // facts of the Slice: an exact match without a REPAIR history, and a
@@ -1222,14 +2002,14 @@ function readVNextCommittedSliceIds(
         // binds a nonexistent/earlier Context can never back a SLICE_COMMIT.
         const cvFacts = readVNextCvReceiptFacts(
           root,
-          manifest.stage_id,
+          manifest,
           slice.slice_id,
           {
             stageId: manifest.stage_id,
             sliceId: slice.slice_id,
-            manifestDigest,
-            planDigest,
-            proofIndexDigest: computeDigest(slice.proof_index),
+            manifestDigest: exempt ? workerTipFact.manifestDigest : manifestDigest,
+            planDigest: exempt ? workerTipFact.planDigest : manifest.plan.plan_digest,
+            proofIndexDigest: exempt ? workerTipFact.proofIndexDigest : computeDigest(slice.proof_index),
             workerTipDigest,
             expectedAcceptanceRefs: slice.proof_index.acceptance_refs,
             expectedSeamRefs: slice.proof_index.seam_refs,
@@ -1238,6 +2018,8 @@ function readVNextCommittedSliceIds(
             expectedContextDigest: workerTipFact.contextDigest,
           },
           admittedSnapshot,
+          sliceLocalChain,
+          exempt,
         );
         if (cvFacts.tip === null || cvFacts.tip.type !== 'CV_PASS') {
           throw new VNextHandoffError(
@@ -1265,12 +2047,41 @@ function readVNextCommittedSliceIds(
         }
         // Repair-only files (REPAIR → recheck) must still stay inside the
         // Manifest-declared Slice execution scope; protected paths are never
-        // admissible changed files.
-        const sliceAllowedScope = unique(
-          taskIdsForSlice(manifest, slice).flatMap((taskId) =>
+        // admissible changed files.  User authorization A8 (next counterpart,
+        // S12-E REPAIR-001): the committed boundary of one Slice may
+        // legitimately carry files declared by ALREADY ADMITTED TASK_COMPLETE
+        // receipts of OTHER Slices of the same Stage (shared worktree with
+        // interleaved Slice outputs — S12-D/S12-E).  The allowed side is
+        // therefore the union of this Slice's execution scope and every other
+        // admitted Worker fact's changed_files — the same A8 semantics
+        // commit-admission / integration-admission apply to the committed/
+        // integrated boundary.  S12-E REPAIR-FINAL round 3: every file the
+        // other Slice's facts declare must itself stay inside THAT Slice's
+        // Manifest task scope (the union of all its tasks' allowedCodeScope
+        // plus evidence/plan projections) — a forged "declared Slice"
+        // credential can never pass out-of-scope files through the A8 merge.
+        const otherSliceDeclaredFiles = unique(
+          workerFacts
+            .filter((fact) => fact.slice.slice_id !== slice.slice_id)
+            .flatMap((fact) => {
+              const otherSliceScope = vnextSliceAllowedScope(manifest, fact.slice.slice_id);
+              for (const file of fact.changedFiles) {
+                if (!otherSliceScope.some((base) => pathWithin(file, base))) {
+                  throw new VNextHandoffError(
+                    'execution-scope-gap',
+                    `Other Slice declared file is outside its Manifest task scope: ${file}`,
+                  );
+                }
+              }
+              return fact.changedFiles;
+            }),
+        );
+        const sliceAllowedScope = unique([
+          ...taskIdsForSlice(manifest, slice).flatMap((taskId) =>
             taskAllowedScope(root, manifest, slice, taskId),
           ),
-        );
+          ...otherSliceDeclaredFiles,
+        ]);
         const sliceForbiddenScope = [
           '.proofloop/manifests',
           '.proofloop/receipts',
@@ -1296,12 +2107,16 @@ function readVNextCommittedSliceIds(
             );
           }
         } else if (
-          receiptChangedFiles.length !== workerChangedFiles.length ||
-          receiptChangedFiles.some((value, index) => value !== workerChangedFiles[index])
+          // User authorization A8c (next counterpart): declared projections
+          // already present in the committed HEAD tree (tasks.md cannot
+          // change without breaking Manifest binding) satisfy their
+          // declaration through the persisted snapshot.
+          !workerChangedFiles.every((value) =>
+            receiptChangedFiles.includes(value) || gitTreeContains(root, commitSha, value))
         ) {
           throw new VNextHandoffError(
             'admission-invalid',
-            'SLICE_COMMIT Receipt changed_files do not match all Worker facts',
+            'SLICE_COMMIT Receipt changed_files do not contain every persisted Worker fact',
           );
         }
         // S08-REVIEW-005: the commit_sha boundary must be cross-validated
@@ -1441,8 +2256,17 @@ function assertReceiptSnapshotOnExecutionChain(
   candidate: string,
   admittedSnapshot: string,
   label: string,
+  allowHistoricalAncestry = false,
 ): void {
   if (candidate === admittedSnapshot) return;
+  if (allowHistoricalAncestry) {
+    // S12-D-T02 slice-local exemption: the historical snapshot of an
+    // integrated CURRENT slice's facts is legal history — it must only be a
+    // Git commit reachable from the current branch (HEAD or an ancestor of
+    // it), never a reverted/side-branch/foreign boundary.
+    assertCommitOnCurrentHead(root, candidate, label);
+    return;
+  }
   let gitRoot: string;
   try {
     gitRoot = resolveGitRoot(root);
@@ -1726,11 +2550,33 @@ export class VNextNextActionService {
         assertVNextManifestReferenceBindings(input.projectRoot, manifest);
       }
       const authoritySnapshot = authority.spv.snapshot_digest;
+      // S12-D-T02: the slice-local currentness exemption set is computed
+      // BEFORE the Worker facts are read — a committed+current Slice's
+      // historical facts must be exempted while its receipts are consumed
+      // (the committed determination itself needs the Worker facts, so the
+      // exemption is derived from the INTEGRATION chain, not from the
+      // committer chain). Legacy manifests (no `binding`) stay strict.
+      // S12-D repair (v3 consumer chain): the INTEGRATION chain is read ONCE
+      // and shared by the exemption set, the v3 Worker/Commit credential
+      // binding validation and the CV credential binding validation — the
+      // same chain facts, never re-read per consumer.
+      const sliceLocalChain =
+        manifest.binding !== undefined
+          ? readVNextIntegrationReceiptChain(input.projectRoot, manifest)
+          : [];
+      const currentIntegratedSliceIds = readVNextCurrentIntegratedSliceIds(
+        input.projectRoot,
+        manifest,
+        manifestDigest,
+        sliceLocalChain,
+      );
       const workerFacts = readVNextWorkerFacts(
         input.projectRoot,
         manifest,
         manifestDigest,
         authoritySnapshot,
+        currentIntegratedSliceIds,
+        sliceLocalChain,
       );
       const committedSliceIds = readVNextCommittedSliceIds(
         input.projectRoot,
@@ -1739,6 +2585,8 @@ export class VNextNextActionService {
         manifest.plan.plan_digest,
         authoritySnapshot,
         workerFacts,
+        currentIntegratedSliceIds,
+        sliceLocalChain,
       );
       // A committed Slice's execution chain is closed (Worker → CV → Slice
       // Commit); its persisted Worker facts must never re-project RUN_CV or a
@@ -1906,7 +2754,7 @@ export class VNextNextActionService {
           }
           readVNextCvReceiptFacts(
             input.projectRoot,
-            manifest.stage_id,
+            manifest,
             slice.slice_id,
             {
               stageId: manifest.stage_id,
@@ -1922,6 +2770,7 @@ export class VNextNextActionService {
               expectedContextDigest: workerTipFact.contextDigest,
             },
             authoritySnapshot,
+            sliceLocalChain,
           );
           return runCvOutput(
             input,
@@ -2748,5 +3597,17 @@ export function persistVNextRoleContext(
     );
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function gitTreeContains(root: string, commitSha: string, filePath: string): boolean {
+  try {
+    const listing = execFileSync('git', ['-C', root, 'ls-tree', '-r', '--name-only', commitSha, '--'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return listing.split('\n').some((line) => line.trimEnd() === filePath);
+  } catch {
+    return false;
   }
 }

@@ -143,14 +143,29 @@ function detectWorkerEnvelopeRoute(value: unknown): WorkerEnvelopeRoute {
   return 'unknown';
 }
 
-/** 显式 vNext CV_RESULT envelope 路由（与 Host 同一判别规则）。 */
+/**
+ * 显式 vNext CV_RESULT envelope 路由（与 Host 同一判别规则）。
+ *
+ * S15-UNBLOCK-CV-ROUTE（S15 unblock recovery）：schema_version 2（当前 vNext）
+ * 与 schema_version 3（slice-local，S12-D §8.3）都是同一 vNext CV 消费端
+ * 的合法 CV_RESULT 判别符 —— shared validator（cv-validation.ts）与 CV
+ * admission consumer（cv-admission.ts）已同时支持两者，route 只负责把 closed
+ * CV_RESULT 送入该消费端。Stage 模式门（v3-in-legacy / v2-in-slice-local →
+ * BINDING.MODE_MIXED）与 binding 校验由 shared validator / consumer 严格
+ * fail-closed，CLI 不在此放宽，也不新增 public operation。
+ */
 type CvEnvelopeRoute = 'vnext' | 'legacy' | 'unknown';
 
 function detectCvEnvelopeRoute(value: unknown): CvEnvelopeRoute {
   if (value === undefined) return 'legacy';
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'unknown';
   const record = value as Record<string, unknown>;
-  return record['schema_version'] === 2 && record['type'] === 'CV_RESULT' ? 'vnext' : 'unknown';
+  return (
+    (record['schema_version'] === 2 || record['schema_version'] === 3) &&
+    record['type'] === 'CV_RESULT'
+  )
+    ? 'vnext'
+    : 'unknown';
 }
 
 /** vNext admit 状态的有界投影（永不泄漏完整 Receipt payload）。 */
@@ -471,7 +486,7 @@ function runAdmitCv(
     return errorEnvelope(
       command,
       'RUNTIME.SCHEMA_MISMATCH',
-      'stage admit-cv envelope must be an explicit vNext CV_RESULT object (schema_version 2, type CV_RESULT)',
+      'stage admit-cv envelope must be an explicit vNext CV_RESULT object (schema_version 2 or 3, type CV_RESULT); unknown versions never fall back',
     );
   }
   let envelope: ReturnType<typeof validateVNextCVResultEnvelope>;

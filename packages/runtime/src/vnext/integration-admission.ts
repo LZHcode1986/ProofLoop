@@ -15,6 +15,11 @@ import {
   computeReceiptDigest,
   validateReceipt,
 } from '@proofloop/kernel';
+// S12-D repair (v3 consumer chain): the kernel closed dependency-binding
+// validator is applied to the persisted INTEGRATION_PASS
+// `dependency_bindings` facts (same closed validator `next` / `validate`
+// apply to the read side).
+import { validateDependencyBinding } from '@proofloop/kernel/dist/vnext';
 import type {
   Receipt,
   VNextExecutionScope,
@@ -42,17 +47,30 @@ import { runReceiptAdmission } from '../admit-pipeline';
 import type { IntegrationAdmissionRequest } from '../admission-request';
 import { validateVNextCvResultEnvelope } from './cv-admission';
 import {
+  assertSliceLocalCredentialBindingFields,
+  assertUpstreamTaskCompleteSemantics,
+  credentialSchemaVersionMismatch,
+} from './cv-validation';
+import type { VNextSliceLocalBindingExpectation } from './cv-validation';
+// S12-D-T04 (S12-D REPLAN): the slice-local binding expectation (stage/slice
+// contract digests + recomputed execution binding) is the single shared
+// computation of the Worker/CV/Commit/Integration credential consumers.
+import {
+  computeSliceLocalBindingExpectation,
+  readSliceLocalDependencyBindings,
+} from './worker-admission';
+import {
   assertVNextManifestReferenceBindings,
   readVNextManifest,
 } from './dispatch';
 import { readVNextAdmissionAuthority } from './next';
 import {
+  VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL,
   VNEXT_INTEGRATION_ACTION,
   VNEXT_INTEGRATION_RESULT_TYPE,
   VNEXT_INTEGRATION_SCHEMA_VERSION,
   VNEXT_SLICE_COMMIT_ACTION,
   VNEXT_SLICE_COMMIT_RESULT_TYPE,
-  VNEXT_SLICE_COMMIT_SCHEMA_VERSION,
 } from './types';
 import type {
   VNextAdmissionAuthority,
@@ -116,6 +134,13 @@ const WORKER_PAYLOAD_FIELDS = new Set([
   'snapshot_digest',
   'context_ref',
   'context_digest',
+  // S12-D-T04 (§8.3, S12-D REPLAN): slice-local binding fields — admissible
+  // only on a schema_version 3 TASK_COMPLETE credential (the shared
+  // assertSliceLocalCredentialBindingFields enforces the v3-only rule; the
+  // schema_version discrimination runs before this exact-field set).
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
 ]);
 const SLICE_COMMIT_PAYLOAD_FIELDS = new Set([
   'schema_version',
@@ -131,6 +156,13 @@ const SLICE_COMMIT_PAYLOAD_FIELDS = new Set([
   'cv_receipt_digest',
   'changed_files',
   'receipt_chain_valid',
+  // S12-D-T04 (§8.3, S12-D REPLAN): slice-local binding fields — admissible
+  // only on a schema_version 3 SLICE_COMMIT credential (the shared
+  // assertSliceLocalCredentialBindingFields enforces the v3-only rule; the
+  // schema_version discrimination runs before this exact-field set).
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
 ]);
 const INTEGRATION_FIELDS = new Set([
   'schema_version',
@@ -148,6 +180,21 @@ const INTEGRATION_FIELDS = new Set([
   'cv_receipt_digest',
   'changed_files',
   'receipt_chain_valid',
+  // S12-D-T04 (§8.3, S12-D REPLAN): slice-local binding fields — admissible
+  // only on a schema_version 3 INTEGRATION_PASS credential (the shared
+  // assertSliceLocalCredentialBindingFields enforces the v3-only rule; the
+  // schema_version discrimination runs before this exact-field set).
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
+  // S12-D repair (v3 consumer chain): the persisted slice-local
+  // INTEGRATION_PASS credential carries the receipt-bound dependency
+  // binding facts (§8.2 `dependency_bindings`) it was admitted against —
+  // the read-side consumers (`next` / `validate-vnext-stage`) recompute the
+  // execution binding from these persisted facts instead of an empty list.
+  // v2 credentials must not carry the field (enforced below); the field is
+  // admissible only on the schema_version 3 credential.
+  'dependency_bindings',
 ]);
 
 const SYSTEM_FORBIDDEN_PATHS = ['.proofloop', '.git'] as const;
@@ -543,10 +590,21 @@ export function sliceBinding(root: string, manifest: VNextManifest, sliceId: str
     evidencePath,
     planPath,
   ]);
-  for (const allowed of allowedExecutionScope) {
-    for (const forbidden of forbiddenExecutionScope) {
-      if (pathsOverlap(allowed, forbidden)) {
-        fail('RUNTIME.SCHEMA_MISMATCH', `Manifest execution scope overlaps forbidden path: ${allowed}`);
+  // User authorization A4 (integration sliceBinding counterpart): the
+  // overlap check is task-level — each task's own allowed scope against its
+  // own forbidden list plus the system forbidden paths.  Another task's
+  // forbidden list must not veto this task's admitted files (S12-D: T02
+  // edits next.ts while T01/T04 forbid it).
+  for (const task of tasks) {
+    const taskForbidden = unique([
+      ...task.executionScope.forbidden_paths,
+      ...systemForbiddenPaths(root),
+    ]);
+    for (const allowed of unique([...task.allowedCodeScope, evidencePath, planPath])) {
+      for (const forbidden of taskForbidden) {
+        if (pathsOverlap(allowed, forbidden)) {
+          fail('RUNTIME.SCHEMA_MISMATCH', `Manifest execution scope overlaps forbidden path: ${allowed}`);
+        }
       }
     }
   }
@@ -780,8 +838,12 @@ function readReceiptChain(root: string, directory: string, label: string): Recei
 }
 
 function assertTuple(value: Record<string, unknown>, tuple: TupleBinding, label: string): void {
+  // S12-D-T04 (S12-D REPLAN): the tuple binding is credential-version
+  // agnostic — a v2 (legacy/current vNext) or v3 (slice-local) credential
+  // must bind the SAME stage/slice digest tuple. The credential version is
+  // discriminated separately through credentialSchemaVersionMismatch.
   if (
-    value.schema_version !== 2 ||
+    (value.schema_version !== 2 && value.schema_version !== 3) ||
     value.manifest_digest !== tuple.manifestDigest ||
     value.plan_digest !== tuple.planDigest ||
     value.proof_index_digest !== tuple.proofIndexDigest ||
@@ -807,11 +869,101 @@ function assertPathsWithinScope(
   }
 }
 
+/**
+ * S12-E REPAIR-FINAL round 3 — context 落盘绑定: the context_ref file of a
+ * declared TASK_COMPLETE receipt must EXIST at
+ * `.proofloop/context/<context_digest>.json` and its content digest must
+ * equal context_digest.  A forged receipt naming a Context that was never
+ * persisted (or whose content does not match) never expands the A8
+ * tolerated/allowed side.
+ */
+function assertDeclaredContextPersisted(root: string, contextRef: string, contextDigest: string): void {
+  const context = readRootJson(root, contextRef, 'TASK_COMPLETE Context');
+  const withoutDigest = { ...context };
+  delete withoutDigest.context_digest;
+  if (context.context_digest !== contextDigest || computeDigest(withoutDigest) !== contextDigest) {
+    fail('RUNTIME.SCHEMA_MISMATCH', 'TASK_COMPLETE Context is not persisted at its digest address');
+  }
+}
+
+/**
+ * User authorization A8 (integration counterpart, S12-E REPAIR-001/REPAIR-
+ * FINAL): the union of the changed_files declared by every ALREADY ADMITTED
+ * TASK_COMPLETE receipt of the OTHER Slices DECLARED BY THE CURRENT MANIFEST
+ * (manifest.slices where slice_id ≠ current and task_refs is non-empty).  In
+ * a shared worktree with interleaved Slice outputs (S12-D/S12-E) the
+ * committed/integrated boundary of one Slice legitimately carries files
+ * declared by another Slice's admitted receipts — the allowed side of the
+ * boundary scope check is extended with this union (mirrors
+ * commit-admission's A8 implementation).
+ *
+ * S12-E REPAIR-FINAL: only Manifest-declared other slices are consulted — an
+ * unknown slice / a receipt directory not declared in the Manifest NEVER
+ * expands the allowed side — and every TASK_COMPLETE receipt must pass the
+ * complete admission-chain semantics (readReceiptChain chain valid + payload
+ * semantics: mode/outcome/changed_files/evidence_ref/context); a
+ * semantically incomplete receipt contributes nothing (fail-closed).  S12-E
+ * REPAIR-FINAL round 3: every declared file must also stay inside the
+ * declaring Slice's Manifest task scope (the union of all its tasks'
+ * allowedCodeScope plus evidence/plan projections) and its Context must be
+ * persisted — a forged "declared Slice" credential can never pass
+ * out-of-scope files through the A8 merge.
+ */
+function otherSliceDeclaredFiles(root: string, manifest: VNextManifest, tuple: TupleBinding): string[] {
+  const declared = new Set<string>();
+  for (const otherSlice of manifest.slices) {
+    if (otherSlice.slice_id === tuple.sliceId) continue;
+    // A Manifest Slice must declare tasks to hold admitted Worker facts; a
+    // taskless declaration never contributes declarations.
+    if (otherSlice.proof_index.task_refs.length === 0) continue;
+    const otherSliceScope = sliceBinding(root, manifest, otherSlice.slice_id).allowedExecutionScope;
+    const otherReceipts = readReceiptChain(
+      root,
+      tasksReceiptDir(root, tuple.stageId, otherSlice.slice_id),
+      `vNext Worker Receipt chain for ${otherSlice.slice_id}`,
+    );
+    for (const receipt of otherReceipts.receipts) {
+      if (receipt.type !== 'TASK_COMPLETE') continue;
+      const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${otherSlice.slice_id}].payload`);
+      // The complete admission-chain payload semantics: a forged or
+      // semantically incomplete TASK_COMPLETE (missing fields / context not
+      // persisted / out-of-scope declaration) never contributes declarations
+      // to the allowed side.
+      try {
+        assertUpstreamTaskCompleteSemantics(
+          payload,
+          otherSlice.evidence_path,
+          `TASK_COMPLETE[${otherSlice.slice_id}]`,
+          {
+            verifyContextPersisted: (contextRef, contextDigest) =>
+              assertDeclaredContextPersisted(root, contextRef, contextDigest),
+            stageHasBinding: manifest.binding !== undefined,
+            allowedScope: otherSliceScope,
+          },
+        );
+      } catch (error) {
+        fail(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `TASK_COMPLETE[${otherSlice.slice_id}] does not pass the complete admission-chain semantics: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      const files = payload['changed_files'];
+      if (Array.isArray(files)) {
+        for (const f of files) declared.add(rootRelativePath(root, f, 'other Slice declared file'));
+      }
+    }
+  }
+  return [...declared];
+}
+
 export function validateWorkerFacts(
   root: string,
   manifest: VNextManifest,
   slice: SliceBinding,
   tuple: TupleBinding,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): WorkerFacts {
   const chain = readReceiptChain(
     root,
@@ -841,9 +993,32 @@ export function validateWorkerFacts(
       fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a legacy, mixed, or wrong-slice Receipt');
     }
     const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${index}].payload`);
+    // S12-D-T04 (§8.3): the credential schema_version discrimination runs
+    // BEFORE the exact-field set so a slice-local (v3) payload carrying the
+    // binding fields fails with the explicit BINDING code, not as an
+    // unknown-field rejection.
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      payload.schema_version,
+      manifest.binding !== undefined,
+      `TASK_COMPLETE[${index}].payload`,
+    );
+    if (schemaMismatch !== null) {
+      // The BINDING.* code is carried in the finding message: the canonical
+      // FindingCode vocabulary is a closed kernel union (§7).
+      fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
+    }
+    // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode every v3 Worker
+    // credential must carry the slice-local binding fields and bind the SAME
+    // Manifest contract digests and recomputed execution binding; a v2
+    // credential carrying binding fields is rejected (never silently
+    // ignored).
+    assertSliceLocalCredentialBindingFields(
+      payload,
+      `TASK_COMPLETE[${index}].payload`,
+      sliceLocalBinding,
+    );
     assertExactFields(payload, WORKER_PAYLOAD_FIELDS, `TASK_COMPLETE[${index}].payload`);
     if (
-      payload.schema_version !== 2 ||
       (payload.mode !== 'implement-task' && payload.mode !== 'recover-task') ||
       payload.outcome !== 'completed'
     ) {
@@ -872,13 +1047,48 @@ export function validateWorkerFacts(
     ).map((item, fileIndex) =>
       rootRelativePath(root, item, `TASK_COMPLETE[${index}].changed_files[${fileIndex}]`),
     );
-    assertPathsWithinScope(
-      changedFiles,
-      slice.allowedExecutionScope,
-      slice.forbiddenExecutionScope,
-      `TASK_COMPLETE[${index}].changed_files`,
+    // User authorization A4 (same semantics as worker-admission A3): the
+    // task-level forbidden list constrains the CURRENT task's own behavior,
+    // not the worktree's historical state.  A declared file that belongs to
+    // a prior task's code/test scope — and not to the current task's own
+    // scope — is exempt from the current task's forbidden check (S12-D: T04
+    // must declare T02's next.ts output while T04's own forbidden covers
+    // next.ts).  The system forbidden paths and the Slice allowed-scope
+    // check still bind every declared file, and the current task's own
+    // files stay bound by its own forbidden list.
+    const priorCodeAndTest = unique(
+      slice.tasks.slice(0, index).flatMap((prior) => prior.allowedCodeScope),
     );
-    if (!changedFiles.includes(slice.evidencePath) || !changedFiles.includes(slice.planPath)) {
+    const taskLevelForbidden = unique(task.executionScope.forbidden_paths);
+    const systemForbidden = unique(systemForbiddenPaths(root));
+    const changedFilesLabel = `TASK_COMPLETE[${index}].changed_files`;
+    for (const changed of changedFiles) {
+      if (systemForbidden.some((base) => pathsOverlap(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} contains a forbidden path: ${changed}`);
+      }
+      const priorOwned =
+        priorCodeAndTest.some((base) => pathWithin(changed, base)) &&
+        !task.allowedCodeScope.some((base) => pathWithin(changed, base));
+      if (!priorOwned && taskLevelForbidden.some((base) => pathsOverlap(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} contains a forbidden path: ${changed}`);
+      }
+      if (!slice.allowedExecutionScope.some((base) => pathWithin(changed, base))) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} expands beyond the admitted Slice scope: ${changed}`);
+      }
+    }
+    // User authorization A6 (admission counterpart): the Evidence/Plan
+    // projection must be declared only when it is part of the current
+    // worktree changes; an already-committed projection (HEAD-consistent)
+    // satisfies the contract via the persisted snapshot.
+    const worktreeChanges = new Set(
+      gitChangedPaths(root).map((value, fileIndex) =>
+        rootRelativePath(root, value, `Git changed path[${fileIndex}]`),
+      ),
+    );
+    if (
+      (worktreeChanges.has(slice.evidencePath) && !changedFiles.includes(slice.evidencePath)) ||
+      (worktreeChanges.has(slice.planPath) && !changedFiles.includes(slice.planPath))
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', `TASK_COMPLETE[${index}].changed_files omits the Evidence or Plan projection`);
     }
     if (!Array.isArray(payload.verification_runs)) {
@@ -933,8 +1143,10 @@ function assertCvProofBindings(envelope: VNextCvResultEnvelope, slice: SliceBind
 export function validateCvFacts(
   root: string,
   slice: SliceBinding,
+  stageHasBinding: boolean,
   tuple: TupleBinding,
   worker: WorkerFacts,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): CvFacts {
   const chain = readReceiptChain(
     root,
@@ -965,6 +1177,27 @@ export function validateCvFacts(
         `vNext CV Receipt ${index} is not a valid closed CV envelope: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    // S12-D-T04 (§8.3): a v3 (or unknown-future) credential in the persisted
+    // CV history is discriminated against the Stage mode before any tuple
+    // binding is asserted.
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      envelope.schema_version,
+      stageHasBinding,
+      `CV Receipt ${index}.payload`,
+    );
+    if (schemaMismatch !== null) {
+      // The BINDING.* code is carried in the finding message: the canonical
+      // FindingCode vocabulary is a closed kernel union (§7).
+      fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
+    }
+    // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode every persisted v3
+    // CV credential must bind the Manifest contract digests and the
+    // recomputed execution binding (same single-truth as the candidate).
+    assertSliceLocalCredentialBindingFields(
+      envelope as unknown as Record<string, unknown>,
+      `CV Receipt ${index}.payload`,
+      sliceLocalBinding,
+    );
     if (receipt.type !== (envelope.verdict === 'PASS' ? 'CV_PASS' : 'CV_REPAIR')) {
       fail('RUNTIME.SCHEMA_MISMATCH', `CV Receipt ${index} discriminator does not match its vNext verdict`);
     }
@@ -1051,14 +1284,63 @@ function gitOutput(root: string, args: readonly string[], label: string): string
   }
 }
 
-function assertWorkingTreeBoundary(root: string): void {
+function assertWorkingTreeBoundary(root: string, manifest: VNextManifest, tuple: TupleBinding): void {
   const status = gitOutput(root, ['status', '--porcelain', '--untracked-files=all'], 'Git status');
+  // User authorization A8 (integration counterpart): worktree changes
+  // declared by an ALREADY ADMITTED TASK_COMPLETE receipt of a Manifest-
+  // DECLARED Slice of this Stage are expected (shared worktree with
+  // interleaved Slice outputs — S12-D/S12-E) and do not block the
+  // integration boundary.  S12-E REPAIR-FINAL: unknown slices / receipt
+  // directories not declared in the current Manifest are ignored (they
+  // never expand the tolerated set), and every TASK_COMPLETE receipt must
+  // pass the complete admission-chain payload semantics.  S12-E REPAIR-
+  // FINAL round 3: every declared file must also stay inside the declaring
+  // Slice's Manifest task scope and its Context must be persisted.  Un-
+  // declared changes still fail closed.
+  const declaredFiles = new Set<string>();
+  for (const declaredSlice of manifest.slices) {
+    if (declaredSlice.proof_index.task_refs.length === 0) continue;
+    const declaredSliceScope = sliceBinding(root, manifest, declaredSlice.slice_id).allowedExecutionScope;
+    const declaredReceipts = readReceiptChain(
+      root,
+      tasksReceiptDir(root, tuple.stageId, declaredSlice.slice_id),
+      `vNext Worker Receipt chain for ${declaredSlice.slice_id}`,
+    );
+    for (const receipt of declaredReceipts.receipts) {
+      if (receipt.type !== 'TASK_COMPLETE') continue;
+      const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${declaredSlice.slice_id}].payload`);
+      try {
+        assertUpstreamTaskCompleteSemantics(
+          payload,
+          declaredSlice.evidence_path,
+          `TASK_COMPLETE[${declaredSlice.slice_id}]`,
+          {
+            verifyContextPersisted: (contextRef, contextDigest) =>
+              assertDeclaredContextPersisted(root, contextRef, contextDigest),
+            stageHasBinding: manifest.binding !== undefined,
+            allowedScope: declaredSliceScope,
+          },
+        );
+      } catch (error) {
+        fail(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `TASK_COMPLETE[${declaredSlice.slice_id}] does not pass the complete admission-chain semantics: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      const files = payload['changed_files'];
+      if (Array.isArray(files)) {
+        for (const f of files) declaredFiles.add(rootRelativePath(root, f, 'admitted declared file'));
+      }
+    }
+  }
   const unexpected = status
     .split('\n')
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0)
     .map((line) => line.slice(3))
-    .filter((value) => value !== '' && !value.startsWith('.proofloop/'));
+    .filter((value) => value !== '' && !value.startsWith('.proofloop/') && !declaredFiles.has(rootRelativePath(root, value, 'Git status path')));
   if (unexpected.length > 0) {
     fail(
       'RUNTIME.SCHEMA_MISMATCH',
@@ -1069,6 +1351,7 @@ function assertWorkingTreeBoundary(root: string): void {
 
 function assertCommittedChangedFiles(
   root: string,
+  manifest: VNextManifest,
   tuple: TupleBinding,
   commitSha: string,
   slice: SliceBinding,
@@ -1132,7 +1415,7 @@ function assertCommittedChangedFiles(
   if (!GIT_SHA_RE.test(parentCommit)) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'commit_sha has no resolvable parent commit boundary');
   }
-  assertWorkingTreeBoundary(root);
+  assertWorkingTreeBoundary(root, manifest, tuple);
 
   const raw = gitOutput(
     root,
@@ -1148,7 +1431,22 @@ function assertCommittedChangedFiles(
   if (changed.length === 0) {
     fail('DOMAIN.INVALID_TRANSITION', 'Integration requires a non-empty committed Slice boundary');
   }
-  assertPathsWithinScope(changed, slice.allowedExecutionScope, slice.forbiddenExecutionScope, 'Git integrated changed files');
+  // User authorization A4 (integration commit-level counterpart): the
+  // integrated boundary may legitimately contain any task's admitted files
+  // (S12-D: next.ts is T02's admitted file while T01/T04 forbid it), so the
+  // forbidden side for the committed boundary is system paths only —
+  // mirroring commit-admission's commit-level semantics.  User authorization
+  // A8 (S12-E REPAIR-001): the allowed side is the union of this Slice's
+  // execution scope and the changed_files declared by every OTHER admitted
+  // Worker receipt of the same Stage (a shared worktree with interleaved
+  // Slice outputs — S12-D/S12-E) — the same A8 semantics commit-admission
+  // applies to the committed boundary.
+  assertPathsWithinScope(
+    changed,
+    unique([...slice.allowedExecutionScope, ...otherSliceDeclaredFiles(root, manifest, tuple)]),
+    systemForbiddenPaths(root),
+    'Git integrated changed files',
+  );
 
   const declared = unique(worker.facts.flatMap((fact) => fact.changedFiles)).sort();
   const hasRepairHistory = cv.envelopes.some((envelope) => envelope.verdict === 'REPAIR');
@@ -1165,10 +1463,16 @@ function assertCommittedChangedFiles(
         `integrated changed-file set does not contain every persisted Worker fact (declared=${declared.join(',')} actual=${changed.join(',')})`,
       );
     }
-  } else if (declared.length !== changed.length || declared.some((value, index) => value !== changed[index])) {
+  } else if (
+    // User authorization A8b/A8c (integration counterpart): the exact-match
+    // gate becomes declared-subset with the HEAD-tree escape — a declared
+    // projection already present in HEAD history satisfies its declaration
+    // through the persisted snapshot.
+    !declared.every((value) => changed.includes(value) || gitTreeContains(root, commitSha, value))
+  ) {
     fail(
       'RUNTIME.SCHEMA_MISMATCH',
-      `integrated changed-file set does not exactly match persisted Worker facts (declared=${declared.join(',')} actual=${changed.join(',')})`,
+      `integrated changed-file set does not contain every persisted Worker fact (declared=${declared.join(',')} actual=${changed.join(',')})`,
     );
   }
   return changed;
@@ -1176,13 +1480,16 @@ function assertCommittedChangedFiles(
 
 export function validateSliceCommitPayload(
   root: string,
+  manifest: VNextManifest,
   receipt: Receipt,
   tuple: TupleBinding,
+  stageHasBinding: boolean,
   slice: SliceBinding,
   worker: WorkerFacts,
   cv: CvFacts,
   commitSha: string,
   changedFiles: readonly string[],
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): Record<string, unknown> {
   if (
     receipt.version !== 1 ||
@@ -1193,10 +1500,26 @@ export function validateSliceCommitPayload(
     fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit Receipt is legacy, mixed, or bound to the wrong tuple');
   }
   const payload = requireRecord(receipt.payload, 'SLICE_COMMIT.payload');
-  assertExactFields(payload, SLICE_COMMIT_PAYLOAD_FIELDS, 'SLICE_COMMIT.payload');
-  if (payload.schema_version !== VNEXT_SLICE_COMMIT_SCHEMA_VERSION) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'SLICE_COMMIT.payload.schema_version must be 2');
+  // S12-D-T04 (§8.3): the credential schema_version discrimination runs
+  // BEFORE the exact-field set so a slice-local (v3) payload carrying the
+  // binding fields fails with the explicit BINDING code, not as an
+  // unknown-field rejection.
+  const schemaMismatch = credentialSchemaVersionMismatch(
+    payload.schema_version,
+    stageHasBinding,
+    'SLICE_COMMIT.payload',
+  );
+  if (schemaMismatch !== null) {
+    // The BINDING.* code is carried in the finding message: the canonical
+    // FindingCode vocabulary is a closed kernel union (§7).
+    fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
   }
+  // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode the SLICE_COMMIT
+  // credential must carry the slice-local binding fields and bind the SAME
+  // Manifest contract digests and recomputed execution binding; a v2
+  // credential carrying binding fields is rejected (never silently ignored).
+  assertSliceLocalCredentialBindingFields(payload, 'SLICE_COMMIT.payload', sliceLocalBinding);
+  assertExactFields(payload, SLICE_COMMIT_PAYLOAD_FIELDS, 'SLICE_COMMIT.payload');
   if (payload.type !== VNEXT_SLICE_COMMIT_RESULT_TYPE || payload.action !== VNEXT_SLICE_COMMIT_ACTION) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit Receipt is not the closed vNext SLICE_COMMIT_RESULT fact');
   }
@@ -1224,10 +1547,18 @@ export function validateSliceCommitPayload(
     'SLICE_COMMIT.payload.changed_files',
     { nonEmpty: true },
   ).map((item, index) => rootRelativePath(root, item, `SLICE_COMMIT.payload.changed_files[${index}]`)).sort();
+  // User authorization A4 (SLICE_COMMIT counterpart): the commit fact
+  // declares the whole Slice boundary, which may contain any task's
+  // admitted files (S12-D: next.ts is T02's admitted file while T01/T04
+  // forbid it); the forbidden side is system paths only.  User authorization
+  // A8 (S12-E REPAIR-001): the allowed side is extended with the changed_files
+  // declared by every OTHER admitted Worker receipt of the same Stage — the
+  // SLICE_COMMIT boundary of one Slice legitimately carries interleaved files
+  // of other Slices (mirrors commit-admission's A8 implementation).
   assertPathsWithinScope(
     receiptChangedFiles,
-    slice.allowedExecutionScope,
-    slice.forbiddenExecutionScope,
+    unique([...slice.allowedExecutionScope, ...otherSliceDeclaredFiles(root, manifest, tuple)]),
+    systemForbiddenPaths(root),
     'SLICE_COMMIT.payload.changed_files',
   );
   const workerChangedFiles = unique(worker.facts.flatMap((fact) => fact.changedFiles)).sort();
@@ -1236,14 +1567,21 @@ export function validateSliceCommitPayload(
     // The admitted Slice Commit boundary may contain repair-only files that
     // no Worker fact declared (REPAIR → recheck sequence); the Receipt must
     // still cover every declared Worker fact file.
-    if (!workerChangedFiles.every((value) => receiptChangedFiles.includes(value))) {
+    if (!workerChangedFiles.every((value) =>
+      receiptChangedFiles.includes(value) || gitTreeContains(root, commitSha, value))) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit Receipt changed_files do not contain every Worker fact');
     }
   } else if (
-    receiptChangedFiles.length !== workerChangedFiles.length ||
-    receiptChangedFiles.some((value, index) => value !== workerChangedFiles[index])
+    // User authorization A8b/c (integration counterpart): the Slice Commit
+    // Receipt must COVER every Worker fact file (or the file must already
+    // be present in the committed HEAD tree — a declared projection like
+    // tasks.md that cannot change without breaking Manifest binding);
+    // extra committed files (interleaved infrastructure commits) are
+    // bounded by the allowed-scope checks above.
+    !workerChangedFiles.every((value) =>
+      receiptChangedFiles.includes(value) || gitTreeContains(root, commitSha, value))
   ) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit Receipt changed_files do not match all Worker facts');
+    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit Receipt changed_files do not contain every Worker fact');
   }
   if (hasRepairHistory) {
     // The caller-supplied changedFiles is either the integrated Git diff
@@ -1271,10 +1609,55 @@ function validateIntegrationPayload(
   value: Record<string, unknown>,
   label: string,
   root: string,
+  stageHasBinding: boolean,
+  sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): void {
+  // S12-D-T04 (§8.3): the credential schema_version discrimination runs
+  // BEFORE the exact-field set so a slice-local (v3) payload carrying the
+  // binding fields fails with the explicit BINDING code, not as an
+  // unknown-field rejection.
+  const schemaMismatch = credentialSchemaVersionMismatch(
+    value.schema_version,
+    stageHasBinding,
+    label,
+  );
+  if (schemaMismatch !== null) {
+    // The BINDING.* code is carried in the finding message: the canonical
+    // FindingCode vocabulary is a closed kernel union (§7).
+    fail('RUNTIME.SCHEMA_MISMATCH', schemaMismatch.message);
+  }
+  // S12-D-T04 (§8.3, S12-D REPLAN): in slice-local mode the INTEGRATION_PASS
+  // credential must carry the slice-local binding fields and bind the SAME
+  // Manifest contract digests and recomputed execution binding; a v2
+  // credential carrying binding fields is rejected (never silently ignored).
+  assertSliceLocalCredentialBindingFields(value, label, sliceLocalBinding);
   assertExactFields(value, INTEGRATION_FIELDS, label);
-  if (value.schema_version !== VNEXT_INTEGRATION_SCHEMA_VERSION) {
-    fail('RUNTIME.SCHEMA_MISMATCH', `${label}.schema_version must be 2`);
+  // S12-D repair (v3 consumer chain): `dependency_bindings` is a
+  // slice-local credential field — a v2 credential must never smuggle it
+  // past a v2 consumer, and a v3 credential must carry the closed
+  // dependency-binding shape (kernel `validateDependencyBinding`).
+  if (value.schema_version === VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) {
+    const rawDependencies = value.dependency_bindings;
+    if (!Array.isArray(rawDependencies)) {
+      fail('RUNTIME.SCHEMA_MISMATCH', `${label}.dependency_bindings must be an array`);
+    }
+    for (const [index, raw] of rawDependencies.entries()) {
+      try {
+        validateDependencyBinding(raw);
+      } catch (error) {
+        fail(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `${label}.dependency_bindings[${index}] is malformed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  } else if (Object.prototype.hasOwnProperty.call(value, 'dependency_bindings')) {
+    fail(
+      'RUNTIME.SCHEMA_MISMATCH',
+      `${label} is a v2 credential and must not carry the slice-local field \"dependency_bindings\"`,
+    );
   }
   if (value.type !== VNEXT_INTEGRATION_RESULT_TYPE || value.action !== VNEXT_INTEGRATION_ACTION) {
     fail('RUNTIME.SCHEMA_MISMATCH', `${label} is not the closed vNext INTEGRATION_RESULT fact`);
@@ -1380,8 +1763,22 @@ function validateFacts(
     fail('RUNTIME.SCHEMA_MISMATCH', 'Stage Plan authority is not bound to the fresh SPV_PASS fact');
   }
 
-  const worker = validateWorkerFacts(root, manifest, slice, tuple);
-  const cv = validateCvFacts(root, slice, tuple, worker);
+  // S12-D-T04 (S12-D REPLAN): slice-local mode — every credential of the
+  // Slice (Worker chain, CV chain, SLICE_COMMIT, INTEGRATION_PASS) must bind
+  // the SAME Manifest contract digests and the recomputed execution binding.
+  // The base snapshot is the admitted SPV snapshot (the Stage's canonical
+  // integration HEAD at admission), stable for the whole Stage.
+  const sliceLocalBinding =
+    manifest.binding !== undefined
+      ? computeSliceLocalBindingExpectation(
+          root,
+          manifest,
+          request.sliceId,
+          authority.spv.snapshot_digest,
+        )
+      : undefined;
+  const worker = validateWorkerFacts(root, manifest, slice, tuple, sliceLocalBinding);
+  const cv = validateCvFacts(root, slice, manifest.binding !== undefined, tuple, worker, sliceLocalBinding);
   if (cv.final.worker_receipt_digest !== worker.tipDigest) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'latest CV_PASS is not bound to the current complete Worker Receipt chain');
   }
@@ -1401,16 +1798,19 @@ function validateFacts(
   if (sliceCommitReceipt === undefined) {
     fail('DOMAIN.INVALID_TRANSITION', 'vNext Slice Commit Receipt is missing');
   }
-  const changedFiles = assertCommittedChangedFiles(root, tuple, request.commitSha, slice, worker, cv);
+  const changedFiles = assertCommittedChangedFiles(root, manifest, tuple, request.commitSha, slice, worker, cv);
   validateSliceCommitPayload(
     root,
+    manifest,
     sliceCommitReceipt,
     tuple,
+    manifest.binding !== undefined,
     slice,
     worker,
     cv,
     request.commitSha,
     changedFiles,
+    sliceLocalBinding,
   );
 
   const integrationChain = readReceiptChain(
@@ -1428,7 +1828,7 @@ function validateFacts(
       ) {
         fail('RUNTIME.SCHEMA_MISMATCH', `Integration Receipt ${index} is legacy, mixed, or bound to the wrong tuple`);
       }
-      validateIntegrationPayload(requireRecord(receipt.payload, `INTEGRATION_PASS[${index}].payload`), `INTEGRATION_PASS[${index}].payload`, root);
+      validateIntegrationPayload(requireRecord(receipt.payload, `INTEGRATION_PASS[${index}].payload`), `INTEGRATION_PASS[${index}].payload`, root, manifest.binding !== undefined, sliceLocalBinding);
     }
     fail('DOMAIN.INVALID_TRANSITION', 'a vNext Integration Receipt already exists for this Slice');
   }
@@ -1501,8 +1901,20 @@ function assertInstalledIntegrationReceipt(
     requireRecord(receipt.payload, 'INTEGRATION_PASS.afterInstall.payload'),
     'INTEGRATION_PASS.afterInstall.payload',
     facts.root,
+    facts.manifest.binding !== undefined,
+    // S12-D-T04 (S12-D REPLAN): the installed slice-local INTEGRATION_PASS
+    // must bind the same Manifest contract digests and recomputed execution
+    // binding as every other credential of the Slice.
+    facts.manifest.binding !== undefined
+      ? computeSliceLocalBindingExpectation(
+          facts.root,
+          facts.manifest,
+          facts.tuple.sliceId,
+          facts.authority.spv.snapshot_digest,
+        )
+      : undefined,
   );
-  if (!sameValue(receipt.payload, integrationState(facts))) {
+  if (!sameValue(receipt.payload, integrationPayload(facts))) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'installed Integration Receipt payload does not match validated facts');
   }
 }
@@ -1539,13 +1951,54 @@ function integrationState(facts: ValidatedIntegrationFacts): VNextIntegrationAdm
   };
 }
 
+/**
+ * S12-D-T04 (S12-D REPLAN): the persisted INTEGRATION_PASS credential
+ * payload. The credential schema_version follows the Stage credential mode:
+ * legacy Manifest (no binding) → v2 (identical to `integrationState`, zero
+ * behavior change); slice-local Manifest → v3 carrying the three binding
+ * fields (stage/slice contract digests from the Manifest and the recomputed
+ * execution binding through the kernel oracle). The admission STATE stays on
+ * the v2 state schema (the writer-seam state discriminator); the Receipt
+ * payload is the credential.
+ */
+function integrationPayload(facts: ValidatedIntegrationFacts): Record<string, unknown> {
+  const payload: Record<string, unknown> = { ...integrationState(facts) };
+  if (facts.manifest.binding !== undefined) {
+    const sliceLocalBinding = computeSliceLocalBindingExpectation(
+      facts.root,
+      facts.manifest,
+      facts.tuple.sliceId,
+      facts.authority.spv.snapshot_digest,
+    );
+    payload.schema_version = VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL;
+    payload.stage_contract_digest = sliceLocalBinding.stageContractDigest;
+    payload.slice_contract_digest = sliceLocalBinding.sliceContractDigest;
+    payload.execution_binding_digest = sliceLocalBinding.executionBindingDigest;
+    // S12-D repair (v3 consumer chain): the v3 INTEGRATION_PASS credential
+    // persists the receipt-bound dependency binding facts (§8.2) it was
+    // admitted against — the SAME facts the execution binding was computed
+    // from (`computeSliceLocalBindingExpectation` reads them through
+    // `readSliceLocalDependencyBindings`). The read-side consumers
+    // (`next` / `validate-vnext-stage`) recompute the execution binding
+    // from these persisted facts; without them a Slice with declared
+    // dependencies would be recomputed against an empty dependency list and
+    // a valid dependency-backed credential would be rejected.
+    payload.dependency_bindings = readSliceLocalDependencyBindings(
+      facts.root,
+      facts.manifest,
+      facts.tuple.sliceId,
+    );
+  }
+  return payload;
+}
+
 function integrationReceiptBuild(facts: ValidatedIntegrationFacts): ReceiptBuild {
   return {
     type: 'INTEGRATION_PASS',
     stage_id: facts.tuple.stageId,
     slice_id: facts.tuple.sliceId,
     timestamp: new Date().toISOString(),
-    payload: { ...integrationState(facts) },
+    payload: integrationPayload(facts),
   };
 }
 
@@ -1640,3 +2093,40 @@ export function admitVNextIntegration(
 }
 
 export const admitVNextIntegrationResult = admitVNextIntegration;
+
+function gitChangedPaths(root: string): string[] {
+  let gitRoot: string;
+  try {
+    gitRoot = resolveGitRoot(root);
+  } catch (error) {
+    throw new Error(`Git root is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const run = (args: readonly string[]): string[] => {
+    try {
+      const output = execFileSync('git', ['-C', gitRoot, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return output.split('\0').filter((entry) => entry.length > 0);
+    } catch (error) {
+      throw new Error(`Git changed-file scope is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  return unique([
+    ...run(['diff', '--name-only', '-z', '--diff-filter=ACDMRTUXB', 'HEAD', '--']),
+    ...run(['ls-files', '--others', '--exclude-standard', '-z']),
+  ]).map((value, index) => rootRelativePath(root, value, `Git changed path[${index}]`));
+}
+
+function gitTreeContains(root: string, commitSha: string, filePath: string): boolean {
+  try {
+    const listing = gitOutput(
+      root,
+      ['ls-tree', '-r', '--name-only', commitSha, '--'],
+      'Git HEAD tree listing',
+    );
+    return listing.split('\n').some((line) => line.trimEnd() === filePath);
+  } catch {
+    return false;
+  }
+}

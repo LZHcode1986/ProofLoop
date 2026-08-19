@@ -17,8 +17,10 @@ import type {
   VNextExecutionScope,
   VNextPlanNode,
   VNextPlanProjection,
+  VNextStageNodeProjection,
 } from './types';
 import { computeDigest } from './canonical';
+import { SchemaValidationError } from '../validators';
 import {
   collectErrors,
   checkUnknownFields,
@@ -173,6 +175,57 @@ export function canonicalizePlanProjection(
     return projection;
   });
   return { schema_version: plan.schema_version, items };
+}
+
+/**
+ * Locate the single stage node of a Canonical Plan (fail-closed).
+ *
+ * A Canonical Plan must contain exactly one `stage` node; zero or multiple
+ * stage nodes are rejected instead of guessing which node is authoritative.
+ *
+ * @throws {SchemaValidationError} when the plan has no stage node or more
+ *   than one stage node.
+ */
+export function findStageNode(plan: VNextCanonicalPlan): VNextPlanNode {
+  const stages = plan.items.filter((item) => item.kind === 'stage');
+  if (stages.length === 0) {
+    throw new SchemaValidationError(
+      'VNextPlan: plan must contain exactly one stage node (found 0)',
+      [{ path: 'plan.items', message: 'Expected exactly one stage node, found 0' }],
+    );
+  }
+  if (stages.length > 1) {
+    throw new SchemaValidationError(
+      `VNextPlan: plan must contain exactly one stage node (found ${stages.length})`,
+      [{ path: 'plan.items', message: `Expected exactly one stage node, found ${stages.length}` }],
+    );
+  }
+  return stages[0];
+}
+
+/**
+ * Extract the immutable projection of a Plan stage node.
+ *
+ * Keeps `id`, `kind`, `goal`, `refs`, `dependencies`, `required_skills` —
+ * the exact `stage_node` input of the stage contract digest (§8.2). Drops
+ * every mutable execution field (checkbox / status / cv_status).
+ *
+ * Array fields are deterministically sorted (copy, never mutates the input)
+ * so that input ordering can never change the projection: `refs`,
+ * `dependencies` and `required_skills` are SETS, not ordered lists, and the
+ * digest must be order-independent (S12-B binding invariant).
+ */
+export function canonicalizeStageNodeProjection(
+  node: VNextPlanNode,
+): VNextStageNodeProjection {
+  return {
+    id: node.id,
+    kind: node.kind,
+    goal: node.goal,
+    refs: [...node.refs].sort(),
+    dependencies: [...node.dependencies].sort(),
+    required_skills: [...node.required_skills].sort(),
+  };
 }
 
 /**

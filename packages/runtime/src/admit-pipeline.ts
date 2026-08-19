@@ -1656,6 +1656,18 @@ const VNEXT_SLICE_COMMIT_FIELDS = new Set([
   'receipt_chain_valid',
 ]);
 
+/**
+ * S12-D-T04 (S12-D REPLAN): slice-local (schema_version 3) SLICE_COMMIT
+ * field set — the base closed set plus the three binding fields, applied
+ * only to v3 credentials (the base set stays the exact legacy/v2 shape).
+ */
+const VNEXT_SLICE_COMMIT_FIELDS_V3 = new Set([
+  ...VNEXT_SLICE_COMMIT_FIELDS,
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
+]);
+
 const VNEXT_INTEGRATION_FIELDS = new Set([
   'schema_version',
   'type',
@@ -1672,6 +1684,22 @@ const VNEXT_INTEGRATION_FIELDS = new Set([
   'cv_receipt_digest',
   'changed_files',
   'receipt_chain_valid',
+]);
+
+/**
+ * S12-D-T04 (S12-D REPLAN): slice-local (schema_version 3) INTEGRATION_PASS
+ * field set — the base closed set plus the three binding fields and the
+ * receipt-bound `dependency_bindings` facts (S12-D repair: the v3 credential
+ * persists the dependency binding facts the execution binding was computed
+ * from, so the read-side consumers recompute against them), applied only to
+ * v3 credentials (the base set stays the exact legacy/v2 shape).
+ */
+const VNEXT_INTEGRATION_FIELDS_V3 = new Set([
+  ...VNEXT_INTEGRATION_FIELDS,
+  'stage_contract_digest',
+  'slice_contract_digest',
+  'execution_binding_digest',
+  'dependency_bindings',
 ]);
 
 const VNEXT_GATE_FIELDS = new Set([
@@ -1783,9 +1811,25 @@ function validateVNextSliceCommitRecord(
   label: string,
   projectRoot: string,
 ): string | null {
-  const fieldsError = exactClosedFields(value, VNEXT_SLICE_COMMIT_FIELDS, label);
+  // S12-D-T04 (S12-D REPLAN): the SLICE_COMMIT credential schema_version
+  // follows the Stage credential mode — 2 (legacy) or 3 (slice-local). The
+  // v3 field set adds the three binding fields (the per-consumer admission
+  // validates the v3-only rule and the Manifest/recomputed binding before
+  // this write gate); the v2 field set stays the exact legacy shape.
+  const fieldsError = value.schema_version === 3
+    ? exactClosedFields(value, VNEXT_SLICE_COMMIT_FIELDS_V3, label)
+    : exactClosedFields(value, VNEXT_SLICE_COMMIT_FIELDS, label);
   if (fieldsError !== null) return fieldsError;
-  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.schema_version !== 2 && value.schema_version !== 3) {
+    return `${label}.schema_version must be 2 or 3`;
+  }
+  if (value.schema_version === 3) {
+    for (const field of ['stage_contract_digest', 'slice_contract_digest', 'execution_binding_digest']) {
+      if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+        return `${label}.${field} must be a lowercase SHA-256 digest on a schema_version 3 credential`;
+      }
+    }
+  }
   if (value.type !== 'SLICE_COMMIT_RESULT') {
     return `${label}.type must be SLICE_COMMIT_RESULT`;
   }
@@ -1840,9 +1884,48 @@ function validateVNextIntegrationRecord(
   label: string,
   projectRoot: string,
 ): string | null {
-  const fieldsError = exactClosedFields(value, VNEXT_INTEGRATION_FIELDS, label);
+  // S12-D-T04 (S12-D REPLAN): same credential-mode rule as SLICE_COMMIT —
+  // 2 (legacy) or 3 (slice-local, with the three binding fields and the
+  // receipt-bound dependency_bindings); the v2 field set stays the exact
+  // legacy shape.
+  const fieldsError = value.schema_version === 3
+    ? exactClosedFields(value, VNEXT_INTEGRATION_FIELDS_V3, label)
+    : exactClosedFields(value, VNEXT_INTEGRATION_FIELDS, label);
   if (fieldsError !== null) return fieldsError;
-  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  if (value.schema_version !== 2 && value.schema_version !== 3) {
+    return `${label}.schema_version must be 2 or 3`;
+  }
+  if (value.schema_version === 3) {
+    for (const field of ['stage_contract_digest', 'slice_contract_digest', 'execution_binding_digest']) {
+      if (typeof value[field] !== 'string' || !VNEXT_SHA256_RE.test(value[field])) {
+        return `${label}.${field} must be a lowercase SHA-256 digest on a schema_version 3 credential`;
+      }
+    }
+    // S12-D repair (v3 consumer chain): the v3 INTEGRATION_PASS credential
+    // must carry the closed dependency-binding array (each entry a
+    // {slice_id, slice_contract_digest, integration_receipt_digest,
+    // integration_head_sha} binding of one declared dependency slice).
+    if (!Array.isArray(value.dependency_bindings)) {
+      return `${label}.dependency_bindings must be an array on a schema_version 3 credential`;
+    }
+    for (const [index, entry] of value.dependency_bindings.entries()) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+        return `${label}.dependency_bindings[${index}] must be an object`;
+      }
+      const binding = entry as Record<string, unknown>;
+      if (typeof binding.slice_id !== 'string' || binding.slice_id.length === 0) {
+        return `${label}.dependency_bindings[${index}].slice_id must be a non-empty string`;
+      }
+      for (const field of ['slice_contract_digest', 'integration_receipt_digest']) {
+        if (typeof binding[field] !== 'string' || !VNEXT_SHA256_RE.test(binding[field])) {
+          return `${label}.dependency_bindings[${index}].${field} must be a lowercase SHA-256 digest`;
+        }
+      }
+      if (typeof binding.integration_head_sha !== 'string' || !VNEXT_GIT_SHA_RE.test(binding.integration_head_sha)) {
+        return `${label}.dependency_bindings[${index}].integration_head_sha must be a full lowercase Git commit SHA`;
+      }
+    }
+  }
   if (value.type !== 'INTEGRATION_RESULT') {
     return `${label}.type must be INTEGRATION_RESULT`;
   }
@@ -2220,8 +2303,16 @@ function vNextReceiptAdmissionBindingError(
   if (RECEIPT_TYPE_CATEGORY[input.build.type] !== category) {
     return `Receipt type ${input.build.type} is not canonical for category ${category}`;
   }
-  if (!isRecord(input.build.payload) || input.build.payload.schema_version !== 2) {
-    return 'vNext Receipt payload.schema_version must be 2';
+  // S12-D-T04 (S12-D REPLAN): the credential payload schema_version follows
+  // the Stage credential mode — 2 (current vNext / legacy) or 3 (slice-local,
+  // with the three binding fields). The v3 write path is the REPLAN-mandated
+  // fix: slice-local mode persists v3 credentials. The per-consumer
+  // admission validates the credential mode, the v3-only binding fields and
+  // the Manifest/recomputed binding BEFORE this write gate; the gate keeps
+  // the closed field sets and the binding-field/digest shape.
+  if (!isRecord(input.build.payload) ||
+      (input.build.payload.schema_version !== 2 && input.build.payload.schema_version !== 3)) {
+    return 'vNext Receipt payload.schema_version must be 2 or 3';
   }
 
   const payload = input.build.payload;

@@ -109,6 +109,133 @@ export interface VNextProofIndex {
 }
 
 // ============================================================
+// Binding contract (three-level binding fingerprints, S12-B)
+// ============================================================
+
+/**
+ * Binding schema version constant. The only admitted value is `1`
+ * (§8.1/§8.2 contract-state-matrix.md). Unknown versions fail closed.
+ */
+export const VNEXT_BINDING_SCHEMA_VERSION = 1 as const;
+
+export type VNextBindingSchemaVersion = typeof VNEXT_BINDING_SCHEMA_VERSION;
+
+/**
+ * Closed set of binding modes. The only admitted mode is `slice-local`;
+ * a stage-wide mode does not exist in the binding contract (§8.1).
+ */
+export const VNEXT_BINDING_MODES = ['slice-local'] as const;
+
+export type VNextBindingMode = (typeof VNEXT_BINDING_MODES)[number];
+
+/**
+ * Optional Manifest `binding` section (§8.1). Absent = legacy stage-wide
+ * mode (behavior unchanged). When present it must satisfy the closed schema:
+ * version 1, mode `slice-local`, and a 64-hex `stage_contract_digest`.
+ */
+export interface VNextManifestBinding {
+  version: VNextBindingSchemaVersion;
+  mode: VNextBindingMode;
+  stage_contract_digest: string;
+}
+
+/**
+ * One resolved reference binding inside a contract projection.
+ *
+ * `ref_id` is the reference_index key; `kind`, `file_digest` and
+ * `section_digest` come from the registered descriptor. Used by
+ * `stage_reference_bindings` and `reference_bindings` (§8.2).
+ */
+export interface VNextReferenceBinding {
+  kind: VNextReferenceKind;
+  ref_id: string;
+  file_digest: string;
+  section_digest: string;
+}
+
+/**
+ * One dependency integration fact consumed by an execution binding
+ * (§8.2 `dependency_bindings`). In Phase 1 serial execution this is
+ * usually empty or a single element.
+ */
+export interface VNextDependencyBinding {
+  slice_id: string;
+  slice_contract_digest: string;
+  integration_receipt_digest: string;
+  integration_head_sha: string;
+}
+
+/**
+ * Closed input of `computeExecutionBindingDigest` (§8.2).
+ *
+ * `stage_id` / `slice_id` come from the Manifest; the three digests and the
+ * dependency bindings are the execution-time facts consumed by the binding.
+ */
+export interface VNextExecutionBindingInput {
+  stage_id: string;
+  slice_id: string;
+  stage_contract_digest: string;
+  slice_contract_digest: string;
+  dependency_bindings: VNextDependencyBinding[];
+  base_snapshot_digest: string;
+}
+
+/**
+ * Immutable projection of a Plan stage node — the exact stage-contract
+ * input (`stage_node` in §8.2). Never includes mutable execution fields.
+ */
+export interface VNextStageNodeProjection {
+  id: string;
+  kind: VNextPlanKind;
+  goal: string;
+  refs: string[];
+  dependencies: string[];
+  required_skills: string[];
+}
+
+/**
+ * Closed stage contract projection (§8.2). The digest is computed OVER this
+ * object and never included in it.
+ */
+export interface VNextStageContractProjection {
+  binding_schema_version: VNextBindingSchemaVersion;
+  stage_id: string;
+  stage_node: VNextStageNodeProjection;
+  stage_reference_bindings: VNextReferenceBinding[];
+}
+
+/**
+ * Closed slice contract projection (§8.2). `task_scopes` holds ONLY the
+ * entries bound by this slice's `proof_index.task_refs`; `reference_bindings`
+ * is the resolved closure of this slice's Proof Index refs.
+ */
+export interface VNextSliceContractProjection {
+  binding_schema_version: VNextBindingSchemaVersion;
+  stage_id: string;
+  slice_id: string;
+  proof_index: VNextProofIndex;
+  required_skills: string[];
+  depends_on: string[];
+  evidence_path: string;
+  task_scopes: Record<string, VNextTaskScope>;
+  reference_bindings: VNextReferenceBinding[];
+}
+
+/**
+ * Closed execution binding projection (§8.2). The digest is computed OVER
+ * this object and never included in it.
+ */
+export interface VNextExecutionBindingProjection {
+  binding_schema_version: VNextBindingSchemaVersion;
+  stage_id: string;
+  slice_id: string;
+  stage_contract_digest: string;
+  slice_contract_digest: string;
+  dependency_bindings: VNextDependencyBinding[];
+  base_snapshot_digest: string;
+}
+
+// ============================================================
 // Canonical Plan
 // ============================================================
 
@@ -256,6 +383,11 @@ export interface VNextManifestSlice {
   required_skills: string[];
   depends_on: string[];
   evidence_path: string;
+  /**
+   * Static slice contract fingerprint (§8.1). Required in slice-local
+   * binding mode; optional (ignored) for legacy manifests.
+   */
+  slice_contract_digest?: string;
 }
 
 /**
@@ -276,6 +408,11 @@ export interface VNextManifest {
   };
   reference_index: VNextReferenceIndex;
   authority_ref_ids?: string[];
+  /**
+   * Optional binding section (§8.1). Absent = legacy stage-wide mode with
+   * zero behavior change; present = slice-local mode, closed schema.
+   */
+  binding?: VNextManifestBinding;
   /** Immutable per-task scope bindings consumed by Runtime dispatch. */
   task_scopes: Record<string, VNextTaskScope>;
   slices: VNextManifestSlice[];

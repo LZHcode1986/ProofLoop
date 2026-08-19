@@ -5,10 +5,11 @@
   "defaultJoinMode": "smart",
   "schedulingEnabled": true,
   "scopeModels": false,
+  "strictAgentFiles": false,
   "disableDefaultAgents": true,
   "toolDescriptionMode": "full",
   "fleetView": false,
-  "widgetMode": "all",
+  "widgetMode": "off",
   "outputTranscript": true,
   "maxSubagentDepth": 1,
   "fallbackSubagent": "none"

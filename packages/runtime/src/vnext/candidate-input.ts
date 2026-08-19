@@ -17,6 +17,9 @@ import {
   type VNextExecutionScope,
   type VNextReferenceKind,
 } from '@proofloop/kernel';
+// S13: the kernel owns the closed binding-mode vocabulary; this adapter only
+// forwards it.  No second mode/digest oracle is created here.
+import { VNEXT_BINDING_MODES, type VNextBindingMode } from '@proofloop/kernel/dist/vnext';
 import { canonicalPathWithinRoot } from '../path-guard';
 import {
   parseEntityRef,
@@ -38,6 +41,10 @@ const ACTIVE_SCHEMA_VERSION = 2;
 const TOP_LEVEL_FIELDS = new Set([
   'schema_version',
   'mode',
+  // S13: optional top-level discriminator.  Omitted = legacy stage-wide;
+  // only `"slice-local"` is admitted (kernel oracle).  Forwarded verbatim
+  // into the compiler input — never inferred from Markdown.
+  'binding_mode',
   'caller',
   'owner',
   'project_root',
@@ -149,6 +156,8 @@ export interface ActiveCandidateSlice {
 export interface ActiveCandidateInput {
   readonly schema_version: 2;
   readonly mode: 'initial' | 'replan';
+  /** S13: preserved from the closed input; `null` = legacy (omitted). */
+  readonly binding_mode: VNextBindingMode | null;
   readonly caller: 'brain';
   readonly owner: typeof ACTIVE_OWNER;
   readonly project_root: string;
@@ -401,6 +410,19 @@ function activeCandidate(value: unknown): ActiveCandidateInput {
   if (value.mode !== 'initial' && value.mode !== 'replan') {
     fail('invalid-schema', 'candidate input.mode must be initial or replan');
   }
+  // S13: optional binding-mode discriminator.  Omitted → legacy; the ONLY
+  // admitted value is the kernel closed set's "slice-local".  Unknown values
+  // and type errors fail closed BEFORE anything is compiled.
+  let bindingMode: VNextBindingMode | null = null;
+  if (value.binding_mode !== undefined) {
+    if (
+      typeof value.binding_mode !== 'string' ||
+      !(VNEXT_BINDING_MODES as readonly string[]).includes(value.binding_mode)
+    ) {
+      fail('invalid-schema', 'candidate input.binding_mode must be "slice-local" when present (omitted means legacy)');
+    }
+    bindingMode = value.binding_mode as VNextBindingMode;
+  }
   if (value.caller !== ACTIVE_CALLER) fail('invalid-schema', 'candidate input.caller must be brain');
   if (value.owner !== ACTIVE_OWNER) {
     fail('invalid-schema', `candidate input.owner must be ${ACTIVE_OWNER}`);
@@ -631,6 +653,7 @@ function activeCandidate(value: unknown): ActiveCandidateInput {
   return {
     schema_version: 2,
     mode: value.mode,
+    binding_mode: bindingMode,
     caller: 'brain',
     owner: ACTIVE_OWNER,
     project_root: projectRoot,
@@ -749,6 +772,9 @@ export function adaptCandidateInputToCompileVNextManifestInput(
     })),
     slices,
     authority_ref_ids: authorityRefIds,
+    // S13: forwarded verbatim from the candidate boundary.  Omitted stays
+    // omitted (`undefined`), so legacy compile behavior is unchanged.
+    binding_mode: candidate.binding_mode ?? undefined,
   };
 }
 

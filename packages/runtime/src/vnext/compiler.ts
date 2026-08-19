@@ -8,6 +8,12 @@
  *   - writeVNextManifest            (compile + FULL validate, then atomic write)
  *   - kernel vNext validators re-exported for a single import path.
  *
+ * S12-C: in slice-local binding mode (`binding_mode: "slice-local"`) the
+ * compiled Manifest carries `binding {version: 1, mode, stage_contract_digest}`
+ * plus a per-slice `slice_contract_digest` — every fingerprint computed ONLY
+ * through the kernel bindings.ts oracle (§8.1/§8.2). Legacy input (no
+ * `binding_mode`) compiles exactly as before: no binding fields are added.
+ *
  * Rules (fail closed):
  *   - Takes ONLY structured vNext input or already-resolved entity/ref
  *     descriptors. It NEVER infers commands, Proof obligations or
@@ -47,6 +53,18 @@ import {
   type VNextReferenceKind,
   type VNextTaskScope,
 } from '@proofloop/kernel';
+// S12-C: the three-level binding fingerprints (stage_contract_digest /
+// slice_contract_digest) are computed ONLY by the kernel bindings.ts oracle.
+// The kernel package entry does not re-export the binding API; runtime
+// consumes the built vnext subpath surface (S12-B forward note). The compiler
+// must NEVER re-implement hash logic or accept caller-supplied digests (§8.2).
+import {
+  computeStageContractDigest,
+  computeSliceContractDigest,
+  validateBindingMode,
+  VNEXT_BINDING_SCHEMA_VERSION,
+  type VNextBindingMode,
+} from '@proofloop/kernel/dist/vnext';
 import { resolveVNextReference } from './entity-resolver';
 import { canonicalPathWithinRoot } from '../path-guard';
 // S09-C-T03: the shared canonical Stage ID guard (`^S\d+$`).  Legacy parked
@@ -86,6 +104,15 @@ export interface CompileVNextManifestInput {
   readonly slices?: VNextSliceSeed[];
   readonly authority_ref_ids?: string[];
   readonly compiled_by?: string;
+  /**
+   * Optional binding-mode discriminator (§8.1). Absent = legacy stage-wide
+   * mode: the compiled Manifest carries NO binding fields (zero behavior
+   * change). Present = slice-local mode: the compiler emits
+   * `binding {version: 1, mode, stage_contract_digest}` plus a per-slice
+   * `slice_contract_digest`, computed ONLY through the kernel bindings.ts
+   * oracle. Any value outside the closed mode set fails closed.
+   */
+  readonly binding_mode?: VNextBindingMode;
 }
 
 export interface CompileVNextManifestResult {
@@ -342,6 +369,46 @@ export function compileVNextManifest(
     slices: input.slices.map((seed) => buildSlice(seed, input.stage_id)),
     compiled_by: input.compiled_by,
   };
+
+  // 4b. S12-C: slice-local binding output (§8.1/§8.2). Absent `binding_mode`
+  //     = legacy stage-wide mode: no binding field is added (zero behavior
+  //     change). Present = slice-local: emit `binding {version: 1, mode,
+  //     stage_contract_digest}` plus a per-slice `slice_contract_digest`.
+  //     Every digest is computed ONLY through the kernel bindings.ts oracle
+  //     (computeStageContractDigest / computeSliceContractDigest) — the
+  //     compiler never re-implements hash logic and never accepts a
+  //     caller-supplied digest. A mode outside the closed set fails closed.
+  if (input.binding_mode !== undefined) {
+    let mode: VNextBindingMode;
+    try {
+      mode = validateBindingMode(input.binding_mode);
+    } catch (err) {
+      throw new VNextCompileError(
+        'invalid-manifest',
+        `binding_mode is not a valid binding mode: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    try {
+      const stage_contract_digest = computeStageContractDigest(plan, reference_index);
+      manifest.binding = {
+        version: VNEXT_BINDING_SCHEMA_VERSION,
+        mode,
+        stage_contract_digest,
+      };
+      // Per-slice digests are computed over the slice contract projections
+      // (which never include the digest field itself, §8.2), so attaching
+      // them afterwards keeps the fingerprints deterministic.
+      manifest.slices = manifest.slices.map((slice) => ({
+        ...slice,
+        slice_contract_digest: computeSliceContractDigest(manifest, slice.slice_id),
+      }));
+    } catch (err) {
+      throw new VNextCompileError(
+        'invalid-manifest',
+        `binding fingerprints could not be computed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   try {
     validateVNextManifest(manifest);

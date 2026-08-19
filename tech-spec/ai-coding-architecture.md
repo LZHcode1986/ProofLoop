@@ -3,12 +3,13 @@
 ## 1. Metadata
 
 - Project: proofloop-v2（本仓库；ProofLoop v2 通用 CLI；OpenCode Plugin 已退役 2026-08-14）
-- PRD source: `PRD.md`（CONFIRMED, 2026-08-09 已吸收 harness-neutral CLI-first 用户需求）
-- Technical reference: `ProofLoop_pluginv2_流程优化方案.md`（仅作为技术设计输入；不作为第二个产品权威）
-- Architecture version: 0.2.1
-- Date: 2026-08-09（S09/S10 canonical Stage ID revision）
+- PRD source: `PRD.md`（CONFIRMED, 2026-08-09 已吸收 harness-neutral CLI-first 用户需求；2026-08-15 已吸收整改需求 FR-020..024）
+- Technical reference: `ProofLoop_pluginv2_流程优化方案.md`（仅作为技术设计输入；不作为第二个产品权威）；
+  `docs/ProofLoop-v2-slice-binding-parallel-refactor-blueprint.md` + `docs/初步实施方案.md`（2026-08-15 整改输入）
+- Architecture version: 0.3.0
+- Date: 2026-08-15（Slice 级证明绑定整改架构）
 - Owner: Brain（技能 prd-to-ai-architecture；输入蓝图 + 现状代码）
-- Target implementation scope: `packages/runtime` 通用 CLI + pluginv2 Runtime seams；`packages/opencode-plugin` 作为 CLI 成熟后的后续 adapter，依赖 `@proofloop/kernel`、`@proofloop/runtime`
+- Target implementation scope: `packages/kernel` + `packages/runtime`（vNext 分层绑定）；OpenCode Plugin 已退役，无 adapter 义务
 - Status labels: `confirmed` / `assumed` / `open`
 
 ## 2. Product Scope
@@ -20,9 +21,9 @@
 - [confirmed] S09 一次性 bootstrap：在 S10 final Plan boundary 前闭合 executable Runtime
   Proof candidate contract、Gate executor schema 和 candidate Evidence safe refresh，避免再次以
   `not_applicable` 冒充真实运行证明
-- [confirmed] 插件包 `packages/opencode-plugin`（workspace 成员；开发期放入项目级 `.opencode/plugins/**` 或用户级 `~/.config/opencode/plugins/**`，npm 发布不在本版本范围）
-- [confirmed] CLI 成熟后完善 5 个粗粒度 OpenCode tools：`proofloop_plan` / `proofloop_stage` / `proofloop_review` / `proofloop_project` / `proofloop_doctor`（FR-002..006）
-- [confirmed] 4 个 hooks：Protected Artifact / Dirty-State / Command Policy / Context Compaction（FR-008..011）
+- [confirmed] 插件包 `packages/opencode-plugin`（workspace 成员；开发期放入项目级 `.opencode/plugins/**` 或用户级 `~/.config/opencode/plugins/**`，npm 发布不在本版本范围；2026-08-14 已退役，条目仅作历史）
+- [confirmed] CLI 成熟后完善 5 个粗粒度 OpenCode tools：`proofloop_plan` / `proofloop_stage` / `proofloop_review` / `proofloop_project` / `proofloop_doctor`（FR-002..006；插件退役后不构成交付义务）
+- [confirmed] 4 个 hooks：Protected Artifact / Dirty-State / Command Policy / Context Compaction（FR-008..011；插件退役后由 CLI 侧等效机制承担）
 - [confirmed] 项目检测（ProofLoop 标识）+ `.proofloop/runtime.lock` 校验 + fail closed（FR-001/FR-013）
 - [confirmed] 按角色隔离工具：全局 deny + 角色 allow + 运行时二次校验（FR-007）
 - [confirmed] Token 预算与 compact 输出（FR-012）
@@ -38,6 +39,18 @@
 
 ### Future / Out of Scope
 - [open] npm 发布；更多宿主适配（pi-extension）
+
+### 整改范围（2026-08-15，FR-020..024）
+
+#### Must Implement（整改）
+- [confirmed] 三级绑定：`stage_contract_digest` / `slice_contract_digest` / `execution_binding_digest`（FR-020）
+- [confirmed] 已集成且未受影响的 Slice 在 replan 后保持有效；旧模式行为零变化（FR-020 Case 1-7）
+- [confirmed] replan 保留已受理 Slice 执行状态 / Evidence 规则固化 / validate 豁免 / 纪律防复发对照表（FR-021..024）
+- [confirmed] 测试 fixture 自包含 + 测试环境隔离（工程卫生，Task 0）
+
+#### Explicit Non-Goals（整改）
+- [confirmed] 并行执行 / worktree 工作区 / Brain 与宿主并发改造（蓝图 Phase 2-5）
+- [confirmed] 删除 tasks.md 状态、改集成 Git 工作流、会话 id 持久化、固定 repair 次数、CV PASS 后自动 rebase
 
 ## 3. PRD to Architecture Mapping
 
@@ -378,3 +391,225 @@ fail closed。
 - [ ] stable `proofloop <domain> <operation>` 覆盖完整机械流程和角色 Context
 - [ ] S10 bootstrap 后通过通用 CLI self-host 完成 Execution→Review，并用 fresh candidate fixture 验证 Plan 全链；不依赖 OpenCode tools
 - [ ] v1 CLI/legacy 概念只在新 CLI 全链 oracle 通过后移除，并完成 restart/harness-neutral process tests
+
+## 10. 整改架构：Slice 级证明绑定（2026-08-15，Phase 1 串行）
+
+> 本节承接 PRD FR-020..024 与蓝图第 4-8 节、初步实施方案；只收录架构决策，实施细节见后续制品。
+
+### 10.1 范围
+
+- [confirmed] 目标：FR-020 连坐消除 + FR-021 replan 保留状态 + FR-022 Evidence 规则固化 + FR-023 validate 豁免 + FR-024 纪律防复发 + 测试自包含。
+- [confirmed] 永久能力边界：post-admission Task-local/Slice-wide Replan、epoch currentness、Evidence rotation 与 slice-local CV v3 public admission 都是正式 Runtime 能力；不是只为 S13 历史恢复案例提供的一次性迁移工具。
+- [confirmed] 非目标：并行执行 / worktree / Brain 与宿主并发改造（蓝图 Phase 2-5）；删除 tasks.md 状态；改集成 Git 工作流；会话 id 持久化；固定 repair 次数；CV PASS 后自动 rebase。
+
+### 10.2 三级绑定模型
+
+| 指纹 | 表达 | 投影来源（均来自现有 Manifest 结构，不新增计划字段） | 强绑定方 |
+|---|---|---|---|
+| `stage_contract_digest` | Stage 全局执行契约 | digest{ binding_schema_version:1, stage_id, stage 节点不可变投影（id/kind/goal/refs/dependencies/required_skills）, stage 直接引用 refs 的解析绑定（kind/ref/file_digest/section_digest） }；**不含任何 Slice 内容** | 所有 Slice 执行 |
+| `slice_contract_digest` | 单个 Slice 静态执行/验证契约 | digest{ binding_schema_version:1, stage_id, slice_id, proof_index, required_skills, depends_on, evidence_path, task_scopes（仅本 Slice proof_index.task_refs 对应条目）, reference_bindings（本 Slice 引用闭包的解析绑定） } | Worker/CV/Slice Commit/Integration |
+| `execution_binding_digest` | 执行时消费的依赖集成事实 + 基线 | digest{ stage_contract_digest, slice_contract_digest, dependency_bindings[ {slice_id, slice_contract_digest, integration_receipt_digest, integration_head_sha} ], base_snapshot_digest } | Worker/CV/Slice Commit/Integration |
+
+- [confirmed] 依据（已对照代码核实）：Manifest slice 已含 `slice_id/proof_index/required_skills/depends_on/evidence_path`；`manifest.task_scopes` 已按 task_id 键控并交叉校验 slice proof_index.task_refs；`entity-resolver.normalizePlanExecutionProjection` 已规范化 checkbox/Worker Status/CV Status → 引用 digest 稳定，不被 mutable 投影污染。
+- [assumed] `execution_binding_digest` 在 Phase 1 串行下 dependency_bindings 通常为空或单元素；`integration_head_sha` 的精确来源（现有 Integration Receipt 字段 vs 新增字段）实施时核实确定。
+- [confirmed] 三个指纹全部由 kernel `bindings.ts` 唯一 canonical helper 计算；禁止在 compiler/admission/next 复制 hash 逻辑。
+- [confirmed] `plan_digest` / `manifest_digest` 保留，仅用于计划审批、SPV、Gate/Review、审计；不再单独决定已集成 Slice proof 的当前性。
+
+### 10.3 绑定模式判别
+
+- [confirmed] Manifest 新增 closed 字段：`binding: { version: 1, mode: "slice-local", stage_contract_digest }`。
+- [confirmed] 无 `binding` 字段 = legacy stage-wide 模式，行为与现状完全一致（fail-closed 不变）。
+- [confirmed] 一个 Stage 禁止混用两种模式的执行凭证；旧凭证绝不静默解释成新绑定；升级活跃 legacy Stage 必须显式 replan + 重新 admission。
+- [confirmed] 新 Stage 默认 slice-local；切换点 = compile 时按 candidate input 的显式 `binding_mode` 输出 binding 字段。缺省 `binding_mode` 保持 legacy，未知值 fail-closed；Materializer、candidate adapter 与 Compiler 必须保留该判别，不得静默丢弃。
+- [confirmed] S12 是 legacy 过渡 Stage；S13 是首个真实以 `binding_mode: "slice-local"` 规划并执行的 Stage。该切换来自 S12-REVIEW-001 的用户决策 A，历史 S12 证据不回写或迁移。
+
+### 10.4 凭证（Receipt）schema 演进
+
+- [confirmed] payload.schema_version 三档：`1` = legacy / `2` = 当前 vNext / `3` = slice-local（binding 字段必填）。
+- [confirmed] legacy 消费方对 schema_version ≠ 1 已整链阻塞（沿用既有 `legacyTaskSchemaFinding` 模式）；vNext(2) 消费方遇到 `3` 必须显式 fail-closed，不得静默忽略 binding 字段（防静默混链）。
+- [confirmed] slice-local 模式新增 Receipt 字段（Worker/CV/Slice Commit/Integration payload）：`stage_contract_digest`、`slice_contract_digest`、`execution_binding_digest`。
+- [confirmed] `stage admit-cv` 的 CLI 输出 envelope 仍使用 Runtime command 的 `schema_version: 2`；其嵌套 `CV_RESULT` role envelope 使用独立的 credential discriminator：legacy/vNext Stage 允许 `schema_version: 2`，slice-local Stage 必须使用 `schema_version: 3` 与三个 binding digests。Route detector、shared validator、consumer 与 built/source/public parity 必须共同支持该闭集；不得把外层 CLI envelope 版本误当成 credential 版本。
+- [confirmed] admission 时仍严格验证派发时点 revision（dispatch revision 校验不变），不允许旧结果静默按新 Plan 受理。
+
+### 10.5 失效规则（replan invalidation）
+
+- [confirmed] `stage_contract_digest` 变化 → 所有 Slice 证明 invalid（正确连坐）。
+- [confirmed] 否则：`invalidated = changed ∪ reverseDependencyClosure(changed)`（changed = slice_contract_digest 变化的 Slice）。
+- [confirmed] 已集成 Slice 保持有效的机械判据 `isIntegratedSliceCurrent`：stage_contract current ∧ slice_contract current ∧ dependency binding current ∧ integration receipt chain valid；**不再因整本 plan_digest/manifest_digest 历史不同自动失效**。
+- [confirmed] 执行中未集成的 Slice 不整体自动跨 Plan revision carry forward；但在 Task-local
+  Replan 中，之前已接纳 `TASK_COMPLETE` 且 Task contract 未变的前置 Task 可保留。当前被
+  replan 的 Task 与受影响的后续 Tasks 不 carry forward；若前置 Task contract 受影响则升级
+  为 Slice-wide Replan。
+- [confirmed] REPLAN 是 global barrier（Brain 执行：停新动作 → 重规划 → compile/validate → fresh SPV → 新 admission → 按失效规则重算）。
+
+### 10.6 消费改造点
+
+- [confirmed] `next.ts`：读取/重建状态处（已核实约 20 处整本 digest 绑定：Worker facts / CV facts / Slice facts / handoff 校验等）改为 Task/Slice 分级当前性消费；**legacy 路径完全不动**；Phase 1 继续维持单 active Slice。
+- [confirmed] validate：对"已受理且当前有效"的 Slice 豁免证据绑定校验（FR-023）；pre-admission pristine 刷新继续走既有 `refresh-vnext-slice-evidence`（refresh/recover/rollback）；post-admission Replan 必须走同一 public `plan refresh-evidence` 的 Runtime-owned `mode: replan`，不手工改写。
+- [confirmed] worker/cv/commit/integration admission：新模式消费 local binding 字段，并验证当前
+  Replan epoch 对 Task 的 carry-forward/invalidated 判定；changed_files 边界行为本阶段不变（ADR-021）。
+- [confirmed] CV route：`stage admit-cv` 只扩展现有 operation 的 nested `CV_RESULT` schema discriminator；slice-local v3 结果必须通过 `proofloop-stage.ts` → shared CV validator → vNext CV consumer 的同一 source/dist/public 路径，legacy/v2 与 slice-local/v3 不得混链。
+- [confirmed] gate-admission：每个新 Replan epoch 都重新绑定完整 plan/manifest/epoch digest
+  与当前集成 snapshot；旧 Gate/Review 不复用。新模式不依赖 tasks checkbox（本阶段仅预留字段）。
+
+### 10.7 模块边界
+
+| 模块 | 责任 | 不负责 |
+|---|---|---|
+| `packages/kernel/src/vnext/bindings.ts`（新增） | 三级指纹 canonicalization + digest + closed validators（唯一 oracle） | 状态派生、admission 决策 |
+| `packages/runtime/src/vnext/binding-currentness.ts`（新增） | isIntegratedSliceCurrent、Task/Slice 历史 proof 对当前 Replan epoch 的有效性 | 语义依赖推断 |
+| `packages/runtime/src/vnext/replan-impact.ts`（新增） | 比较前后 Plan/Task contract，机械判定 `task-local` / `slice-wide` 与 invalidation closure | 接受 Agent 自报影响等级、修改 Receipt |
+| `packages/runtime/src/vnext/replan-epoch.ts`（新增） | append-only Replan epoch、父 epoch 链、carry-forward/invalidated Task 集合与当前 epoch 读取 | 覆盖旧 Receipt、静默迁移历史事实 |
+| `packages/runtime/src/vnext/evidence-rotation.ts`（新增，内部 Runtime seam） | `mode: replan` 的全量预检、旧 Evidence archive、canonical skeleton rotation、journal/CAS/rollback/restart recovery | 计算 impact、修改 Receipt、接受 Agent 提供的 Evidence binding |
+| `packages/runtime/src/cli/refresh-vnext-slice-evidence.ts` | 现有 `plan refresh-evidence` adapter；转发 `refresh/recover/rollback/replan` closed request 并投影 bounded result | 直接写 Evidence、计算 disposition、绕过 epoch authority |
+| `packages/runtime/src/cli/proofloop-stage.ts` + `packages/runtime/src/vnext/cv-admission.ts` | 现有 `stage admit-cv` 的 nested CV_RESULT v2/v3 route、slice-local credential mode gate 与 consumer admission | 把 CLI 外层 schema 版本当作 credential 版本、降级 v3 为 v2、写 CV Receipt |
+| `packages/runtime/src/vnext/compiler.ts` | 输出 binding 字段 + 三级指纹 | 复制 hash 逻辑 |
+| `packages/runtime/src/vnext/next.ts` | Task/Slice/epoch 当前性消费（legacy 路径不动） | Git worktree 命令 |
+| `packages/runtime/src/vnext/worker/cv/commit/integration-admission.ts` | 消费 local binding、验证 epoch carry-forward 与 dispatch revision | 绕过 Runtime 写凭证 |
+| `packages/runtime/src/vnext/gate-admission.ts` + `review-admission.ts` | 只消费当前 epoch，重新绑定 Gate/Review | 复用旧 epoch 的 Gate/Review 结论 |
+
+- [confirmed] 禁止：AI/代码搜索推断依赖、新增 concurrency analyzer、新增并行 planner agent、用 progress.md 判断 lane 完成、保存 session id 用于恢复 authority（蓝图 §38 红线）。
+
+### 10.8 流程执行问题整改映射（FR-021..024）
+
+| FR | 问题来源 | 架构落点 |
+|---|---|---|
+| FR-021 replan 保留状态 | #2 | Replan impact classifier + epoch currentness 只保留边界未变的此前 Task；当前/受影响 Task 与 Slice-wide 结果失效；materialize 禁令固化到 proofloop-plan/brain-workflow 契约 |
+| FR-022 Evidence 规则 | #8 | Worker 派发模板固化 `### <task-id>` 唯一、子记录 `####`；admission 错误信息明确"任务标题必须唯一" |
+| FR-023 validate 豁免 | #10 | 10.6 validate 豁免 + refresh 工具路径 |
+| FR-024 纪律防复发 | #1/#3/#4/#5/#6/#7/#11/#12 | "问题 → 防复发机制 → 固化位置"对照表入权威；缺机制项补技能/契约（materialize 禁令、digest 逐字段核对清单、CV 结果立即受理） |
+
+### 10.9 决策日志（新增）
+
+| ID | Context | Decision | Consequences | Status |
+|---|---|---|---|---|
+| ADR-019 | 新旧模式共存 | binding 字段可选；无 = legacy；禁止混用 | legacy Stage 零破坏；升级需显式 replan | confirmed |
+| ADR-020 | 凭证防静默混链 | payload schema_version 3 + 消费端 fail-closed（沿用 legacyTaskSchemaFinding 模式） | 三档版本清晰；v2 消费端需加判别 | confirmed |
+| ADR-021 | Phase 1 边界 | 不切换 tasks.md changed_files 行为（仅预留字段） | 串行阶段零行为漂移；Phase 2 再切换 | confirmed |
+| ADR-022 | validate 豁免范围 | 仅"已受理且当前有效"的 Slice 豁免；其余 fail-closed | 不掩盖真实失效 | confirmed |
+| ADR-023 | 首个 slice-local 真实 Stage | S12 保持 legacy 过渡；S13 起 candidate input 显式传 `binding_mode: "slice-local"`，并由 Materializer → candidate adapter → Compiler 完整传递 | 首次真实 Stage 验证三层绑定、v3 凭证与 replan currentness；不得绕过 public plan compile | confirmed（用户决策 A） |
+| ADR-024 | Replan 影响范围分级 | Runtime 根据前后 Task contract 与依赖闭包区分 `task-local` 与 `slice-wide`；不接受 Agent 自报等级 | 边界未变的此前 `TASK_COMPLETE` 可保留；当前/受影响 Task 必须重做；无法证明时 fail-closed | confirmed（用户 2026-08-17） |
+| ADR-025 | Replan epoch 与 Stage Gate/Review | 同一 Stage/Slice 通过 append-only epoch 建立新的当前 Plan/SPV/admission；旧 Receipt 保留为历史；每个新 epoch 重新 Gate/Review | 不覆盖/删除旧 Receipt；Gate/Review 只绑定当前 epoch；未受影响成果只能作为当前证明链的继承来源 | confirmed（用户 2026-08-17） |
+| ADR-026 | 永久 Replan 与 slice-local CV 边界 | 将 post-admission Replan/Evidence rotation 与 slice-local CV v3 admission 拆为两个独立 Runtime seam；复用现有 public operation set，不新增 CLI/ReceiptType；外层 CLI envelope 与 nested credential schema 分离 | Replan 可独立 fail-closed/回滚；所有 slice-local CV 都必须经过 v3 route、Stage/path binding、独立 oracle 与 source/dist/public parity；S14/S13 都必须使用该永久能力 | confirmed（用户 2026-08-18） |
+
+### 10.10 分级 Replan 与 epoch 当前权威
+
+<!-- proofloop:entity id="PLUGINV2-REPLAN-EPOCH-SEAM" kind="seam" -->
+
+#### 术语与权威
+
+- `task-local`：变更只影响当前 Task 及其后续 Tasks；此前已接纳且 Task contract 未变的
+  Task 成果可以继承。
+- `slice-wide`：变更影响此前 Task 的目标、验收含义、证明边界、依赖或执行范围；整个
+  Slice 重新建立执行边界，旧成果不再作为当前授权。
+- `replan_epoch`：同一 Stage/Slice 内一次被 Runtime 接纳的 Plan/Manifest/SPV/执行状态
+  版本。epoch 是 append-only current authority，不是可编辑的状态字段；当前 epoch 由
+  Runtime 从经过校验的 epoch Receipt 链派生。
+- Agent/Brain 不得自报影响等级或 carry-forward 集合；Runtime 依据前后 admitted/current
+  Manifest 的稳定 Task contract 与依赖闭包机械判定。
+
+#### 影响判定
+
+- Runtime 比较前一 current epoch 与候选 Plan 的 Task entity/goal/refs/acceptance/proof
+  refs/dependencies/required_skills/execution_scope 规范化投影。
+- 只有当 Stage contract 未变、Slice 前置 Task contract 未变、变更集合是当前 Task 与其
+  后续依赖闭包时，才可判定 `task-local`。
+- 任何前置 Task contract、Slice proof index、Stage contract、权威引用或执行范围变化，均
+  判定为 `slice-wide`；无法完整证明影响范围时 fail-closed，不猜测为 local。
+- `task-local` 的 `carry_forward_task_ids` 只能来自变更集合之前、contract digest 完全匹配
+  且已有合法 `TASK_COMPLETE` 的 Task；当前被 replan 的 Task 及其受影响后续 Task 必须重做。
+
+#### Epoch / Receipt / Evidence 边界
+
+- 旧 Stage Plan、SPV、Worker、CV、Commit、Integration、Gate、Review Receipt 均保持
+  write-once、原路径和原 digest；它们成为历史 epoch 事实，不被覆盖、删除或静默升级。
+- Runtime 新增 append-only `REPLAN_EPOCH` authority，携带 parent epoch refs/digests、
+  old/new Manifest/Plan digests、impact scope、carry-forward Task refs、invalidated Task
+  refs、fresh snapshot 和新 SPV/Stage Plan refs。epoch-qualified admission refs 必须可
+  从 Receipt 链重建，不能依赖 mutable current pointer。
+- 新 epoch 的 Stage Plan/SPV admission、Worker/CV/Commit/Integration、Gate 和 Review
+  都绑定新 epoch。旧 Gate/Review 永不复用；Stage Close 只接受当前 epoch 的 Gate PASS、
+  Review ACCEPTED 与 integrated snapshot。
+- carry-forward Task 的旧 `TASK_COMPLETE` 不改写为新 Receipt；Runtime 通过 Task contract
+  digest、Evidence binding、changed-file scope 和 epoch carry-forward 事实验证其当前性。
+  当前 replan Task 的旧 Receipt 只作历史，不能产生新的 Worker/CV 授权。
+- Evidence 的 binding/Refresh 由 Runtime 根据每个 Task/Slice disposition 处理：可继承的
+  前置 Task 保留其内容，当前/失效 Task 使用新的绑定与重新执行证据；Brain/Worker 不手改
+  binding header 或 Receipt。
+
+#### 永久 Runtime 子流程
+
+<!-- proofloop:entity id="PLUGINV2-REPLAN-ROTATION-SEAM" kind="seam" -->
+
+- `plan refresh-evidence(mode=replan)` 是永久的 Runtime preparation/rotation seam：它读取 current epoch、候选 Manifest、前后 Task/Receipt/Evidence/Git facts，机械生成 `ReplanDisposition`，再以 root-bound transaction journal + compare-and-swap 归档旧 Evidence、生成当前 skeleton、恢复 bounded mutable projection。任何 preflight 或 commit 阶段失败都必须 no-write 或 journal rollback。
+- `plan admit-spv` 与 `plan admit-stage-plan` 只接纳带 parent epoch/disposition binding 的新 epoch authority；它们不接受 caller 传入的 impact/carry-forward/invalidated 集合。
+
+<!-- proofloop:entity id="PLUGINV2-SLICE-LOCAL-CV-SEAM" kind="seam" -->
+
+- `stage admit-cv` 保持现有 public operation：外层 command envelope 继续是 schema 2；嵌套 `CV_RESULT` 在 legacy/vNext Stage 使用 schema 2，在 slice-local Stage 使用 schema 3。Runtime 必须先判别 Manifest binding mode，再通过 shared validator 验证 binding fields、Worker tip、Context、Proof Index、current epoch 和 snapshot；任何跨模式混链都返回 `BINDING.MODE_MIXED` 并零写入。
+- `readCurrentEpoch` 必须同时验证 requested `stage_id`、epoch refs 的 `stage_id`、canonical epoch-qualified path 和 parent chain；自洽但属于其他 Stage 的 epoch 不能成为当前 parent。
+
+<!-- proofloop:entity id="PLUGINV2-REPLAN-ROTATION-ORACLE" kind="oracle" -->
+
+Replan rotation oracle：post-admission non-pristine Evidence 只能由 Runtime 归档/轮换；旧 Evidence、Receipt、SPV、Gate、Review 不覆盖；中断、identity/CAS、symlink、缺失 parent/disposition 任一失败均 zero-write 或可验证 rollback；重启后只从 journal/epoch chain 恢复。
+
+<!-- proofloop:entity id="PLUGINV2-SLICE-LOCAL-CV-ORACLE" kind="oracle" -->
+
+Slice-local CV oracle：nested CV_RESULT 的 v3 credential 必须包含并匹配 Manifest 的三个 binding digests；v3 必须可经 source CLI、built CLI、public dispatcher、shared validator 与 consumer 完整抵达；v2 在 slice-local Stage 必须 fail-closed；测试不得以直接调用内部 consumer 替代 public route。
+
+#### 执行与收口流程
+
+```text
+停新动作
+→ 读取 current epoch
+→ 编译候选 Plan/Manifest
+→ Runtime 判定 task-local 或 slice-wide
+→ Runtime 建立 Evidence/epoch replan disposition
+→ final clean Git boundary
+→ fresh SPV
+→ 新 epoch Stage Plan admission
+→ carry-forward 未受影响 Task / 重做 invalidated Task
+→ 当前 epoch Gate PASS
+→ 当前 epoch Stage Review ACCEPTED
+→ Stage Close
+```
+
+S13 当前 `S13-A-T01` 是被重新审视的 Task，因此旧 T01 Worker Receipt/代码成果不能作为
+当前 carry-forward；新增的 public CV route Task 与 T01 必须在新的当前 epoch 下重新建立完整
+证明。旧 T01 文件和 Receipt 仍保留作恢复/审计事实，不构成当前授权。
+
+<!-- proofloop:entity id="PLUGINV2-REPLAN-IMPACT-ORACLE" kind="oracle" -->
+
+Replan oracle：Task-local 只保留 contract 完全不变的此前 `TASK_COMPLETE` Task；Slice-wide
+或无法判定时不保留受影响成果；任何新 epoch 的 Gate/Review 必须绑定新 epoch/current snapshot；
+旧 Receipt 永不覆盖或删除。
+
+<!-- proofloop:entity id="PLUGINV2-REPLAN-EPOCH-RISK" kind="risk" -->
+
+主要风险：影响闭包误判会造成旧成果静默复用或无谓重做；epoch 链、Evidence disposition、
+current epoch 读取和 Gate/Review 绑定必须由 source/dist/public CLI parity、正向/零写入/旧
+模式回归和 restart recovery 测试共同覆盖。
+
+### 10.11 开放项（不阻塞）
+
+| 项 | 影响 | Blocking? | 建议默认 |
+|---|---|---|---|
+| `execution_binding_digest.dependency_bindings` 串行形态与 `integration_head_sha` 来源 | 契约矩阵细节 | No | 实施时按现有 Integration Receipt 字段核实 |
+| 新模式首个 Stage 编号 | 排期 | No | S13（S12 为 legacy 过渡；用户决策 A） |
+| compile 时点 binding 字段的默认切换 | 兼容性 | No | 新 Stage 默认 slice-local，旧 Stage 保持 legacy |
+
+### PLUGINV2-S12-BINDING-ORACLE（oracle）
+<!-- proofloop:entity id="PLUGINV2-S12-BINDING-ORACLE" kind="oracle" -->
+整改验收 oracle（FR-020..024）：只改 Slice C 时 A/B 与 stage 契约不变、A/B 证明保持有效（Case 1）；依赖链局部失效（Case 2）；Stage 全局契约变化全量失效（Case 3）；仅运行证明变化不重跑 Worker/CV（Case 4）；权威引用局部失效（Case 5）；legacy 无 binding 行为零变化（Case 6）；蓝图 §38 红线不得触碰。
+
+### PLUGINV2-S13-BINDING-MODE-ORACLE（oracle）
+<!-- proofloop:entity id="PLUGINV2-S13-BINDING-MODE-ORACLE" kind="oracle" -->
+S13 首用 oracle：candidate input 明确传 `binding_mode: "slice-local"` 时，public plan compile 产出 Manifest `binding.mode: "slice-local"` 与每 Slice `slice_contract_digest`，后续 v3 凭证链保持同一模式；缺省值仍产出 legacy Manifest；未知值在 Materializer、candidate adapter 或 Compiler 任一边界 fail-closed；不得以直接调用 Compiler 的 fixture 替代 candidate input → public CLI 的真实路径。
+
+### PLUGINV2-S12-TEST-ORACLE（oracle）
+<!-- proofloop:entity id="PLUGINV2-S12-TEST-ORACLE" kind="oracle" -->
+S12-A 验收 oracle：fresh clone 冒烟后全量测试全绿；配置无污染断言（测试前后项目配置文件不变）；`.proofloop/**` 不入 git。
+
+### PLUGINV2-S12-PROCESS-ORACLE（oracle）
+<!-- proofloop:entity id="PLUGINV2-S12-PROCESS-ORACLE" kind="oracle" -->
+S12-F 验收 oracle（FR-021/022/024）：replan 后已受理 Slice 状态由 Receipt 推导不丢；Evidence 标题规则派发即知、报错明确；13 条问题均有防复发机制归属且对照表可审计。

@@ -12,6 +12,7 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { canonicalJson, computeDigest, validateVNextSpvPassReceipt } from "@proofloop/kernel";
 import { admitVNextStagePlan } from "../vnext";
 
 const USAGE = [
@@ -95,11 +96,22 @@ if (require.main === module) process.exitCode = admitVNextStagePlanCli(process.a
 // `packages/runtime/src/cli/proofloop-plan.ts` (`plan admit-spv`).
 // ===========================================================================
 
-import { computeDigest, validateVNextSpvPassReceipt } from "@proofloop/kernel";
 import type { VNextSpvPassReceipt } from "@proofloop/kernel";
 import { readGitHead, resolveGitRoot } from "../git-source";
 import { canonicalPathWithinRoot, openNoFollowRead } from "../path-guard";
 import { readVNextManifest, assertCanonicalStageId } from "../vnext";
+// S14-A-T02 — replan SPV admission: the CLI adapter only validates the
+// replan declaration and forwards it to the Runtime epoch authority checks
+// (request/path validation + seam forwarding; it never duplicates the
+// disposition logic, §8.8).
+import {
+  ReplanEpochError,
+  computeReplanEpochDigest,
+  readCurrentEpoch,
+  verifyReplanAdmissionFact,
+  validateVNextReplanAdmissionDeclaration,
+} from "../vnext/replan-epoch";
+import type { VNextReplanAdmissionDeclaration } from "../vnext/replan-epoch";
 
 export interface VNextSpvPassAdmissionRequest {
   readonly version: 2;
@@ -111,6 +123,8 @@ export interface VNextSpvPassAdmissionRequest {
   readonly plan_digest: string;
   readonly snapshot_digest: string;
   readonly spv: VNextSpvPassReceipt;
+  /** Optional replan declaration (§8.8) — see `admitVNextSpvPass`. */
+  readonly replan?: VNextReplanAdmissionDeclaration;
 }
 
 export interface VNextSpvPassAdmissionSuccess {
@@ -118,6 +132,8 @@ export interface VNextSpvPassAdmissionSuccess {
   readonly stage_id: string;
   readonly spv_receipt_path: string;
   readonly spv: VNextSpvPassReceipt;
+  /** Present only for replan SPV admissions: the derived epoch digest. */
+  readonly replan_epoch_digest?: string;
 }
 
 export interface VNextSpvPassAdmissionFailure {
@@ -146,7 +162,12 @@ export class VNextSpvPassAdmissionError extends Error {
     | "worktree-dirty"
     | "snapshot-binding"
     | "already-admitted"
-    | "write-failed";
+    | "write-failed"
+    | "replan-invalid"
+    | "replan-parent"
+    | "replan-fact"
+    | "replan-impact"
+    | "replan-epoch";
 
   constructor(code: VNextSpvPassAdmissionError["code"], message: string) {
     super(message);
@@ -157,7 +178,7 @@ export class VNextSpvPassAdmissionError extends Error {
 
 const SPV_REQUEST_FIELDS = new Set([
   "version", "schema_version", "type", "project_root", "stage_id",
-  "manifest_digest", "plan_digest", "snapshot_digest", "spv",
+  "manifest_digest", "plan_digest", "snapshot_digest", "spv", "replan",
 ]);
 
 function spvIsRecord(value: unknown): value is Record<string, unknown> {
@@ -206,6 +227,10 @@ function validateSpvRequest(value: unknown): VNextSpvPassAdmissionRequest {
     spv = validateVNextSpvPassReceipt(value.spv);
   } catch (error) {
     spvFail("spv-invalid", "SPV_PASS authority is invalid: " + (error instanceof Error ? error.message : String(error)));
+  }
+  if (value.replan !== undefined) {
+    try { validateVNextReplanAdmissionDeclaration(value.replan); }
+    catch (error) { spvFail("replan-invalid", "replan declaration is invalid: " + (error instanceof Error ? error.message : String(error))); }
   }
   return value as unknown as VNextSpvPassAdmissionRequest;
 }
@@ -286,7 +311,14 @@ export function admitVNextSpvPass(value: unknown): VNextSpvPassAdmissionResult {
       spvFail("worktree-dirty", "SPV admission requires a clean Git worktree at the canonical project root");
     }
 
-    // Write-once persistence of the SPV authority only.
+    // Write-once persistence of the SPV authority only. A replan request
+    // writes the fresh SPV epoch-qualified into the derived epoch directory
+    // (`.proofloop/receipts/plan/<stage>/epochs/<epoch_digest>/`) WITHOUT any
+    // epoch.json / Stage Plan fact — the Stage Plan admission seam completes
+    // the epoch afterwards (P-05 preserved: this seam never writes a Stage
+    // Plan fact).
+    if (request.replan !== undefined) return admitReplanSpv(request);
+
     const directory = spvRootBound(root, path.join(root, ".proofloop", "receipts", "plan", stageId), "SPV authority directory");
     const spvPath = spvRootBound(root, path.join(directory, "vnext-spv-pass.json"), "SPV authority path");
     const payload = JSON.stringify(spv, null, 2) + "\n";
@@ -328,4 +360,148 @@ export function admitVNextSpvPass(value: unknown): VNextSpvPassAdmissionResult {
       }],
     };
   }
+}
+
+// ===========================================================================
+// Replan SPV admission (S14-A-T02, §8.8)
+// ===========================================================================
+
+function mapSpvReplanEpochError(error: unknown): VNextSpvPassAdmissionError["code"] {
+  if (error instanceof ReplanEpochError) {
+    switch (error.code) {
+      case "REPLAN.ROOT_ESCAPE": return "root-escape";
+      case "REPLAN.EPOCH_NO_AUTHORITY": return "replan-parent";
+      case "REPLAN.EPOCH_CHAIN_BROKEN":
+      case "REPLAN.EPOCH_CHAIN_AMBIGUOUS":
+      case "REPLAN.EPOCH_ORPHAN":
+      case "REPLAN.EPOCH_INVALID":
+      case "REPLAN.EPOCH_ALREADY_ADMITTED":
+      case "REPLAN.PERSIST_FAILED": return "replan-epoch";
+      case "REPLAN.FACT_INVALID":
+      case "REPLAN.FACT_MISSING": return "replan-fact";
+      case "REPLAN.EPOCH_INPUT_INVALID": return "replan-invalid";
+    }
+  }
+  return "replan-epoch";
+}
+
+/**
+ * S14-A-T02 — replan SPV seam. The adapter forwards the replan declaration
+ * to the Runtime epoch authority checks (parent-chain readback, digest-addressed
+ * disposition fact, impact recompute, derived epoch digest) and persists ONLY
+ * the fresh SPV_PASS receipt, epoch-qualified under
+ * `.proofloop/receipts/plan/<stage>/epochs/<epoch_digest>/`. The epoch refs
+ * file and the Stage Plan receipt are completed by the Stage Plan admission
+ * seam (P-05: this seam never writes a Stage Plan fact).
+ */
+function admitReplanSpv(request: VNextSpvPassAdmissionRequest): VNextSpvPassAdmissionSuccess {
+  const root = request.project_root;
+  const stageId = request.stage_id;
+  const replan = request.replan as VNextReplanAdmissionDeclaration;
+
+  let current;
+  try {
+    current = readCurrentEpoch(root, stageId);
+  } catch (error) {
+    spvFail(mapSpvReplanEpochError(error), "current epoch is unavailable: " + (error instanceof Error ? error.message : String(error)));
+  }
+  if (current.epoch_digest !== replan.parent_epoch_digest) {
+    spvFail(
+      "replan-parent",
+      `replan parent_epoch_digest "${replan.parent_epoch_digest}" does not match the current epoch "${current.epoch_digest}"`,
+    );
+  }
+
+  const manifestPath = spvRootBound(root, path.join(root, ".proofloop", "manifests", `${stageId}.json`), "manifest path");
+  try {
+    verifyReplanAdmissionFact(
+      root,
+      replan.disposition_ref,
+      replan.disposition_digest,
+      {
+        stage_id: stageId,
+        parent_epoch_digest: replan.parent_epoch_digest,
+        manifest_digest: request.manifest_digest,
+        plan_digest: request.plan_digest,
+        snapshot_digest: request.snapshot_digest,
+      },
+      manifestPath,
+    );
+  } catch (error) {
+    if (error instanceof ReplanEpochError && error.code === "REPLAN.FACT_INVALID" && /unresolved/.test(error.message)) {
+      spvFail("replan-impact", error.message);
+    }
+    spvFail(mapSpvReplanEpochError(error), "replan disposition fact verification failed: " + (error instanceof Error ? error.message : String(error)));
+  }
+
+  const epochDigest = computeReplanEpochDigest({
+    stage_id: stageId,
+    parent_epoch_digest: replan.parent_epoch_digest,
+    disposition_digest: replan.disposition_digest,
+    manifest_digest: request.manifest_digest,
+    plan_digest: request.plan_digest,
+    snapshot_digest: request.snapshot_digest,
+  });
+  const epochDirectory = spvRootBound(root, path.join(root, ".proofloop", "receipts", "plan", stageId, "epochs", epochDigest), "epoch authority directory");
+  const epochRefsPath = path.join(epochDirectory, "epoch.json");
+  const spvPath = path.join(epochDirectory, "vnext-spv-pass.json");
+
+  // A persisted epoch refs file means the Stage Plan seam already completed
+  // this epoch — a fresh SPV is stale and must never rewrite it (write-once).
+  try {
+    const refsStat = fs.lstatSync(epochRefsPath);
+    if (refsStat.isFile()) {
+      spvFail("replan-epoch", "epoch already admitted; a fresh SPV is stale: " + epochRefsPath);
+    }
+    spvFail("replan-epoch", "epoch refs path exists but is not a regular file: " + epochRefsPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      spvFail("replan-epoch", "epoch refs path cannot be inspected: " + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  // Write-once persistence of the fresh SPV. An identical existing SPV is
+  // idempotent; conflicting content is a write-once violation (fail closed).
+  const spvPayload = JSON.stringify(request.spv, null, 2);
+  const existingSpv = openNoFollowRead(root, spvPath);
+  if (existingSpv.ok) {
+    let existingText: string;
+    try {
+      existingText = fs.readFileSync(existingSpv.fd, "utf8");
+    } catch (error) {
+      spvFail("write-failed", "existing epoch SPV authority cannot be read: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      try { fs.closeSync(existingSpv.fd); } catch { /* ignore */ }
+    }
+    if (canonicalJson(JSON.parse(existingText)) !== canonicalJson(request.spv)) {
+      spvFail("already-admitted", "epoch SPV authority conflicts with the fresh SPV (write-once): " + spvPath);
+    }
+    return {
+      accepted: true,
+      stage_id: stageId,
+      spv_receipt_path: spvPath,
+      spv: request.spv,
+      replan_epoch_digest: epochDigest,
+    };
+  }
+
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  fs.mkdirSync(epochDirectory, { recursive: true });
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(spvPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow, 0o600);
+    fs.writeFileSync(fd, spvPayload, "utf8");
+    fs.fsyncSync(fd);
+  } catch (error) {
+    spvFail("write-failed", "epoch SPV authority could not be written without overwrite: " + (error instanceof Error ? error.message : String(error)));
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  return {
+    accepted: true,
+    stage_id: stageId,
+    spv_receipt_path: spvPath,
+    spv: request.spv,
+    replan_epoch_digest: epochDigest,
+  };
 }

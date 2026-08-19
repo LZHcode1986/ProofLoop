@@ -34,6 +34,10 @@ import {
 import { validateReferenceIndexInto } from './reference';
 import { validateProofIndexInto } from './proof-index';
 import { validateVNextExecutionScopeInto } from './plan';
+import {
+  validateBindingModeInto,
+  validateBindingSchemaVersionInto,
+} from './bindings';
 
 const MANIFEST_KNOWN_FIELDS = new Set([
   'version',
@@ -41,6 +45,7 @@ const MANIFEST_KNOWN_FIELDS = new Set([
   'plan',
   'reference_index',
   'authority_ref_ids',
+  'binding',
   'task_scopes',
   'slices',
   'runtime_proof',
@@ -59,6 +64,17 @@ const SLICE_KNOWN_FIELDS = new Set([
   'required_skills',
   'depends_on',
   'evidence_path',
+  'slice_contract_digest',
+]);
+
+/**
+ * Closed binding section schema (§8.1): `{version: 1, mode: "slice-local",
+ * stage_contract_digest}`. Unknown / missing / malformed fields fail closed.
+ */
+const BINDING_KNOWN_FIELDS = new Set([
+  'version',
+  'mode',
+  'stage_contract_digest',
 ]);
 
 const RUNTIME_PROOF_KNOWN_FIELDS = new Set([
@@ -133,11 +149,27 @@ function validateTaskScopes(
   }
 }
 
+function validateBindingSection(
+  value: unknown,
+  path: string,
+  errors: FieldError[],
+): void {
+  const obj = expectObject(value, path, errors);
+  if (!obj) return;
+
+  checkUnknownFields(obj, BINDING_KNOWN_FIELDS, path, errors);
+
+  validateBindingSchemaVersionInto(obj.version, `${path}.version`, errors);
+  validateBindingModeInto(obj.mode, `${path}.mode`, errors);
+  expectSha256Hex(obj.stage_contract_digest, `${path}.stage_contract_digest`, errors);
+}
+
 function validateSlice(
   value: unknown,
   path: string,
   errors: FieldError[],
   registered: ReadonlyMap<string, VNextReferenceKind>,
+  requireSliceContractDigest: boolean,
 ): void {
   const obj = expectObject(value, path, errors);
   if (!obj) return;
@@ -163,6 +195,25 @@ function validateSlice(
   expectStringArray(obj.required_skills, `${path}.required_skills`, errors);
   expectStringArray(obj.depends_on, `${path}.depends_on`, errors, { unique: true });
   expectNonEmptyString(obj.evidence_path, `${path}.evidence_path`, errors);
+
+  // slice_contract_digest is required per slice in slice-local binding mode
+  // (§8.1) and FORBIDDEN in legacy manifests (no binding section): closed
+  // legacy semantics — a legacy manifest must never silently carry new
+  // binding fields. Present-but-malformed always fails closed.
+  if (obj.slice_contract_digest !== undefined) {
+    expectSha256Hex(obj.slice_contract_digest, `${path}.slice_contract_digest`, errors);
+    if (!requireSliceContractDigest) {
+      errors.push({
+        path: `${path}.slice_contract_digest`,
+        message: 'Not allowed when manifest.binding is absent (legacy stage-wide mode)',
+      });
+    }
+  } else if (requireSliceContractDigest) {
+    errors.push({
+      path: `${path}.slice_contract_digest`,
+      message: 'Required when manifest.binding is present (slice-local mode)',
+    });
+  }
 }
 
 function validateRuntimeProof(
@@ -257,11 +308,17 @@ export function validateVNextManifest(value: unknown): VNextManifest {
       }
     }
 
+    // binding (optional; absent = legacy stage-wide mode, §8.1)
+    const hasBinding = obj.binding !== undefined;
+    if (hasBinding) {
+      validateBindingSection(obj.binding, 'manifest.binding', errors);
+    }
+
     // slices
     const slices = expectArray(obj.slices, 'manifest.slices', errors);
     if (slices) {
       for (let i = 0; i < slices.length; i++) {
-        validateSlice(slices[i], `manifest.slices[${i}]`, errors, registered);
+        validateSlice(slices[i], `manifest.slices[${i}]`, errors, registered, hasBinding);
       }
     }
 

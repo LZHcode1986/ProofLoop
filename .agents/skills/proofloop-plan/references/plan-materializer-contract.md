@@ -44,8 +44,8 @@ Worker/CV/Committer，不执行 `proofloop_stage(next)`。candidate output 永�
 已将某个 Stage 选为正式 execution Stage，输入的 `out_of_scope` 必须只排除
 `plan materialize` 不拥有的写入和 Runtime 事实（Manifest、Receipt、Worker/CV/Commit/Gate/Review
 admission），不能把 admission 成功后的 Stage Goal 永久标为 out of scope。正式执行事实
-仍必须由 `proofloop-execute` 和 Runtime/Host admission owners 产生，`plan materialize`
-不得把 candidate-only `runtime_proof` 当作执行证明。
+仍必须由 `proofloop-execute` 和 Runtime/Host admission owners 产生；Gate 为 facts-only
+（S08-REVIEW-010 / b6b0d3a：candidate input 不接受 `runtime_proof` 投影）。
 
 `plan materialize` 返回后，Brain 按 `SKILL.md` 规划循环步骤 8–14 交接（compile →
 validate → exclusive-create Evidence skeleton → 最终稳定 Git boundary → fresh SPV
@@ -58,6 +58,7 @@ validate → exclusive-create Evidence skeleton → 最终稳定 Git boundary �
 ```yaml
 schema_version: 2
 mode: initial | replan
+binding_mode: slice-local   # 可选（S13）；仅允许 "slice-local"，省略 = legacy stage-wide；未知值/类型错误必须 fail closed
 caller: brain
 owner: pluginv2-active-plan-materializer
 project_root: <absolute canonical trust root>
@@ -81,20 +82,6 @@ reference_index:
   - ref_id: REF-<stable-id>
     kind: goal | task | acceptance | seam | oracle | risk | proof_spec
     ref: <root-relative-path>#/entities/<entity-id>
-runtime_proof:
-  spec_refs: [REF-<candidate-proof-spec>]
-  resolved_steps:
-    - id: <step-id>
-      type: command | service_start | service_stop | probe
-      executable: <command>
-      args: []
-      cwd: <root-relative-path>
-      timeout_ms: <positive-integer>
-      expected: {}
-      service_ref: <optional; service_stop steps only>
-      readiness_signal: <optional; service_start steps only>
-    - not_applicable:
-        reason: <non-empty candidate-only boundary reason>
 slices:
   - slice_id: <stage-id>-A
     goal_entity_id: <stage-id>-A-goal
@@ -141,37 +128,35 @@ slices:
    heading、表格行或模糊 anchor；file/section digest 由 Runtime Resolver 产生。
 3. `reference_index` 的 `ref_id` 唯一，kind 必须匹配每一个 Proof Index 使用点。
    `plan materialize` 不接受 `file_digest`、`section_digest` 或用户提供的 `plan_digest`。
-4. Stage、Slice、Task 的 entity marker 必须唯一且与对应 reference 的 entity id
+4. `binding_mode` 可选：仅接受 kernel 闭集 `VNEXT_BINDING_MODES` 中的 `"slice-local"`，
+   省略表示 legacy stage-wide；任何未知值或类型错误必须 fail closed，不得静默回退 legacy。
+   Materializer 只在 normalized input/plan 上保留该字段供 Runtime `plan compile` 使用；
+   tasks.md 渲染不得使用该字段，且不得借此产生 Manifest/Receipt/Evidence/执行授权或第二事实源。
+5. Stage、Slice、Task 的 entity marker 必须唯一且与对应 reference 的 entity id
    一致；对于 `reference_index` 中 path 等于当前 candidate `tasks.md` 的
    `goal`、`task`、`acceptance`、`seam`、`oracle`、`risk` 和 `proof_spec`
    descriptor，也必须各有唯一且 kind/id 对齐的 entity marker。外部 Authority
    file 的 ref 只保留引用，不得在 candidate 中伪造 marker。Task ID 必须属于其
    Slice，Slice ID 必须属于当前 Stage。
-5. 每个 Slice 必须有唯一 `goal_ref`、至少一个 `task_ref`、至少一个
-   `acceptance_ref`、`seam_ref`、`oracle_ref` 和显式 `risk_refs` 数组。
-   risk binding 只能绑定同一 Proof Index 的 acceptance/seam refs。
-6. 每个 Slice 和 Task 必须声明 `dependencies` 与 `required_skills` 字段；数组可
+ 6. 每个 Slice 必须有唯一 `goal_ref`、至少一个 `task_ref`、至少一个
+    `acceptance_ref`、`seam_ref`、`oracle_ref` 和显式 `risk_refs` 数组。
+    risk binding 只能绑定同一 Proof Index 的 acceptance/seam refs。
+ 7. 每个 Slice 和 Task 必须声明 `dependencies` 与 `required_skills` 字段；数组可
    为空，但字段不能省略。Slice 间依赖必须是 DAG。
-7. candidate-only mutable values 固定为 `checkbox: false`、`status: NOT_STARTED`
-   和 `cv_status: NOT_RUN`。任何 `[x]`、执行状态、CV verdict、completion claim
-   都是 `PLAN_DEFECT`。`implementation` Task 的 `execution_scope.code_paths`
-   与 `test_paths` 必须非空；`evidence-only` Task 不得进入 `implement-task` dispatch。
-8. `manifest_path`、`evidence_dir`、Receipt、可执行 Runtime Proof payload、
+ 8. candidate-only mutable values 固定为 `checkbox: false`、`status: NOT_STARTED`
+    和 `cv_status: NOT_RUN`。任何 `[x]`、执行状态、CV verdict、completion claim
+    都是 `PLAN_DEFECT`。`implementation` Task 的 `execution_scope.code_paths`
+    与 `test_paths` 必须非空；`evidence-only` Task 不得进入 `implement-task` dispatch。
+ 9. `manifest_path`、`evidence_dir`、Receipt、可执行 Runtime Proof payload、
    `proof_digest`、Worker/CV packet、裸的实现文件清单和 admission 字段不属于输入
    schema。Task 可以携带由 Brain 根据 Authority/Contract 明确给出的结构化
    `execution_scope`；`plan materialize` 不得从 goal、Markdown 或代码搜索推断 scope。
-   `runtime_proof` 是唯一允许的显式 proof 投影：`spec_refs` 必须
-   引用当前 candidate `tasks.md` 中的 `proof_spec` entity，且 `resolved_steps`
-   必须是非空的闭合集合，其中每个 step 要么是 canonical executable step
-   （闭合类型集 `command | service_start | service_stop | probe`；必填字段
-   `id`/`type`/`executable`/`args`/`cwd`/`timeout_ms`/`expected`，`cwd` 必须
-   root-relative，可选 `service_ref` 仅限 `service_stop`、`readiness_signal`
-   仅限 `service_start`），要么是显式 `not_applicable{reason}` boundary；
-   executable 与 not_applicable 绝不混合（never both），也不存在第二套 step
-   类型。`proof_digest`
-   由 Runtime 在 compile 时确定性计算，`plan materialize` 拒绝任何 caller-supplied
-   digest。不得从 Markdown 推断命令。
-9. `execution_scope` 是 immutable Plan projection 的一部分，参与 `plan_digest`；
+   **candidate input 不接受 `runtime_proof` 投影**（b6b0d3a / S08-REVIEW-010 关闭：
+   Manifest runtime_proof 与 gate proof 执行 seam 已整体移除；Gate 为 facts-only，
+   build/test 由 Stage Review 承担）。`reference_index` 仍可登记指向
+   candidate `tasks.md` 的 `proof_spec` 实体（若未来需要显式 proof 声明），但
+   materialize 不生成、不校验可执行 step 投影。
+10. `execution_scope` 是 immutable Plan projection 的一部分，参与 `plan_digest`；
    纯 checkbox/status/CV projection 不得改变 digest，scope 变化必须使 Manifest、
    Context 和旧验证结果失效。
 
@@ -180,8 +165,9 @@ slices:
 - **refs 必须同时登记**：`selected_work_item_refs`、`authority_entity_refs` 以及
   Proof Index 用到的每个 `ref_id` 都必须同时出现在 `reference_index` 中
   （缺登记 → `INCOMPLETE_PROOF_INDEX` / `MISSING_ACCEPTANCE_AUTHORITY`）。
-- **`cwd` 必须 root-relative 且不是 `"."`**：`runtime_proof.resolved_steps[].cwd`
-  写 `packages/runtime`，不要写 `.`、`./packages/runtime` 或绝对路径
+- **`cwd` 必须 root-relative 且不是 `"."`**：runtime proof steps 已随 b6b0d3a 移除；
+  若未来恢复 executable proof 投影，`runtime_proof.resolved_steps[].cwd` 写
+  `packages/runtime`，不要写 `.`、`./packages/runtime` 或绝对路径
   （`.` 产生空路径段 → `CANDIDATE_PATH_ESCAPE`）。
 - **路径不以 `/` 结尾**：`execution_scope.forbidden_paths`、`code_paths`、
   `test_paths`、`evidence_path` 等路径不能以 `/` 结尾（尾斜杠产生空路径段，
@@ -270,6 +256,8 @@ risk_refs: [<ref_id> + bindings]
 <!-- proofloop:entity id="<candidate-local-oracle-id>" kind="oracle" -->
 <!-- proofloop:entity id="<candidate-local-risk-id>" kind="risk" -->
 <!-- proofloop:entity id="<candidate-local-proof-spec-id>" kind="proof_spec" -->
+<!-- 注：proof_spec marker 仅在 candidate 显式声明 proof_spec 引用时生成；
+     candidate input 不接受 runtime_proof 投影（b6b0d3a / Gate facts-only）。 -->
 <candidate-only reference projection; external Authority refs have no marker>
 ```
 
