@@ -503,6 +503,8 @@ export {
   VNEXT_REVIEW_SCHEMA_VERSION,
   VNEXT_REVIEW_RESULT_TYPE,
   VNEXT_REVIEW_ACTION,
+  readVNextStageReviewStatus,
+  persistVNextStageReviewPreparation,
   VNEXT_REVIEW_VERDICTS,
   validateVNextStageCloseRequest,
   admitVNextStageClose,
@@ -514,6 +516,8 @@ export {
   VNextStageIdError,
 } from './vnext';
 export type {
+  VNextStageReviewStatusReport,
+  VNextStageReviewPreparation,
   EntityDigestBinding,
   ParsedEntityRef,
   MarkedEntity,
@@ -713,8 +717,19 @@ export type {
   TrustRootResolution,
   ParsedCliArgs,
 } from './cli/proofloop-common';
-export { VNEXT_WORKER_COMPLETION_MODES, VNEXT_NEXT_ACTIONS } from './vnext';
-export type { VNextWorkerCompletionMode, VNextNextAction } from './vnext';
+export {
+  VNEXT_WORKER_COMPLETION_MODES,
+  VNEXT_WORKER_DISPATCH_MODES,
+  VNEXT_NEXT_ACTIONS,
+} from './vnext';
+export type {
+  VNextWorkerCompletionMode,
+  VNextWorkerDispatchMode,
+  VNextRepairWorkerContext,
+  VNextTaskWorkerContext,
+  VNextFinalizeWorkerContext,
+  VNextNextAction,
+} from './vnext';
 export { proofloopCli } from './cli/proofloop';
 export type { ProofloopCliOptions } from './cli/proofloop';
 export { runBoundaryDomain } from './cli/proofloop-boundary';

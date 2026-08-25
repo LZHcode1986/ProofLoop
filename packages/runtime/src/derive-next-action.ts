@@ -79,6 +79,13 @@ export interface NextActionExtras {
   readonly pending_worker_result_envelopes?: readonly WorkerResultEnvelope[];
   /** CV result envelopes awaiting admit, bound to this stage. */
   readonly pending_cv_result_envelopes?: readonly PendingCvResultEnvelope[];
+  /**
+   * vNext only: a persisted Stage Review prepared fact binds the CURRENT
+   * Gate PASS tip (Manifest/Plan/gate-receipt/snapshot tuple). Absent or stale
+   * facts never enable finalize — Gate PASS without it derives
+   * PREPARE_STAGE_REVIEW first.
+   */
+  readonly review_prepared_present?: boolean;
 }
 
 /** Input to `deriveNextAction` — the reconciled stage state + extras. */
@@ -214,8 +221,8 @@ function blockingFinding(message: string): Finding {
  * Row 6 sub-branches for one slice in READY_FOR_CV with the latest CV fact
  * being CV_REPAIR (cv_status REPAIR or PENDING_RECHECK, derived by Reconcile
  * from the CV receipt chain):
- *   6b PENDING_RECHECK (repair TASK_COMPLETE admitted after the last
- *      CV_REPAIR) → RUN_CV recheck;
+ *   6b PENDING_RECHECK (a validated mode='repair' WorkerResultEnvelope binds
+ *      the latest CV_REPAIR Receipt; projected by Reconcile) → RUN_CV recheck;
  *   6c REPAIR + repair_attempt 0 (CV_REPAIR count 1) → DISPATCH_WORKER repair;
  *   6d REPAIR + repair_attempt 1 (CV_REPAIR count 2) → DISPATCH_WORKER repair
  *      (second repair — the diagnose skill is loaded by dispatch discipline);
@@ -537,15 +544,24 @@ export function deriveNextAction(state: DeriveNextActionInput): DerivedNextActio
       responsible_role: 'executor',
     });
   }
-
   // ── Row 12: GATE_PASS present without STAGE_REVIEW_PASS (UNDER_REVIEW)
-  //           → FINALIZE_STAGE_REVIEW ──
+  //           → PREPARE_STAGE_REVIEW until a prepared fact binds the current
+  //             Gate PASS tip, then FINALIZE_STAGE_REVIEW ──
   if (state.stage_state === StageState.UNDER_REVIEW && state.gate_pass_present === true) {
+    if (state.review_prepared_present !== true) {
+      return makeResult(state, chainValid, {
+        action: 'PREPARE_STAGE_REVIEW',
+        action_detail:
+          `PREPARE_STAGE_REVIEW — stage "${state.stage_id}" UNDER_REVIEW with GATE_PASS ` +
+          `present; assemble and persist the Review prepared fact before finalizing`,
+        responsible_role: 'brain',
+      });
+    }
     return makeResult(state, chainValid, {
       action: 'FINALIZE_STAGE_REVIEW',
       action_detail:
         `FINALIZE_STAGE_REVIEW — stage "${state.stage_id}" UNDER_REVIEW with GATE_PASS ` +
-        `present and no STAGE_REVIEW_PASS receipt`,
+        `present and the prepared fact bound to the current Gate PASS tip`,
       responsible_role: 'stage-reviewer',
     });
   }

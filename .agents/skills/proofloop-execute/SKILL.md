@@ -25,8 +25,10 @@ Brain 负责：
 - 通过当前 Host relay 路由 Worker（`herdr-link` 为通信优先，Herdr Skill/CLI 负责 pane/Agent 生命周期控制，`herdr-legacy` 为显式兼容路线，`subagent` 为 harness-native 兼容路线）；三种 Worker route 见本技能的 `DISPATCH_WORKER` 分支；
 - Herdr Link 可用时，使用 `herdr_link_send` 派发并通过 `reply_to` 接收 Worker Result；Brain 重读 Context、Evidence、Git/diff 和 Receipts 后交给正确 consumer。Link 不可用时只能选择明确的兼容 route；不得静默改用 raw ACP、`recent-unwrapped` 或 `--wait`。
   `repair`/`diagnose` 不送入当前 `stage admit-worker`；
-- CV repair 派发纪律：修复阶段的所有 repair 一律以 `mode: repair` 派发
-  （Worker repair 行为见 references/worker-template.md）；
+- CV repair 派发纪律：CV_REPAIR admitted 后，所有 repair 一律以
+  `DISPATCH_WORKER mode=repair` 派发（taskless Context，携带
+  `repairs_cv_receipt_digest`；Worker repair 行为见
+  references/worker-template.md）；冻结链见「CV 循环」修复段；
 - Stage Close、`progress.md` 和下一个 Stage 的重新选择。
 
 Runtime 负责：
@@ -163,7 +165,10 @@ ADMIT_INTEGRATION
 RUN_GATE
 → Runtime 执行 typed RuntimeProof 与 Gate admission
 
-PREPARE/FINALIZE_STAGE_REVIEW
+PREPARE_STAGE_REVIEW
+→ prepare-stage 把 prepared fact 持久化到
+  `.proofloop/review/<stage_id>/preparations/<digest>.json` 后重新 next
+FINALIZE_STAGE_REVIEW
 → Brain 使用 Stage Review 流程调度 fresh Stage Reviewer
 
 VALIDATE
@@ -210,7 +215,19 @@ admission（见「动作路由」），其余 verdict 只能进入 Brain 路由�
 
 修复：
 
-- 首次 CV `REPAIR` 使用 `references/worker-template.md` 的正常 `mode: repair` 上下文；Worker repair 的 Herdr Link Result（或显式 legacy Result）经过 action/digest 校验后不能送入当前 `stage admit-worker`，必须由 Runtime 触发 fresh bounded CV recheck；
+- CV REPAIR 冻结链：CV_REPAIR admitted（tip=CV_REPAIR 且尚无绑定该 tip
+  digest 的有效 repair envelope）→ `stage next` 返回
+  `DISPATCH_WORKER mode=repair`（taskless Context，无 `task_id/task_ref`，
+  携带 `repairs_cv_receipt_digest`=当前 CV_REPAIR receipt digest）→ Worker
+  完成 repair 后返回 `VNextWorkerResultEnvelope(mode='repair',
+  repairsCvReceiptDigest=<该 CV_REPAIR digest>)` → 该 envelope 不进入
+  `stage admit-worker`（Runtime 显式拒绝；repair 由 recheck 消费）→
+  `stage next` 校验 envelope 绑定（schema/tuple、`repairsCvReceiptDigest`
+  等于最新 CV_REPAIR tip digest、Context 文件存在且 digest 匹配）→
+  `cvStatus = PENDING_RECHECK` → `RUN_CV recheck`；recheck 再次失败会产生
+  新的 CV_REPAIR（digest 不同），旧 envelope 失配并回到 REPAIR 状态进入
+  下一轮修复。Worker repair 的 Herdr Link Result（或显式 legacy Result）
+  经过 action/digest 校验后同样不得送入当前 `stage admit-worker`；
 - Goal、Authority refs、Proof Index、Manifest、Plan、Context 或验证边界变化时，必须重新 initial CV；
 - Worker repair 后的 fresh CV recheck 再次返回 `REPAIR` 时，Brain 必须加载
   `.agents/contracts/brain/multi-round-repair.md`；该 Contract 负责跨轮 history、
@@ -238,13 +255,20 @@ Brain 不直接 `git commit`。
 
 Gate PASS 持久化后：
 
-1. Brain 派发 fresh、goal-first Stage Reviewer；
-2. Reviewer 只返回 `ACCEPTED`、`REJECTED` 或 `BLOCKED`；
-3. Runtime/Plugin admission 写 Stage Review Receipt；
-4. ACCEPTED 才能进入 Stage Close；
-5. Brain 更新 `progress.md`，记录 Stage 划分摘要、完成引用、剩余 AWI、阻塞和恢复方向；
-6. Committer 提交 Stage Close boundary；
-7. Brain 重新读取 Git/Receipt/Manifest，再选择下一个 Stage。
+1. `stage next` 先返回 `PREPARE_STAGE_REVIEW`：prepare-stage 把全部由
+   Runtime seam 派生的 prepared fact 持久化到
+   `.proofloop/review/<stage_id>/preparations/<digest>.json`；prepared fact
+   是 digest-addressed 的持久化交接事实，不是 Receipt、不进入 Receipt chain；
+2. prepared fact 存在且绑定当前 Gate/Manifest/Plan/snapshot 时（binding 不
+   匹配视为 stale、返回 null，不阻塞），`stage next` 再返回
+   `FINALIZE_STAGE_REVIEW`；
+3. Brain 派发 fresh、goal-first Stage Reviewer；
+4. Reviewer 只返回 `ACCEPTED`、`REJECTED` 或 `BLOCKED`；
+5. Runtime/Plugin admission 写 Stage Review Receipt；
+6. ACCEPTED 才能进入 Stage Close；
+7. Brain 更新 `progress.md`，记录 Stage 划分摘要、完成引用、剩余 AWI、阻塞和恢复方向；
+8. Committer 提交 Stage Close boundary；
+9. Brain 重新读取 Git/Receipt/Manifest，再选择下一个 Stage。
 
 `progress.md` 是快照，不是 Stage 权威。根目录 `progress.md` 内的插件实施
 章节与「pluginv2 流程优化」章节不得混写。

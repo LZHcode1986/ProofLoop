@@ -233,6 +233,13 @@ export interface VNextWorkerResultEnvelope {
   readonly snapshotDigest: string;
   readonly contextRef: string;
   readonly contextDigest: string;
+  /**
+   * Repair handoff binding (mode='repair' only): the CV_REPAIR Receipt digest
+   * this repair result closes. Required for repair envelopes, forbidden
+   * otherwise — a repair envelope is a persisted handoff fact consumed by the
+   * CV recheck projection, never an admissible TASK_COMPLETE claim.
+   */
+  readonly repairsCvReceiptDigest?: string;
 }
 
 // ============================================================
@@ -267,6 +274,7 @@ const VNEXT_ENVELOPE_KNOWN_FIELDS = new Set([
   'snapshotDigest',
   'contextRef',
   'contextDigest',
+  'repairsCvReceiptDigest',
 ]);
 
 const VERIFICATION_RUN_KNOWN_FIELDS = new Set(['commandId', 'exitCode', 'logRef']);
@@ -528,10 +536,23 @@ export function validateVNextWorkerResultEnvelope(data: unknown): VNextWorkerRes
   expectDigest(data.snapshotDigest, 'snapshotDigest', errors, 40);
   expectString(data.contextRef, 'contextRef', errors);
   expectDigest(data.contextDigest, 'contextDigest', errors, 64);
+  if (data.repairsCvReceiptDigest !== undefined) {
+    expectDigest(data.repairsCvReceiptDigest, 'repairsCvReceiptDigest', errors, 64);
+  }
 
-  if (data.mode !== 'finalize-slice' &&
+  // Repair envelopes carry the closed CV_REPAIR handoff binding instead of a
+  // task anchor: repairs close a Slice-level CV verdict, not a Task.
+  if (data.mode === 'repair') {
+    if (typeof data.repairsCvReceiptDigest !== 'string' || data.repairsCvReceiptDigest.length === 0) {
+      errors.push({ path: 'repairsCvReceiptDigest', message: "repairsCvReceiptDigest is required for mode='repair' results" });
+    }
+  } else if (data.repairsCvReceiptDigest !== undefined) {
+    errors.push({ path: 'repairsCvReceiptDigest', message: 'repairsCvReceiptDigest is only allowed on repair results' });
+  }
+
+  if (data.mode !== 'finalize-slice' && data.mode !== 'repair' &&
       (typeof data.taskId !== 'string' || data.taskId.length === 0)) {
-    errors.push({ path: 'taskId', message: 'taskId is required except for finalize-slice results' });
+    errors.push({ path: 'taskId', message: 'taskId is required except for finalize-slice and repair results' });
   }
 
   if (errors.length > 0) {

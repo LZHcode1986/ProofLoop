@@ -82,11 +82,13 @@ import {
 } from './cv-validation';
 import { readReceiptChain, validateHistoricalCvGeneration } from './integration-validation';
 import type { VNextCvPayloadBinding } from './cv-validation';
-import { VNEXT_WORKER_COMPLETION_MODES } from './types';
+import { VNEXT_WORKER_COMPLETION_MODES, VNEXT_WORKER_DISPATCH_MODES } from './types';
+import { readVNextStageReviewPreparedFacts } from './review-preparation';
 import type {
   VNextNextAction,
   VNextResponsibleRole,
   VNextWorkerCompletionMode,
+  VNextWorkerDispatchMode,
 } from './types';
 // P-11 task B: read-only STAGE_CLOSE archived-facts probe.  An archived Stage
 // is a historical snapshot and must never be projected for dispatch/CV.
@@ -99,7 +101,7 @@ import { deriveNextAction } from '../derive-next-action';
 import type { DerivedNextAction, PendingCvResultEnvelope } from '../derive-next-action';
 import type { ReconciledSliceState } from '../state-model';
 import { validateVNextWorkerResultEnvelope } from '../relay-contract';
-import type { WorkerResultEnvelope } from '../relay-contract';
+import type { VNextWorkerResultEnvelope, WorkerResultEnvelope } from '../relay-contract';
 // Runtime-safe cycle: cv-admission uses next.ts bindings only inside
 // functions, never during module evaluation.
 import { validateVNextCvResultEnvelope } from './cv-result-envelope';
@@ -129,7 +131,7 @@ export interface VNextNextActionOutput {
   readonly stage_id: string;
   readonly slice_id?: string;
   readonly task_id?: string;
-  readonly mode?: VNextWorkerCompletionMode;
+  readonly mode?: VNextWorkerDispatchMode;
   readonly context_ref?: string;
   readonly manifest_digest?: string;
   readonly plan_digest?: string;
@@ -3202,7 +3204,10 @@ function readVNextPendingResultFacts(
     if (record.schemaVersion === 2 && record.stageId === stageId) {
       try {
         const envelope = validateVNextWorkerResultEnvelope(record);
-        if (!admittedActionTokens.has(envelope.actionToken)) {
+        // Repair envelopes are handoff facts for the CV recheck projection,
+        // never claimable completion results — they must not surface as
+        // ADMIT_WORKER_RESULT pending facts.
+        if (envelope.mode !== 'repair' && !admittedActionTokens.has(envelope.actionToken)) {
           worker.push({
             stageId: envelope.stageId,
             sliceId: envelope.sliceId,
@@ -3234,6 +3239,85 @@ function readVNextPendingResultFacts(
     }
   }
   return { worker, cv };
+}
+
+/**
+ * Repair handoff validation (CV REPAIR closed loop): a CV_REPAIR verdict is
+ * only allowed to advance to its bounded recheck (PENDING_RECHECK) after a
+ * schema-valid mode='repair' WorkerResultEnvelope exists that binds exactly
+ * that verdict — stage/slice, active Manifest/Plan tuple, the repaired
+ * CV_REPAIR Receipt digest, and a persisted repair Context whose digest
+ * matches the envelope. Anything else fails closed: no repair fact means the
+ * Slice stays in REPAIR and the canonical table dispatches the repair Worker.
+ */
+function readValidRepairEnvelopeForCvRepairTip(
+  root: string,
+  manifestDigest: string,
+  manifest: VNextManifest,
+  sliceId: string,
+  cvRepairReceiptDigest: string,
+): boolean {
+  const directory = path.join(root, '.pi', 'proofloop-runtime', 'results');
+  if (canonicalPathWithinRoot(root, directory) === null) {
+    throw new VNextHandoffError('path-escape', 'pending results directory escapes the project root');
+  }
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new VNextHandoffError('admission-invalid', `pending results directory could not be read: ${directory}`);
+  }
+  for (const name of names) {
+    const file = path.join(directory, name);
+    const opened = openNoFollowRead(root, file);
+    if (!opened.ok) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(opened.fd, 'utf8'));
+    } catch {
+      continue;
+    } finally {
+      fs.closeSync(opened.fd);
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+    const record = parsed as Record<string, unknown>;
+    if (record.schemaVersion !== 2 || record.stageId !== manifest.stage_id) continue;
+    let envelope: VNextWorkerResultEnvelope;
+    try {
+      envelope = validateVNextWorkerResultEnvelope(record);
+    } catch {
+      continue;
+    }
+    if (envelope.mode !== 'repair') continue;
+    if (envelope.sliceId !== sliceId) continue;
+    if (envelope.manifestDigest !== manifestDigest || envelope.planDigest !== manifest.plan.plan_digest) continue;
+    if (envelope.repairsCvReceiptDigest !== cvRepairReceiptDigest) continue;
+    // The repair Context must exist on disk and match the envelope binding:
+    // digest-addressed context file, same mode, same repaired verdict.
+    const contextFile = path.join(root, '.proofloop', 'context', `${envelope.contextDigest}.json`);
+    if (canonicalPathWithinRoot(root, contextFile) === null) continue;
+    const contextOpened = openNoFollowRead(root, contextFile);
+    if (!contextOpened.ok) continue;
+    let context: unknown;
+    try {
+      context = JSON.parse(fs.readFileSync(contextOpened.fd, 'utf8'));
+    } catch {
+      fs.closeSync(contextOpened.fd);
+      continue;
+    } finally {
+      fs.closeSync(contextOpened.fd);
+    }
+    if (context === null || typeof context !== 'object' || Array.isArray(context)) continue;
+    const ctx = context as Record<string, unknown>;
+    if (ctx['context_digest'] !== envelope.contextDigest) continue;
+    if (ctx['mode'] !== 'repair') continue;
+    if (ctx['slice_id'] !== sliceId) continue;
+    if (ctx['manifest_digest'] !== manifestDigest) continue;
+    if (ctx['repairs_cv_receipt_digest'] !== cvRepairReceiptDigest) continue;
+    return true;
+  }
+  return false;
 }
 
 function readReceiptJsonFiles(root: string, directory: string): unknown[] {
@@ -3299,7 +3383,10 @@ interface VNextCanonicalBridgeInput {
  * the ONE canonical priority table. Any invalid persisted fact fails closed
  * (the readers throw; nextAction maps the failure to bounded VALIDATE).
  */
-function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): DerivedNextAction {
+function deriveVNextCanonicalNextAction(
+  bridge: VNextCanonicalBridgeInput,
+  cvRepairTipsOut?: Map<string, string>,
+): DerivedNextAction {
   const {
     input,
     manifest,
@@ -3325,6 +3412,10 @@ function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): Deri
   );
 
   const slices: ReconciledSliceState[] = [];
+  // Slice → digest of the outstanding CV_REPAIR chain tip (REPAIR status only).
+  // Consumed by the DISPATCH_WORKER projection so a repair dispatch binds the
+  // exact verdict it closes.
+  const cvRepairTips = new Map<string, string>();
   for (const slice of manifest.slices) {
     const sliceId = slice.slice_id;
     const taskIds = taskIdsForSlice(manifest, slice);
@@ -3390,14 +3481,34 @@ function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): Deri
           replanDispositions,
           workerFacts,
         );
-        repairAttempt = cvFacts.repairCount;
+        // Off-by-one discipline: the canonical table counts COMPLETED repairs
+        // (attempt 0 = first repair outstanding). The chain tip is the
+        // (repairCount)-th CV_REPAIR, so the completed count is repairCount - 1.
+        if (cvFacts.tip !== null && cvFacts.tip.type === 'CV_REPAIR') {
+          repairAttempt = Math.max(0, cvFacts.repairCount - 1);
+        } else {
+          repairAttempt = cvFacts.repairCount;
+        }
         if (cvFacts.tip !== null) {
           if (cvFacts.tip.type === 'CV_PASS') {
             cvPassed = true;
+          } else if (cvFacts.tip.type === 'CV_REPAIR') {
+            // Closed REPAIR loop: the verdict may only advance to its bounded
+            // recheck after a validated mode='repair' envelope binds exactly
+            // this CV_REPAIR Receipt. Without it the Slice stays REPAIR and
+            // the canonical table dispatches the repair Worker.
+            const repairEnvelopePresent = readValidRepairEnvelopeForCvRepairTip(
+              input.projectRoot,
+              manifestDigest,
+              manifest,
+              sliceId,
+              cvFacts.tip.digest,
+            );
+            cvStatus = repairEnvelopePresent ? CVStatus.PENDING_RECHECK : CVStatus.REPAIR;
+            if (!repairEnvelopePresent) {
+              cvRepairTips.set(sliceId, cvFacts.tip.digest);
+            }
           } else {
-            // A REPAIR verdict awaits its bounded recheck in vNext: the fix
-            // work is projected as recover-task Worker steps, never as a
-            // parallel repair-dispatch mode.
             cvStatus = CVStatus.PENDING_RECHECK;
           }
         }
@@ -3453,6 +3564,18 @@ function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): Deri
   const gateTip = readVNextStageGateTipFacts(input.projectRoot, input.stageId, stageLevelBinding);
   if (gateTip !== null && gateTip.verdict === 'PASS') gatePassPresent = true;
   if (gateTip !== null && gateTip.verdict === 'FAIL') gateFailPresent = true;
+  // P0-2 closed Review chain: Gate PASS derives PREPARE_STAGE_REVIEW until a
+  // prepared fact binds exactly this Gate PASS tip (stale facts never count).
+  let reviewPreparedPresent = false;
+  if (gatePassPresent && gateTip !== null) {
+    reviewPreparedPresent =
+      readVNextStageReviewPreparedFacts(input.projectRoot, input.stageId, {
+        manifestDigest,
+        planDigest: manifest.plan.plan_digest,
+        gateReceiptDigest: gateTip.digest,
+        snapshotDigest: authoritySnapshot,
+      }) !== null;
+  }
   if (gatePassPresent) {
     const reviewTip = readVNextStageReviewTipFacts(input.projectRoot, input.stageId, stageLevelBinding);
     if (reviewTip?.verdict === 'ACCEPTED') {
@@ -3504,7 +3627,7 @@ function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): Deri
       }) as unknown as WorkerResultEnvelope,
   );
 
-  return deriveNextAction({
+  const derived = deriveNextAction({
     stage_id: input.stageId,
     slices,
     stage_state: gatePassPresent ? StageState.UNDER_REVIEW : StageState.EXECUTING,
@@ -3516,7 +3639,14 @@ function deriveVNextCanonicalNextAction(bridge: VNextCanonicalBridgeInput): Deri
     ...(gateFailPresent ? { gate_fail_present: true } : {}),
     ...(pendingWorkerForTable.length > 0 ? { pending_worker_result_envelopes: pendingWorkerForTable } : {}),
     ...(pending.cv.length > 0 ? { pending_cv_result_envelopes: pending.cv } : {}),
+    ...(reviewPreparedPresent ? { review_prepared_present: true } : {}),
   });
+  if (cvRepairTipsOut !== undefined) {
+    for (const [repairSliceId, repairTipDigest] of cvRepairTips) {
+      cvRepairTipsOut.set(repairSliceId, repairTipDigest);
+    }
+  }
+  return derived;
 }
 
 /**
@@ -3535,10 +3665,11 @@ function projectVNextDerivedAction(
   derived: DerivedNextAction,
   workerFacts: readonly VNextWorkerFact[],
   committedSliceIds: ReadonlySet<string>,
+  cvRepairTips: ReadonlyMap<string, string>,
 ): VNextNextActionOutput {
   if (derived.action === 'DISPATCH_WORKER') {
     const slice = manifest.slices.find((candidate) => candidate.slice_id === derived.slice_id);
-    if (slice === undefined || derived.mode === undefined || derived.mode === 'repair') {
+    if (slice === undefined || derived.mode === undefined) {
       throw new VNextHandoffError(
         'task-anchor-gap',
         `canonical decision dispatched an unresolvable Slice/mode: ${derived.slice_id ?? '<missing>'}/${derived.mode ?? '<missing>'}`,
@@ -3550,6 +3681,49 @@ function projectVNextDerivedAction(
         .filter((fact) => fact.slice.slice_id === sliceId && fact.taskId !== undefined)
         .map((fact) => fact.taskId as string),
     );
+    // Closed REPAIR loop projection: a canonical repair dispatch is anchored
+    // to the Slice's outstanding CV_REPAIR chain tip — never to a Task.
+    if (derived.mode === 'repair') {
+      const repairedCvReceiptDigest = cvRepairTips.get(slice.slice_id);
+      if (repairedCvReceiptDigest === undefined) {
+        throw new VNextHandoffError(
+          'task-anchor-gap',
+          `canonical repair dispatch for slice "${slice.slice_id}" has no outstanding CV_REPAIR chain tip`,
+        );
+      }
+      const repairDispatch = projectVNextWorkerDispatch({
+        root: input.projectRoot,
+        manifest,
+        manifestDigest,
+        snapshotDigest: requestedSnapshot,
+        authority,
+        sliceId,
+        completedTaskIds: [],
+        mode: 'repair',
+        repairsCvReceiptDigest: repairedCvReceiptDigest,
+        provenCompleteSlices: committedSliceIds,
+        verifyReferenceBindings: input.verifyReferenceBindings,
+      });
+      if (input.persistContext === true) persistVNextWorkerContext(input.projectRoot, repairDispatch);
+      return {
+        action: repairDispatch.action,
+        action_detail:
+          'DISPATCH_WORKER mode=' + repairDispatch.mode + ' for slice ' + repairDispatch.slice_id +
+          ' repairs CV_REPAIR receipt ' + repairedCvReceiptDigest +
+          ' context_ref ' + repairDispatch.context_ref,
+        responsible_role: repairDispatch.responsible_role,
+        receipt_chain_valid: repairDispatch.receipt_chain_valid,
+        stage_id: repairDispatch.stage_id,
+        slice_id: repairDispatch.slice_id,
+        mode: repairDispatch.mode,
+        context_ref: repairDispatch.context_ref,
+        manifest_digest: repairDispatch.manifest_digest,
+        plan_digest: repairDispatch.plan_digest,
+        proof_index_digest: repairDispatch.proof_index_digest,
+        snapshot_digest: repairDispatch.snapshot_digest,
+        findings: repairDispatch.findings,
+      };
+    }
     const dispatch = projectVNextWorkerDispatch({
       root: input.projectRoot,
       manifest,
@@ -3816,20 +3990,24 @@ export class VNextNextActionService {
       // Fact resolution/validation happened above; the ONE canonical Stage
       // lifecycle decision now comes from `deriveNextAction` (vNext keeps no
       // parallel action state machine).
-      const derived = deriveVNextCanonicalNextAction({
-        input,
-        manifest,
-        manifestDigest,
-        authority,
-        authoritySnapshot,
-        currentIntegratedSliceIds,
-        workerFacts,
-        finalizeFacts,
-        committedSliceIds,
-        sliceLocalChain,
-        historicalInvalidatedTaskIds,
-        replanDispositions,
-      });
+      const cvRepairTips = new Map<string, string>();
+      const derived = deriveVNextCanonicalNextAction(
+        {
+          input,
+          manifest,
+          manifestDigest,
+          authority,
+          authoritySnapshot,
+          currentIntegratedSliceIds,
+          workerFacts,
+          finalizeFacts,
+          committedSliceIds,
+          sliceLocalChain,
+          historicalInvalidatedTaskIds,
+          replanDispositions,
+        },
+        cvRepairTips,
+      );
       return projectVNextDerivedAction(
         input,
         manifest,
@@ -3839,6 +4017,7 @@ export class VNextNextActionService {
         derived,
         workerFacts,
         committedSliceIds,
+        cvRepairTips,
       );
     } catch (error) {
       return failureOutput(input.stageId, error);

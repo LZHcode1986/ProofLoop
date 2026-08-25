@@ -8,10 +8,11 @@
  *    review 链 + stage-gate 前缀链、root-bound/no-follow/self-digest）；
  *    空链是正常可查询状态（exit 0，S10 运行证明第 7 步
  *    `review status --json --stage S10` 必须 exit 0）。零写入。
- *  - `review prepare-stage`：只读组装 ReviewInput（manifest/plan/runtime_
- *    proof/snapshot digest + gate 前缀 + ready_for_review），零写入。
- *    verdict 仍由 AI Reviewer 提供，CLI 不替代判断（Acceptance D）。
- *  - `review finalize-stage`：verdict（closed ACCEPTED|REPAIR）+ 非空
+ *  - `review prepare-stage`：Runtime-seam 组装 ReviewInput 并持久化 prepared
+ *    fact（D2/P0-2：`.proofloop/review/<stage>/preparations/<digest>.json`，
+ *    digest-addressed 非 Receipt 事实，不入 chain）；成功 envelope 附
+ *    preparation_ref/preparation_digest。verdict 仍由 AI Reviewer 提供，
+ *    CLI 不替代判断（Acceptance D）。
  *    summary 经 CLI→Runtime review admission（`assembleVNextStageReviewRequest`
  *    + `admitVNextStageReview`）保存 —— 成功返回 Receipt ref+digest；
  *    失败 canonical Finding + no-write（exit 2）。Receipt 写入由
@@ -46,6 +47,10 @@ import {
   readVNextStageReviewStatus,
   type VNextStageReviewStatusReport,
 } from '../vnext/review-admission';
+import {
+  persistVNextStageReviewPreparation,
+  type VNextStageReviewPreparation,
+} from '../vnext/review-preparation';
 import type { StageReviewAdmissionRequest } from '../admission-request';
 import type { AdmitResult } from '../admit-pipeline';
 
@@ -213,7 +218,65 @@ function runReviewPrepare(
   stage: string,
 ): CliEnvelope {
   try {
-    return okEnvelope(command, projectReviewPrepareData(readVNextStageReviewStatus(root, stage)));
+    // D2/P0-2：prepare-stage 持久化 prepared fact。绑定全部由 Runtime seam
+    // 派生：assemble 校验 vNext route + Manifest + 当前 Git HEAD snapshot；
+    // status seam 重验集成前缀并给出 plan digest 与 Gate PASS tip。任何
+    // 失败（assemble/status/Gate-PASS 缺失）零写入。
+    const assembled = assembleVNextStageReviewRequest(
+      // prepare 不消费 verdict/summary（assemble 仅派生 Manifest/snapshot 绑定）。
+      { type: 'stage_review', stageId: stage, verdict: 'REPAIR', summary: '' },
+      root,
+    );
+    if (!assembled.ok) {
+      return failureEnvelope(command, assembled.result.findings);
+    }
+    const report = readVNextStageReviewStatus(root, stage);
+    if (report.archived) {
+      return errorEnvelope(
+        command,
+        'DOMAIN.INVALID_TRANSITION',
+        `review prepare-stage blocked: stage ${stage} is archived`,
+      );
+    }
+    const gateTip = report.stage_gate.latest;
+    if (gateTip === null || gateTip.receipt_type !== 'GATE_PASS' || gateTip.verdict !== 'PASS') {
+      return errorEnvelope(
+        command,
+        'DOMAIN.INVALID_TRANSITION',
+        'review prepare-stage blocked: a current GATE PASS receipt is required before preparing the stage review',
+      );
+    }
+    if (
+      assembled.request.manifestDigest !== report.manifest_digest ||
+      assembled.request.snapshotDigest !== report.snapshot_digest
+    ) {
+      return errorEnvelope(
+        command,
+        'RUNTIME.SCHEMA_MISMATCH',
+        'review prepare-stage blocked: Manifest/snapshot binding changed during assembly',
+      );
+    }
+    const fact: VNextStageReviewPreparation = {
+      schema_version: 2,
+      stage_id: stage,
+      manifest_digest: report.manifest_digest,
+      plan_digest: report.plan_digest,
+      gate_receipt_digest: gateTip.digest,
+      snapshot_digest: report.snapshot_digest,
+      review_input_refs: [
+        path.posix.join('.proofloop', 'manifests', `${stage}.json`),
+        gateTip.ref,
+        ...(report.review.latest !== null ? [report.review.latest.ref] : []),
+      ].sort(),
+      prepared_at: new Date().toISOString(),
+    };
+    const persisted = persistVNextStageReviewPreparation(root, fact);
+    const data = projectReviewPrepareData(report);
+    data.preparation_ref = persisted.ref;
+    data.preparation_digest = persisted.digest;
+    return okEnvelopeWithRefs(command, data, [
+      { ref: persisted.ref, digest: persisted.digest },
+    ]);
   } catch (error) {
     const code = error instanceof Error && typeof (error as unknown as { code?: unknown }).code === 'string'
       ? (error as unknown as { code: string }).code

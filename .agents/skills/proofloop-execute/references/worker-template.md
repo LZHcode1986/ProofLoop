@@ -31,13 +31,14 @@ contract_mode: vnext-template
 mode: implement-task | recover-task | finalize-slice | repair
 stage_id: <stage-id>
 slice_id: <slice-id>
-task_id: <single-current-task-id | null for finalize-slice>
+task_id: <single-current-task-id | null for finalize-slice | repair>
 project_root: <canonical-trust-root>
 manifest_path: .proofloop/manifests/<stage-id>.json
 manifest_digest: <sha256>
 plan_digest: <sha256>
 context_ref: .proofloop/context/<context-digest>.json
 context_digest: <sha256>
+repairs_cv_receipt_digest: <sha256> # 仅 mode: repair；taskless Context 携带
 snapshot_digest: <sha256>
 evidence_path: delivery/stages/<stage-id>/evidence/<slice-id>.md
 plan_projection_path: delivery/stages/<stage-id>/tasks.md
@@ -90,8 +91,10 @@ host_relay:
   Plan/Manifest，必须 fail closed 并返回 bounded blocker，不得继续或自行修复 Plan；
 - Worker 不写 Receipt、Current CV Status、Gate verdict，不提交 Git；
 - `finalize-slice` 只更新 Current Slice Evidence，不能修改实现或 checkbox；
-- repair 只能修复 CV 指定的 bounded failure；repair 派发必须要求加载
-  `diagnose` 技能（复现 → 根因隔离 → bounded 修复 → 验证）。
+- repair 是 taskless 派发：无 `task_id/task_ref`，packet/Context 携带
+  `repairs_cv_receipt_digest`（当前 CV_REPAIR receipt digest）；只能修复 CV
+  指定的 bounded failure；repair 派发必须要求加载 `diagnose` 技能（复现 →
+  根因隔离 → bounded 修复 → 验证）。
 
 ## 完成回传与 Runtime 路由
 
@@ -99,7 +102,13 @@ Worker 的完整 Result 传输优先使用 Herdr Link：Brain 发送 Task messag
 本 Contract 只补充以下路由边界：
 - `implement-task`、`recover-task` 的完整 Result 读取后，Brain 重读持久化事实，再交给 `stage admit-worker`；
 - `finalize-slice` 的 `READY_FOR_CV` 只表示 Slice 证据可供 CV，不能按普通 `TASK_COMPLETE` 接纳；
-- `repair`、`diagnose` 的 Result 只能进入 fresh CV recheck。当前 Runtime 不接受 `mode: repair` 的 `stage admit-worker` 请求，禁止把 repair 伪装成 `implement-task` 或 `recover-task`；
+- `repair` 的 Result 是持久化交接事实而非 `TASK_COMPLETE`：envelope 为
+  `mode='repair'`，此时 `repairsCvReceiptDigest` 必填（等于当前 CV_REPAIR
+  receipt digest）、`taskId` 免填；该 envelope 不进入 `stage admit-worker`
+  （Runtime 显式拒绝），由 `stage next` 校验 envelope 绑定后置
+  `PENDING_RECHECK` 并触发 fresh bounded CV recheck；`diagnose` 的 Result
+  同样只进入 fresh CV recheck。禁止把 repair 伪装成 `implement-task` 或
+  `recover-task`；
 - Link `reply_to`、`status: sent`、Herdr lifecycle、模型总结和工作区 diff 都不是 Receipt 或完成授权；Brain 必须重读 durable facts。显式 legacy route 才使用 ACP/READY/`recent-unwrapped`，且缺少完整 Result 时 fail closed。
 ## Task Evidence 书写规范
 
@@ -116,7 +125,9 @@ Worker 的完整 Result 传输优先使用 Herdr Link：Brain 发送 Task messag
 
 ```text
 implement-task / recover-task → TASK_COMPLETE 或结构化 blocker
-finalize-slice / repair → READY_FOR_CV 或结构化 blocker
+finalize-slice / repair → READY_FOR_CV 或结构化 blocker（repair envelope 为
+  `mode='repair'` + `repairsCvReceiptDigest`：持久化交接事实，不经
+  `stage admit-worker` 接纳）
 ```
 
 结构化 blocker 必须包含 `route_code`、`subtype`、`reason`、

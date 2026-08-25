@@ -70,6 +70,14 @@ export type VNextResponsibleRole =
 export const VNEXT_WORKER_COMPLETION_MODES = ['implement-task', 'recover-task', 'finalize-slice'] as const;
 export type VNextWorkerCompletionMode = (typeof VNEXT_WORKER_COMPLETION_MODES)[number];
 
+/**
+ * Closed dispatch vocabulary: the completion modes above plus the repair
+ * handoff mode. A repair dispatch never produces a TASK_COMPLETE fact — its
+ * result envelope is consumed by the CV recheck projection instead.
+ */
+export const VNEXT_WORKER_DISPATCH_MODES = [...VNEXT_WORKER_COMPLETION_MODES, 'repair'] as const;
+export type VNextWorkerDispatchMode = (typeof VNEXT_WORKER_DISPATCH_MODES)[number];
+
 export interface VNextAdmissionAuthority {
   readonly stagePlan: VNextStagePlanReceipt;
   readonly spv: VNextSpvPassReceipt;
@@ -81,21 +89,14 @@ export interface VNextWorkerScope {
   readonly forbidden_paths: readonly string[];
 }
 
-export interface VNextWorkerContext {
+/** Fields shared by every Worker Context regardless of dispatch mode. */
+export interface VNextWorkerContextBase {
   readonly schema_version: 2;
   readonly root_path: string;
   readonly root_digest: string;
   readonly stage_id: string;
   readonly slice_id: string;
-  readonly task_id: string;
-  readonly task_ref: string;
   readonly slice_goal_ref: string;
-  /**
-   * The persisted dispatch-mode binding of this Context. Admission requires
-   * the Worker result mode to equal this value, so a recover-task Context can
-   * never be admitted under the implement-task narrative (S08-E-T07 §Recovery).
-   */
-  readonly mode: VNextWorkerCompletionMode;
   readonly proof_index: {
     readonly goal_ref: string;
     readonly task_refs: readonly string[];
@@ -119,13 +120,41 @@ export interface VNextWorkerContext {
   readonly scope: VNextWorkerScope;
 }
 
+/** Task-anchored Context: implement/recover results complete exactly one Task. */
+export interface VNextTaskWorkerContext extends VNextWorkerContextBase {
+  readonly mode: 'implement-task' | 'recover-task';
+  readonly task_id: string;
+  readonly task_ref: string;
+}
+
+/** Taskless finalize Context: closes a Slice, so it must not carry a task anchor. */
+export interface VNextFinalizeWorkerContext extends VNextWorkerContextBase {
+  readonly mode: 'finalize-slice';
+}
+
+/**
+ * Repair Context (mode='repair'): a taskless handoff for closing a CV_REPAIR
+ * verdict. It binds the CV_REPAIR Receipt digest it repairs; its result is
+ * never admitted as TASK_COMPLETE — the CV recheck consumes it.
+ */
+export interface VNextRepairWorkerContext extends VNextWorkerContextBase {
+  readonly mode: 'repair';
+  readonly repairs_cv_receipt_digest: string;
+}
+
+/** Discriminated by `mode`: the machine contract of the real Context shapes. */
+export type VNextWorkerContext =
+  | VNextTaskWorkerContext
+  | VNextFinalizeWorkerContext
+  | VNextRepairWorkerContext;
+
 export interface VNextWorkerDispatch {
   readonly action: 'DISPATCH_WORKER';
   readonly responsible_role: 'worker';
   readonly stage_id: string;
   readonly slice_id: string;
   readonly task_id?: string;
-  readonly mode: VNextWorkerCompletionMode;
+  readonly mode: VNextWorkerDispatchMode;
   readonly context_ref: string;
   readonly manifest_digest: string;
   readonly plan_digest: string;
@@ -372,12 +401,18 @@ export interface ProjectVNextWorkerDispatchInput {
   /** Existing vNext TASK_COMPLETE facts; completed tasks are not dispatched again. */
   readonly completedTaskIds?: readonly string[];
   /**
-   * Explicit dispatch completion mode. Defaults to `implement-task`; the
-   * execution next consumer passes `recover-task` when the Task checkbox is
-   * already checked in the worktree (already-produced implementation
-   * evidence without an admitted TASK_COMPLETE fact).
+   * Explicit dispatch mode. Defaults to `implement-task`; the execution next
+   * consumer passes `recover-task` when the Task checkbox is already checked
+   * in the worktree (already-produced implementation evidence without an
+   * admitted TASK_COMPLETE fact) and `repair` after a CV_REPAIR verdict.
    */
-  readonly mode?: VNextWorkerCompletionMode;
+  readonly mode?: VNextWorkerDispatchMode;
+  /**
+   * Repair dispatches only: the digest of the CV_REPAIR Receipt this repair
+   * closes. Bound into the repair Context so the resulting envelope can be
+   * matched to exactly one outstanding CV verdict.
+   */
+  readonly repairsCvReceiptDigest?: string;
   /** Explicit current Slice selected from persisted execution facts. */
   readonly sliceId?: string;
   /**

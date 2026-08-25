@@ -19,6 +19,7 @@ import type {
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import { readGitHead, resolveGitRoot } from '../git-source';
 import { readReceiptCategory } from '../receipt-reader';
+import { VNextHandoffError } from './errors';
 import { tasksReceiptDir } from '../receipt-layout';
 import { runReceiptAdmission } from '../admit-pipeline';
 import type {
@@ -463,6 +464,15 @@ function taskBinding(
     };
   }
 
+  // Task-anchored results require a task-anchored Context; repair envelopes
+  // never reach admission and fail closed if one ever does.
+  if (context.mode !== 'implement-task' && context.mode !== 'recover-task') {
+    throw new VNextHandoffError(
+      'admission-invalid',
+      `Context mode "${context.mode}" cannot anchor a Task`,
+    );
+  }
+
   const taskId = context.task_id;
   const taskRefIds = slice.proof_index.task_refs.filter((refId) => {
     const descriptor = manifest.reference_index[refId];
@@ -560,8 +570,12 @@ function readAndValidateContext(
   }
 
   if (context.mode === 'finalize-slice') {
-    if (context.task_id !== undefined) mismatch('finalize-slice Context must not carry a task_id');
-    if (context.task_ref !== undefined) mismatch('finalize-slice Context must not carry a task_ref');
+    if ('task_id' in context) mismatch('finalize-slice Context must not carry a task_id');
+    if ('task_ref' in context) mismatch('finalize-slice Context must not carry a task_ref');
+  } else if (context.mode === 'repair') {
+    // Repair results never reach admission; a smuggled repair binding fails
+    // closed instead of being guessed as a completion fact.
+    mismatch('repair results are not admissible completion facts');
   } else {
     requireString(context.task_id, 'Context.task_id');
     requireString(context.task_ref, 'Context.task_ref');
@@ -610,6 +624,17 @@ function assertContextTaskBinding(
   context: VNextWorkerContext,
   task: TaskBinding,
 ): void {
+  // Mode-correlated Context narrowing: the Context shape must follow the
+  // result mode (task-anchored vs taskless). Repair never reaches admission.
+  if (envelope.mode === 'finalize-slice') {
+    if (context.mode !== 'finalize-slice') {
+      mismatch('finalize-slice result requires a finalize-slice Context');
+      return;
+    }
+  } else if (context.mode !== 'implement-task' && context.mode !== 'recover-task') {
+    mismatch(`Context mode "${context.mode}" cannot anchor a Task`);
+    return;
+  }
   const expectedProofIndex = {
     goal_ref: task.slice.proof_index.goal_ref,
     task_refs: [...task.slice.proof_index.task_refs],
@@ -630,7 +655,7 @@ function assertContextTaskBinding(
   if (context.proof_index_digest !== computeDigest(task.slice.proof_index)) {
     mismatch('Context proof_index_digest does not match the admitted Proof Index');
   }
-  if (envelope.mode !== 'finalize-slice') {
+  if (context.mode !== 'finalize-slice') {
     const contextScope = canonicalScope(root, context.execution_scope);
     if (!sameValue(contextScope, task.executionScope)) {
       mismatch('Context execution_scope does not match the immutable Manifest task scope');
@@ -676,7 +701,7 @@ function assertContextTaskBinding(
       mismatch('Worker result taskId does not match the admitted task entity');
     }
   } else {
-    if (context.task_id !== undefined || context.task_ref !== undefined) {
+    if ('task_id' in context || 'task_ref' in context) {
       mismatch('Context task binding must be absent for finalize-slice mode');
     }
     if (envelope.taskId !== undefined) {
@@ -1958,12 +1983,20 @@ export function admitVNextWorkerResult(
     return rejected(`vNext Worker outcome "${envelope.outcome}" is not admissible; no Receipt is written`);
   }
   // S08-E-T07 §Recovery: implement-task and recover-task are the only closed
-  // completion modes with a persisted Context mode binding. recover-task is a
-  // consistency recheck of already-produced implementation evidence; repair /
-  // finalize-slice have no vNext persisted mode binding yet and
-  // therefore fail closed instead of being guessed from the legacy state
-  // machine. A recover-task result is never a CV verdict and never an
-  // implement-task narrative.
+  // completion modes with a task-anchored Context binding; recover-task is a
+  // consistency recheck of already-produced implementation evidence and
+  // never a CV verdict or an implement-task narrative. finalize-slice is the
+  // taskless Slice-closure completion.
+  // Closed REPAIR loop: a repair envelope is a persisted handoff fact consumed
+  // by the CV recheck projection (stage next flips the REPAIR slice to
+  // PENDING_RECHECK). It is never an admissible completion claim — no Receipt,
+  // no checkbox, no CV verdict.
+  if (envelope.mode === 'repair') {
+    return rejected(
+      `vNext Worker mode "repair" results are not admissible via stage admit-worker; ` +
+      `the repair envelope closes CV_REPAIR ${envelope.repairsCvReceiptDigest ?? '<missing>'} and is consumed by the fresh CV recheck`,
+    );
+  }
   if (
     envelope.mode !== 'implement-task' &&
     envelope.mode !== 'recover-task' &&

@@ -198,6 +198,10 @@ npm exec -- vitest run test/proofloop-plan-process-consistency.spec.ts
 node packages/runtime/dist/cli/proofloop.js plan materialize --help
 ```
 
+适用范围注记：以上 `npm test`/vitest 命令仅存在于本实施仓库；Windows 模板仓库
+（远端 v2 分支）刻意不包含任何测试资产。同步流程文件到模板仓库时，不得假设
+模板可执行这些验证命令。
+
 验证必须以文件和结构化输出为事实；重启本身不能替代上述 fixture test。
 
 ## Runtime CLI pointer

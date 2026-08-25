@@ -127,7 +127,7 @@ host_relay:
 
 ### Result envelope
 
-无论 transport route 如何，正文必须使用当前 `VNextWorkerResultEnvelope` 的闭集字段：`schemaVersion`、`actionToken`、`stageId`、`sliceId`、`taskId`、`mode`、`outcome`、`evidenceRef`、`changedFiles`、`verificationRuns`、`manifestDigest`、`planDigest`、`proofIndexDigest`、`snapshotDigest`、`contextRef`、`contextDigest`。
+无论 transport route 如何，正文必须使用当前 `VNextWorkerResultEnvelope` 的闭集字段：`schemaVersion`、`actionToken`、`stageId`、`sliceId`、`taskId`、`mode`、`outcome`、`evidenceRef`、`changedFiles`、`verificationRuns`、`manifestDigest`、`planDigest`、`proofIndexDigest`、`snapshotDigest`、`contextRef`、`contextDigest`，以及仅 `mode='repair'` 时允许出现的 `repairsCvReceiptDigest`（64hex，非 repair mode 禁止携带）。
 - `outcome: completed` 是 Worker envelope 字段；Runtime admission 才形成 `TASK_COMPLETE`，Worker 不伪造 Receipt。
 - `actionToken`、digest、`evidenceRef` 和 `changedFiles` 是候选事实；Brain 必须重读 Evidence、tasks.md、Context、Git HEAD/diff 和相关 Receipts。
 - 不得把 Herdr lifecycle、模型叙事或 `git diff` 单独解释为完成，也不得加入 Runtime-owned Receipt、Manifest、Context 或状态字段。
@@ -155,7 +155,7 @@ Runtime DISPATCH_WORKER
 | pane/Session 丢失，但已有代码、Evidence 或 tasks projection | 保留现有 diff，重新读取 Runtime 事实并走 `recover-task`/`recheck`；不得用 `implement-task` 重做 |
 | Herdr 重启 | 使用稳定的 Herdr session restore；恢复后重新校验 action、Context digest、Git/Evidence 和结果块 |
 | 超时、`unknown` 或结果块无法解析 | 先读取 agent 状态、持久化制品和 Git diff；返回 blocker 或 recovery route，不盲目重发 prompt |
-| CV `REPAIR` | 使用同一 Worker Session 和 `mode: repair`；repair 后由 Runtime 发起 fresh bounded CV recheck |
+| CV `REPAIR` | 使用同一 Worker Session 和 `mode: repair`（taskless，携带 `repairs_cv_receipt_digest`）；repair envelope 不进 admit-worker，经 `stage next` 校验绑定置 `PENDING_RECHECK` 后，由 Runtime 发起 fresh bounded CV recheck |
 | canonical CV `PASS` | 仅以 Runtime CV PASS Receipt 为关闭条件，随后释放/关闭对应 harness |
 
 Herdr 不可用时，迁移期允许在创建显式新/recovery Session 时选择另一个 **Herdr 管理的** harness（例如 `agent_kind: pi`），或选择 `transport: subagent` 兼容路由；两者都不是静默 fallback。已有成果、未决 action 或未接纳 diff 存在时，任何切换都必须走 recovery/recheck，不得静默重派实现 Task。`subagent` 路由仍需产出同一 Worker Result Contract，并由其 host adapter 做等价校验。

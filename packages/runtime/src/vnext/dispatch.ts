@@ -26,12 +26,12 @@ import { credentialSchemaVersionMismatch } from './cv-validation';
 import { VNextHandoffError } from './errors';
 export { VNextHandoffError } from './errors';
 import type { VNextSliceLocalBindingExpectation } from './cv-validation';
-import { VNEXT_WORKER_COMPLETION_MODES } from './types';
+import { VNEXT_WORKER_DISPATCH_MODES } from './types';
 import type {
   ProjectVNextWorkerDispatchInput,
   VNextAdmissionAuthority,
-  VNextWorkerCompletionMode,
   VNextWorkerContext,
+  VNextWorkerDispatchMode,
   VNextWorkerDispatch,
 } from './types';
 import type { VNextDependencyBinding } from '@proofloop/kernel/dist/vnext';
@@ -309,6 +309,88 @@ export function verifyVNextWorkerContextBindings(
   if (typeof context.snapshot_digest !== 'string' || !/^[a-f0-9]{40}$/.test(context.snapshot_digest)) {
     fail('snapshot-binding', 'Context snapshot_digest must be a canonical Git HEAD digest');
   }
+  // Common Slice / Proof Index / artifact-path binding verification shared by
+  // every Context mode.
+  const { slice, evidencePath, planProjectionPath } = verifyCommonSliceBindings(root, manifest, context);
+  // ── Mode-specific anchor/scope verification. Taskless Contexts
+  // (finalize-slice / repair) must never carry a task anchor, and a repair
+  // never carries a mutable Plan projection permission.
+  if (context.mode === 'finalize-slice' || context.mode === 'repair') {
+    if ('task_id' in context || 'task_ref' in context) {
+      fail('task-anchor-gap', `${context.mode} Context must not carry a task anchor`);
+    }
+    const systemForbiddenPaths = ['.proofloop/manifests', '.proofloop/receipts', '.proofloop/context', '.git']
+      .map((value) => assertRootPath(root, value, 'system forbidden scope path'));
+    if (context.mode === 'repair') {
+      // Repair binds the exact CV_REPAIR Receipt it closes and owns the union
+      // of the Slice's admitted implementation scopes.
+      if (!/^[a-f0-9]{64}$/.test(context.repairs_cv_receipt_digest)) {
+        fail('manifest-binding', 'repair Context repairs_cv_receipt_digest must bind its CV_REPAIR Receipt');
+      }
+      const unionCode = new Set<string>();
+      const unionTest = new Set<string>();
+      for (const refId of slice.proof_index.task_refs) {
+        const descriptor = manifest.reference_index[refId];
+        const id = descriptor === undefined ? undefined : entityId(descriptor.ref);
+        if (id === undefined) continue;
+        const scopeBinding = manifest.task_scopes[id];
+        const scope = scopeBinding === undefined ? undefined : scopeBinding.execution_scope;
+        if (scope === undefined || scope.kind !== 'implementation') continue;
+        for (const value of scope.code_paths) unionCode.add(value);
+        for (const value of scope.test_paths) unionTest.add(value);
+      }
+      if (unionCode.size === 0 || unionTest.size === 0) {
+        fail('execution-scope-gap', `Slice "${slice.slice_id}" has no implementation scope union to verify a repair Context`);
+      }
+      const codePaths = [...unionCode].sort().map((value) => assertRootPath(root, value, 'execution_scope.code_paths path'));
+      const testPaths = [...unionTest].sort().map((value) => assertRootPath(root, value, 'execution_scope.test_paths path'));
+      const allowedCodeScope = uniquePaths([...codePaths, ...testPaths]);
+      const allowedPaths = uniquePaths([...allowedCodeScope, evidencePath]);
+      if (JSON.stringify(context.execution_scope) !== JSON.stringify({
+        kind: 'implementation',
+        code_paths: codePaths,
+        test_paths: testPaths,
+        forbidden_paths: [],
+      })) {
+        fail('execution-scope-gap', 'repair Context execution_scope is not the Slice implementation scope union');
+      }
+      if (JSON.stringify(context.allowed_code_scope) !== JSON.stringify(allowedCodeScope)) {
+        fail('execution-scope-gap', 'repair Context allowed_code_scope is not the exact union scope');
+      }
+      if (JSON.stringify(context.scope.allowed_paths) !== JSON.stringify(allowedPaths)) {
+        fail('execution-scope-gap', 'repair Context scope.allowed_paths is not the exact admitted scope');
+      }
+      if (JSON.stringify(context.scope.mutable_projection_paths) !== JSON.stringify([])) {
+        fail('execution-scope-gap', 'repair Context must not carry a mutable Plan projection permission');
+      }
+      if (JSON.stringify(context.scope.forbidden_paths) !== JSON.stringify(uniquePaths(systemForbiddenPaths))) {
+        fail('execution-scope-gap', 'repair Context scope.forbidden_paths does not match the Manifest scope');
+      }
+      return;
+    }
+    // finalize-slice: evidence-only scope plus the Plan projection permission.
+    if (JSON.stringify(context.execution_scope) !== JSON.stringify({
+      kind: 'evidence-only',
+      code_paths: [],
+      test_paths: [],
+      forbidden_paths: [],
+    })) {
+      fail('execution-scope-gap', 'finalize-slice Context execution_scope must be evidence-only');
+    }
+    if (JSON.stringify(context.allowed_code_scope) !== JSON.stringify([])) {
+      fail('execution-scope-gap', 'finalize-slice Context must not carry code scope');
+    }
+    if (JSON.stringify(context.scope.allowed_paths) !== JSON.stringify(uniquePaths([evidencePath, planProjectionPath]))) {
+      fail('execution-scope-gap', 'finalize-slice Context scope.allowed_paths is not the exact admitted scope');
+    }
+    if (JSON.stringify(context.scope.mutable_projection_paths) !== JSON.stringify([planProjectionPath])) {
+      fail('execution-scope-gap', 'finalize-slice Context scope.mutable_projection_paths is not exactly the Plan projection');
+    }
+    if (JSON.stringify(context.scope.forbidden_paths) !== JSON.stringify(uniquePaths(systemForbiddenPaths))) {
+      fail('execution-scope-gap', 'finalize-slice Context scope.forbidden_paths does not match the Manifest scope');
+    }
+    return;
+  }
   // Task entity resolution: the projected task_ref must be a registered task
   // reference whose root-bound entity id equals the projected task_id.
   const taskDescriptor = Object.values(manifest.reference_index).find(
@@ -330,6 +412,56 @@ export function verifyVNextWorkerContextBindings(
   if (resolvedTask.fileDigest !== taskDescriptor.file_digest || resolvedTask.sectionDigest !== taskDescriptor.section_digest) {
     fail('reference-digest-mismatch', 'Context task_ref digests do not match the admitted Manifest binding');
   }
+  // Execution scope / allowed code scope / worker scope must be the exact
+  // root-bound projection of the admitted Manifest task scope.
+  const taskScopeBinding = manifest.task_scopes[context.task_id];
+  if (taskScopeBinding === undefined || taskScopeBinding.task_ref !== context.task_ref) {
+    fail('execution-scope-gap', 'Context task_id is not bound to an admitted Manifest task scope');
+  }
+  const executionScope = taskScopeBinding.execution_scope;
+  if (executionScope.kind !== 'implementation') {
+    fail('execution-scope-gap', `Context task "${context.task_id}" has "${executionScope.kind}" scope and cannot be dispatched as implement-task`);
+  }
+  const codePaths = executionScope.code_paths.map((value) => assertRootPath(root, value, 'execution_scope.code_paths path'));
+  const testPaths = executionScope.test_paths.map((value) => assertRootPath(root, value, 'execution_scope.test_paths path'));
+  const declaredForbiddenPaths = executionScope.forbidden_paths.map((value) => assertRootPath(root, value, 'execution_scope.forbidden_paths path'));
+  const systemForbiddenPaths = ['.proofloop/manifests', '.proofloop/receipts', '.proofloop/context', '.git']
+    .map((value) => assertRootPath(root, value, 'system forbidden scope path'));
+  const forbiddenPaths = uniquePaths([...declaredForbiddenPaths, ...systemForbiddenPaths]);
+  const allowedCodeScope = uniquePaths([...codePaths, ...testPaths]);
+  const allowedPaths = uniquePaths([...allowedCodeScope, evidencePath, planProjectionPath]);
+  if (JSON.stringify(context.execution_scope) !== JSON.stringify({
+    kind: executionScope.kind,
+    code_paths: codePaths,
+    test_paths: testPaths,
+    forbidden_paths: declaredForbiddenPaths,
+  })) {
+    fail('execution-scope-gap', 'Context execution_scope does not match the Manifest task scope');
+  }
+  if (JSON.stringify(context.allowed_code_scope) !== JSON.stringify(allowedCodeScope)) {
+    fail('execution-scope-gap', 'Context allowed_code_scope is not the exact code/test scope');
+  }
+  if (JSON.stringify(context.scope.allowed_paths) !== JSON.stringify(allowedPaths)) {
+    fail('execution-scope-gap', 'Context scope.allowed_paths is not the exact admitted scope');
+  }
+  if (JSON.stringify(context.scope.mutable_projection_paths) !== JSON.stringify([planProjectionPath])) {
+    fail('execution-scope-gap', 'Context scope.mutable_projection_paths is not exactly the Plan projection');
+  }
+  if (JSON.stringify(context.scope.forbidden_paths) !== JSON.stringify(forbiddenPaths)) {
+    fail('execution-scope-gap', 'Context scope.forbidden_paths does not match the Manifest scope');
+  }
+}
+
+/**
+ * Slice / goal entity resolution plus Proof Index, skills and artifact-path
+ * binding checks shared by every Context mode. Returns the resolved values
+ * the mode-specific scope verifications compare against.
+ */
+function verifyCommonSliceBindings(
+  root: string,
+  manifest: VNextManifest,
+  context: VNextWorkerContext,
+): { slice: VNextManifest['slices'][number]; evidencePath: string; planProjectionPath: string } {
   // Slice / goal entity resolution.
   const slice = manifest.slices.find((candidate) => candidate.slice_id === context.slice_id);
   if (slice === undefined) {
@@ -378,44 +510,7 @@ export function verifyVNextWorkerContextBindings(
   if (planProjectionPath !== manifest.plan.ref) {
     fail('manifest-binding', 'Context plan_projection_path does not match Manifest.plan.ref');
   }
-  // Execution scope / allowed code scope / worker scope must be the exact
-  // root-bound projection of the admitted Manifest task scope.
-  const taskScopeBinding = manifest.task_scopes[context.task_id];
-  if (taskScopeBinding === undefined || taskScopeBinding.task_ref !== context.task_ref) {
-    fail('execution-scope-gap', 'Context task_id is not bound to an admitted Manifest task scope');
-  }
-  const executionScope = taskScopeBinding.execution_scope;
-  if (executionScope.kind !== 'implementation') {
-    fail('execution-scope-gap', `Context task "${context.task_id}" has "${executionScope.kind}" scope and cannot be dispatched as implement-task`);
-  }
-  const codePaths = executionScope.code_paths.map((value) => assertRootPath(root, value, 'execution_scope.code_paths path'));
-  const testPaths = executionScope.test_paths.map((value) => assertRootPath(root, value, 'execution_scope.test_paths path'));
-  const declaredForbiddenPaths = executionScope.forbidden_paths.map((value) => assertRootPath(root, value, 'execution_scope.forbidden_paths path'));
-  const systemForbiddenPaths = ['.proofloop/manifests', '.proofloop/receipts', '.proofloop/context', '.git']
-    .map((value) => assertRootPath(root, value, 'system forbidden scope path'));
-  const forbiddenPaths = uniquePaths([...declaredForbiddenPaths, ...systemForbiddenPaths]);
-  const allowedCodeScope = uniquePaths([...codePaths, ...testPaths]);
-  const allowedPaths = uniquePaths([...allowedCodeScope, evidencePath, planProjectionPath]);
-  if (JSON.stringify(context.execution_scope) !== JSON.stringify({
-    kind: executionScope.kind,
-    code_paths: codePaths,
-    test_paths: testPaths,
-    forbidden_paths: declaredForbiddenPaths,
-  })) {
-    fail('execution-scope-gap', 'Context execution_scope does not match the Manifest task scope');
-  }
-  if (JSON.stringify(context.allowed_code_scope) !== JSON.stringify(allowedCodeScope)) {
-    fail('execution-scope-gap', 'Context allowed_code_scope is not the exact code/test scope');
-  }
-  if (JSON.stringify(context.scope.allowed_paths) !== JSON.stringify(allowedPaths)) {
-    fail('execution-scope-gap', 'Context scope.allowed_paths is not the exact admitted scope');
-  }
-  if (JSON.stringify(context.scope.mutable_projection_paths) !== JSON.stringify([planProjectionPath])) {
-    fail('execution-scope-gap', 'Context scope.mutable_projection_paths is not exactly the Plan projection');
-  }
-  if (JSON.stringify(context.scope.forbidden_paths) !== JSON.stringify(forbiddenPaths)) {
-    fail('execution-scope-gap', 'Context scope.forbidden_paths does not match the Manifest scope');
-  }
+  return { slice, evidencePath, planProjectionPath };
 }
 
 function assertAuthority(
@@ -468,12 +563,12 @@ export function projectVNextWorkerDispatch(
   if (input.manifestDigest !== actualManifestDigest) {
     fail('manifest-binding', 'manifest_digest does not match the admitted v2 Manifest');
   }
-  const dispatchMode: VNextWorkerCompletionMode = input.mode ?? 'implement-task';
-  if (!(VNEXT_WORKER_COMPLETION_MODES as readonly string[]).includes(dispatchMode)) {
+  const dispatchMode: VNextWorkerDispatchMode = input.mode ?? 'implement-task';
+  if (!(VNEXT_WORKER_DISPATCH_MODES as readonly string[]).includes(dispatchMode)) {
     fail(
       'manifest-binding',
-      `Worker dispatch mode "${dispatchMode}" is outside the closed completion vocabulary ` +
-      `(${VNEXT_WORKER_COMPLETION_MODES.join(', ')})`,
+      `Worker dispatch mode "${dispatchMode}" is outside the closed dispatch vocabulary ` +
+      `(${VNEXT_WORKER_DISPATCH_MODES.join(', ')})`,
     );
   }
 
@@ -506,8 +601,42 @@ export function projectVNextWorkerDispatch(
     forbidden_paths: [],
   };
 
-  if (dispatchMode === 'finalize-slice') {
-    // finalize-slice has no task anchor or implementation scope
+  // Repair dispatches bind the exact CV_REPAIR Receipt they close; the repair
+  // scope is the union of the Slice's admitted implementation scopes so the
+  // repairer can touch every implementation path the CV verdict covers.
+  const repairsCvReceiptDigest =
+    dispatchMode === 'repair' ? input.repairsCvReceiptDigest : undefined;
+  if (dispatchMode === 'repair') {
+    if (typeof repairsCvReceiptDigest !== 'string' || !/^[a-f0-9]{64}$/.test(repairsCvReceiptDigest)) {
+      fail(
+        'manifest-binding',
+        'repair dispatch requires the digest of the CV_REPAIR Receipt being repaired',
+      );
+    }
+    const codePaths = new Set<string>();
+    const testPaths = new Set<string>();
+    for (const refId of slice.proof_index.task_refs) {
+      const descriptor = manifest.reference_index[refId];
+      const id = descriptor === undefined ? undefined : entityId(descriptor.ref);
+      if (id === undefined) continue;
+      const scopeBinding = manifest.task_scopes[id];
+      const scope = scopeBinding === undefined ? undefined : scopeBinding.execution_scope;
+      if (scope === undefined || scope.kind !== 'implementation') continue;
+      for (const value of scope.code_paths) codePaths.add(value);
+      for (const value of scope.test_paths) testPaths.add(value);
+    }
+    if (codePaths.size === 0 || testPaths.size === 0) {
+      fail('execution-scope-gap', `Slice "${slice.slice_id}" has no implementation scope union to dispatch as repair`);
+    }
+    executionScope = {
+      kind: 'implementation',
+      code_paths: [...codePaths].sort(),
+      test_paths: [...testPaths].sort(),
+      forbidden_paths: [],
+    };
+  }
+
+  if (dispatchMode === 'finalize-slice' || dispatchMode === 'repair') {
     taskId = undefined;
     taskDescriptor = undefined;
   } else {
@@ -579,7 +708,9 @@ export function projectVNextWorkerDispatch(
   // Plan projection and Evidence are separate mutable/artifact permissions and
   // must never be smuggled into production code scope.
   const allowedCodeScope = uniquePaths([...codePaths, ...testPaths]);
-  const mutableProjectionPaths = [planProjectionPath];
+  // A repair mutates implementation code only; it never edits the Plan
+  // projection (its result is not admitted, so no checkbox may move).
+  const mutableProjectionPaths = dispatchMode === 'repair' ? [] : [planProjectionPath];
   const nonProjectionAllowedPaths = uniquePaths([...allowedCodeScope, evidencePath]);
   const scopeAllowedPaths = uniquePaths([
     ...nonProjectionAllowedPaths,
@@ -618,6 +749,7 @@ export function projectVNextWorkerDispatch(
     ...(taskDescriptor?.ref !== undefined ? { task_ref: taskDescriptor.ref } : {}),
     slice_goal_ref: slice.proof_index.goal_ref,
     mode: dispatchMode,
+    ...(repairsCvReceiptDigest !== undefined ? { repairs_cv_receipt_digest: repairsCvReceiptDigest } : {}),
     proof_index: {
       goal_ref: slice.proof_index.goal_ref,
       task_refs: [...slice.proof_index.task_refs],

@@ -196,11 +196,19 @@ export type {
   VNextStagePlanReceipt,
 } from '@proofloop/kernel';
 
-export { VNEXT_NEXT_ACTIONS, VNEXT_WORKER_COMPLETION_MODES } from './types';
+export {
+  VNEXT_NEXT_ACTIONS,
+  VNEXT_WORKER_COMPLETION_MODES,
+  VNEXT_WORKER_DISPATCH_MODES,
+} from './types';
 export type {
   VNextNextAction,
   VNextResponsibleRole,
   VNextWorkerCompletionMode,
+  VNextWorkerDispatchMode,
+  VNextTaskWorkerContext,
+  VNextFinalizeWorkerContext,
+  VNextRepairWorkerContext,
 } from './types';
 
 // vNext Code Verifier schema and admission seam.  The consumer is isolated
@@ -334,10 +342,12 @@ export {
   admitVNextStageReview,
   assembleVNextStageReviewRequest,
   validateVNextStageReviewRequest,
+  readVNextStageReviewStatus,
 } from './review-admission';
 export type {
   VNextReviewAdmissionDependencies,
   VNextStageReviewAdmissionRequest,
+  VNextStageReviewStatusReport,
 } from './review-admission';
 export {
   VNEXT_REVIEW_SCHEMA_VERSION,
@@ -385,3 +395,14 @@ export type {
   VNextStageCloseAdmissionState,
   VNextStageCloseResult,
 } from './types';
+// D2/P0-2: vNext Stage Review preparation facts（digest-addressed，非 Receipt、
+// 不入 chain；主线 Row-12 PREPARE/FINALIZE 分裂的读侧消费点）。
+export {
+  persistVNextStageReviewPreparation,
+  readVNextStageReviewPreparedFacts,
+  VNEXT_STAGE_REVIEW_PREPARATION_SCHEMA_VERSION,
+} from './review-preparation';
+export type {
+  VNextStageReviewPreparation,
+  VNextStageReviewPreparedBinding,
+} from './review-preparation';

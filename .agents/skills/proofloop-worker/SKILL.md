@@ -36,8 +36,8 @@ Worker 收到 `contract_mode: vnext-template` packet 后，Host 按以下顺序�
 - 先写 Evidence，再更新 checkbox；不得写 Runtime-owned `## Current CV Status`。
 - 不写 Receipt、Manifest、Context、Gate/Review verdict，不提交 Git。
 - `repair`/`diagnose` 只修复已接纳 CV 结果指定的 failure family（失败问题族），并
-  按当前 repair history 执行 bounded repair（有界修复）；修复后返回 `READY_FOR_CV`，
-  不把它当作 `TASK_COMPLETE`。
+  按当前 repair history 执行 bounded repair（有界修复）；修复后返回 envelope
+  `mode='repair'`（持久化交接事实），不把它当作 `TASK_COMPLETE`。
 
 ## 结果模式和 Runtime 路由
 
@@ -46,7 +46,13 @@ Worker 收到 `contract_mode: vnext-template` packet 后，Host 按以下顺序�
 | `implement-task` | `TASK_COMPLETE` 候选 | 重读事实后提交 `stage admit-worker` |
 | `recover-task` | `TASK_COMPLETE` 候选 | 重读事实后提交 `stage admit-worker` |
 | `finalize-slice` | `READY_FOR_CV` 候选 | 由 Runtime 计算 CV action；不能按普通 Task 接纳 |
-| `repair` / `diagnose` | `READY_FOR_CV` 候选 | fresh CV recheck（新的 CV 复核）；当前 Runtime 不把 `repair` 送入 `stage admit-worker` |
+| `repair` / `diagnose` | envelope `mode='repair'`（持久化交接事实，非 `TASK_COMPLETE`） | 不进入 `stage admit-worker`（Runtime 显式拒绝）；`stage next` 校验 envelope 绑定后置 `PENDING_RECHECK` → `RUN_CV` fresh recheck |
+
+envelope `mode='repair'` 语义：repair 结果是持久化交接事实而非
+`TASK_COMPLETE`；`mode='repair'` 时 `repairsCvReceiptDigest` 必填（64hex，
+等于当前 CV_REPAIR receipt digest）、`taskId` 免填；不得调用
+`stage admit-worker` 提交 repair envelope——Runtime 在 admission 处显式拒绝，
+repair 由 `stage next` 绑定校验消费后触发 fresh bounded CV recheck。
 
 `PROOFLOOP-WORKER-READY` 仅是 legacy ACP route 的兼容唤醒头。Herdr Link route 使用 `reply_to` 关联完整 Result；任何 route 中，`result_available` 都是不受信任提示，不能替代 Result、Evidence、Git/diff 或 Runtime Receipt。
 
@@ -64,7 +70,7 @@ Worker 必须先完成代码、测试、Evidence 和允许的 Plan projection，
 4. Brain 收到回复后校验 `reply_to`、`actionToken`、digest 和闭集字段，重读 Evidence、Context、tasks projection、Git/diff 和 Receipts，再交给适用的 Runtime/CV consumer。
 5. Worker Result 缺失、截断、重复、错目标、错 `reply_to`、错 action 或 schema 无效时 fail closed；不得由 `idle`、`done`、模型总结或 Git diff 补全。
 
-结果正文仍使用当前字段：`schemaVersion`、`actionToken`、`stageId`、`sliceId`、`taskId`、`mode`、`outcome`、`evidenceRef`、`changedFiles`、`verificationRuns`、`manifestDigest`、`planDigest`、`proofIndexDigest`、`snapshotDigest`、`contextRef`、`contextDigest`。未知别名或自由扩展字段必须拒绝。
+结果正文仍使用当前字段：`schemaVersion`、`actionToken`、`stageId`、`sliceId`、`taskId`、`mode`、`outcome`、`evidenceRef`、`changedFiles`、`verificationRuns`、`manifestDigest`、`planDigest`、`proofIndexDigest`、`snapshotDigest`、`contextRef`、`contextDigest`，以及仅 `mode='repair'` 时允许出现的 `repairsCvReceiptDigest`（64hex，非 repair mode 禁止携带）。未知别名或自由扩展字段必须拒绝。
 
 ### Legacy Herdr route
 
@@ -87,8 +93,9 @@ Herdr Skill/CLI 仍用于 pane 创建/布局、Agent 启动/恢复、identity/li
   可对同一 Session 请求一次有界的结果补发，但不能伪造 Result。
 - Result 与当前 `actionToken`、Session、Context digest 或 snapshot 不匹配：记录
   stale/mismatch，按 recovery route 处理。
-- `repair` 结果不能伪装成 `implement-task`/`recover-task`；它直接触发 fresh CV
-  recheck，除非当前 Runtime Contract 明确新增了 repair consumer。
+- `repair` 结果不能伪装成 `implement-task`/`recover-task`；它是持久化交接事实，
+  由 `stage next` 校验 envelope 绑定（含 `repairsCvReceiptDigest`）后置
+  `PENDING_RECHECK` 并触发 fresh CV recheck，不经 `stage admit-worker` 接纳。
 
 ## 完成标准
 
