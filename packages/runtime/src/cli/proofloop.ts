@@ -33,6 +33,7 @@ import { collectReviewParams, runReview } from './proofloop-review';
 import { collectProjectParams, runProjectDomain } from './proofloop-project';
 import { collectRecoveryParams, runRecoveryDomain } from './proofloop-recovery';
 import { runCutoverDomain } from './proofloop-cutover';
+import { runBoundaryDomain } from './proofloop-boundary';
 import {
   CANONICAL_DOMAINS,
   CLI_EXIT,
@@ -312,6 +313,16 @@ export function proofloopCli(
     const envelope = runCutoverDomain(root, command, requestValidation.request);
     emitEnvelope(envelope);
     return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
+  }
+  // S11: boundary is the public deterministic Git adapter. It owns only
+  // mechanical status/index/stage/commit/post-commit checks; Brain still owns
+  // boundary selection and all recovery decisions.
+  if (domain === 'boundary') {
+    const envelope = runBoundaryDomain(root, command, requestValidation.request);
+    emitEnvelope(envelope);
+    return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
+      ? CLI_EXIT.USAGE
+      : envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
   }
 
   // The closed operation is known but has no handler yet (later Slices).

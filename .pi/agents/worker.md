@@ -3,7 +3,7 @@ description: Worker — implements exactly one Task per dispatch, writes Evidenc
 tools: read, edit, write, bash, grep, find, ls
 extensions: false
 skills: test-driven-development, diagnose, proofloop-worker
-model: opencode/deepseek-v4-flash-free
+model: openai-codex/gpt-5.6-luna
 thinking: max
 prompt_mode: replace
 inherit_context: false
@@ -27,17 +27,9 @@ validate the Worker Contract:
 .agents/skills/proofloop-execute/references/worker-template.md
 ```
 
-For `transport: herdr`, the Host relay additionally loads
-`.agents/skills/herdr/SKILL.md` and
-`.agents/skills/proofloop-execute/references/herdr-worker-template.md`. The
-shared Skill's visible Result → callback → lifecycle wait → bounded read order
-is mandatory; a `PROOFLOOP-WORKER-READY` callback without a readable complete
-Result block is `WORKER_RESULT_MISSING`.
+For `transport: herdr-link` or explicit `herdr-legacy`, the Host relay additionally loads `.agents/skills/herdr/SKILL.md` and `.agents/skills/proofloop-execute/references/herdr-worker-template.md`. In the Link route, send one strict Result payload to Brain through `herdr_link_send` with `reply_to` set to the dispatch message id; do not use raw Herdr CLI, `--wait`, pane reads or terminal input for ordinary messages. The legacy route alone uses ACP/READY/`recent-unwrapped` compatibility rules. A missing or mismatched Result is `WORKER_RESULT_MISSING` and must fail closed.
 
-Brain owns the Worker session relay for this mode. Runtime remains the owner of
-admission, Receipt writing and completion judgment. The vNext template takes
-precedence over legacy-only packet fields; do not request Brain to reconstruct
-missing fields from the old Executor Contract.
+Brain owns the Worker session relay for this mode. Runtime remains the owner of admission, Receipt writing and completion judgment. The vNext template takes precedence over legacy-only packet fields; do not request Brain to reconstruct missing fields from the old Executor Contract.
 
 For this mode, the supplied vNext Context is the authority for the current
 dispatch scope. It must include the root-bound `plan_projection_path`,

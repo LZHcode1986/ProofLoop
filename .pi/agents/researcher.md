@@ -3,7 +3,7 @@ description: Researcher — external technical solution research.
 tools: read, grep, find, ls, ext:pi-web-access/web_search, ext:pi-web-access/source_check, ext:pi-web-access/fetch_content, ext:pi-web-access/get_search_content
 extensions: pi-web-access
 skills: false
-model: opencode-go/deepseek-v4-flash
+model: openai-codex/gpt-5.6-luna
 thinking: max
 prompt_mode: replace
 inherit_context: false

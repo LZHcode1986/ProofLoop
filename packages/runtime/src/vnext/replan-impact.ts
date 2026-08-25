@@ -2,7 +2,21 @@
  * S14-A-T01 — Runtime replan impact classifier.
  *
  * Mechanical before/after Manifest/Task contract + dependency closure
- * classification. The classifier derives every derived set itself
+ * classification over the CLOSED four-state impact scope (整改方案 §8.1):
+ *
+ *   - task-local      changed Task + same-slice successors + downstream
+ *                     closure; completed Tasks strictly before the change
+ *                     point with an identical contract digest carry forward;
+ *   - slice-wide      PRECISE: target Slices + transitive downstream Slices
+ *                     only — never the whole Stage by default; completed
+ *                     Tasks outside the affected region carry forward;
+ *   - stage-wide      Stage Contract change or a global Authority change
+ *                     that cannot be attributed to Slices invalidates every
+ *                     execution fact of the current Stage;
+ *   - unresolved      unprovable dependency closure fails closed, never
+ *                     guessed as task-local.
+ *
+ * The classifier derives every derived set itself
  * (changed/carry_forward/invalidated) — caller-supplied derived facts are
  * structurally impossible (HP-021 forbidden shortcut). See
  * tech-spec/ai-coding-architecture.md §10.10 and
@@ -11,7 +25,13 @@
 import { computeDigest } from '@proofloop/kernel';
 import type { VNextExecutionScope } from '@proofloop/kernel';
 
-export type ReplanImpactScope = 'task-local' | 'slice-wide' | 'unresolved';
+/** Closed four-state impact scope (整改方案 §8.1): task-local / slice-wide /
+ *  stage-wide / unresolved. `stage-wide` re-establishes every execution fact
+ *  of the current Stage; `slice-wide` is PRECISE — only the target Slices and
+ *  their transitive downstream Slices are invalidated, never the whole Stage
+ *  by default; `unresolved` fails closed when the dependency closure cannot
+ *  be proven. */
+export type ReplanImpactScope = 'task-local' | 'slice-wide' | 'stage-wide' | 'unresolved';
 
 export type ReplanExecutionScopeInput = VNextExecutionScope;
 
@@ -618,6 +638,114 @@ function computeCarryForward(
   return carry;
 }
 
+/** Transitive downstream Slices of the target Slices (§8.1 slice-wide):
+ *  every Slice that depends on a target Slice directly or transitively,
+ *  over the merged previous+candidate dependency graph. The graph is
+ *  acyclic by construction (the caller has already proven a topological
+ *  order), so reverse reachability always terminates. */
+function computeDownstreamSlices(
+  targetSliceIds: readonly string[],
+  previous: ReplanPlanSnapshotInput,
+  candidate: ReplanPlanSnapshotInput,
+): Set<string> {
+  const dependents = new Map<string, string[]>();
+  for (const snap of [previous, candidate]) {
+    for (const s of snap.slices) {
+      const list = dependents.get(s.slice_id) ?? [];
+      for (const d of s.depends_on) if (!list.includes(d)) list.push(d);
+      dependents.set(s.slice_id, list);
+    }
+  }
+  // Reverse adjacency: dependency slice → slices that depend on it.
+  const reverse = new Map<string, string[]>();
+  for (const [sliceId, deps] of dependents) {
+    for (const d of deps) {
+      const list = reverse.get(d) ?? [];
+      if (!list.includes(sliceId)) list.push(sliceId);
+      reverse.set(d, list);
+    }
+  }
+  const downstream = new Set<string>();
+  const queue = [...targetSliceIds];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const dependent of reverse.get(current) ?? []) {
+      if (!downstream.has(dependent)) {
+        downstream.add(dependent);
+        queue.push(dependent);
+      }
+    }
+  }
+  return downstream;
+}
+
+/** Task ids bound by the given Slices across BOTH snapshots (a removed
+ *  Slice's Tasks are still part of the invalidation report). */
+function taskIdsOfSlices(
+  sliceIds: ReadonlySet<string>,
+  previous: ReplanPlanSnapshotInput,
+  candidate: ReplanPlanSnapshotInput,
+): string[] {
+  const ids = new Set<string>();
+  for (const snap of [previous, candidate]) {
+    for (const s of snap.slices) {
+      if (!sliceIds.has(s.slice_id)) continue;
+      for (const taskId of s.task_ids) ids.add(taskId);
+    }
+  }
+  return [...ids].sort();
+}
+
+/** Carry-forward rule for PRECISE slice-wide dispositions (§8.2): completed
+ *  Tasks outside the invalidated region whose contract digest is unchanged
+ *  keep their accepted facts (A/B=CURRENT in the acceptance example). */
+function computeCarryForwardOutsideInvalidated(
+  completedTaskIds: readonly string[],
+  invalidated: ReadonlySet<string>,
+  prevDigests: ReadonlyMap<string, string>,
+  candDigests: ReadonlyMap<string, string>,
+): string[] {
+  const carry: string[] = [];
+  for (const taskId of uniqueSorted(completedTaskIds)) {
+    if (invalidated.has(taskId)) continue;
+    if (!candDigests.has(taskId)) continue; // removed from the candidate plan
+    if (prevDigests.get(taskId) !== candDigests.get(taskId)) continue; // contract changed
+    carry.push(taskId);
+  }
+  return carry;
+}
+
+/** ref id → set of Slices that reference it (proof index or Task refs)
+ *  across both snapshots — the attribution basis for authority changes. */
+function buildRefOwnerSlices(
+  previous: ReplanPlanSnapshotInput,
+  candidate: ReplanPlanSnapshotInput,
+): Map<string, Set<string>> {
+  const owners = new Map<string, Set<string>>();
+  const add = (refId: string, sliceId: string): void => {
+    if (!owners.has(refId)) owners.set(refId, new Set());
+    owners.get(refId)!.add(sliceId);
+  };
+  for (const snap of [previous, candidate]) {
+    for (const s of snap.slices) {
+      add(s.proof_index.goal_ref, s.slice_id);
+      for (const ref of [
+        ...s.proof_index.task_refs,
+        ...s.proof_index.acceptance_refs,
+        ...s.proof_index.seam_refs,
+        ...s.proof_index.oracle_refs,
+        ...s.proof_index.risk_refs.map((r: ReplanRiskBindingInput) => r.ref_id),
+      ]) {
+        add(ref, s.slice_id);
+      }
+    }
+    for (const t of snap.tasks) {
+      for (const ref of t.refs) add(ref, t.slice_id);
+    }
+  }
+  return owners;
+}
+
 export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanImpactDisposition {
   validateInput(input);
 
@@ -640,15 +768,38 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
   const candTaskDigests = new Map(cand.tasks.map((t) => [t.task_id, taskContractDigest(t)]));
   const changedTaskIds = computeChangedTaskIds(prevTaskDigests, candTaskDigests);
 
-  const sliceWide = (): ReplanImpactDisposition => {
-    const allTaskIds = uniqueSorted([...prevTaskDigests.keys(), ...candTaskDigests.keys()]);
-    return buildDisposition(input, 'slice-wide', changedTaskIds, [], allTaskIds);
+  // Stage-wide disposition (§8.1): Stage Contract 变化使当前 Stage 全部
+  // execution facts 失效 — nothing carries forward, every Task re-runs.
+  const stageWide = (): ReplanImpactDisposition =>
+    buildDisposition(
+      input,
+      'stage-wide',
+      changedTaskIds,
+      [],
+      uniqueSorted([...prevTaskDigests.keys(), ...candTaskDigests.keys()]),
+    );
+
+  // Precise slice-wide disposition (§8.1/§8.2): ONLY the target Slices and
+  // their transitive downstream Slices are invalidated — never the whole
+  // Stage by default. Completed Tasks outside the affected region with an
+  // unchanged contract digest carry forward (acceptance example:
+  // A/B=CURRENT, C=REPLAN, D=INVALIDATED).
+  const sliceWideOver = (targetSliceIds: ReadonlySet<string>): ReplanImpactDisposition => {
+    const downstream = computeDownstreamSlices([...targetSliceIds], prev, cand);
+    const affected = new Set<string>([...targetSliceIds, ...downstream]);
+    const invalidated = taskIdsOfSlices(affected, prev, cand);
+    const carry = computeCarryForwardOutsideInvalidated(
+      input.completed_task_ids,
+      new Set(invalidated),
+      prevTaskDigests,
+      candTaskDigests,
+    );
+    return buildDisposition(input, 'slice-wide', changedTaskIds, carry, invalidated);
   };
 
   // Stage contract is the top boundary: any change re-establishes the whole
-  // execution boundary (§10.10) — nothing carries forward, every Task is
-  // invalidated.
-  if (prev.stage_contract_digest !== cand.stage_contract_digest) return sliceWide();
+  // Stage execution boundary (§10.10 / §8.1 stage-wide).
+  if (prev.stage_contract_digest !== cand.stage_contract_digest) return stageWide();
 
   // A cyclic Slice dependency graph makes the execution order (and therefore
   // the downstream closure) unprovable: fail closed as unresolved before any
@@ -658,24 +809,43 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
     return buildDisposition(input, 'unresolved', [], [], [], 'CLOSURE_UNPROVABLE');
   }
 
-  // Slice set identity: adding or removing a Slice is a slice-wide change.
   const prevSliceIds = new Set(prev.slices.map((s) => s.slice_id));
   const candSliceIds = new Set(cand.slices.map((s) => s.slice_id));
-  if (prevSliceIds.size !== candSliceIds.size || [...prevSliceIds].some((id) => !candSliceIds.has(id))) {
-    return sliceWide();
-  }
 
-  // Authority reference set identity (§10.10: 权威引用变化 → slice-wide).
+  // Structural boundary targets accumulate into ONE precise slice-wide exit;
+  // a global authority change that cannot be attributed to Slices escalates
+  // to stage-wide immediately (§8.1).
+  const boundaryTargets = new Set<string>();
+
+  // Slice set identity: adding or removing a Slice targets exactly the added/
+  // removed Slices plus their transitive downstream Slices (§8.1: 结构变化可
+  // 局部证明安全时按 slice-wide 精确失效).
+  for (const sliceId of prevSliceIds) if (!candSliceIds.has(sliceId)) boundaryTargets.add(sliceId);
+  for (const sliceId of candSliceIds) if (!prevSliceIds.has(sliceId)) boundaryTargets.add(sliceId);
+
+  // Authority reference SET identity + content attribution (§8.1: 全局
+  // Authority 改变无法归属单个 Slice 时 → stage-wide；归属明确时按所属
+  // Slice 精确 slice-wide).
   const sameSet = (a: readonly string[], b: readonly string[]): boolean => {
     const sa = uniqueSorted(a);
     const sb = uniqueSorted(b);
     return sa.length === sb.length && sa.every((v, i) => v === sb[i]);
   };
-  if (!sameSet(prev.authority_ref_ids, cand.authority_ref_ids)) return sliceWide();
+  const refOwners = buildRefOwnerSlices(prev, cand);
+  if (!sameSet(prev.authority_ref_ids, cand.authority_ref_ids)) {
+    const prevAuth = new Set(prev.authority_ref_ids);
+    const candAuth = new Set(cand.authority_ref_ids);
+    const deltaRefs = [...prevAuth, ...candAuth].filter((id) => !prevAuth.has(id) || !candAuth.has(id));
+    for (const refId of uniqueSorted(deltaRefs)) {
+      const owners = refOwners.get(refId);
+      if (owners === undefined || owners.size === 0) return stageWide();
+      for (const owner of owners) boundaryTargets.add(owner);
+    }
+  }
 
   // Per-Slice proof boundary and structural facts must be identical; a Slice
   // without changed Tasks must also keep its whole Slice contract digest
-  // (§10.10: Slice proof index / 执行范围变化 → slice-wide).
+  // (§10.10: Slice proof index / 执行范围变化 → 该 Slice 及下游 slice-wide).
   const sliceOfTask = new Map<string, string>();
   for (const snap of [prev, cand]) {
     for (const t of snap.tasks) {
@@ -690,16 +860,19 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
   const prevSliceById = new Map(prev.slices.map((s) => [s.slice_id, s]));
   const candSliceById = new Map(cand.slices.map((s) => [s.slice_id, s]));
   for (const sliceId of candSliceIds) {
+    if (!prevSliceIds.has(sliceId)) continue; // handled by the set identity rule
     const ps = prevSliceById.get(sliceId)!;
     const cs = candSliceById.get(sliceId)!;
-    if (proofIndexDigest(ps.proof_index) !== proofIndexDigest(cs.proof_index)) return sliceWide();
-    if (sliceStructuralDigest(ps) !== sliceStructuralDigest(cs)) return sliceWide();
-    if (!changedSlices.has(sliceId) && ps.slice_contract_digest !== cs.slice_contract_digest) return sliceWide();
+    if (proofIndexDigest(ps.proof_index) !== proofIndexDigest(cs.proof_index)) boundaryTargets.add(sliceId);
+    else if (sliceStructuralDigest(ps) !== sliceStructuralDigest(cs)) boundaryTargets.add(sliceId);
+    else if (!changedSlices.has(sliceId) && ps.slice_contract_digest !== cs.slice_contract_digest) boundaryTargets.add(sliceId);
   }
 
-  // Reference binding attribution: authority content changes are slice-wide
-  // unless every changed binding belongs to a changed Task (§10.10: 权威引用
-  // 变化 → slice-wide; the replanned Task's own entity re-render is expected).
+  // Reference binding attribution: an authority CONTENT change outside the
+  // changed Tasks is slice-wide when attributable to Slices, and stage-wide
+  // when no Slice references it (global authority, §8.1); the replanned
+  // Task's own entity re-render is expected and absorbed by the Task-level
+  // closure.
   const prevBindings = new Map(
     Object.entries(prev.reference_index).map(([refId, desc]) => [refId, referenceBindingDigest(desc)] as const),
   );
@@ -716,7 +889,29 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
         if (changedTaskIds.includes(t.task_id)) for (const ref of t.refs) ownedByChanged.add(ref);
       }
     }
-    if ([...bindingDelta].some((refId) => !ownedByChanged.has(refId))) return sliceWide();
+    for (const refId of [...bindingDelta].sort()) {
+      if (ownedByChanged.has(refId)) continue;
+      const owners = refOwners.get(refId);
+      if (owners === undefined || owners.size === 0) return stageWide();
+      for (const owner of owners) boundaryTargets.add(owner);
+    }
+  }
+
+  if (boundaryTargets.size > 0) {
+    // §8.1: an Authority/binding-only change (NO Task contract root) whose
+    // affected Slice closure already covers EVERY declared Slice leaves no
+    // slice-local remainder — the whole Stage re-establishes, so the honest
+    // classification is stage-wide: empty changed root, nothing carried
+    // forward, the full declared Stage task set invalidated. Genuinely
+    // PARTIAL regions stay slice-wide (and keep requiring a non-empty
+    // changed root at admission time).
+    if (changedTaskIds.length === 0) {
+      const downstreamOfTargets = computeDownstreamSlices([...boundaryTargets], prev, cand);
+      const affected = new Set<string>([...boundaryTargets, ...downstreamOfTargets]);
+      const declaredSlices = new Set<string>([...prevSliceIds, ...candSliceIds]);
+      if ([...declaredSlices].every((sliceId) => affected.has(sliceId))) return stageWide();
+    }
+    return sliceWideOver(boundaryTargets);
   }
 
   if (changedTaskIds.length === 0) {
@@ -746,7 +941,17 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
     // a dependency cycle): fail closed, never guess task-local.
     return buildDisposition(input, 'unresolved', [], [], [], 'CLOSURE_UNPROVABLE');
   }
-  if (changedTaskIds.some((taskId) => !closure.has(taskId))) return sliceWide();
+  if (changedTaskIds.some((taskId) => !closure.has(taskId))) {
+    // Independent change roots cannot be proven local: the precise slice-wide
+    // region covers every changed Task's Slice plus its downstream Slices.
+    const roots = new Set<string>();
+    for (const taskId of changedTaskIds) {
+      const sliceId = sliceOfTask.get(taskId);
+      if (sliceId === undefined) return buildDisposition(input, 'unresolved', [], [], [], 'CLOSURE_UNPROVABLE');
+      roots.add(sliceId);
+    }
+    return sliceWideOver(roots);
+  }
 
   const invalidated = [...closure].sort();
   const carry = computeCarryForward(

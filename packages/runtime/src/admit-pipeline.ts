@@ -2352,7 +2352,7 @@ function vNextReceiptAdmissionBindingError(
     ? [
         { field: 'stage_id', required: false },
         { field: 'slice_id', required: false },
-        { field: 'task_id', required: true },
+        { field: 'task_id', required: false },
         { field: 'mode', required: true },
         { field: 'outcome', required: true },
         { field: 'manifest_digest', required: true },
@@ -2445,6 +2445,16 @@ function vNextReceiptAdmissionBindingError(
       required,
     );
     if (fieldError !== null) return fieldError;
+  }
+  // S13-S17 remediation §6.4: task_id mirrors the state binding (absent only
+  // for the finalize-slice step); every Task completion credential must carry
+  // its Manifest task identity.
+  if (
+    action === 'TASK_COMPLETE' &&
+    payload.mode !== 'finalize-slice' &&
+    !hasOwn(payload, 'task_id')
+  ) {
+    return 'TASK_COMPLETE payload.task_id is required unless mode is finalize-slice';
   }
   if (action === 'SLICE_COMMIT' && payload.type !== 'SLICE_COMMIT_RESULT') {
     return `${action} payload.type must be SLICE_COMMIT_RESULT`;

@@ -458,7 +458,7 @@ fail closed。
 |---|---|---|
 | `packages/kernel/src/vnext/bindings.ts`（新增） | 三级指纹 canonicalization + digest + closed validators（唯一 oracle） | 状态派生、admission 决策 |
 | `packages/runtime/src/vnext/binding-currentness.ts`（新增） | isIntegratedSliceCurrent、Task/Slice 历史 proof 对当前 Replan epoch 的有效性 | 语义依赖推断 |
-| `packages/runtime/src/vnext/replan-impact.ts`（新增） | 比较前后 Plan/Task contract，机械判定 `task-local` / `slice-wide` 与 invalidation closure | 接受 Agent 自报影响等级、修改 Receipt |
+| `packages/runtime/src/vnext/replan-impact.ts`（新增） | 比较前后 Plan/Task contract，机械判定 `task-local` / 精确 `slice-wide` / `stage-wide` 与 invalidation closure | 接受 Agent 自报影响等级、修改 Receipt |
 | `packages/runtime/src/vnext/replan-epoch.ts`（新增） | append-only Replan epoch、父 epoch 链、carry-forward/invalidated Task 集合与当前 epoch 读取 | 覆盖旧 Receipt、静默迁移历史事实 |
 | `packages/runtime/src/vnext/evidence-rotation.ts`（新增，内部 Runtime seam） | `mode: replan` 的全量预检、旧 Evidence archive、canonical skeleton rotation、journal/CAS/rollback/restart recovery | 计算 impact、修改 Receipt、接受 Agent 提供的 Evidence binding |
 | `packages/runtime/src/cli/refresh-vnext-slice-evidence.ts` | 现有 `plan refresh-evidence` adapter；转发 `refresh/recover/rollback/replan` closed request 并投影 bounded result | 直接写 Evidence、计算 disposition、绕过 epoch authority |
@@ -488,7 +488,7 @@ fail closed。
 | ADR-021 | Phase 1 边界 | 不切换 tasks.md changed_files 行为（仅预留字段） | 串行阶段零行为漂移；Phase 2 再切换 | confirmed |
 | ADR-022 | validate 豁免范围 | 仅"已受理且当前有效"的 Slice 豁免；其余 fail-closed | 不掩盖真实失效 | confirmed |
 | ADR-023 | 首个 slice-local 真实 Stage | S12 保持 legacy 过渡；S13 起 candidate input 显式传 `binding_mode: "slice-local"`，并由 Materializer → candidate adapter → Compiler 完整传递 | 首次真实 Stage 验证三层绑定、v3 凭证与 replan currentness；不得绕过 public plan compile | confirmed（用户决策 A） |
-| ADR-024 | Replan 影响范围分级 | Runtime 根据前后 Task contract 与依赖闭包区分 `task-local` 与 `slice-wide`；不接受 Agent 自报等级 | 边界未变的此前 `TASK_COMPLETE` 可保留；当前/受影响 Task 必须重做；无法证明时 fail-closed | confirmed（用户 2026-08-17） |
+| ADR-024 | Replan 影响范围分级 | Runtime 根据前后 Task contract 与依赖闭包区分 `task-local`、精确 `slice-wide`（目标 Slice + transitive downstream）与 `stage-wide`（整改方案 §8.1 四态闭集）；不接受 Agent 自报等级 | 边界未变的此前 `TASK_COMPLETE` 可保留；当前/受影响 Task 必须重做；无法证明时 fail-closed | confirmed（用户 2026-08-17） |
 | ADR-025 | Replan epoch 与 Stage Gate/Review | 同一 Stage/Slice 通过 append-only epoch 建立新的当前 Plan/SPV/admission；旧 Receipt 保留为历史；每个新 epoch 重新 Gate/Review | 不覆盖/删除旧 Receipt；Gate/Review 只绑定当前 epoch；未受影响成果只能作为当前证明链的继承来源 | confirmed（用户 2026-08-17） |
 | ADR-026 | 永久 Replan 与 slice-local CV 边界 | 将 post-admission Replan/Evidence rotation 与 slice-local CV v3 admission 拆为两个独立 Runtime seam；复用现有 public operation set，不新增 CLI/ReceiptType；外层 CLI envelope 与 nested credential schema 分离 | Replan 可独立 fail-closed/回滚；所有 slice-local CV 都必须经过 v3 route、Stage/path binding、独立 oracle 与 source/dist/public parity；S14/S13 都必须使用该永久能力 | confirmed（用户 2026-08-18） |
 
@@ -498,10 +498,16 @@ fail closed。
 
 #### 术语与权威
 
-- `task-local`：变更只影响当前 Task 及其后续 Tasks；此前已接纳且 Task contract 未变的
-  Task 成果可以继承。
-- `slice-wide`：变更影响此前 Task 的目标、验收含义、证明边界、依赖或执行范围；整个
-  Slice 重新建立执行边界，旧成果不再作为当前授权。
+- `task-local`：变更只影响当前 Task、same-slice successors 及其 downstream closure；
+  变化点之前已接纳且 Task contract 未变的 Task 成果可以继承。
+- `slice-wide`（精确）：Slice proof index / Slice dependency / Slice contract / 执行边界
+  变化，或可归属到具体 Slice 的权威引用变化；失效范围 = 目标 Slice + transitive downstream
+  Slices，受影响区域之外的已完成 Task 可 carry forward。绝不默认扩大为整个 Stage。
+- `stage-wide`：Stage contract 变化，或全局 Authority 改变且无法归属任何单个 Slice
+  （含 Slice set 结构变化无法局部证明安全的情形）；当前 Stage 全部 execution facts 失效，
+  无任何 carry forward。
+- `unresolved`：依赖闭包无法证明时 fail-closed（`REPLAN.IMPACT_UNRESOLVED`），不得猜测
+  降级为 `task-local`。
 - `replan_epoch`：同一 Stage/Slice 内一次被 Runtime 接纳的 Plan/Manifest/SPV/执行状态
   版本。epoch 是 append-only current authority，不是可编辑的状态字段；当前 epoch 由
   Runtime 从经过校验的 epoch Receipt 链派生。
@@ -514,8 +520,12 @@ fail closed。
   refs/dependencies/required_skills/execution_scope 规范化投影。
 - 只有当 Stage contract 未变、Slice 前置 Task contract 未变、变更集合是当前 Task 与其
   后续依赖闭包时，才可判定 `task-local`。
-- 任何前置 Task contract、Slice proof index、Stage contract、权威引用或执行范围变化，均
-  判定为 `slice-wide`；无法完整证明影响范围时 fail-closed，不猜测为 local。
+- Stage contract 变化判定为 `stage-wide`；Slice proof index / dependency / contract /
+  执行范围变化及可归属的权威引用变化判定为精确 `slice-wide`（目标 Slice + transitive
+  downstream Slices）；全局 Authority 改变且无法归属单个 Slice 时升级为 `stage-wide`；
+  无法完整证明影响范围时 fail-closed 为 `unresolved`，不猜测为 local。
+- 验收基准（整改方案 §8.2）：Slice A/B 与 C 无依赖且已完成，修改 C Proof Index 后
+  A/B=CURRENT（carry forward）、C=REPLAN、D(依赖 C)=INVALIDATED，而不是全 Stage 失效。
 - `task-local` 的 `carry_forward_task_ids` 只能来自变更集合之前、contract digest 完全匹配
   且已有合法 `TASK_COMPLETE` 的 Task；当前被 replan 的 Task 及其受影响后续 Task 必须重做。
 
@@ -563,7 +573,7 @@ Slice-local CV oracle：nested CV_RESULT 的 v3 credential 必须包含并匹配
 停新动作
 → 读取 current epoch
 → 编译候选 Plan/Manifest
-→ Runtime 判定 task-local 或 slice-wide
+→ Runtime 判定 task-local / 精确 slice-wide / stage-wide
 → Runtime 建立 Evidence/epoch replan disposition
 → final clean Git boundary
 → fresh SPV

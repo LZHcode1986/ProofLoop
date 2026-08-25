@@ -4,19 +4,20 @@
 
 ## Host relay 选择
 
-Worker 的目标 Host 由 Brain/dispatch routing 在 Session 创建时确定。Stage 同时支持两种显式 transport；默认迁移路线为 Herdr：
-
+Worker 的目标 Host 由 Brain/dispatch routing 在 Session 创建时确定。当前通信优先使用 Herdr Link；没有 Link Adapter 时只能显式选择 legacy Herdr 或 subagent：
 ```yaml
 host_relay:
-  transport: herdr | subagent
+  transport: herdr-link | herdr-legacy | subagent
   profile_ref: herdr-worker | subagent-worker
-  agent_kind: agy # 仅 transport: herdr；默认值
+  agent_kind: agy # Herdr route only
+  result_transport: herdr-link-message-reply # legacy: inline-acp-prompt
 ```
 
 - `host_relay` 是一次性派发元数据，不属于 Manifest、Context、Evidence、Receipt 或 Runtime Result Contract。
-- `transport: herdr` 时，Brain/adapter 使用固定加载链：`.agents/skills/herdr/SKILL.md`（通用 Herdr 控制面）→ `.agents/skills/proofloop-worker/SKILL.md`（跨 harness Worker 行为）→ 本模板（跨 harness Worker 业务 Contract）→ `references/herdr-worker-template.md`（Herdr relay 映射）。底层 Herdr CLI 参数、Handle/ID 规则和 lifecycle 命令由 Herdr Skill 维护，本模板不重复定义。
-- `transport: subagent` 时，Brain/host 使用现有 harness-native Worker wrapper；只加载本模板及该 harness 的 Worker wrapper，不加载 Herdr CLI 控制面。该路由是迁移兼容路径，不是 Herdr 失败后的隐式 fallback。
-- `agent_kind` 只适用于 `transport: herdr`：`agy` 为本 Stage 默认 harness，`pi` 表示 Herdr 启动独立 Pi harness，不是 `pi-subagents` 扩展。`transport: subagent` 使用 harness 原生 Worker 目标。
+- `transport: herdr-link` 时，Brain/adapter 使用 `.agents/skills/herdr/SKILL.md` 的 lifecycle 控制、`.agents/skills/proofloop-worker/SKILL.md` 的 Link Result 规则和 `references/herdr-worker-template.md` 的 Session 映射；普通消息使用 `herdr_link_send`/`reply_to`，不使用 raw Herdr CLI。
+- `transport: herdr-legacy` 仅用于没有 Link Adapter 的显式兼容路线，保留 ACP/READY/`recent-unwrapped` 约束；不能与 Link 静默混用。
+- `transport: subagent` 使用现有 harness-native Worker wrapper；该路由是显式迁移兼容路径，不是 Herdr 失败后的隐式 fallback。
+- `agent_kind` 只适用于 Herdr route；`agy` 为默认 harness，`pi` 表示 Herdr 启动独立 Pi harness，不是 `pi-subagents` 扩展。
 - 同一 Worker Session 的相邻 Task、`finalize-slice` 和 CV repair/recheck 必须保持同一 transport、Session 和 harness binding；切换只能在新 Session 或显式 recovery route 中发生。
 
 ## 派发数据包
@@ -59,9 +60,9 @@ forbidden_scope: []
 stop_conditions: []
 expected_result: TASK_COMPLETE | READY_FOR_CV
 host_relay:
-  transport: herdr | subagent
+  transport: herdr-link | herdr-legacy | subagent
   profile_ref: herdr-worker | subagent-worker
-  agent_kind: agy # transport: herdr only
+  agent_kind: agy # Herdr route only
   # worker_session_ref is ephemeral and never persisted
 ```
 
@@ -94,19 +95,12 @@ host_relay:
 
 ## 完成回传与 Runtime 路由
 
-Worker 的完整结果输出、回调时序和 Herdr `idle`/`done` 后读取规则由
-`.agents/skills/proofloop-worker/SKILL.md` 定义；本 Contract 只补充以下路由边界：
-
-- `implement-task`、`recover-task` 的完整 Result 读取后，Brain 重读持久化事实，再
-  交给 `stage admit-worker`；
-- `finalize-slice` 的 `READY_FOR_CV` 只表示 Slice 证据可供 CV，不能按普通
-  `TASK_COMPLETE` 接纳；
-- `repair`、`diagnose` 的 Result 只能进入 fresh CV recheck。当前 Runtime 不接受
-  `mode: repair` 的 `stage admit-worker` 请求，禁止把 repair 伪装成
-  `implement-task` 或 `recover-task`；
-- callback、`result_available: true`、Herdr lifecycle、模型总结和工作区 diff 都
-  不是 Receipt 或完成授权；缺少可解析 Result block 时 fail closed。
-
+Worker 的完整 Result 传输优先使用 Herdr Link：Brain 发送 Task message，Worker 以 `reply_to` 返回严格 Result；`.agents/skills/proofloop-worker/SKILL.md` 规定 Link route、显式 legacy route 和失败关闭规则。
+本 Contract 只补充以下路由边界：
+- `implement-task`、`recover-task` 的完整 Result 读取后，Brain 重读持久化事实，再交给 `stage admit-worker`；
+- `finalize-slice` 的 `READY_FOR_CV` 只表示 Slice 证据可供 CV，不能按普通 `TASK_COMPLETE` 接纳；
+- `repair`、`diagnose` 的 Result 只能进入 fresh CV recheck。当前 Runtime 不接受 `mode: repair` 的 `stage admit-worker` 请求，禁止把 repair 伪装成 `implement-task` 或 `recover-task`；
+- Link `reply_to`、`status: sent`、Herdr lifecycle、模型总结和工作区 diff 都不是 Receipt 或完成授权；Brain 必须重读 durable facts。显式 legacy route 才使用 ACP/READY/`recent-unwrapped`，且缺少完整 Result 时 fail closed。
 ## Task Evidence 书写规范
 
 - 每个任务的 Task Evidence 小节标题必须为 `### <task_id>`（该任务的

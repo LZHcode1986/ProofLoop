@@ -66,13 +66,16 @@ import {
   readVNextManifest,
   VNextHandoffError,
 } from './dispatch';
-import { readVNextAdmissionAuthority } from './next';
+import { readCurrentVNextAdmissionAuthority } from './replan-epoch';
 import type { VNextAdmissionAuthority } from './types';
+import { stageTailSchemaMismatch } from './types';
 import {
   VNEXT_REVIEW_ACTION,
   VNEXT_REVIEW_RESULT_TYPE,
   VNEXT_REVIEW_SCHEMA_VERSION,
   VNEXT_REVIEW_VERDICTS,
+  VNEXT_GATE_SCHEMA_VERSION,
+  VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS,
 } from './types';
 import type {
   VNextReviewAdmissionState,
@@ -487,7 +490,8 @@ function validateClosedGateRecord(
   ) {
     return `${label}.verification_source must be "receipts" or "git_facts" when present`;
   }
-  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  const gateSchemaMismatch = stageTailSchemaMismatch(value.schema_version, 'GATE_RESULT', label);
+  if (gateSchemaMismatch !== null) return gateSchemaMismatch;
   if (value.type !== 'GATE_RESULT') return `${label}.type must be GATE_RESULT`;
   if (value.action !== 'GATE') return `${label}.action must be GATE`;
   if (typeof value.stage_id !== 'string' || !CANONICAL_STAGE_ID.test(value.stage_id)) {
@@ -576,7 +580,8 @@ function validateClosedReviewRecord(
     if (field === 'runtime_proof_digest') continue;
     if (!hasOwn(value, field)) return `${label}.${field} is required`;
   }
-  if (value.schema_version !== 2) return `${label}.schema_version must be 2`;
+  const reviewSchemaMismatch = stageTailSchemaMismatch(value.schema_version, 'STAGE_REVIEW_RESULT', label);
+  if (reviewSchemaMismatch !== null) return reviewSchemaMismatch;
   if (value.type !== 'STAGE_REVIEW_RESULT') return `${label}.type must be STAGE_REVIEW_RESULT`;
   if (value.action !== 'STAGE_REVIEW') return `${label}.action must be STAGE_REVIEW`;
   if (typeof value.stage_id !== 'string' || !CANONICAL_STAGE_ID.test(value.stage_id)) {
@@ -725,7 +730,11 @@ function validateFacts(
 
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, request.stageId);
+    // repair (current-authority parity): the Stage Review consumes the SAME
+    // canonical current-epoch authority reader as dispatch/next, CV, Commit
+    // and Integration — after a replan the active SPV/Stage Plan lives in
+    // the current epoch directory and stale root-level receipts are history.
+    authority = readCurrentVNextAdmissionAuthority(root, request.stageId);
   } catch (error) {
     if (!(error instanceof VNextHandoffError)) throw error;
     fail(
@@ -754,7 +763,12 @@ function validateFacts(
       fail('RUNTIME.SCHEMA_MISMATCH', `stage-gate chain contains ${receipt.type}; expected only GATE_PASS/GATE_FAIL vNext facts`);
     }
     const payload = receipt.payload;
-    if (!isRecord(payload) || payload.schema_version !== 2 || payload.type !== 'GATE_RESULT' || payload.action !== 'GATE') {
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.GATE_RESULT ||
+      payload.type !== 'GATE_RESULT' ||
+      payload.action !== 'GATE'
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'stage-gate chain contains a legacy v1 Gate fact or a vNext Gate fact without the GATE_RESULT/GATE discriminator');
     }
     const gateRecordError = validateClosedGateRecord(
@@ -820,7 +834,12 @@ function validateFacts(
       fail('RUNTIME.SCHEMA_MISMATCH', `stage review chain contains ${receipt.type}; expected only STAGE_REVIEW_PASS vNext facts`);
     }
     const payload = receipt.payload;
-    if (!isRecord(payload) || payload.schema_version !== 2 || payload.type !== 'STAGE_REVIEW_RESULT' || payload.action !== 'STAGE_REVIEW') {
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
+      payload.type !== 'STAGE_REVIEW_RESULT' ||
+      payload.action !== 'STAGE_REVIEW'
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a legacy v1 Review fact or a vNext Review fact without the STAGE_REVIEW_RESULT/STAGE_REVIEW discriminator');
     }
     const reviewRecordError = validateClosedReviewRecord(
@@ -1262,7 +1281,9 @@ export function readVNextStageReviewStatus(
 
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, stageId);
+    // repair (current-authority parity): the read-only Review status seam
+    // binds the SAME canonical current-epoch authority as the admission path.
+    authority = readCurrentVNextAdmissionAuthority(root, stageId);
   } catch (error) {
     if (!(error instanceof VNextHandoffError)) throw error;
     fail(
@@ -1281,7 +1302,12 @@ export function readVNextStageReviewStatus(
       fail('RUNTIME.SCHEMA_MISMATCH', `stage-gate chain contains ${receipt.type}; expected only GATE_PASS/GATE_FAIL vNext facts`);
     }
     const payload = receipt.payload;
-    if (!isRecord(payload) || payload.schema_version !== 2 || payload.type !== 'GATE_RESULT' || payload.action !== 'GATE') {
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.GATE_RESULT ||
+      payload.type !== 'GATE_RESULT' ||
+      payload.action !== 'GATE'
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'stage-gate chain contains a legacy v1 Gate fact or a vNext Gate fact without the GATE_RESULT/GATE discriminator');
     }
     const gateRecordError = validateClosedGateRecord(
@@ -1315,7 +1341,12 @@ export function readVNextStageReviewStatus(
       fail('RUNTIME.SCHEMA_MISMATCH', `stage review chain contains ${receipt.type}; expected only STAGE_REVIEW_PASS vNext facts`);
     }
     const payload = receipt.payload;
-    if (!isRecord(payload) || payload.schema_version !== 2 || payload.type !== 'STAGE_REVIEW_RESULT' || payload.action !== 'STAGE_REVIEW') {
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
+      payload.type !== 'STAGE_REVIEW_RESULT' ||
+      payload.action !== 'STAGE_REVIEW'
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a legacy v1 Review fact or a vNext Review fact without the STAGE_REVIEW_RESULT/STAGE_REVIEW discriminator');
     }
     const reviewRecordError = validateClosedReviewRecord(

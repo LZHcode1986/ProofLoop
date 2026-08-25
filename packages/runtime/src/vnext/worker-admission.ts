@@ -16,18 +16,6 @@ import type {
   VNextExecutionScope,
   VNextManifest,
 } from '@proofloop/kernel';
-// S12-D-T04: the slice-local execution binding digest is computed ONLY
-// through the kernel bindings.ts oracle (`@proofloop/kernel/dist/vnext` — the
-// S12-B forward note: runtime consumes the built subpath surface). The
-// runtime never re-implements hash logic and never accepts caller-supplied
-// digests as computation.
-import {
-  computeExecutionBindingDigest,
-  validateDependencyBinding,
-} from '@proofloop/kernel/dist/vnext';
-import type {
-  VNextDependencyBinding,
-} from '@proofloop/kernel/dist/vnext';
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import { readGitHead, resolveGitRoot } from '../git-source';
 import { readReceiptCategory } from '../receipt-reader';
@@ -40,6 +28,8 @@ import type {
 } from '../admit-pipeline';
 import {
   assertVNextManifestReferenceBindings,
+  computeSliceLocalBindingExpectation,
+  readVNextAdmissionAuthority,
   readVNextManifest,
 } from './dispatch';
 import {
@@ -47,7 +37,9 @@ import {
   credentialSchemaVersionMismatch,
 } from './cv-validation';
 import type { VNextSliceLocalBindingExpectation } from './cv-validation';
-import { assertIgnoredProtectedPaths, readVNextAdmissionAuthority } from './next';
+import { classifyVNextFinalizeLineage, validateVNextInvalidatedFinalizeReceipt } from './finalize-lineage';
+import { assertIgnoredProtectedPaths } from './protected-paths';
+import type { ReplanAncestorDispositionRecord, ReplanDispositionFact } from './replan-epoch';
 import type {
   VNextAdmissionAuthority,
   VNextWorkerContext,
@@ -57,13 +49,17 @@ import {
   validateVNextWorkerResultEnvelope,
 } from '../relay-contract';
 import type { VNextWorkerResultEnvelope } from '../relay-contract';
+import {
+  deriveLineageReceiptExemptions,
+  loadAncestorReplanDispositionRecords,
+  readCurrentEpoch,
+} from './replan-epoch';
 import { VNEXT_WORKER_COMPLETION_MODES } from './types';
 import type { VNextWorkerCompletionMode } from './types';
 import {
   VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL,
   VNEXT_CREDENTIAL_SCHEMA_VERSION_V2,
 } from './types';
-
 export interface VNextWorkerAdmissionDependencies {
   readonly projectRoot: string;
   readonly writer?: ReceiptWriterPort;
@@ -71,9 +67,9 @@ export interface VNextWorkerAdmissionDependencies {
 
 interface TaskBinding {
   readonly slice: VNextManifest['slices'][number];
-  readonly taskId: string;
-  readonly taskRef: string;
-  readonly executionScope: VNextExecutionScope;
+  readonly taskId?: string;
+  readonly taskRef?: string;
+  readonly executionScope?: VNextExecutionScope;
   readonly planPath: string;
   readonly evidencePath: string;
 }
@@ -118,12 +114,19 @@ const WORKER_STATUS_VALUES = new Set([
  * is a planning clean boundary artifact: the Materializer emits candidate
  * projections with the planning-era `NOT_STARTED` spelling, which is exactly
  * the canonical form that normalizePlanExecutionProjection (entity-resolver.ts)
- * normalizes Worker Status rows to. The worktree side is an execution
- * projection and stays on the closed WORKER_STATUS_VALUES set above.
+ * normalizes Worker Status rows to. Replan rotation additionally restores
+ * committed baselines through evidence-refresh renderRestoredPlanProjection,
+ * which emits the Runtime-generated stage/slice spellings `IN_PROGRESS`
+ * (some tasks carry forward) and `COMPLETED` (all tasks carry forward);
+ * those restored spellings are legal on the HEAD side only. The worktree
+ * side is an execution projection and stays on the closed
+ * WORKER_STATUS_VALUES set above.
  */
 const HEAD_WORKER_STATUS_VALUES = new Set([
   ...WORKER_STATUS_VALUES,
   'NOT_STARTED',
+  'IN_PROGRESS',
+  'COMPLETED',
 ]);
 
 const CONTEXT_FIELDS = new Set([
@@ -446,6 +449,20 @@ function taskBinding(
   if (context.stage_id !== envelope.stageId || context.slice_id !== envelope.sliceId) {
     mismatch('Context stage/slice binding does not match the Worker result');
   }
+  const planPath = rootRelativePath(root, manifest.plan.ref, 'Manifest.plan.ref');
+  const evidencePath = rootRelativePath(root, slice.evidence_path, 'Slice Evidence path');
+
+  if (envelope.mode === 'finalize-slice') {
+    if (envelope.taskId !== undefined) {
+      mismatch('Worker result taskId must be absent for finalize-slice mode');
+    }
+    return {
+      slice,
+      planPath,
+      evidencePath,
+    };
+  }
+
   const taskId = context.task_id;
   const taskRefIds = slice.proof_index.task_refs.filter((refId) => {
     const descriptor = manifest.reference_index[refId];
@@ -476,8 +493,6 @@ function taskBinding(
   ) {
     mismatch(`Task ${taskId} has no non-empty implementation code/test scope`);
   }
-  const planPath = rootRelativePath(root, manifest.plan.ref, 'Manifest.plan.ref');
-  const evidencePath = rootRelativePath(root, slice.evidence_path, 'Slice Evidence path');
   return {
     slice,
     taskId,
@@ -544,8 +559,13 @@ function readAndValidateContext(
     mismatch('Context plan_projection_path is not the exact Manifest.plan.ref');
   }
 
-  requireString(context.task_id, 'Context.task_id');
-  requireString(context.task_ref, 'Context.task_ref');
+  if (context.mode === 'finalize-slice') {
+    if (context.task_id !== undefined) mismatch('finalize-slice Context must not carry a task_id');
+    if (context.task_ref !== undefined) mismatch('finalize-slice Context must not carry a task_ref');
+  } else {
+    requireString(context.task_id, 'Context.task_id');
+    requireString(context.task_ref, 'Context.task_ref');
+  }
   requireString(context.slice_goal_ref, 'Context.slice_goal_ref');
   requireStringArray(context.required_skills, 'Context.required_skills');
   requireStringArray(context.allowed_code_scope, 'Context.allowed_code_scope');
@@ -610,54 +630,61 @@ function assertContextTaskBinding(
   if (context.proof_index_digest !== computeDigest(task.slice.proof_index)) {
     mismatch('Context proof_index_digest does not match the admitted Proof Index');
   }
-
-  const contextScope = canonicalScope(root, context.execution_scope);
-  if (!sameValue(contextScope, task.executionScope)) {
-    mismatch('Context execution_scope does not match the immutable Manifest task scope');
-  }
-  const codeScope = unique([...task.executionScope.code_paths, ...task.executionScope.test_paths]);
-  if (!sameValue(context.allowed_code_scope, codeScope)) {
-    mismatch('Context allowed_code_scope is broader than the admitted code/test scope');
-  }
-
-  const planPath = task.planPath;
-  const evidencePath = task.evidencePath;
-  const expectedAllowedPaths = unique([...codeScope, evidencePath, planPath]);
-  const expectedForbiddenPaths = unique([
-    ...task.executionScope.forbidden_paths,
-    ...SYSTEM_FORBIDDEN_PATHS.map((value) => rootRelativePath(root, value, 'system forbidden path')),
-  ]);
-  const workerScope = context.scope;
-  const allowedPaths = requireStringArray(workerScope.allowed_paths, 'Context.scope.allowed_paths')
-    .map((value, index) => rootRelativePath(root, value, `Context.scope.allowed_paths[${index}]`));
-  const mutablePaths = requireStringArray(workerScope.mutable_projection_paths, 'Context.scope.mutable_projection_paths')
-    .map((value, index) => rootRelativePath(root, value, `Context.scope.mutable_projection_paths[${index}]`));
-  const forbiddenPaths = requireStringArray(workerScope.forbidden_paths, 'Context.scope.forbidden_paths')
-    .map((value, index) => rootRelativePath(root, value, `Context.scope.forbidden_paths[${index}]`));
-  if (!sameValue(allowedPaths, expectedAllowedPaths)) {
-    mismatch('Context scope.allowed_paths is broader than the admitted task scope');
-  }
-  if (!sameValue(mutablePaths, [planPath])) {
-    mismatch('Context scope.mutable_projection_paths must contain only Manifest.plan.ref');
-  }
-  if (!sameValue(forbiddenPaths, expectedForbiddenPaths)) {
-    mismatch('Context scope.forbidden_paths does not match the admitted forbidden scope');
-  }
-  for (const allowed of allowedPaths) {
-    for (const forbidden of forbiddenPaths) {
-      if (pathsOverlap(allowed, forbidden)) {
-        mismatch(`Context allowed path overlaps forbidden path: ${allowed}`);
+  if (envelope.mode !== 'finalize-slice') {
+    const contextScope = canonicalScope(root, context.execution_scope);
+    if (!sameValue(contextScope, task.executionScope)) {
+      mismatch('Context execution_scope does not match the immutable Manifest task scope');
+    }
+    const codeScope = unique([...(task.executionScope?.code_paths ?? []), ...(task.executionScope?.test_paths ?? [])]);
+    if (!sameValue(context.allowed_code_scope, codeScope)) {
+      mismatch('Context allowed_code_scope is broader than the admitted code/test scope');
+    }
+    const planPath = task.planPath;
+    const evidencePath = task.evidencePath;
+    const expectedAllowedPaths = unique([...codeScope, evidencePath, planPath]);
+    const expectedForbiddenPaths = unique([
+      ...(task.executionScope?.forbidden_paths ?? []),
+      ...SYSTEM_FORBIDDEN_PATHS.map((value) => rootRelativePath(root, value, 'system forbidden path')),
+    ]);
+    const workerScope = context.scope;
+    const allowedPaths = requireStringArray(workerScope.allowed_paths, 'Context.scope.allowed_paths')
+      .map((value, index) => rootRelativePath(root, value, `Context.scope.allowed_paths[${index}]`));
+    const mutablePaths = requireStringArray(workerScope.mutable_projection_paths, 'Context.scope.mutable_projection_paths')
+      .map((value, index) => rootRelativePath(root, value, `Context.scope.mutable_projection_paths[${index}]`));
+    const forbiddenPaths = requireStringArray(workerScope.forbidden_paths, 'Context.scope.forbidden_paths')
+      .map((value, index) => rootRelativePath(root, value, `Context.scope.forbidden_paths[${index}]`));
+    if (!sameValue(allowedPaths, expectedAllowedPaths)) {
+      mismatch('Context scope.allowed_paths is broader than the admitted task scope');
+    }
+    if (!sameValue(mutablePaths, [planPath])) {
+      mismatch('Context scope.mutable_projection_paths must contain only Manifest.plan.ref');
+    }
+    if (!sameValue(forbiddenPaths, expectedForbiddenPaths)) {
+      mismatch('Context scope.forbidden_paths does not match the admitted forbidden scope');
+    }
+    for (const allowed of allowedPaths) {
+      for (const forbidden of forbiddenPaths) {
+        if (pathsOverlap(allowed, forbidden)) {
+          mismatch(`Context allowed path overlaps forbidden path: ${allowed}`);
+        }
       }
     }
+    if (context.task_id !== task.taskId || context.task_ref !== task.taskRef) {
+      mismatch('Context task binding does not match the admitted task entity');
+    }
+    if (envelope.taskId !== undefined && envelope.taskId !== task.taskId) {
+      mismatch('Worker result taskId does not match the admitted task entity');
+    }
+  } else {
+    if (context.task_id !== undefined || context.task_ref !== undefined) {
+      mismatch('Context task binding must be absent for finalize-slice mode');
+    }
+    if (envelope.taskId !== undefined) {
+      mismatch('Worker result taskId must be absent for finalize-slice mode');
+    }
   }
-  if (context.evidence_path !== evidencePath || context.plan_projection_path !== planPath) {
+  if (context.evidence_path !== task.evidencePath || context.plan_projection_path !== task.planPath) {
     mismatch('Context artifact paths do not match the admitted Manifest paths');
-  }
-  if (context.task_id !== task.taskId || context.task_ref !== task.taskRef) {
-    mismatch('Context task binding does not match the admitted task entity');
-  }
-  if (envelope.taskId !== undefined && envelope.taskId !== task.taskId) {
-    mismatch('Worker result taskId does not match the admitted task entity');
   }
   if (manifest.plan.plan_digest !== envelope.planDigest) {
     mismatch('Manifest plan binding changed during Context validation');
@@ -831,10 +858,26 @@ function protectedEvidenceProjection(content: string, allowedTaskIds: readonly s
   return protectedLines;
 }
 
+function assertCurrentSliceEvidence(root: string, manifest: VNextManifest, sliceId: string): void {
+  const slice = manifest.slices.find((entry) => entry.slice_id === sliceId);
+  if (!slice) {
+    mismatch(`Slice "${sliceId}" not found in Manifest`);
+  }
+  const evidencePath = slice.evidence_path;
+  const content = readRootBoundText(root, evidencePath, 'Manifest Slice Evidence');
+  const lines = content.split(/\r?\n/);
+  const summaryHeadings = lines
+    .map((line, index) => ({ line: line.trim(), index }))
+    .filter((entry) => entry.line === '## Slice Summary' || entry.line === '## Summary');
+  if (summaryHeadings.length === 0) {
+    mismatch(`Manifest Slice Evidence for ${sliceId} must contain "## Slice Summary" section`);
+  }
+}
+
 function assertCurrentTaskEvidence(
   root: string,
   task: TaskBinding,
-  allowedTaskIds: readonly string[] = [task.taskId],
+  allowedTaskIds: readonly string[] = task.taskId ? [task.taskId] : [],
 ): void {
   const content = readRootBoundText(root, task.evidencePath, 'Manifest Slice Evidence');
   const lines = content.split(/\r?\n/);
@@ -1060,8 +1103,10 @@ function assertCurrentWorkerStatusVocabulary(
   // The two sides draw from different vocabularies by construction: the HEAD
   // baseline is a planning clean boundary artifact that may still carry the
   // planning-era `NOT_STARTED` spelling (the canonical normalizePlanExecution
-  // Projection form), while the worktree side is an execution projection and
-  // Worker must advance Status into the closed execution vocabulary.
+  // Projection form) plus Runtime-restored `IN_PROGRESS`/`COMPLETED`
+  // spellings from replan rotation, while the worktree side is an execution
+  // projection and Worker must advance Status into the closed execution
+  // vocabulary.
   const accepted = source === 'HEAD' ? HEAD_WORKER_STATUS_VALUES : WORKER_STATUS_VALUES;
   if (value === undefined || !accepted.has(value)) {
     mismatch(
@@ -1119,9 +1164,9 @@ function projectionChangePair(
 function validateMutablePlanProjection(
   root: string,
   planPath: string,
-  taskId: string,
+  taskId: string | undefined,
   sliceId: string,
-  allowedTaskIds: readonly string[] = [taskId],
+  allowedTaskIds: readonly string[] = taskId ? [taskId] : [],
 ): void {
   let before: string;
   try {
@@ -1241,115 +1286,187 @@ function manifestSliceTaskIds(manifest: VNextManifest, sliceId: string): string[
  * every entry is validated through the kernel closed validator
  * (`validateDependencyBinding`).
  */
-export function readSliceLocalDependencyBindings(
+
+function validateInvalidatedFinalizeForAdmission(
   root: string,
   manifest: VNextManifest,
-  sliceId: string,
-): VNextDependencyBinding[] {
-  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
-  if (slice === undefined) mismatch(`Manifest does not declare slice ${sliceId}`);
-  const dependencies = slice.depends_on ?? [];
-  const bindings: VNextDependencyBinding[] = [];
-  for (const dependencyId of dependencies) {
-    const category = readReceiptCategory({
-      projectRoot: root,
-      category: 'integration',
-      stageId: manifest.stage_id,
-      sliceId: dependencyId,
-    });
-    if (!category.chainValid || category.invalidFiles.length > 0 || category.misplaced.length > 0) {
-      mismatch(
-        `dependency slice ${dependencyId} integration Receipt chain is not a valid chain; ` +
-        `the slice-local execution binding cannot be computed`,
-      );
-    }
-    const tip = category.latest;
-    if (tip === null) {
-      if (manifest.slices.some((candidate) => candidate.slice_id === dependencyId)) {
-        mismatch(
-          `dependency slice ${dependencyId} has no current INTEGRATION_PASS Receipt; ` +
-          `a slice-local execution binding cannot prove the declared dependency (serial order: integrate the dependency first)`,
-        );
-      }
-      // Dependency outside the current Manifest (legacy/external): no
-      // binding facts are available, contribute no entry.
-      continue;
-    }
-    const payload = tip.receipt.payload;
-    if (!isRecord(payload)) {
-      mismatch(`dependency slice ${dependencyId} INTEGRATION_PASS payload must be a JSON object`);
-    }
-    const schemaMismatch = credentialSchemaVersionMismatch(
-      payload.schema_version,
-      manifest.binding !== undefined,
-      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}`,
-    );
-    if (schemaMismatch !== null) mismatch(schemaMismatch.message);
-    const sliceContractDigest = requireString(
-      payload.slice_contract_digest,
-      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}.slice_contract_digest`,
-    );
-    const integrationHeadSha = requireString(
-      payload.commit_sha,
-      `INTEGRATION_PASS.payload of dependency slice ${dependencyId}.commit_sha`,
-    );
-    const entry: VNextDependencyBinding = {
-      slice_id: dependencyId,
-      slice_contract_digest: sliceContractDigest,
-      integration_receipt_digest: tip.receipt.digest,
-      integration_head_sha: integrationHeadSha,
-    };
-    try {
-      validateDependencyBinding(entry);
-    } catch (error) {
-      mismatch(
-        `dependency slice ${dependencyId} integration binding is malformed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    bindings.push(entry);
+  envelope: VNextWorkerResultEnvelope,
+  payload: Record<string, unknown>,
+  replanDispositions: readonly ReplanAncestorDispositionRecord[],
+  historicalReceiptDigest?: string,
+ ): boolean {
+  if (payload.mode !== 'finalize-slice') return false;
+  const lineage = classifyVNextFinalizeLineage(
+    envelope.stageId,
+    manifestSliceTaskIds(manifest, envelope.sliceId),
+    requireString(payload.manifest_digest, 'existing finalize-slice.manifest_digest'),
+    requireString(payload.plan_digest, 'existing finalize-slice.plan_digest'),
+    requireString(payload.snapshot_digest, 'existing finalize-slice.snapshot_digest'),
+    replanDispositions,
+  );
+  if (lineage.kind !== 'invalidated') return false;
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === envelope.sliceId);
+  if (slice === undefined) mismatch(`Manifest does not declare slice ${envelope.sliceId}`);
+  validateVNextInvalidatedFinalizeReceipt(
+    root,
+    manifest,
+    slice,
+    payload,
+    lineage.dispositionFact,
+    envelope.snapshotDigest,
+    historicalReceiptDigest,
+  );
+  return true;
+}
+/**
+ * S13-S17 remediation §6.4: a persisted TASK_COMPLETE fact is historically
+ * invalidated when an ancestor Replan disposition invalidates its task for
+ * the exact prior Manifest/Plan/snapshot tuple the fact binds — the same
+ * semantics as the next reader. Such facts are validated history: they are
+ * never checked against the CURRENT tuple and never enter the completion
+ * identity set.
+ */
+function isHistoricallyInvalidatedWorkerFact(
+  root: string,
+  stageId: string,
+  payload: Record<string, unknown>,
+): boolean {
+  const taskId = payload.task_id;
+  if (typeof taskId !== 'string' || taskId.length === 0) return false;
+  const manifestDigest = payload.manifest_digest;
+  const planDigest = payload.plan_digest;
+  const snapshotDigest = payload.snapshot_digest;
+  if (
+    typeof manifestDigest !== 'string' ||
+    typeof planDigest !== 'string' ||
+    typeof snapshotDigest !== 'string'
+  ) {
+    return false;
   }
-  return bindings;
+  for (const record of loadAncestorReplanDispositionRecords(root, stageId)) {
+    const disp = record.dispositionFact;
+    if (
+      manifestDigest === disp.previous_snapshot.manifest_digest &&
+      planDigest === disp.previous_snapshot.plan_digest &&
+      snapshotDigest === disp.previous_snapshot.snapshot_digest &&
+      disp.disposition.invalidated_task_ids.includes(taskId) &&
+      !disp.disposition.carry_forward_task_ids.includes(taskId)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
- * Compute the slice-local credential binding expectation (§8.2/§8.3) of one
- * Slice: the Manifest stage/slice contract digests plus the execution
- * binding digest recomputed through the kernel bindings.ts oracle from the
- * persisted dependency integration facts and the admitted base snapshot
- * (the Stage's canonical integration HEAD at admission). Every v3 credential
- * writer and consumer shares this single computation.
+ * S15-A-T02 (runtime-carry-lineage): resolve the EXACT persisted carry-forward
+ * lineage fact of one persisted TASK_COMPLETE payload, or null when the fact
+ * is not an exact carried-forward historical completion.
  *
- * Slice-local mode only; a legacy Manifest (no `binding`) fails closed.
+ * The decision is derived ONLY from the persisted ancestor ReplanDisposition
+ * chain through the canonical {@link deriveLineageReceiptExemptions}
+ * (replan-epoch.ts) — the SAME semantics the next reader applies:
+ *  - the receipt's manifest/plan/snapshot tuple EXACTLY equals a persisted
+ *    disposition's previous_snapshot (the whole prior epoch this fact was
+ *    admitted in);
+ *  - THAT disposition lists the task in carry_forward_task_ids and NOT in
+ *    its invalidated_task_ids; and
+ *  - no NEWER ancestor disposition invalidates the task again (fail-closed
+ *    direction: a newer rotation that kills the task also kills the old
+ *    carried completion).
+ * A wrong-task carry, a partial/foreign tuple, a same-disposition
+ * invalidate+carry contradiction and any non-matching stale/current receipt
+ * resolve to null and keep failing closed against the CURRENT bindings.
  */
-export function computeSliceLocalBindingExpectation(
+function carriedForwardWorkerLineageFact(
   root: string,
-  manifest: VNextManifest,
+  stageId: string,
+  payload: Record<string, unknown>,
+): ReplanDispositionFact | null {
+  const taskId = payload.task_id;
+  const manifestDigest = payload.manifest_digest;
+  const planDigest = payload.plan_digest;
+  const snapshotDigest = payload.snapshot_digest;
+  if (
+    typeof taskId !== 'string' || taskId.length === 0 ||
+    typeof manifestDigest !== 'string' ||
+    typeof planDigest !== 'string' ||
+    typeof snapshotDigest !== 'string'
+  ) {
+    return null;
+  }
+  const records = loadAncestorReplanDispositionRecords(root, stageId);
+  if (records.length === 0) return null;
+  const { carriedForward } = deriveLineageReceiptExemptions(records);
+  const exempt = carriedForward.some(
+    (binding) =>
+      binding.manifest_digest === manifestDigest &&
+      binding.plan_digest === planDigest &&
+      binding.snapshot_digest === snapshotDigest &&
+      binding.task_id === taskId,
+  );
+  if (!exempt) return null;
+  // Locate the generation whose previous_snapshot claims this exact tuple
+  // so the credential can be cross-bound to its OWN persisted historical
+  // snapshot facts. Unreachable when exempt — defensive fail-closed.
+  for (const record of records) {
+    const fact = record.dispositionFact;
+    const prevSnap = fact.previous_snapshot;
+    if (
+      prevSnap.manifest_digest !== manifestDigest ||
+      prevSnap.plan_digest !== planDigest ||
+      prevSnap.snapshot_digest !== snapshotDigest
+    ) {
+      continue;
+    }
+    const disp = fact.disposition;
+    if (disp.carry_forward_task_ids.includes(taskId) && !disp.invalidated_task_ids.includes(taskId)) {
+      return fact;
+    }
+  }
+  return null;
+}
+
+/**
+ * S15-A-T02 (runtime-carry-lineage): binding-field validation of one exact
+ * carried-forward historical TASK_COMPLETE credential. The credential is
+ * NEVER validated against the CURRENT slice-local expectation (its
+ * execution_binding_digest was computed at admission time against its own
+ * historical base snapshot and dependency state, which a later rotation may
+ * legitimately have replaced); it is instead cross-bound to its OWN persisted
+ * history:
+ *  - the shared structural discrimination still runs (64-hex binding fields
+ *    on v3; a v2 credential carrying none); then, for a v3 credential,
+ *  - stage_contract_digest must equal the carried-forward disposition's
+ *    persisted previous_snapshot.stage_contract_digest, and
+ *  - slice_contract_digest must equal the previous_snapshot Slice contract
+ *    digest of THIS Slice.
+ * The tuple itself is already exactly bound by the lineage resolution above,
+ * so a forged or foreign credential cannot pass as carried-forward history.
+ */
+function assertCarriedForwardCredentialBinding(
+  payload: Record<string, unknown>,
+  label: string,
   sliceId: string,
-  baseSnapshotDigest: string,
-): VNextSliceLocalBindingExpectation {
-  if (manifest.binding === undefined) {
-    mismatch(`slice-local binding expectation requires a Manifest binding for ${sliceId}`);
+  carriedFact: ReplanDispositionFact,
+): void {
+  assertSliceLocalCredentialBindingFields(payload, label);
+  if (payload.schema_version !== VNEXT_CREDENTIAL_SCHEMA_VERSION_SLICE_LOCAL) return;
+  const previousSnapshot = carriedFact.previous_snapshot;
+  if (payload.stage_contract_digest !== previousSnapshot.stage_contract_digest) {
+    mismatch(
+      `${label}.stage_contract_digest does not match the carried-forward disposition's persisted previous_snapshot stage contract`,
+    );
   }
-  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
-  if (slice === undefined) mismatch(`Manifest does not declare slice ${sliceId}`);
-  const sliceContractDigest = slice.slice_contract_digest;
-  if (sliceContractDigest === undefined) {
-    mismatch(`Manifest slice ${sliceId} has no slice_contract_digest in slice-local mode`);
+  const historicalSlice = previousSnapshot.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (historicalSlice === undefined) {
+    mismatch(`carried-forward disposition previous_snapshot does not declare Slice ${sliceId}`);
   }
-  const stageContractDigest = manifest.binding.stage_contract_digest;
-  const executionBindingDigest = computeExecutionBindingDigest({
-    stage_id: manifest.stage_id,
-    slice_id: sliceId,
-    stage_contract_digest: stageContractDigest,
-    slice_contract_digest: sliceContractDigest,
-    dependency_bindings: readSliceLocalDependencyBindings(root, manifest, sliceId),
-    base_snapshot_digest: baseSnapshotDigest,
-  });
-  return {
-    stageContractDigest,
-    sliceContractDigest,
-    executionBindingDigest,
-  };
+  if (payload.slice_contract_digest !== historicalSlice.slice_contract_digest) {
+    mismatch(
+      `${label}.slice_contract_digest does not match the carried-forward disposition's persisted previous_snapshot Slice contract`,
+    );
+  }
 }
 
 /** Read already-admitted vNext facts so later Worker results can retain scope-bound dirty paths. */
@@ -1357,7 +1474,7 @@ function priorVNextTaskIds(
   root: string,
   manifest: VNextManifest,
   envelope: VNextWorkerResultEnvelope,
-  currentTaskId: string,
+  currentTaskId: string | undefined,
   sliceLocalBinding?: VNextSliceLocalBindingExpectation,
 ): string[] {
   const category = readReceiptCategory({
@@ -1370,6 +1487,7 @@ function priorVNextTaskIds(
     mismatch(`Worker Receipt category is not a valid chain: ${category.dir}`);
   }
   const taskIds = manifestSliceTaskIds(manifest, envelope.sliceId);
+  const replanDispositions = loadAncestorReplanDispositionRecords(root, envelope.stageId);
   const seen = new Set<string>();
   for (const entry of category.receipts) {
     const receipt = entry.receipt;
@@ -1395,24 +1513,70 @@ function priorVNextTaskIds(
     if (!isRecord(payload)) {
       mismatch('existing TASK_COMPLETE.payload must be a JSON object');
     }
-    assertSliceLocalCredentialBindingFields(
+    if (payload.mode === 'finalize-slice') {
+      if (validateInvalidatedFinalizeForAdmission(root, manifest, envelope, payload, replanDispositions, receipt.digest)) {
+        continue;
+      }
+      mismatch('existing finalize-slice Receipt is non-invalidated or not bound to a unique persisted lineage generation');
+    }
+    // S13-S17 remediation §6.4: a prior-epoch credential invalidated by a
+    // persisted Replan disposition is validated history — it must never be
+    // checked against the CURRENT tuple/binding (same semantics as the next
+    // reader) and it is excluded from the completion identity set.
+    if (
+      payload.task_id !== undefined &&
+      isHistoricallyInvalidatedWorkerFact(root, envelope.stageId, payload as Record<string, unknown>)
+    ) {
+      continue;
+    }
+    // S15-A-T02 (runtime-carry-lineage): an EXACT carried-forward historical
+    // completion is legal history of a survived task — it counts in the
+    // prior/seen set while being cross-bound to its OWN persisted lineage
+    // facts instead of the CURRENT slice-local expectation. Wrong-task,
+    // partial-tuple, foreign and non-carry receipts resolve to null here and
+    // keep the strict current-tuple validation below.
+    const carriedFact = carriedForwardWorkerLineageFact(
+      root,
+      envelope.stageId,
       payload as Record<string, unknown>,
-      'existing TASK_COMPLETE.payload',
-      sliceLocalBinding,
     );
+    if (carriedFact !== null) {
+      assertCarriedForwardCredentialBinding(
+        payload as Record<string, unknown>,
+        'existing TASK_COMPLETE.payload',
+        envelope.sliceId,
+        carriedFact,
+      );
+    } else {
+      assertSliceLocalCredentialBindingFields(
+        payload as Record<string, unknown>,
+        'existing TASK_COMPLETE.payload',
+        sliceLocalBinding,
+      );
+    }
     const taskId = requireString(payload.task_id, 'existing TASK_COMPLETE.task_id');
     if (!taskIds.includes(taskId)) {
       mismatch(`existing TASK_COMPLETE task ${taskId} is not declared by the Manifest Slice`);
     }
     if (
-      payload.manifest_digest !== envelope.manifestDigest ||
+      carriedFact === null &&
+      (payload.manifest_digest !== envelope.manifestDigest ||
       payload.plan_digest !== envelope.planDigest ||
-      payload.snapshot_digest !== envelope.snapshotDigest
+      payload.snapshot_digest !== envelope.snapshotDigest)
     ) {
       mismatch(`existing TASK_COMPLETE fact for ${taskId} is stale or not bound to the active tuple`);
     }
     if (seen.has(taskId)) mismatch(`multiple existing TASK_COMPLETE facts are ambiguous for task ${taskId}`);
     seen.add(taskId);
+  }
+  if (!currentTaskId) {
+    // finalize-slice mode: all manifest tasks must be completed
+    for (const taskId of taskIds) {
+      if (!seen.has(taskId)) {
+        mismatch(`cannot admit finalize-slice before all Manifest tasks are completed; missing Receipt for ${taskId}`);
+      }
+    }
+    return taskIds.filter((taskId) => seen.has(taskId));
   }
   const currentIndex = taskIds.indexOf(currentTaskId);
   if (currentIndex < 0) {
@@ -1431,7 +1595,6 @@ function priorVNextTaskIds(
   }
   return taskIds.slice(0, currentIndex).filter((taskId) => seen.has(taskId));
 }
-
 function assertChangedFiles(
   root: string,
   envelope: VNextWorkerResultEnvelope,
@@ -1439,6 +1602,7 @@ function assertChangedFiles(
   manifest: VNextManifest,
   task: TaskBinding,
   allowedTaskIds: readonly string[],
+  replanDispositions: readonly ReplanAncestorDispositionRecord[] = [],
 ): string[] {
   const declared = envelope.changedFiles.map((value, index) =>
     changedFilePath(root, value, `changedFiles[${index}]`),
@@ -1447,9 +1611,15 @@ function assertChangedFiles(
     mismatch('changed_files contains duplicate canonical paths');
   }
 
+  const executionScope = task.executionScope ?? {
+    kind: 'evidence-only' as const,
+    code_paths: [],
+    test_paths: [],
+    forbidden_paths: [],
+  };
   const codeAndTest = unique([
-    ...task.executionScope.code_paths,
-    ...task.executionScope.test_paths,
+    ...executionScope.code_paths,
+    ...executionScope.test_paths,
   ]);
   const priorCodeAndTest = unique(
     allowedTaskIds
@@ -1474,7 +1644,7 @@ function assertChangedFiles(
   // (S12-D: T02 edits next.ts while T01/T04 forbid it).  The task-level
   // allowed scope above (current + prior code/test plus the shared
   // Evidence/Plan projection) already bounds what the Worker may touch.
-  const taskForbidden = unique(task.executionScope.forbidden_paths);
+  const taskForbidden = unique(executionScope.forbidden_paths);
   const systemForbidden = unique(
     PROTECTED_PATHS.map((value) => rootRelativePath(root, value, 'system forbidden path')),
   );
@@ -1528,15 +1698,15 @@ function assertChangedFiles(
   assertIgnoredProtectedPaths(root, [{
     stageId: envelope.stageId,
     sliceId: envelope.sliceId,
-    taskId: task.taskId,
+    taskId: task.taskId ?? '',
     manifestDigest: envelope.manifestDigest,
     planDigest: envelope.planDigest,
     snapshotDigest: envelope.snapshotDigest,
     contextRef: envelope.contextRef,
     // The admission mode gate above already restricted envelope.mode to the
-    // closed completion vocabulary {implement-task, recover-task}.
+    // closed completion vocabulary {implement-task, recover-task, finalize-slice}.
     mode: envelope.mode as VNextWorkerCompletionMode,
-  }]);
+  }], replanDispositions);
   // User authorization A5+A7: changed_files must be a SUBSET of the current
   // Git worktree changes UNION the Evidence/Plan projections (declared ⊆
   // actual ∪ {evidence, plan}) — a Worker may never declare a code file it
@@ -1563,7 +1733,9 @@ function assertChangedFiles(
 function assertNoDuplicateAdmission(
   root: string,
   envelope: VNextWorkerResultEnvelope,
-  taskId: string,
+  taskId: string | undefined,
+  manifest: VNextManifest,
+  replanDispositions: readonly ReplanAncestorDispositionRecord[],
 ): void {
   const category = readReceiptCategory({
     projectRoot: root,
@@ -1577,8 +1749,39 @@ function assertNoDuplicateAdmission(
   if (category.receipts.some((entry) => entry.receipt.payload?.['action_token'] === envelope.actionToken)) {
     mismatch(`actionToken "${envelope.actionToken}" has already been admitted`);
   }
-  if (category.receipts.some((entry) => entry.receipt.payload?.['task_id'] === taskId)) {
-    mismatch(`TASK_COMPLETE for task "${taskId}" has already been admitted`);
+  if (envelope.mode === 'finalize-slice') {
+    const hasAdmittedFinalize = category.receipts.some((entry) => {
+      const payload = entry.receipt.payload;
+      if (!isRecord(payload) || payload['mode'] !== 'finalize-slice') return false;
+      return !validateInvalidatedFinalizeForAdmission(
+        root,
+        manifest,
+        envelope,
+        payload,
+        replanDispositions,
+        entry.receipt.digest,
+      );
+    });
+    if (hasAdmittedFinalize) {
+      mismatch(`finalize-slice for slice "${envelope.sliceId}" has already been admitted`);
+    }
+  } else if (taskId !== undefined) {
+    const hasAdmittedSameTask = category.receipts.some((entry) => {
+      const payload = entry.receipt.payload;
+      if (!isRecord(payload) || payload['task_id'] !== taskId) return false;
+      // S15-A-T02 (epoch duplicate guard): a prior-epoch TASK_COMPLETE fact
+      // invalidated by a persisted ancestor Replan disposition is validated
+      // history — it must never block the current-epoch re-admission of the
+      // same task (the recover-task consistency recheck). This is the SAME
+      // persisted-disposition semantics as priorVNextTaskIds(): historical
+      // invalidated receipts are excluded from the duplicate identity set,
+      // while current-epoch or non-invalidated stale/foreign receipts still
+      // fail closed.
+      return !isHistoricallyInvalidatedWorkerFact(root, envelope.stageId, payload);
+    });
+    if (hasAdmittedSameTask) {
+      mismatch(`TASK_COMPLETE for task "${taskId}" has already been admitted`);
+    }
   }
 }
 
@@ -1598,8 +1801,16 @@ function validateFacts(
     'vNext Worker Receipt path',
   );
   // The authority is read before the snapshot assertion so the Worker
-  // result can be checked against the admitted snapshot chain.
-  const authority = readVNextAdmissionAuthority(root, envelope.stageId);
+  // result can be checked against the admitted snapshot chain. The read is
+  // Replan-epoch aware (S13-S17 remediation §6.2): after a Replan rotation
+  // the CURRENT Stage Plan/SPV authority lives in the epoch directory —
+  // reading the stale initial-epoch files would falsely reject every
+  // post-replan Worker result tuple.
+  const currentEpoch = readCurrentEpoch(root, envelope.stageId);
+  const authority: VNextAdmissionAuthority = {
+    stagePlan: currentEpoch.stagePlan,
+    spv: currentEpoch.spv,
+  };
   const admittedSnapshot = authority.spv.snapshot_digest;
   assertCurrentSnapshot(root, envelope.snapshotDigest, admittedSnapshot);
   const manifest = readAndValidateManifest(root, envelope);
@@ -1613,11 +1824,6 @@ function validateFacts(
       manifest,
       envelope,
       task.taskId,
-      // S12-D-T04 (S12-D REPLAN): slice-local mode — every v3 credential of
-      // the Slice (including the prior Worker facts) must bind the SAME
-      // Manifest contract digests and the recomputed execution binding. The
-      // base snapshot is the admitted SPV snapshot (the Stage's canonical
-      // integration HEAD at admission), stable for the whole Stage.
       manifest.binding !== undefined
         ? computeSliceLocalBindingExpectation(
             root,
@@ -1627,14 +1833,24 @@ function validateFacts(
           )
         : undefined,
     ),
-    task.taskId,
+    ...(task.taskId ? [task.taskId] : []),
   ]);
-  assertCurrentTaskEvidence(root, task, allowedTaskIds);
+  if (envelope.mode === 'finalize-slice') {
+    assertCurrentSliceEvidence(root, manifest, envelope.sliceId);
+  } else {
+    assertCurrentTaskEvidence(root, task, allowedTaskIds);
+  }
   if (changedFilePath(root, envelope.evidenceRef, 'evidenceRef') !== task.evidencePath) {
     mismatch('Worker evidenceRef is not the current Slice Evidence path bound by the Manifest');
   }
-  const changedFiles = assertChangedFiles(root, envelope, context, manifest, task, allowedTaskIds);
-  assertNoDuplicateAdmission(root, envelope, task.taskId);
+  const changedFiles = assertChangedFiles(root, envelope, context, manifest, task, allowedTaskIds, loadAncestorReplanDispositionRecords(root, envelope.stageId));
+  assertNoDuplicateAdmission(
+    root,
+    envelope,
+    task.taskId,
+    manifest,
+    loadAncestorReplanDispositionRecords(root, envelope.stageId),
+  );
   // Re-assert right before the write so a HEAD advance between validation
   // and admission cannot slip through (TOCTOU guard, snapshot-chain aware).
   assertCurrentSnapshot(root, envelope.snapshotDigest, admittedSnapshot);
@@ -1659,7 +1875,7 @@ function vNextState(
     action: 'TASK_COMPLETE',
     stage_id: envelope.stageId,
     slice_id: envelope.sliceId,
-    task_id: facts.task.taskId,
+    ...(facts.task.taskId !== undefined ? { task_id: facts.task.taskId } : {}),
     mode: envelope.mode,
     outcome: 'completed',
     manifest_digest: envelope.manifestDigest,
@@ -1701,7 +1917,7 @@ function workerReceipt(
     action_token: envelope.actionToken,
     mode: envelope.mode,
     outcome: envelope.outcome,
-    task_id: facts.task.taskId,
+    ...(facts.task.taskId !== undefined ? { task_id: facts.task.taskId } : {}),
     evidence_ref: facts.task.evidencePath,
     changed_files: [...facts.changedFiles],
     verification_runs: envelope.verificationRuns,
@@ -1750,7 +1966,8 @@ export function admitVNextWorkerResult(
   // implement-task narrative.
   if (
     envelope.mode !== 'implement-task' &&
-    envelope.mode !== 'recover-task'
+    envelope.mode !== 'recover-task' &&
+    envelope.mode !== 'finalize-slice'
   ) {
     return rejected(
       `vNext Worker mode "${envelope.mode}" has no admitted Context mode binding; ` +

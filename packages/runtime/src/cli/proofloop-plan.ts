@@ -202,8 +202,15 @@ function receiptExists(root: string, relative: string): boolean {
   }
 }
 
-function seamFindings(errors: ReadonlyArray<{ readonly type: string; readonly message: string }>) {
-  return errors.map((error) => ({ code: error.type, message: error.message }));
+// CV repair #6: the structured §9.5 finding must survive the public route —
+// STAGE_COMPOSITION_GAP errors carry their stage_composition object 1:1
+// instead of being flattened to code/message.
+function seamFindings(errors: ReadonlyArray<{ readonly type: string; readonly message: string; readonly stage_composition?: import('../vnext/stage-composition-audit').VNextCompositionGapFinding }>) {
+  return errors.map((error) => ({
+    code: error.type,
+    message: error.message,
+    ...(error.stage_composition !== undefined ? { stage_composition: error.stage_composition } : {}),
+  }));
 }
 
 // ============================================================

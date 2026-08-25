@@ -46,8 +46,11 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const GIT_SHA1_HEX = /^[0-9a-f]{40}$/;
 const TASK_ID_GRAMMAR = /^S\d+-[A-Z0-9]+-T\d+$/;
 
-/** Impact scope of a Runtime-derived Replan disposition (§8.8). */
-export type ReplanImpactScope = 'task-local' | 'slice-wide';
+/** Impact scope of a Runtime-derived Replan disposition (§8.1/§8.8): the
+ *  closed four-state scope. `stage-wide` re-establishes every execution fact
+ *  of the Stage; `slice-wide` is precise (target + transitive downstream
+ *  Slices). */
+export type ReplanImpactScope = 'task-local' | 'slice-wide' | 'stage-wide';
 
 /**
  * Replan disposition — closed schema (§8.8).  Runtime-derived; the rotation
@@ -95,7 +98,7 @@ export function parseReplanDisposition(value: unknown): ReplanDisposition | null
   const parentEpochDigest = record.parent_epoch_digest;
   if (typeof parentEpochDigest !== 'string' || !SHA256_HEX.test(parentEpochDigest)) return null;
   const impactScope = record.impact_scope;
-  if (impactScope !== 'task-local' && impactScope !== 'slice-wide') return null;
+  if (impactScope !== 'task-local' && impactScope !== 'slice-wide' && impactScope !== 'stage-wide') return null;
 
   const readTaskIds = (field: string): readonly string[] | null => {
     const value = record[field];
@@ -111,16 +114,24 @@ export function parseReplanDisposition(value: unknown): ReplanDisposition | null
   const carried = readTaskIds('carry_forward_task_ids');
   const invalidated = readTaskIds('invalidated_task_ids');
   if (changed === null || carried === null || invalidated === null) return null;
-  if (changed.length === 0 || invalidated.length === 0) return null;
+  // §8.1: a stage-wide disposition re-establishes the whole Stage from Stage
+  // Contract / global Authority binding changes alone — every Task contract
+  // digest may be unchanged, so an EMPTY changed root is valid ONLY for
+  // stage-wide. task-local and slice-wide must always name their changed
+  // root Tasks; every resolved scope must invalidate a non-empty set.
+  if (changed.length === 0 && impactScope !== 'stage-wide') return null;
+  if (invalidated.length === 0) return null;
 
   // Cross-field rules (§8.8): a replanned Task is never carried forward; the
   // invalidated set covers every changed Task plus the affected closure.
+  // stage-wide re-runs the whole Stage, so it never carries anything forward.
   const changedSet = new Set(changed);
   const carriedSet = new Set(carried);
   const invalidatedSet = new Set(invalidated);
   if (carriedSet.size !== carried.length) return null; // duplicates are forged
   if (invalidatedSet.size !== invalidated.length) return null;
   if (new Set(changed).size !== changed.length) return null;
+  if (impactScope === 'stage-wide' && carried.length > 0) return null;
   if (changed.some((id) => carriedSet.has(id))) return null;
   if (invalidated.some((id) => carriedSet.has(id))) return null;
   if (!changed.every((id) => invalidatedSet.has(id))) return null;

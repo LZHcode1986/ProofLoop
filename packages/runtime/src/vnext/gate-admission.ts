@@ -78,7 +78,7 @@ import {
   readVNextManifest,
   VNextHandoffError,
 } from './dispatch';
-import { readVNextAdmissionAuthority } from './next';
+import { readCurrentVNextAdmissionAuthority } from './replan-epoch';
 // Shared vNext Slice binding (Proof Index digest + evidence/plan paths from
 // the Manifest, root-bound): the reduced Gate consumes only this pure
 // binding — the Worker → CV → Slice Commit prefix revalidation was removed
@@ -86,16 +86,17 @@ import { readVNextAdmissionAuthority } from './next';
 import {
   sliceBinding,
   VNextIntegrationAdmissionError,
-} from './integration-admission';
+} from './integration-validation';
 import type {
   SliceBinding,
   TaskBinding,
-} from './integration-admission';
+} from './integration-validation';
 import {
   VNEXT_GATE_ACTION,
   VNEXT_GATE_RESULT_TYPE,
   VNEXT_GATE_SCHEMA_VERSION,
   VNEXT_GATE_VERDICTS,
+  VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS,
 } from './types';
 import type {
   VNextAdmissionAuthority,
@@ -987,7 +988,11 @@ function validateFacts(
 
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, request.stageId);
+    // repair (current-authority parity): the Gate consumes the SAME canonical
+    // current-epoch authority reader as dispatch/next, CV, Commit and
+    // Integration — after a replan the active SPV/Stage Plan lives in the
+    // current epoch directory and stale root-level receipts are history.
+    authority = readCurrentVNextAdmissionAuthority(root, request.stageId);
   } catch (error) {
     if (!(error instanceof VNextHandoffError)) throw error;
     fail(
@@ -1050,7 +1055,12 @@ function validateFacts(
       fail('RUNTIME.SCHEMA_MISMATCH', `stage-gate chain contains ${receipt.type}; expected only GATE_PASS/GATE_FAIL vNext facts`);
     }
     const payload = receipt.payload;
-    if (!isRecord(payload) || payload.schema_version !== 2 || payload.type !== 'GATE_RESULT' || payload.action !== 'GATE') {
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.GATE_RESULT ||
+      payload.type !== 'GATE_RESULT' ||
+      payload.action !== 'GATE'
+    ) {
       fail('RUNTIME.SCHEMA_MISMATCH', 'stage-gate chain contains a legacy v1 Gate fact or a vNext Gate fact without the GATE_RESULT/GATE discriminator');
     }
     if (
@@ -1107,7 +1117,7 @@ function validateFacts(
     if (
       reviewTip.type !== 'STAGE_REVIEW_PASS' ||
       !isRecord(reviewPayload) ||
-      reviewPayload.schema_version !== 2 ||
+      reviewPayload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
       reviewPayload.type !== 'STAGE_REVIEW_RESULT' ||
       reviewPayload.action !== 'STAGE_REVIEW' ||
       reviewPayload.verdict !== 'REPAIR'

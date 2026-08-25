@@ -1,6 +1,14 @@
 # AGENTS.md — ProofLoop 项目规则
 
-本文件是 ProofLoop 的项目级补充，只定义项目硬约束和流程入口；具体事实、权限、字段和步骤以当前 Authority、Contract、Skill 和 Runtime 制品为准。
+本文件是 ProofLoop 的项目级补充，只定义项目硬约束和流程入口；除第 0 节的流程整改例外外，具体事实、权限、字段和步骤以当前 Authority、Contract、Skill 和 Runtime 制品为准。
+
+## 0. 流程整改与自举解锁
+
+- ProofLoop 的 CLI、Runtime、Agent、Skill 或 Contract 本身成为整改对象时，先判断当前流程能否完成这次整改；流程能够推进时仍使用正式公共路径。
+- 当被整改的规则造成自举锁死，且用户已授权整改时，Brain 可以跳过该规则要求的 planning、admission、Receipt、Evidence、Gate 或 Review ceremony，直接修复通用实现与 canonical 文档。
+- 自举解锁只产出可复用的 CLI/Runtime、测试以及必要的 canonical Agent、Skill、Contract 文档；单次 Stage、故障或 recovery episode 不转化为新的 Authority、Contract、ReceiptType 或治理机制。
+- 解锁不放宽用户授权、Trust Root、Git、安全、最小变更和独立验证纪律；不伪造或手写 Runtime 事实，也不把直接修复描述为 Stage 已完成。
+- 通用实现、公共路径测试和 canonical 文档一致，且未留下事故专用活动入口时，本次自举解锁才完成；随后继续适用正常 ProofLoop 执行规则。
 
 ## 1. 事实来源与重新加载
 
@@ -49,3 +57,14 @@
 - Agent 被中断或取消后，磁盘内容和 Git diff 是唯一事实源；不得假设回滚或重复覆盖 partial state。
 - 尚未 Runtime admission 的 Worker 代码、测试、Evidence 或 tasks projection 必须作为 recovery patch 保留。Runtime/Host 修复单独提交并因 HEAD 变化重新执行 fresh SPV/admission，再通过 `recover-task`/`recheck` 重新绑定和接纳现有成果；不得重写或重新派发实现 Task。
 - 任何 Agent 不得绕过 Runtime 手写 Receipt、Manifest 或 Context，也不得替代 Committer 建立 Git boundary。
+
+<!-- CODEGRAPH_START -->
+## CodeGraph
+
+In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
+
+- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it's listed but deferred, load it by name via tool search.
+- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
+
+If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
+<!-- CODEGRAPH_END -->

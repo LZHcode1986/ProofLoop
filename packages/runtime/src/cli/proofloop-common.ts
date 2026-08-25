@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import { resolveProjectRoot } from './vnext-cli-support-vnext';
 import { canonicalPathWithinRoot } from '../path-guard';
 import { readRootBoundFile } from '../vnext';
+import { BOUNDARY_TYPES } from '../git-boundary';
 
 // ============================================================
 // Version / schema
@@ -75,6 +76,7 @@ export const CANONICAL_DOMAINS = [
   'recovery',
   // S10-E-T02 repair: cutover 域接入唯一 public seam（CLI Contract §0.3）。
   'cutover',
+  'boundary',
 ] as const;
 
 export type CanonicalDomain = (typeof CANONICAL_DOMAINS)[number];
@@ -141,6 +143,7 @@ export const DOMAIN_REGISTRY: Readonly<Record<CanonicalDomain, DomainRegistryEnt
   // S10-E-T02 repair: cutover 域 closed 操作集（status 只读 legacy scan；
   // execute 带 irreversible 保护语义的删除执行）。
   cutover: { domain: 'cutover', operations: ['status', 'execute'] },
+  boundary: { domain: 'boundary', operations: ['close'] },
 };
 
 export function isCanonicalDomain(value: string): value is CanonicalDomain {
@@ -163,6 +166,13 @@ export interface CliCommand {
 export interface CliFinding {
   readonly code: string;
   readonly message: string;
+  /**
+   * S13-S17 remediation Phase 4 (CV repair #6): present only on
+   * STAGE_COMPOSITION_GAP findings — the full structured §9.5 Stage
+   * Composition Closure Audit finding, carried 1:1 from the mechanical
+   * validator through the public `proofloop plan validate` envelope.
+   */
+  readonly stage_composition?: import('../vnext/stage-composition-audit').VNextCompositionGapFinding;
 }
 
 export interface CliRef {
@@ -568,6 +578,15 @@ export interface CliRequestInput {
   readonly e2e_receipt_path?: string | undefined;
   readonly reviewer_result_path?: string | undefined;
   readonly output_dir?: string | undefined;
+  /** Boundary close request fields (public deterministic Git adapter). */
+  readonly boundary_type?: string | undefined;
+  readonly expected_head?: string | undefined;
+  readonly manifest_digest?: string | undefined;
+  readonly cv_receipt_digest?: string | undefined;
+  readonly old_manifest_digest?: string | undefined;
+  readonly paths?: readonly string[] | undefined;
+  readonly description?: string | undefined;
+  readonly expected_branch?: string | undefined;
 }
 
 /**
@@ -688,6 +707,11 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
   // 必须与 cutover status 检测出的 legacy 删除目标完全一致）。未知字段
   // 仍 fail closed。confirmed/delete_list 的类型特例见 parseClosedRequestObject。
   cutover: new Set(['domain', 'operation', 'stage', 'confirmed', 'delete_list']),
+  boundary: new Set([
+    'domain', 'operation', 'boundary_type', 'expected_head', 'stage', 'slice',
+    'manifest_digest', 'cv_receipt_digest', 'old_manifest_digest', 'paths',
+    'description', 'expected_branch',
+  ]),
 };
 
 const REQUEST_BASE_FIELDS = new Set(['domain', 'operation']);
@@ -748,6 +772,26 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
           ok: false,
           code: 'RUNTIME.INPUT_INVALID',
           message: 'request field "delete_list" must be an array of non-empty root-relative path strings',
+        };
+      }
+      continue;
+    }
+    if (key === 'paths') {
+      if (!Array.isArray(record[key]) || record[key].some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: 'request field "paths" must be an array of non-empty root-relative path strings',
+        };
+      }
+      continue;
+    }
+    if (key === 'boundary_type') {
+      if (typeof record[key] !== 'string' || !(BOUNDARY_TYPES as readonly string[]).includes(record[key])) {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: `request field "boundary_type" must be one of ${BOUNDARY_TYPES.join('|')}`,
         };
       }
       continue;
@@ -862,6 +906,12 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     e2e_receipt_path: record.e2e_receipt_path as string | undefined,
     reviewer_result_path: record.reviewer_result_path as string | undefined,
     output_dir: record.output_dir as string | undefined,
+    boundary_type: record.boundary_type as string | undefined,
+    expected_head: record.expected_head as string | undefined,
+    old_manifest_digest: record.old_manifest_digest as string | undefined,
+    paths: Array.isArray(record.paths) ? record.paths as string[] : undefined,
+    description: record.description as string | undefined,
+    expected_branch: record.expected_branch as string | undefined,
   };
   if (request.mode !== undefined && !['refresh', 'recover', 'rollback', 'replan'].includes(request.mode)) {
     return {

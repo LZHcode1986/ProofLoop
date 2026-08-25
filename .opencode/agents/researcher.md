@@ -1,7 +1,7 @@
 ---
 description: Researcher — external technical solution research.
 mode: subagent
-model: opencode-go/deepseek-v4-flash
+model: openai/gpt-5.6-luna
 variant: max
 hidden: true
 permission:

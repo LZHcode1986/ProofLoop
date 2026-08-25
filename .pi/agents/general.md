@@ -3,7 +3,7 @@ description: Execute bounded Brain direct tasks.
 tools: read, edit, write, bash, grep, find, ls
 extensions: false
 skills: diagnose, code-review-and-quality
-model: opencode/deepseek-v4-flash-free
+model: openai-codex/gpt-5.6-luna
 thinking: max
 prompt_mode: replace
 inherit_context: false

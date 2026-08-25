@@ -7,19 +7,25 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { computeDigest, validateVNextManifest } from '@proofloop/kernel';
+import { computeDigest, validateVNextManifest, validateVNextSpvPassReceipt, validateVNextStagePlanReceipt } from '@proofloop/kernel';
+import {
+  computeExecutionBindingDigest,
+  validateDependencyBinding,
+} from '@proofloop/kernel/dist/vnext';
 import type {
   VNextExecutionScope,
   VNextManifest,
   VNextSpvPassReceipt,
   VNextStagePlanReceipt,
 } from '@proofloop/kernel';
-import {
-  validateVNextSpvPassReceipt,
-  validateVNextStagePlanReceipt,
-} from '@proofloop/kernel';
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
+import { integrationReceiptDir } from '../receipt-layout';
+import { readReceiptCategory } from '../receipt-reader';
 import { resolveVNextReference } from './entity-resolver';
+import { credentialSchemaVersionMismatch } from './cv-validation';
+import { VNextHandoffError } from './errors';
+export { VNextHandoffError } from './errors';
+import type { VNextSliceLocalBindingExpectation } from './cv-validation';
 import { VNEXT_WORKER_COMPLETION_MODES } from './types';
 import type {
   ProjectVNextWorkerDispatchInput,
@@ -28,6 +34,7 @@ import type {
   VNextWorkerContext,
   VNextWorkerDispatch,
 } from './types';
+import type { VNextDependencyBinding } from '@proofloop/kernel/dist/vnext';
 
 export type {
   ProjectVNextWorkerDispatchInput,
@@ -37,25 +44,117 @@ export type {
   VNextWorkerScope,
 } from './types';
 
-/** Structured fail-closed error; no v1 fallback is represented by this type. */
-export class VNextHandoffError extends Error {
-  public readonly code:
-    | 'v1-input'
-    | 'manifest-invalid'
-    | 'manifest-binding'
-    | 'admission-missing'
-    | 'admission-invalid'
-    | 'task-anchor-gap'
-    | 'execution-scope-gap'
-    | 'path-escape'
-    | 'reference-digest-mismatch'
-    | 'snapshot-binding';
+function authorityDirectory(root: string, stageId: string): string {
+  return path.join(root, '.proofloop', 'receipts', 'plan', stageId);
+}
 
-  constructor(code: VNextHandoffError['code'], message: string) {
-    super(message);
-    this.name = 'VNextHandoffError';
-    this.code = code;
+function readRootBoundJson(root: string, file: string): string {
+  const opened = openNoFollowRead(root, file);
+  if (!opened.ok) fail('path-escape', `vNext admission authority file is not root-bound: ${file}`);
+  try {
+    return fs.readFileSync(opened.fd, 'utf-8');
+  } finally {
+    fs.closeSync(opened.fd);
   }
+}
+
+function readJsonFiles(root: string, directory: string): unknown[] {
+  if (canonicalPathWithinRoot(root, directory) === null) fail('path-escape', 'vNext admission authority path escapes the project root');
+  try {
+    if (fs.statSync(directory).isFile()) {
+      const canonicalFile = canonicalPathWithinRoot(root, directory);
+      if (canonicalFile === null) fail('path-escape', 'vNext admission authority file escapes the project root');
+      return [JSON.parse(readRootBoundJson(root, canonicalFile))];
+    }
+  } catch (error) {
+    if (error instanceof VNextHandoffError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') fail('admission-invalid', `vNext admission authority file could not be read: ${directory}`);
+  }
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    fail('admission-invalid', `vNext admission authority directory could not be read: ${directory}`);
+  }
+  const values: unknown[] = [];
+  for (const name of names) {
+    const file = path.join(directory, name);
+    if (canonicalPathWithinRoot(root, file) === null) fail('path-escape', 'vNext admission authority file escapes the project root');
+    try {
+      values.push(JSON.parse(readRootBoundJson(root, file)));
+    } catch (error) {
+      if (error instanceof VNextHandoffError) throw error;
+      fail('admission-invalid', `vNext admission authority file is not valid JSON: ${name}`);
+    }
+  }
+  return values;
+}
+
+/** Read exactly one v2 Stage Plan + one fresh v2 SPV fact; v1 facts are rejected. */
+export function readVNextAdmissionAuthority(root: string, stageId: string, admissionPath?: string): VNextAdmissionAuthority {
+  const values = admissionPath ? readJsonFiles(root, admissionPath).map((value) => [value]).flat() : readJsonFiles(root, authorityDirectory(root, stageId));
+  let stagePlan: VNextAdmissionAuthority['stagePlan'] | undefined;
+  let spv: VNextAdmissionAuthority['spv'] | undefined;
+  for (const value of values) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    if (record.version !== 2 || record.schema_version !== 2) {
+      if (record.type === 'STAGE_PLAN' || record.type === 'SPV_PASS') fail('admission-invalid', 'v1 admission authority is not accepted by the vNext consumer');
+      continue;
+    }
+    if (record.type === 'STAGE_PLAN') {
+      if (stagePlan !== undefined) fail('admission-invalid', 'multiple v2 Stage Plan authorities are ambiguous');
+      stagePlan = validateVNextStagePlanReceipt(record);
+    } else if (record.type === 'SPV_PASS') {
+      if (spv !== undefined) fail('admission-invalid', 'multiple v2 SPV authorities are ambiguous');
+      spv = validateVNextSpvPassReceipt(record);
+    }
+  }
+  if (stagePlan === undefined || spv === undefined) fail('admission-missing', 'Stage Plan admission authority and fresh SPV authority are required');
+  return { stagePlan, spv };
+}
+
+/** Read receipt-bound dependency facts and compute the single execution binding. */
+export function readSliceLocalDependencyBindings(root: string, manifest: VNextManifest, sliceId: string): VNextDependencyBinding[] {
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) fail('manifest-binding', `Manifest does not declare slice ${sliceId}`);
+  const bindings: VNextDependencyBinding[] = [];
+  for (const dependencyId of slice.depends_on ?? []) {
+    const category = readReceiptCategory({ projectRoot: root, category: 'integration', stageId: manifest.stage_id, sliceId: dependencyId });
+    if (!category.chainValid || category.invalidFiles.length > 0 || category.misplaced.length > 0) fail('manifest-binding', `dependency slice ${dependencyId} integration Receipt chain is not valid`);
+    const tip = category.latest;
+    if (tip === null) {
+      if (manifest.slices.some((candidate) => candidate.slice_id === dependencyId)) fail('manifest-binding', `dependency slice ${dependencyId} has no current INTEGRATION_PASS Receipt`);
+      continue;
+    }
+    const payload = tip.receipt.payload;
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) fail('manifest-binding', `dependency slice ${dependencyId} INTEGRATION_PASS payload must be an object`);
+    const schemaMismatch = credentialSchemaVersionMismatch(
+      (payload as Record<string, unknown>).schema_version,
+      manifest.binding !== undefined,
+      `dependency slice ${dependencyId} Integration`,
+    );
+    if (schemaMismatch !== null) fail('manifest-binding', schemaMismatch.message);
+    const entry: VNextDependencyBinding = {
+      slice_id: dependencyId,
+      slice_contract_digest: String((payload as Record<string, unknown>).slice_contract_digest ?? ''),
+      integration_receipt_digest: tip.receipt.digest,
+      integration_head_sha: String((payload as Record<string, unknown>).commit_sha ?? ''),
+    };
+    try { validateDependencyBinding(entry); } catch (error) { fail('manifest-binding', `dependency slice ${dependencyId} binding is malformed: ${error instanceof Error ? error.message : String(error)}`); }
+    bindings.push(entry);
+  }
+  return bindings;
+}
+
+export function computeSliceLocalBindingExpectation(root: string, manifest: VNextManifest, sliceId: string, baseSnapshotDigest: string): VNextSliceLocalBindingExpectation {
+  if (manifest.binding === undefined) fail('manifest-binding', `slice-local binding expectation requires a Manifest binding for ${sliceId}`);
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined || slice.slice_contract_digest === undefined) fail('manifest-binding', `Manifest slice ${sliceId} has no slice contract binding`);
+  const stageContractDigest = manifest.binding.stage_contract_digest;
+  const executionBindingDigest = computeExecutionBindingDigest({ stage_id: manifest.stage_id, slice_id: sliceId, stage_contract_digest: stageContractDigest, slice_contract_digest: slice.slice_contract_digest, dependency_bindings: readSliceLocalDependencyBindings(root, manifest, sliceId), base_snapshot_digest: baseSnapshotDigest });
+  return { stageContractDigest, sliceContractDigest: slice.slice_contract_digest, executionBindingDigest };
 }
 
 function fail(code: VNextHandoffError['code'], message: string): never {
@@ -398,20 +497,36 @@ export function projectVNextWorkerDispatch(
     fail('task-anchor-gap', 'Slice id is not bound to the Manifest stage');
   }
   const completedTaskIds = new Set(input.completedTaskIds ?? []);
-  const taskRefId = slice.proof_index.task_refs.find((refId) => {
-    const descriptor = manifest.reference_index[refId];
-    const id = descriptor === undefined ? undefined : entityId(descriptor.ref);
-    return id === undefined || !completedTaskIds.has(id);
-  });
-  if (taskRefId === undefined) fail('task-anchor-gap', 'Task anchor is not available from the verified Proof Index');
-  const taskDescriptor = manifest.reference_index[taskRefId];
-  const taskId = taskDescriptor === undefined ? undefined : entityId(taskDescriptor.ref);
-  if (taskDescriptor?.kind !== 'task' || taskId === undefined) {
-    fail('task-anchor-gap', 'Task anchor is not available from the verified Proof Index');
+  let taskId: string | undefined;
+  let taskDescriptor: (typeof manifest.reference_index)[string] | undefined;
+  let executionScope: VNextExecutionScope = {
+    kind: 'evidence-only',
+    code_paths: [],
+    test_paths: [],
+    forbidden_paths: [],
+  };
+
+  if (dispatchMode === 'finalize-slice') {
+    // finalize-slice has no task anchor or implementation scope
+    taskId = undefined;
+    taskDescriptor = undefined;
+  } else {
+    const taskRefId = slice.proof_index.task_refs.find((refId) => {
+      const descriptor = manifest.reference_index[refId];
+      const id = descriptor === undefined ? undefined : entityId(descriptor.ref);
+      return id === undefined || !completedTaskIds.has(id);
+    });
+    if (taskRefId === undefined) fail('task-anchor-gap', 'Task anchor is not available from the verified Proof Index');
+    taskDescriptor = manifest.reference_index[taskRefId];
+    taskId = taskDescriptor === undefined ? undefined : entityId(taskDescriptor.ref);
+    if (taskDescriptor?.kind !== 'task' || taskId === undefined) {
+      fail('task-anchor-gap', 'Task anchor is not available from the verified Proof Index');
+    }
+    if (!taskId.startsWith(`${slice.slice_id}-`)) {
+      fail('task-anchor-gap', 'Task anchor is not bound to the declared Slice');
+    }
   }
-  if (!taskId.startsWith(`${slice.slice_id}-`)) {
-    fail('task-anchor-gap', 'Task anchor is not bound to the declared Slice');
-  }
+
   const sliceGoal = manifest.reference_index[slice.proof_index.goal_ref];
   if (sliceGoal?.kind !== 'goal') fail('task-anchor-gap', 'Slice Goal ref is not available from the verified Proof Index');
 
@@ -426,19 +541,22 @@ export function projectVNextWorkerDispatch(
   assertAuthority(input.authority, manifest.stage_id, input.manifestDigest, manifest.plan.plan_digest, input.snapshotDigest);
   if (input.verifyReferenceBindings !== false) assertVNextManifestReferenceBindings(input.root, manifest);
 
-  const taskScopeBinding = manifest.task_scopes[taskId];
-  if (taskScopeBinding === undefined) {
-    fail('execution-scope-gap', `Manifest has no execution scope for task "${taskId}"`);
-  }
-  if (taskScopeBinding.task_ref !== taskDescriptor.ref) {
-    fail('execution-scope-gap', `Task scope for "${taskId}" is not bound to its admitted task ref`);
-  }
-  const executionScope = taskScopeBinding.execution_scope;
-  if (executionScope.kind !== 'implementation') {
-    fail('execution-scope-gap', `Task "${taskId}" has "${executionScope.kind}" scope and cannot be dispatched as implement-task`);
-  }
-  if (executionScope.code_paths.length === 0 || executionScope.test_paths.length === 0) {
-    fail('execution-scope-gap', `Task "${taskId}" implementation scope requires non-empty code_paths and test_paths`);
+  if (dispatchMode !== 'finalize-slice' && taskId !== undefined && taskDescriptor !== undefined) {
+    const taskScopeBinding = manifest.task_scopes[taskId];
+    if (taskScopeBinding === undefined) {
+      fail('execution-scope-gap', `Manifest has no execution scope for task "${taskId}"`);
+    }
+    if (taskScopeBinding.task_ref !== taskDescriptor.ref) {
+      fail('execution-scope-gap', `Task scope for "${taskId}" is not bound to its admitted task ref`);
+    }
+    const admittedScope = taskScopeBinding.execution_scope;
+    if (admittedScope.kind !== 'implementation') {
+      fail('execution-scope-gap', `Task "${taskId}" has "${admittedScope.kind}" scope and cannot be dispatched as implement-task`);
+    }
+    if (admittedScope.code_paths.length === 0 || admittedScope.test_paths.length === 0) {
+      fail('execution-scope-gap', `Task "${taskId}" implementation scope requires non-empty code_paths and test_paths`);
+    }
+    executionScope = admittedScope;
   }
 
   const codePaths = executionScope.code_paths.map((value) =>
@@ -496,8 +614,8 @@ export function projectVNextWorkerDispatch(
     root_digest: rootDigest,
     stage_id: manifest.stage_id,
     slice_id: slice.slice_id,
-    task_id: taskId,
-    task_ref: taskDescriptor.ref,
+    ...(taskId !== undefined ? { task_id: taskId } : {}),
+    ...(taskDescriptor?.ref !== undefined ? { task_ref: taskDescriptor.ref } : {}),
     slice_goal_ref: slice.proof_index.goal_ref,
     mode: dispatchMode,
     proof_index: {

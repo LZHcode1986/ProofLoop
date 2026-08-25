@@ -10,7 +10,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { SchemaValidationError } from '@proofloop/kernel';
 import {
   computeDigest,
   computeReceiptDigest,
@@ -25,7 +24,6 @@ import type {
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 // S09-C-T03: the shared canonical Stage ID guard (`^S\d+$`).  Legacy parked
 // labels such as S08B0/S08B fail closed before any Runtime read/write.
-import { CANONICAL_STAGE_ID_RE } from './stage-id';
 import { readGitHead, resolveGitRoot } from '../git-source';
 import { cvReceiptDir, tasksReceiptDir } from '../receipt-layout';
 import type {
@@ -50,166 +48,27 @@ import type { VNextSliceLocalBindingExpectation } from './cv-validation';
 // S12-D-T04 (S12-D REPLAN): the slice-local binding expectation (stage/slice
 // contract digests + recomputed execution binding) is the single shared
 // computation of the Worker/CV/Commit/Integration credential consumers.
-import { computeSliceLocalBindingExpectation } from './worker-admission';
-import { readVNextAdmissionAuthority } from './next';
+import { computeSliceLocalBindingExpectation } from './dispatch';
+import { loadAncestorReplanDispositionRecords, readCurrentEpoch } from './replan-epoch';
+import { isVNextHistoricalInvalidatedCvPayload, isVNextHistoricalInvalidatedWorkerPayload } from './finalize-lineage';
+import { assertHistoricalInvalidatedWorkerGenerations } from './integration-validation';
+import type { ReplanAncestorDispositionRecord } from './replan-epoch';
 import {
   VNEXT_WORKER_COMPLETION_MODES,
 } from './types';
 import type { VNextAdmissionAuthority, VNextCvResultEnvelope } from './types';
-
-interface FieldError {
-  readonly path: string;
-  readonly message: string;
-}
-
-const KNOWN_FIELDS = new Set([
-  'schema_version',
-  'type',
-  'stage_id',
-  'slice_id',
-  'worker_receipt_digest',
-  'manifest_digest',
-  'plan_digest',
-  'proof_index_digest',
-  'context_ref',
-  'context_digest',
-  'snapshot_digest',
-  'verification_type',
-  'verdict',
-  'summary',
-  'acceptance_refs_checked',
-  'seam_refs_checked',
-  'oracle_refs_checked',
-  'risk_refs_considered',
-  'failed_acceptance_refs',
-  'invalid_tests',
-  'counterexamples',
-  'scope_violations',
-  'forbidden_substitutions',
-  'regression_failures',
-  'failed_criterion',
-  'failure_signature',
-  'required_recheck_scope',
-  'previous_failure_signature',
-  'repair_diff_digest',
-  // S12-D-T04 (§8.3): slice-local binding fields — admissible only on a
-  // schema_version 3 payload (the shared cv-validation module enforces the
-  // branch rule; this pre-check only admits the field names).
-  'stage_contract_digest',
-  'slice_contract_digest',
-  'execution_binding_digest',
-]);
-
-const IDENTIFIER_RE = /^[A-Za-z0-9_-]+$/;
+import { validateVNextCvResultEnvelope, validateVNextCVResultEnvelope, validateVNextCvResult, validateVNextCVResult } from './cv-result-envelope';
 const SHA256_RE = /^[a-f0-9]{64}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-
-function add(errors: FieldError[], path: string, message: string): void {
-  errors.push({ path, message });
-}
-
-function checkUnknownFields(value: Record<string, unknown>, errors: FieldError[]): void {
-  for (const key of Object.keys(value)) {
-    if (!KNOWN_FIELDS.has(key)) add(errors, `cv_result.${key}`, `Unknown field "${key}"`);
-  }
-}
-
-function nonEmptyString(
-  value: unknown,
-  path: string,
-  errors: FieldError[],
-): value is string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    add(errors, path, 'Expected a non-empty string');
-    return false;
-  }
-  return true;
-}
-
-function identifier(value: unknown, path: string, errors: FieldError[]): void {
-  if (!nonEmptyString(value, path, errors)) return;
-  if (!IDENTIFIER_RE.test(value)) {
-    add(errors, path, 'Expected an identifier matching ^[A-Za-z0-9_-]+$');
-  }
-}
-
-/**
- * S09-C-T03: canonical Stage ID field check — the SAME `^S\d+$` grammar as
- * the candidate parser, compiler, Mechanical Validator, plan/stage/review
- * status and every admission seam.  Legacy parked labels such as S08B0/S08B
- * fail closed before any Runtime read/write.
- */
-function canonicalStageId(value: unknown, path: string, errors: FieldError[]): void {
-  if (!nonEmptyString(value, path, errors)) return;
-  if (!CANONICAL_STAGE_ID_RE.test(value)) {
-    add(
-      errors,
-      path,
-      'Expected a canonical Stage ID matching /^S\\d+$/ (e.g. S09); legacy labels such as S08B0/S08B are rejected',
-    );
-  }
-}
-
-function throwValidationError(errors: readonly FieldError[]): never {
-  throw new SchemaValidationError(
-    `VNextCvResultEnvelope schema validation failed: ${errors
-      .map((error) => `${error.path}: ${error.message}`)
-      .join('; ')}`,
-    [...errors],
-  );
-}
-
-/**
- * Validate a vNext CV result without performing admission or filesystem I/O.
- *
- * The returned value is the original object on success.  Unknown fields,
- * legacy CV level/profile fields, branch-inappropriate fields, and incomplete
- * PASS/REPAIR metadata are all rejected rather than defaulted.
- *
- * S08-REVIEW-007: the closed v2 CV_RESULT payload validation is delegated to
- * the SHARED `cv-validation` module — the same single truth the `next`
- * consumer applies to persisted CV Receipts — instead of a second hand-written
- * schema. The field-level `SchemaValidationError` vocabulary is preserved so
- * the external contract (field errors, `SchemaValidationError` type) stays
- * stable; without a binding this is the pure schema pass, and the Manifest/
- * Worker bindings (exact Proof Index refs, Worker tip, final Worker Context)
- * are applied by `validateFacts` through the same shared module.
- */
-export function validateVNextCvResultEnvelope(value: unknown): VNextCvResultEnvelope {
-  if (!isRecord(value)) {
-    throwValidationError([
-      {
-        path: 'cv_result',
-        message: 'Expected a non-null object',
-      },
-    ]);
-  }
-
-  const errors: FieldError[] = [];
-  checkUnknownFields(value, errors);
-  canonicalStageId(value.stage_id, 'cv_result.stage_id', errors);
-  identifier(value.slice_id, 'cv_result.slice_id', errors);
-  if (errors.length > 0) throwValidationError(errors);
-
-  try {
-    assertClosedVNextCvPayload(value);
-  } catch (error) {
-    if (error instanceof VNextHandoffError) {
-      throwValidationError([{ path: 'cv_result', message: error.message }]);
-    }
-    throw error;
-  }
-  return value as unknown as VNextCvResultEnvelope;
-}
-
-/** Acronym-compatible aliases for Runtime consumers. */
-export const validateVNextCVResultEnvelope = validateVNextCvResultEnvelope;
-export const validateVNextCvResult = validateVNextCvResultEnvelope;
-export const validateVNextCVResult = validateVNextCvResultEnvelope;
-
+export {
+  validateVNextCvResultEnvelope,
+  validateVNextCVResultEnvelope,
+  validateVNextCvResult,
+  validateVNextCVResult,
+} from './cv-result-envelope';
 // ---------------------------------------------------------------------------
 // vNext CV admission core
 // ---------------------------------------------------------------------------
@@ -281,7 +140,7 @@ interface SliceBinding {
 interface ContextFacts {
   readonly ref: string;
   readonly digest: string;
-  readonly taskId: string;
+  readonly taskId: string | undefined;
 }
 
 interface WorkerChainFacts {
@@ -639,7 +498,7 @@ function validateContext(
   manifest: VNextManifest,
   slice: SliceBinding,
   envelope: VNextCvResultEnvelope,
-  task: TaskBinding,
+  task: TaskBinding | null,
   contextRef: string,
   contextDigest: string,
   mode: string,
@@ -669,13 +528,24 @@ function validateContext(
   }
 
   const expectedRootDigest = computeDigest(root);
+  // S13-S17 remediation §6.4: a finalize-slice Context carries no Task
+  // identity (task_id/task_ref absent) and the evidence-only execution
+  // scope; a Task Context must bind exactly its declared task entity.
+  if (task === null) {
+    if (context.task_id !== undefined || context.task_ref !== undefined) {
+      fail('RUNTIME.SCHEMA_MISMATCH', 'finalize-slice Context must not carry a task identity');
+    }
+  } else if (
+    context.task_id !== task.taskId ||
+    context.task_ref !== task.taskRef
+  ) {
+    fail('RUNTIME.SCHEMA_MISMATCH', 'Context is not bound to the active vNext execution tuple');
+  }
   if (
     context.root_path !== root ||
     context.root_digest !== expectedRootDigest ||
     context.stage_id !== envelope.stage_id ||
     context.slice_id !== envelope.slice_id ||
-    context.task_id !== task.taskId ||
-    context.task_ref !== task.taskRef ||
     context.manifest_digest !== envelope.manifest_digest ||
     context.plan_digest !== envelope.plan_digest ||
     context.proof_index_digest !== envelope.proof_index_digest ||
@@ -706,13 +576,19 @@ function validateContext(
     fail('RUNTIME.SCHEMA_MISMATCH', 'Context proof_index_digest does not match the Manifest Slice');
   }
 
+  // S13-S17 remediation §6.4: the finalize-slice Context projects the
+  // evidence-only scope (no task code/test scope); a Task Context must
+  // match its declared Manifest task scope exactly.
+  const expectedExecutionScope: VNextExecutionScope = task === null
+    ? { kind: 'evidence-only', code_paths: [], test_paths: [], forbidden_paths: [] }
+    : task.executionScope;
   const executionScope = canonicalScope(root, context.execution_scope, 'Context.execution_scope');
-  if (!sameValue(executionScope, task.executionScope)) {
+  if (!sameValue(executionScope, expectedExecutionScope)) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Context execution_scope does not match the Manifest task scope');
   }
   const allowedCodeScope = requireStringArray(context.allowed_code_scope, 'Context.allowed_code_scope')
     .map((item, index) => rootRelativePath(root, item, `Context.allowed_code_scope[${index}]`));
-  if (!sameValue(allowedCodeScope, task.allowedCodeScope)) {
+  if (!sameValue(allowedCodeScope, task === null ? [] : task.allowedCodeScope)) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Context allowed_code_scope is not the exact task code/test scope');
   }
 
@@ -726,9 +602,13 @@ function validateContext(
   ).map((item, index) => rootRelativePath(root, item, `Context.scope.mutable_projection_paths[${index}]`));
   const forbiddenPaths = requireStringArray(scope.forbidden_paths, 'Context.scope.forbidden_paths')
     .map((item, index) => rootRelativePath(root, item, `Context.scope.forbidden_paths[${index}]`));
-  const expectedAllowedPaths = unique([...task.allowedCodeScope, slice.evidencePath, slice.planPath]);
+  const expectedAllowedPaths = unique([
+    ...(task === null ? [] : task.allowedCodeScope),
+    slice.evidencePath,
+    slice.planPath,
+  ]);
   const expectedForbiddenPaths = unique([
-    ...task.executionScope.forbidden_paths,
+    ...(task === null ? [] : task.executionScope.forbidden_paths),
     ...canonicalSystemForbiddenPaths(root),
   ]);
   if (!sameValue(allowedPaths, expectedAllowedPaths)) {
@@ -747,7 +627,7 @@ function validateContext(
       }
     }
   }
-  return { ref: contextRef, digest: contextDigest, taskId: task.taskId };
+  return { ref: contextRef, digest: contextDigest, taskId: task === null ? undefined : task.taskId };
 }
 
 function canonicalReceiptDirectory(root: string, directory: string, label: string): string {
@@ -765,7 +645,7 @@ interface ReceiptChainFacts {
 }
 
 /** Read one canonical Receipt chain without using the legacy receipt reader. */
-function readReceiptChain(root: string, directory: string, label: string): ReceiptChainFacts {
+function readReceiptChain(root: string, directory: string, label: string, allowMultipleGenerations = false): ReceiptChainFacts {
   const canonicalDirectory = canonicalReceiptDirectory(root, directory, label);
   let names: string[];
   try {
@@ -848,24 +728,21 @@ function readReceiptChain(root: string, directory: string, label: string): Recei
     }
     successors.set(previous, receipt.digest);
   }
-  if (genesis.length !== 1) {
+  if (genesis.length !== 1 && !allowMultipleGenerations) {
     fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} must contain exactly one chain genesis`);
   }
-
   const ordered: Receipt[] = [];
   const visited = new Set<string>();
-  let current: string | undefined = genesis[0];
-  while (current !== undefined) {
-    if (visited.has(current)) {
-      fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} contains a circular Receipt chain`);
+  for (const rootDigest of genesis.sort()) {
+    let current: string | undefined = rootDigest;
+    while (current !== undefined) {
+      if (visited.has(current)) fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} contains a circular or overlapping Receipt chain`);
+      const receipt = byDigest.get(current);
+      if (receipt === undefined) fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} contains an unreachable Receipt`);
+      visited.add(current);
+      ordered.push(receipt);
+      current = successors.get(current);
     }
-    const receipt = byDigest.get(current);
-    if (receipt === undefined) {
-      fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} contains an unreachable Receipt`);
-    }
-    visited.add(current);
-    ordered.push(receipt);
-    current = successors.get(current);
   }
   if (visited.size !== byDigest.size) {
     fail('RUNTIME.RECEIPT_CHAIN_BROKEN', `${label} contains an unreachable Receipt branch`);
@@ -893,6 +770,7 @@ function assertTuple(
   }
 }
 
+
 function validateWorkerChain(
   root: string,
   manifest: VNextManifest,
@@ -908,15 +786,40 @@ function validateWorkerChain(
   if (chain.receipts.length === 0 || chain.tipDigest === null) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'all Manifest tasks must have v2 TASK_COMPLETE Receipts before CV admission');
   }
-  if (chain.receipts.length !== slice.tasks.length) {
-    fail(
-      'RUNTIME.SCHEMA_MISMATCH',
-      `Worker Receipt count ${chain.receipts.length} does not equal Manifest task count ${slice.tasks.length}`,
-    );
-  }
+  const replanDispositions = loadAncestorReplanDispositionRecords(root, envelope.stage_id);
+  // repair (no skip-before-validation): the loop below may exclude a
+  // historical invalidated Worker fact from the completion identity set
+  // ONLY AFTER every distinct invalidated generation has fully validated
+  // through the canonical neutral validator — closed schema, outer tuple,
+  // action tokens, Context digest/scope and changed_files against its OWN
+  // persisted generation authority. A tampered historical TASK_COMPLETE
+  // whose old tuple matches a persisted disposition now fails closed here
+  // instead of being silently skipped.
+  assertHistoricalInvalidatedWorkerGenerations(
+    root,
+    manifest,
+    envelope.stage_id,
+    slice,
+    replanDispositions,
+    chain.receipts,
+    (payload) => isVNextHistoricalInvalidatedWorkerPayload(payload, envelope.stage_id, slice.tasks.map((task) => task.taskId), replanDispositions),
+    sliceLocalBinding,
+  );
+  // S13-S17 remediation §6.4 / Principle 3: Task completion is derived from
+  // the completion-mode IDENTITY SET (implement-task/recover-task facts bound
+  // to Manifest task ids), never from the raw Receipt count — the slice
+  // finalize-slice fact carries no task identity and must never inflate or
+  // satisfy the Task cardinality.
 
   const contexts: ContextFacts[] = [];
+  const activeReceipts: Receipt[] = [];
   const actionTokens = new Set<string>();
+  const completedTaskIds = new Set<string>();
+  // Prior admitted tasks' code scopes accumulate in CHAIN order — a later
+  // Task may declare files of prior tasks whose uncommitted output the
+  // worktree still carries.
+  const priorCodeScopes: string[][] = [];
+  let finalizeEntry: { receipt: Receipt; index: number } | null = null;
   for (const [index, receipt] of chain.receipts.entries()) {
     if (
       receipt.version !== 1 ||
@@ -927,6 +830,8 @@ function validateWorkerChain(
       fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a legacy, mixed, or wrong-slice Receipt');
     }
     const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${index}].payload`);
+    if (isVNextHistoricalInvalidatedWorkerPayload(payload, envelope.stage_id, slice.tasks.map((task) => task.taskId), replanDispositions)) continue;
+    activeReceipts.push(receipt);
     // S12-D-T04 (§8.3): the credential schema_version discrimination runs
     // BEFORE the exact-field set so a slice-local (v3) payload carrying the
     // binding fields fails with the explicit BINDING code, not as an
@@ -953,24 +858,12 @@ function validateWorkerChain(
       sliceLocalBinding,
     );
     assertExactFields(payload, WORKER_PAYLOAD_FIELDS, `TASK_COMPLETE[${index}].payload`);
-    const task = slice.tasks[index];
-    if (task === undefined) {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains an undeclared task');
-    }
-    if (
-      (payload.mode !== 'implement-task' && payload.mode !== 'recover-task') ||
-      payload.outcome !== 'completed'
-    ) {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a non-completed or legacy Worker fact');
-    }
+    const mode = requireString(payload.mode, `TASK_COMPLETE[${index}].mode`);
     const actionToken = requireString(payload.action_token, `TASK_COMPLETE[${index}].action_token`);
     if (actionTokens.has(actionToken)) {
       fail('RUNTIME.SCHEMA_MISMATCH', `Worker Receipt chain reuses action_token ${actionToken}`);
     }
     actionTokens.add(actionToken);
-    if (payload.task_id !== task.taskId) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `Worker Receipt order/task binding does not match Manifest task ${task.taskId}`);
-    }
     assertTuple(payload, envelope, `TASK_COMPLETE[${index}]`);
     if (payload.proof_index_digest !== slice.proofIndexDigest) {
       fail('RUNTIME.SCHEMA_MISMATCH', `TASK_COMPLETE[${index}] proof_index_digest is stale`);
@@ -978,21 +871,51 @@ function validateWorkerChain(
     if (payload.evidence_ref !== slice.evidencePath) {
       fail('RUNTIME.SCHEMA_MISMATCH', `TASK_COMPLETE[${index}] evidence_ref is not Manifest-bound`);
     }
+
+    // ── Mode discrimination (§6.4): the finalize-slice fact has no task
+    //    identity; implement-task/recover-task facts are Task completions. ──
+    let task: TaskBinding | null = null;
+    if (mode === 'finalize-slice') {
+      if (payload.task_id !== undefined) {
+        fail('RUNTIME.SCHEMA_MISMATCH', 'finalize-slice TASK_COMPLETE must not carry a task_id');
+      }
+      if (finalizeEntry !== null) {
+        fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains more than one finalize-slice fact');
+      }
+      finalizeEntry = { receipt, index };
+    } else {
+      if (mode !== 'implement-task' && mode !== 'recover-task') {
+        fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a non-completed or legacy Worker fact');
+      }
+      if (payload.outcome !== 'completed') {
+        fail('RUNTIME.SCHEMA_MISMATCH', 'Worker Receipt chain contains a non-completed or legacy Worker fact');
+      }
+      const taskId = requireString(payload.task_id, `TASK_COMPLETE[${index}].task_id`);
+      task = slice.tasks.find((candidate) => candidate.taskId === taskId) ?? null;
+      if (task === null) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `Worker Receipt chain contains an undeclared task ${taskId}`);
+      }
+      if (completedTaskIds.has(taskId)) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `Worker Receipt chain completes declared task ${taskId} twice`);
+      }
+      completedTaskIds.add(taskId);
+    }
+
     const changedFiles = requireStringArray(payload.changed_files, `TASK_COMPLETE[${index}].changed_files`, true)
       .map((item, fileIndex) => rootRelativePath(root, item, `TASK_COMPLETE[${index}].changed_files[${fileIndex}]`));
-    // Task-level scope: a TASK_COMPLETE fact declares the files its task
-    // changed, so it is bounded by the task's OWN allowed scope — its
-    // code/test paths plus the shared Evidence/Plan projection, extended by
+    // Scope binding: a TASK_COMPLETE fact declares the files its step
+    // changed. A Task completion is bounded by its OWN allowed scope plus
     // the scopes of prior tasks whose uncommitted output the worktree still
-    // carries.  Another task's forbidden list must not veto this task's
-    // admitted files (S12-D: T01/T04 forbid next.ts while T02 is admitted
-    // to edit it).
-    const priorCodeAndTest = unique(
-      slice.tasks.slice(0, index).flatMap((prior) => prior.allowedCodeScope),
-    );
+    // carries; another task's forbidden list must not veto this task's
+    // admitted files (S12-D: T01/T04 forbid next.ts while T02 is admitted to
+    // edit it). The finalize-slice step converges Slice Evidence/projection
+    // only, so it is bounded by the whole declared Slice scope.
+    const priorCodeAndTest = unique(priorCodeScopes.flat());
     const taskAllowed = unique([
       ...priorCodeAndTest,
-      ...task.allowedCodeScope,
+      ...(task === null
+        ? slice.tasks.flatMap((declared) => declared.allowedCodeScope)
+        : task.allowedCodeScope),
       slice.evidencePath,
       slice.planPath,
     ]);
@@ -1005,7 +928,9 @@ function validateWorkerChain(
     // next.ts).  The system forbidden paths and the allowed-scope check
     // still bind every declared file, and the current task's own files stay
     // bound by its own forbidden list.
-    const taskLevelForbidden = unique(task.executionScope.forbidden_paths);
+    const taskLevelForbidden = unique(
+      task === null ? [] : task.executionScope.forbidden_paths,
+    );
     const systemForbidden = unique(canonicalSystemForbiddenPaths(root));
     const changedFilesLabel = `TASK_COMPLETE[${index}].changed_files`;
     for (const changed of changedFiles) {
@@ -1014,7 +939,7 @@ function validateWorkerChain(
       }
       const priorOwned =
         priorCodeAndTest.some((base) => pathWithin(changed, base)) &&
-        !task.allowedCodeScope.some((base) => pathWithin(changed, base));
+        !(task !== null && task.allowedCodeScope.some((base) => pathWithin(changed, base)));
       if (!priorOwned && taskLevelForbidden.some((base) => pathsOverlap(changed, base))) {
         fail('RUNTIME.SCHEMA_MISMATCH', `${changedFilesLabel} contains a forbidden path: ${changed}`);
       }
@@ -1051,12 +976,34 @@ function validateWorkerChain(
       task,
       contextRef,
       contextDigest,
-      requireString(payload.mode, `TASK_COMPLETE[${index}].mode`),
+      mode,
     );
     contexts.push(context);
+    if (task !== null) priorCodeScopes.push([...task.allowedCodeScope]);
+  }
+  // §6.4 Task coverage: the completion identity set must equal the Manifest
+  // declared task set exactly — no missing, no undeclared, no duplicate.
+  const declaredTaskIds = new Set(slice.tasks.map((declared) => declared.taskId));
+  if (
+    completedTaskIds.size !== declaredTaskIds.size ||
+    [...completedTaskIds].some((taskId) => !declaredTaskIds.has(taskId))
+  ) {
+    fail(
+      'RUNTIME.SCHEMA_MISMATCH',
+      'Worker completion facts do not cover exactly the Manifest task identity set',
+    );
+  }
+  // §6.4 worker_tip: when a finalize-slice fact exists it must be the chain
+  // tip — the CV entry binds the finalized Slice state, never an earlier
+  // Task completion.
+  if (finalizeEntry !== null && finalizeEntry.receipt.digest !== chain.tipDigest) {
+    fail(
+      'RUNTIME.SCHEMA_MISMATCH',
+      'the finalize-slice fact must be the Worker Receipt chain tip at CV admission',
+    );
   }
   return {
-    receipts: chain.receipts,
+    receipts: activeReceipts,
     tipDigest: chain.tipDigest,
     contexts,
   };
@@ -1083,6 +1030,7 @@ function assertCvProofBindings(envelope: VNextCvResultEnvelope, slice: SliceBind
   }
 }
 
+
 function validateCvHistory(
   root: string,
   slice: SliceBinding,
@@ -1090,14 +1038,18 @@ function validateCvHistory(
   envelope: VNextCvResultEnvelope,
   worker: WorkerChainFacts,
   sliceLocalBinding?: VNextSliceLocalBindingExpectation,
+  replanDispositions: readonly ReplanAncestorDispositionRecord[] = [],
 ): CvHistoryFacts {
   const chain = readReceiptChain(
     root,
     cvReceiptDir(root, envelope.stage_id, envelope.slice_id),
     'vNext CV Receipt chain',
+    true,
   );
+  const allWorkerReceipts = readReceiptChain(root, tasksReceiptDir(root, envelope.stage_id, envelope.slice_id), 'vNext Worker Receipt chain').receipts;
   const workerDigests = new Set(worker.receipts.map((receipt) => receipt.digest));
   const envelopes: VNextCvResultEnvelope[] = [];
+  const activeReceipts: Receipt[] = [];
   for (const [index, receipt] of chain.receipts.entries()) {
     if (
       receipt.version !== 1 ||
@@ -1116,6 +1068,8 @@ function validateCvHistory(
         `vNext CV Receipt ${index} is not a valid closed CV envelope: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    if (isVNextHistoricalInvalidatedCvPayload(prior as unknown as Record<string, unknown>, envelope.stage_id, slice.tasks.map((task) => task.taskId), allWorkerReceipts, worker.receipts, replanDispositions)) continue;
+    activeReceipts.push(receipt);
     // S12-D-T04 (§8.3): a v3 (or unknown-future) credential in the persisted
     // CV history is discriminated against the Stage mode before any tuple
     // binding is asserted.
@@ -1188,7 +1142,7 @@ function validateCvHistory(
     }
     envelopes.push(prior);
   }
-  return { receipts: chain.receipts, envelopes };
+  return { receipts: activeReceipts, envelopes };
 }
 
 /**
@@ -1226,12 +1180,14 @@ function validateFacts(
   dependencies: VNextCvAdmissionDependencies,
 ): ValidatedCvFacts {
   const root = canonicalProjectRoot(dependencies.projectRoot);
+  const replanDispositions = loadAncestorReplanDispositionRecords(root, value.stage_id);
   // The authority is read before the snapshot assertion so the CV result can
   // be checked against the admitted snapshot chain (Slice Commit legitimately
   // advanced HEAD to a descendant of the admission snapshot).
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, value.stage_id);
+    const currentEpoch = readCurrentEpoch(root, value.stage_id);
+    authority = { spv: currentEpoch.spv, stagePlan: currentEpoch.stagePlan };
   } catch (error) {
     fail(
       'RUNTIME.SCHEMA_MISMATCH',
@@ -1359,18 +1315,22 @@ function validateFacts(
     }
     throw error;
   }
+  // S13-S17 remediation §6.4: the CV envelope binds the FINAL Worker Context
+  // — the finalize-slice Context when the chain tip is the slice finalize
+  // (no task identity), otherwise the last Task completion's Context.
+  const tipMode = requireString(
+    worker.receipts[worker.receipts.length - 1]?.payload['mode'],
+    'latest TASK_COMPLETE.mode',
+  );
   validateContext(
     root,
     manifest,
     slice,
     value,
-    latestTask,
+    tipMode === 'finalize-slice' ? null : latestTask,
     value.context_ref,
     value.context_digest,
-    requireString(
-      worker.receipts[worker.receipts.length - 1]?.payload['mode'],
-      'latest TASK_COMPLETE.mode',
-    ),
+    tipMode,
   );
 
   const history = validateCvHistory(
@@ -1380,6 +1340,7 @@ function validateFacts(
     value,
     worker,
     sliceLocalBinding,
+    replanDispositions,
   );
   // A Worker repair does not produce a new Worker Receipt, so a legal
   // REPAIR → recheck sequence binds the recheck to the SAME Worker Receipt

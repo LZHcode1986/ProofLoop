@@ -84,7 +84,18 @@ allowed_paths:
   - packages/runtime/src/cli/proofloop-plan-replan.spec.ts
   - packages/runtime/src/vnext/evidence-rotation.spec.ts
   - packages/runtime/src/vnext/replan-impact.spec.ts
+  - packages/runtime/src/vnext/replan-epoch.ts
   - packages/runtime/src/vnext/replan-epoch.spec.ts
+  # Validator parity for Runtime-owned Evidence history archives.
+  - packages/runtime/src/cli/vnext-cli-support-vnext.ts
+  - packages/runtime/src/cli/validate-vnext-stage.spec.ts
+  # Current-epoch consumers: isolate invalidated historical TASK_COMPLETE facts,
+  # route existing implementation through recover-task, and project Context from
+  # the current epoch rather than the stale canonical admission path.
+  - packages/runtime/src/vnext/next.ts
+  - packages/runtime/src/cli/next-action-vnext.spec.ts
+  - packages/runtime/src/cli/proofloop-context.ts
+  - packages/runtime/src/cli/proofloop-context.spec.ts
 forbidden_paths:
   - .proofloop/**
   - delivery/stages/S15/**
@@ -100,15 +111,40 @@ Manifest、Task/Receipt/Evidence/Git facts 独立派生并绑定 disposition，�
 `plan refresh-evidence(mode=replan)` 执行 Evidence rotation 与 bounded projection
 recovery。不得接受 caller 自报或 self-digest forged disposition。不得改变 Plan shape、
 Task scope、Dependency、public operation、ReceiptType 或 Evidence/Receipt 内容。
+当 Replan rotation 已产生 Runtime-owned `evidence/history/<parent-epoch>/` 归档时，
+同一 repair boundary 也可修复 Planner Validator 对该受控归档目录的识别；只能允许
+完整 digest 目录下声明 Slice 的 `.md` 归档，其他目录、文件、symlink 或 foreign Slice
+必须继续 fail-closed。
+
+当已 admission 的 Replan epoch 进入 `stage next` 或 `context prepare` 消费路径时，同一
+repair boundary 也可修复 current-epoch authority 解析与历史事实隔离；Context 必须从
+当前 epoch 的 admission authority 投影，并按同一祖先 disposition 规则过滤历史事实。
+当 Git HEAD 变化但 Manifest/Plan contract 不变、需要生成下一 epoch 时，同一 boundary
+也可让 Runtime 在严格验证祖先 Replan disposition 后忽略已标记为 historical invalidated
+的旧 Worker Receipt，不能把未知或未被祖先事实覆盖的旧 Receipt 静默跳过。只有与
+`previous_snapshot` 完全绑定、且由当前 disposition 标记为 invalidated 的历史
+`TASK_COMPLETE` 才能从 active facts 隔离，并必须把已有实现路由为 `recover-task`；
+当前 epoch、混合 epoch、伪造 digest、错误 Receipt chain、外层 Receipt binding 与
+payload 不一致或未知任务必须继续 fail-closed。该修复不改变 Plan shape、Task scope、
+Dependency、public operation、ReceiptType 或任何 Evidence/Receipt 内容。
 
 ## 允许范围
 
-修复仅限：
+普通 CV v3 route repair 仅限：
 
 - `packages/runtime/src/cli/proofloop-stage.ts`
 - `packages/runtime/src/vnext/cv-admission.ts`
 - `packages/runtime/src/vnext/cv-validation.ts`
 - 与上述 route 直接对应的 source/built/public parity tests
+
+`mode: runtime-replan-repair` 的 Runtime-owned consumer 修复仅限：
+
+- `packages/runtime/src/cli/vnext-cli-support-vnext.ts`
+- `packages/runtime/src/cli/validate-vnext-stage.spec.ts`
+- `packages/runtime/src/cli/proofloop-context.ts`
+- `packages/runtime/src/cli/proofloop-context.spec.ts`
+- `packages/runtime/src/vnext/next.ts`
+- `packages/runtime/src/cli/next-action-vnext.spec.ts`
 
 ## 禁止范围
 

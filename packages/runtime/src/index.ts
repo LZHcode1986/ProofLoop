@@ -477,6 +477,8 @@ export {
   validateVNextCVResult,
   admitVNextCVResult,
   admitVNextCvResult,
+  validateVNextSliceCommitRequest,
+  admitVNextSliceCommit,
   admitVNextIntegration,
   admitVNextIntegrationResult,
   validateVNextIntegrationRequest,
@@ -502,6 +504,8 @@ export {
   VNEXT_REVIEW_RESULT_TYPE,
   VNEXT_REVIEW_ACTION,
   VNEXT_REVIEW_VERDICTS,
+  validateVNextStageCloseRequest,
+  admitVNextStageClose,
   // S09-C-T03 — shared canonical Stage ID guard (^S\d+$; legacy S08B0/S08B
   // labels fail closed before any Runtime read/write).
   CANONICAL_STAGE_ID_RE,
@@ -646,6 +650,38 @@ export type { ValidateVNextStageResult } from './cli/validate-vnext-stage';
 export { initializeVNextSliceEvidence } from './cli/initialize-vnext-slice-evidence';
 export type { InitializeVNextSliceEvidenceResult } from './cli/initialize-vnext-slice-evidence';
 export type { VNextCliError } from './cli/vnext-cli-support-vnext';
+// S13-S17 remediation Phase 4 (§9.6): read-only Stage Composition Closure
+// Audit — mechanically derivable chain proof callable by SPV before admission.
+export {
+  auditVNextStageComposition,
+  auditRouteTableWiring,
+  auditVersionClosure,
+  VNEXT_COMPOSITION_BINDING_MODES,
+  VNEXT_COMPOSITION_CLOSURES,
+  VNEXT_SLICE_CREDENTIAL_CONTRACTS,
+  VNEXT_STAGE_TAIL_CREDENTIAL_CONTRACTS,
+} from './vnext/stage-composition-audit';
+export {
+  VNEXT_ROUTE_TABLE,
+} from './cli/vnext-route-table';
+export type {
+  VNextRouteTableEntry,
+} from './cli/vnext-route-table';
+export {
+  stageTailSchemaMismatch,
+  VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS,
+} from './vnext/types';
+export type {
+  VNextCredentialConsumerContract,
+} from './vnext/stage-composition-audit';
+export type {
+  VNextCompositionBindingMode,
+  VNextCompositionClosure,
+  VNextCompositionChainStep,
+  VNextCompositionGapFinding,
+  VNextSliceCompositionAudit,
+  VNextStageCompositionAuditResult,
+} from './vnext/stage-composition-audit';
 
 // S10-A-T01 — public proofloop CLI seam base: closed domain/operation
 // registry、canonical JSON envelope、exit contract 与 canonical trust root
@@ -677,5 +713,16 @@ export type {
   TrustRootResolution,
   ParsedCliArgs,
 } from './cli/proofloop-common';
+export { VNEXT_WORKER_COMPLETION_MODES, VNEXT_NEXT_ACTIONS } from './vnext';
+export type { VNextWorkerCompletionMode, VNextNextAction } from './vnext';
 export { proofloopCli } from './cli/proofloop';
 export type { ProofloopCliOptions } from './cli/proofloop';
+export { runBoundaryDomain } from './cli/proofloop-boundary';
+export { closeGitBoundary, BOUNDARY_TYPES, GitBoundaryError } from './git-boundary';
+export type { BoundaryCloseRequest, BoundaryCloseResult, BoundaryType } from './git-boundary';
+// S13-S17 remediation §7.3: the public next CLI route seam is part of the
+// Runtime public surface so consumers and tests share one import path.
+export { nextActionFromInput, nextActionCli } from './cli/next-action';
+export {
+  admitVNextSpvPass,
+} from './cli/admit-vnext-stage-plan';

@@ -38,7 +38,7 @@
  * the `next` consumer projects as VALIDATE); the module never performs
  * filesystem or Git I/O and never writes anything.
  */
-import { VNextHandoffError } from './dispatch';
+import { VNextHandoffError } from './errors';
 import {
   VNEXT_BINDING_FIELD_EXECUTION_BINDING_DIGEST,
   VNEXT_BINDING_FIELD_SLICE_CONTRACT_DIGEST,
@@ -1011,13 +1011,17 @@ export function assertUpstreamTaskCompleteSemantics(
     failAdmission(`${label} payload must be a JSON object`);
   }
   const mode = payload.mode;
-  if (mode !== 'implement-task' && mode !== 'recover-task') {
-    failAdmission(`${label}.mode is outside the closed completion vocabulary (implement-task|recover-task)`);
+  if (mode !== 'implement-task' && mode !== 'recover-task' && mode !== 'finalize-slice') {
+    failAdmission(`${label}.mode is outside the closed completion vocabulary (implement-task|recover-task|finalize-slice)`);
   }
   if (payload.outcome !== 'completed') {
     failAdmission(`${label}.outcome must be 'completed'`);
   }
-  requireNonEmptyString(payload.task_id, `${label}.task_id`);
+  if (mode !== 'finalize-slice') {
+    requireNonEmptyString(payload.task_id, `${label}.task_id`);
+  } else if (payload.task_id !== undefined) {
+    failAdmission(`${label}.task_id must be absent for finalize-slice mode`);
+  }
   requireUpstreamChangedFiles(payload, label, options?.allowedScope);
   if (expectedEvidencePath !== undefined && payload.evidence_ref !== expectedEvidencePath) {
     failAdmission(`${label}.evidence_ref is not bound to the Manifest Slice evidence path`);

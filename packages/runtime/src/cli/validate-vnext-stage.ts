@@ -42,7 +42,10 @@ import {
   computeSliceLocalCredentialExpectation,
   credentialSchemaVersionMismatch,
 } from '../vnext/cv-validation';
-
+// S13-S17 remediation Phase 4 (§9.6): the mechanical Stage Composition
+// Closure Audit helper — SPV calls this validator; it never reasons about
+// expected consumers from natural language.
+import { auditVNextStageComposition } from '../vnext/stage-composition-audit';
 export interface ValidateVNextStageResult {
   readonly valid: boolean;
   readonly stage_id: string;
@@ -153,6 +156,24 @@ export function validateVNextStage(
           ),
         ];
       }
+    }
+    // S13-S17 remediation Phase 4 (§9.2–§9.6) — Stage Composition Closure
+    // Audit: mechanically derive the expected public execution chain from
+    // this Manifest composition and fail closed on any behavior/version/
+    // count/tip/public-route gap before SPV or admission can see PLAN_READY.
+    const composition = auditVNextStageComposition(checked.manifest);
+    for (const gap of composition.findings) {
+      errors = [
+        ...errors,
+        vnextError(
+          'STAGE_COMPOSITION_GAP',
+          `${gap.missing_step}: ${gap.reason}`,
+          {
+            ...(gap.slice_id !== undefined ? { slice_id: gap.slice_id } : {}),
+            stage_composition: gap,
+          },
+        ),
+      ];
     }
   }
   return {

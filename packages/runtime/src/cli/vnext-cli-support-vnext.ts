@@ -23,12 +23,15 @@ import {
   parseEntityRef,
   readRootBoundFile,
   resolveVNextReference,
-} from '../vnext';
+} from '../vnext/entity-resolver';
 // S09-C-T03: the shared canonical Stage ID guard (`^S\d+$`).  Legacy parked
 // labels such as S08B0/S08B fail closed before any Runtime read/write.
 import { CANONICAL_STAGE_ID_RE, isCanonicalStageId } from '../vnext/stage-id';
+// S13-S17 remediation Phase 4: structured §9.5 finding carried on
+// STAGE_COMPOSITION_GAP validator errors.
+import type { VNextCompositionGapFinding } from '../vnext/stage-composition-audit';
 
-export { readRootBoundFile } from '../vnext';
+export { readRootBoundFile } from '../vnext/entity-resolver';
 
 // ============================================================
 // Bounded error surface
@@ -39,12 +42,23 @@ export interface VNextCliError {
   readonly message: string;
   readonly path?: string;
   readonly slice_id?: string;
+  /**
+   * S13-S17 remediation Phase 4 (§9.5): present only on
+   * STAGE_COMPOSITION_GAP errors — the full structured Stage Composition
+   * Closure Audit finding (producer/consumer/binding_mode/expected_schema/
+   * missing_step/…).  Consumers map it 1:1 onto the SPV PLAN_DEFECT result.
+   */
+  readonly stage_composition?: VNextCompositionGapFinding;
 }
 
 export function vnextError(
   type: string,
   message: string,
-  details: { readonly path?: string; readonly slice_id?: string } = {},
+  details: {
+    readonly path?: string;
+    readonly slice_id?: string;
+    readonly stage_composition?: VNextCompositionGapFinding;
+  } = {},
 ): VNextCliError {
   return { type, message, ...details };
 }
@@ -442,6 +456,87 @@ function checkReferenceBindings(
   }
 }
 
+function checkEvidenceHistoryArchive(
+  root: string,
+  manifest: VNextManifest,
+  historyDir: string,
+  errors: VNextCliError[],
+): void {
+  let epochEntries: fs.Dirent[];
+  try {
+    epochEntries = fs.readdirSync(historyDir, { withFileTypes: true });
+  } catch (error) {
+    errors.push(vnextError('EVIDENCE_DIR_ERROR', `cannot scan evidence history directory: ${errorMessage(error)}`, { path: historyDir }));
+    return;
+  }
+
+  const declaredSliceFiles = new Set(manifest.slices.map((s) => `${s.slice_id}.md`));
+  const seenEpochDigests = new Set<string>();
+
+  for (const epochEntry of epochEntries) {
+    const epochPath = path.join(historyDir, epochEntry.name);
+    if (epochEntry.isSymbolicLink()) {
+      errors.push(vnextError('EVIDENCE_SYMLINK', `evidence history entry is a symlink: "${epochEntry.name}"`, { path: epochPath }));
+      continue;
+    }
+    if (!epochEntry.isDirectory()) {
+      errors.push(vnextError('ORPHANED_EVIDENCE', `evidence history entry is not a directory: "${epochEntry.name}"`, { path: epochPath }));
+      continue;
+    }
+    if (!/^[a-f0-9]{64}$/.test(epochEntry.name)) {
+      errors.push(vnextError('ORPHANED_EVIDENCE', `evidence history entry is not a valid 64-hex parent epoch digest: "${epochEntry.name}"`, { path: epochPath }));
+      continue;
+    }
+    if (seenEpochDigests.has(epochEntry.name)) {
+      errors.push(vnextError('ORPHANED_EVIDENCE', `duplicate evidence history epoch directory: "${epochEntry.name}"`, { path: epochPath }));
+      continue;
+    }
+    seenEpochDigests.add(epochEntry.name);
+
+    let sliceEntries: fs.Dirent[];
+    try {
+      sliceEntries = fs.readdirSync(epochPath, { withFileTypes: true });
+    } catch (error) {
+      errors.push(vnextError('EVIDENCE_DIR_ERROR', `cannot scan history epoch directory: ${errorMessage(error)}`, { path: epochPath }));
+      continue;
+    }
+
+    const seenSliceFiles = new Set<string>();
+    for (const sliceEntry of sliceEntries) {
+      const sliceFilePath = path.join(epochPath, sliceEntry.name);
+      if (sliceEntry.isSymbolicLink()) {
+        errors.push(vnextError('EVIDENCE_SYMLINK', `history slice entry is a symlink: "${sliceEntry.name}"`, { path: sliceFilePath }));
+        continue;
+      }
+      if (!sliceEntry.isFile()) {
+        errors.push(vnextError('ORPHANED_EVIDENCE', `history slice entry is not a regular file: "${sliceEntry.name}"`, { path: sliceFilePath }));
+        continue;
+      }
+      if (!declaredSliceFiles.has(sliceEntry.name)) {
+        errors.push(vnextError('ORPHANED_EVIDENCE', `history slice file has no declared slice: "${sliceEntry.name}"`, { path: sliceFilePath }));
+        continue;
+      }
+      if (seenSliceFiles.has(sliceEntry.name)) {
+        errors.push(vnextError('ORPHANED_EVIDENCE', `duplicate history slice file: "${sliceEntry.name}"`, { path: sliceFilePath }));
+        continue;
+      }
+      seenSliceFiles.add(sliceEntry.name);
+
+      try {
+        readRootBoundFile(root, path.relative(root, sliceFilePath));
+      } catch (error) {
+        errors.push(
+          vnextError(
+            'ORPHANED_EVIDENCE',
+            `history slice file is missing or unreadable: ${errorMessage(error)}`,
+            { path: sliceFilePath },
+          ),
+        );
+      }
+    }
+  }
+}
+
 function checkEvidenceDirectoryBinding(
   root: string,
   manifest: VNextManifest,
@@ -498,6 +593,14 @@ function checkEvidenceDirectoryBinding(
     const entryPath = path.join(canonicalDir, entry.name);
     if (entry.isSymbolicLink()) {
       errors.push(vnextError('EVIDENCE_SYMLINK', `evidence-dir entry is a symlink: "${entry.name}"`, { path: entryPath }));
+      continue;
+    }
+    if (entry.name === 'history') {
+      if (!entry.isDirectory()) {
+        errors.push(vnextError('ORPHANED_EVIDENCE', `evidence-dir history entry is not a directory: "${entry.name}"`, { path: entryPath }));
+        continue;
+      }
+      checkEvidenceHistoryArchive(root, manifest, entryPath, errors);
       continue;
     }
     if (!entry.isFile()) {

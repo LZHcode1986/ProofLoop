@@ -96,7 +96,10 @@ if (require.main === module) process.exitCode = admitVNextStagePlanCli(process.a
 // `packages/runtime/src/cli/proofloop-plan.ts` (`plan admit-spv`).
 // ===========================================================================
 
-import type { VNextSpvPassReceipt } from "@proofloop/kernel";
+import type { VNextManifest, VNextSpvPassReceipt } from "@proofloop/kernel";
+// S13-S17 remediation Phase 4 (CV repair R2 #5): the independent SPV-only
+// admission seam enforces the mechanical Stage Composition Closure Audit.
+import { auditVNextStageComposition } from "../vnext/stage-composition-audit";
 import { readGitHead, resolveGitRoot } from "../git-source";
 import { canonicalPathWithinRoot, openNoFollowRead } from "../path-guard";
 import { readVNextManifest, assertCanonicalStageId } from "../vnext";
@@ -268,6 +271,20 @@ export function admitVNextSpvPass(value: unknown): VNextSpvPassAdmissionResult {
     if (manifestDigest !== request.manifest_digest) spvFail("manifest-binding", "manifest_digest does not match the root-bound vNext Manifest");
     if ((manifest.plan as { plan_digest: string }).plan_digest !== request.plan_digest) {
       spvFail("manifest-binding", "plan_digest does not match the vNext Manifest plan binding");
+    }
+
+    // S13-S17 remediation Phase 4 (CV repair R2 #5): the independent SPV-only
+    // admission seam enforces the SAME mechanical Stage Composition Closure
+    // Audit before ANY authority write — `plan admit-spv` can never be used
+    // to bypass composition closure.  Runs before ensureAbsent/mkdir/write,
+    // so a gap is a zero-write rejection.
+    const composition = auditVNextStageComposition(manifest as unknown as VNextManifest);
+    if (!composition.closure_valid) {
+      const first = composition.findings[0];
+      spvFail(
+        "manifest-invalid",
+        `stage composition closure audit failed: ${first.missing_step}: ${first.reason}`,
+      );
     }
 
     // SPV binding: the SPV_PASS fact must bind the same Stage/Manifest/Plan/snapshot.

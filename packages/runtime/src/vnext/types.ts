@@ -6,18 +6,54 @@
  * checkbox/Worker-Status projection only; it is never part of the code scope.
  */
 import type {
+  NextAction,
   VNextExecutionScope,
   VNextSpvPassReceipt,
   VNextStagePlanReceipt,
 } from '@proofloop/kernel';
 import type { WorkerStepMode } from '../relay-contract';
 
-/** Closed action vocabulary owned by the vNext next/context consumer. */
-export const VNEXT_NEXT_ACTIONS = ['DISPATCH_WORKER', 'RUN_CV', 'VALIDATE'] as const;
+/**
+ * Closed action vocabulary of the vNext next/context consumer — the canonical
+ * kernel `NextAction` set (S13-S17 remediation §6.1/§6.2). The vNext next
+ * service no longer owns a parallel three-action lifecycle: it projects the
+ * same closed vocabulary the canonical Runtime decision table derives, with
+ * no synonyms and no omissions.
+ */
+export const VNEXT_NEXT_ACTIONS = [
+  'DISPATCH_WORKER',
+  'RUN_CV',
+  'RUN_GATE',
+  'ADMIT_WORKER_RESULT',
+  'ADMIT_CV_RESULT',
+  'ADMIT_SLICE_COMMIT',
+  'ADMIT_INTEGRATION',
+  'PREPARE_STAGE_REVIEW',
+  'FINALIZE_STAGE_REVIEW',
+  'COMPILE_ACCEPTANCE',
+  'RUN_E2E',
+  'INITIALIZE_EVIDENCE',
+  'VALIDATE',
+  'ADMIT_SPV_RESULT',
+  'REPARTITION',
+] as const satisfies readonly NextAction[];
 export type VNextNextAction = (typeof VNEXT_NEXT_ACTIONS)[number];
 
-/** Closed roles emitted by the vNext next/context consumer. */
-export type VNextResponsibleRole = 'worker' | 'code-verifier' | 'executor';
+/**
+ * Closed roles emitted by the vNext next/context consumer — the canonical
+ * kernel `RoleType` set (S13-S17 remediation §6.2).
+ */
+export type VNextResponsibleRole =
+  | 'brain'
+  | 'planner'
+  | 'executor'
+  | 'worker'
+  | 'code-verifier'
+  | 'stage-reviewer'
+  | 'researcher'
+  | 'prototype'
+  | 'committer'
+  | 'general';
 
 /**
  * Closed completion-mode vocabulary for admissible vNext Worker facts
@@ -31,7 +67,7 @@ export type VNextResponsibleRole = 'worker' | 'code-verifier' | 'executor';
  * digest-addressed Worker Context and the TASK_COMPLETE payload, so a Worker
  * cannot replace a recover-task binding with the implement-task narrative.
  */
-export const VNEXT_WORKER_COMPLETION_MODES = ['implement-task', 'recover-task'] as const;
+export const VNEXT_WORKER_COMPLETION_MODES = ['implement-task', 'recover-task', 'finalize-slice'] as const;
 export type VNextWorkerCompletionMode = (typeof VNEXT_WORKER_COMPLETION_MODES)[number];
 
 export interface VNextAdmissionAuthority {
@@ -88,7 +124,7 @@ export interface VNextWorkerDispatch {
   readonly responsible_role: 'worker';
   readonly stage_id: string;
   readonly slice_id: string;
-  readonly task_id: string;
+  readonly task_id?: string;
   readonly mode: VNextWorkerCompletionMode;
   readonly context_ref: string;
   readonly manifest_digest: string;
@@ -111,7 +147,7 @@ export interface VNextWorkerAdmissionState {
   readonly action: 'TASK_COMPLETE';
   readonly stage_id: string;
   readonly slice_id: string;
-  readonly task_id: string;
+  readonly task_id?: string;
   readonly mode: WorkerStepMode;
   readonly outcome: 'completed';
   readonly manifest_digest: string;
@@ -606,3 +642,42 @@ export interface VNextStageCloseAdmissionState {
 
 /** Payload/state-compatible alias for callers that name the result directly. */
 export type VNextStageCloseResult = VNextStageCloseAdmissionState;
+
+// ---------------------------------------------------------------------------
+// Stage-tail credential payload schema contract (S13-S17 remediation Phase 4,
+// CV repair R2 #4).  Single source of truth: the Gate/Review/Close admission
+// discriminators and the Stage Composition Closure Audit all read THESE
+// constants — no consumer restates a schema_version literal.
+// --------------------------------------------------------------------------
+
+/** Closed stage-tail credential type → legal payload schema_version map. */
+export const VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS: Readonly<{
+  GATE_RESULT: typeof VNEXT_GATE_SCHEMA_VERSION;
+  STAGE_REVIEW_RESULT: typeof VNEXT_REVIEW_SCHEMA_VERSION;
+  STAGE_CLOSE_RESULT: typeof VNEXT_STAGE_CLOSE_SCHEMA_VERSION;
+}> = {
+  GATE_RESULT: VNEXT_GATE_SCHEMA_VERSION,
+  STAGE_REVIEW_RESULT: VNEXT_REVIEW_SCHEMA_VERSION,
+  STAGE_CLOSE_RESULT: VNEXT_STAGE_CLOSE_SCHEMA_VERSION,
+};
+
+export type VNextStageTailCredentialType = keyof typeof VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS;
+
+/**
+ * Shared stage-tail payload discriminator consumed by the real Gate/Review/
+ * Close admission validators.  Returns the fail-closed error message, or null
+ * when the payload carries exactly the contract schema_version of its
+ * credential type — drifted or unknown versions never pass.
+ */
+export function stageTailSchemaMismatch(
+  schemaVersion: unknown,
+  credentialType: VNextStageTailCredentialType,
+  label: string,
+): string | null {
+  const expected = VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS[credentialType];
+  if (schemaVersion === expected) return null;
+  return (
+    `${label}.schema_version must be ${expected} (${credentialType} stage-tail credential); ` +
+    `received ${String(schemaVersion)} — drifted or unknown versions fail closed`
+  );
+}

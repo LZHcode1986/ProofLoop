@@ -41,15 +41,17 @@ import type {
   ReplanSliceContractInput,
   ReplanTaskContractInput,
 } from './replan-impact';
-import { readVNextAdmissionAuthority } from './next';
-import { readVNextManifest } from './dispatch';
+import { readVNextAdmissionAuthority, readVNextManifest } from './dispatch';
+import { VNextHandoffError } from './errors';
+import type { VNextAdmissionAuthority } from './types';
 import { readGitHead, resolveGitRoot } from '../git-source';
+import { validatePlanProjectionStructure } from './evidence-refresh';
 
 export const REPLAN_EPOCH_SCHEMA_VERSION = 1;
 export const REPLAN_FACT_SCHEMA_VERSION = 1;
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/;
 const SNAPSHOT_HEX_RE = /^[a-f0-9]{40}$|^[a-f0-9]{64}$/;
-const REPLAN_IMPACT_SCOPES = new Set(['task-local', 'slice-wide', 'unresolved']);
+const REPLAN_IMPACT_SCOPES = new Set(['task-local', 'slice-wide', 'stage-wide', 'unresolved']);
 
 export class ReplanEpochError extends Error {
   public readonly code:
@@ -290,7 +292,7 @@ function validateDispositionShape(value: unknown): asserts value is ReplanImpact
   }
   assertHex(value.parent_epoch_digest, 'fact.disposition.parent_epoch_digest', SHA256_HEX_RE);
   if (typeof value.impact_scope !== 'string' || !REPLAN_IMPACT_SCOPES.has(value.impact_scope)) {
-    fail('REPLAN.FACT_INVALID', 'fact.disposition.impact_scope must be task-local, slice-wide or unresolved');
+    fail('REPLAN.FACT_INVALID', 'fact.disposition.impact_scope must be task-local, slice-wide, stage-wide or unresolved');
   }
   assertStringArray(value.changed_task_ids, 'fact.disposition.changed_task_ids');
   assertStringArray(value.carry_forward_task_ids, 'fact.disposition.carry_forward_task_ids');
@@ -410,6 +412,20 @@ export function readReplanDispositionFact(root: string, factRef: string, expecte
  * requested Stage and previous Manifest/Plan binding. Stale or foreign
  * receipts fail closed.
  */
+export interface ReplanHistoricalInvalidatedBinding {
+  readonly stage_id: string;
+  readonly manifest_digest: string;
+  readonly plan_digest: string;
+  readonly snapshot_digest: string;
+  readonly task_id: string;
+}
+
+export interface ReplanAncestorDispositionRecord {
+  readonly dispositionFact: ReplanDispositionFact;
+  readonly epochDigest: string;
+  readonly parentEpochDigest: string;
+}
+
 export function deriveCompletedTaskIdsFromReceipts(
   root: string,
   stageId: string,
@@ -417,6 +433,9 @@ export function deriveCompletedTaskIdsFromReceipts(
   previousPlanDigest: string,
   slices?: readonly { readonly slice_id: string; readonly task_ids?: readonly string[] }[],
   previousSnapshotDigest?: string,
+  historicalBindings?: readonly ReplanHistoricalInvalidatedBinding[],
+  lineageExemptions?: ReplanLineageReceiptExemptions,
+  ancestorRecords?: readonly ReplanAncestorDispositionRecord[],
 ): { ok: true; task_ids: string[] } | { ok: false; message: string } {
   const completed = new Set<string>();
   const sliceIds = slices ? slices.map((s) => s.slice_id) : [];
@@ -487,8 +506,23 @@ export function deriveCompletedTaskIdsFromReceipts(
         return { ok: false, message: `Worker Receipt payload is malformed: ${name}` };
       }
       const record = payload as Record<string, unknown>;
-      const taskId = record.task_id;
-      if (typeof taskId !== 'string' || taskId.length === 0) {
+      // Legacy replan fixtures and v1-compatible TASK_COMPLETE facts may omit
+      // the vNext mode discriminator. Treat a task-bearing omission as the
+      // historical implement-task form; all vNext admission consumers still
+      // require the closed mode vocabulary before admitting a Worker result.
+      if (record.mode === undefined && typeof record.task_id !== 'string') {
+        return { ok: false, message: `Worker Receipt has no mode: ${name}` };
+      }
+      const mode = record.mode === undefined ? 'implement-task' : record.mode;
+      if (mode !== 'implement-task' && mode !== 'recover-task' && mode !== 'finalize-slice') {
+        return { ok: false, message: `Worker Receipt mode "${String(mode)}" is invalid: ${name}` };
+      }
+      const taskIdValue = record.task_id;
+      if (mode === 'finalize-slice') {
+        if (taskIdValue !== undefined) {
+          return { ok: false, message: `Worker Receipt finalize-slice must not carry a task_id: ${name}` };
+        }
+      } else if (typeof taskIdValue !== 'string' || taskIdValue.length === 0) {
         return { ok: false, message: `Worker Receipt has no task_id: ${name}` };
       }
       if (typeof record.snapshot_digest !== 'string' || record.snapshot_digest.length === 0) {
@@ -506,6 +540,46 @@ export function deriveCompletedTaskIdsFromReceipts(
       if (record.slice_id !== undefined && record.slice_id !== sliceId) {
         return { ok: false, message: `Worker Receipt payload slice_id "${record.slice_id}" does not match receipt slice "${sliceId}": ${name}` };
       }
+      const exactAncestors = ancestorRecords?.filter((ancestor) => {
+        const previous = ancestor.dispositionFact.previous_snapshot;
+        return ancestor.dispositionFact.stage_id === stageId && previous.stage_id === stageId && previous.manifest_digest === record.manifest_digest && previous.plan_digest === record.plan_digest && previous.snapshot_digest === record.snapshot_digest;
+      });
+      const matchesCurrentPrevTuple =
+        record.manifest_digest === previousManifestDigest &&
+        record.plan_digest === previousPlanDigest &&
+        (previousSnapshotDigest === undefined || record.snapshot_digest === previousSnapshotDigest);
+      if (mode === 'finalize-slice') {
+        if (!matchesCurrentPrevTuple) {
+          if (exactAncestors === undefined || exactAncestors.length !== 1) {
+            if (record.manifest_digest !== previousManifestDigest) {
+              return { ok: false, message: `Worker Receipt manifest_digest "${record.manifest_digest}" does not match previous epoch "${previousManifestDigest}": ${name}` };
+            }
+            if (record.plan_digest !== previousPlanDigest) {
+              return { ok: false, message: `Worker Receipt plan_digest "${record.plan_digest}" does not match previous epoch "${previousPlanDigest}": ${name}` };
+            }
+            if (previousSnapshotDigest !== undefined && record.snapshot_digest !== previousSnapshotDigest) {
+              return { ok: false, message: `Worker Receipt snapshot_digest "${record.snapshot_digest}" does not match previous epoch "${previousSnapshotDigest}": ${name}` };
+            }
+            return { ok: false, message: `Worker Receipt is not bound to previous epoch: ${name}` };
+          }
+          const disposition = exactAncestors[0].dispositionFact.disposition;
+          const invalidated = new Set(disposition.invalidated_task_ids);
+          const carriedForward = new Set(disposition.carry_forward_task_ids);
+          if ([...invalidated].some((taskId) => carriedForward.has(taskId))) {
+            return { ok: false, message: `Worker Receipt finalize-slice lineage has overlapping invalidated/carry-forward task ids: ${name}` };
+          }
+          if (declaredTasks === undefined || declaredTasks.size === 0) {
+            return { ok: false, message: `Worker Receipt historical finalize-slice has no declared Slice task set: ${name}` };
+          }
+          const union = new Set([...invalidated, ...carriedForward]);
+          const intersection = [...union].filter((taskId) => declaredTasks.has(taskId));
+          if (intersection.length !== declaredTasks.size || intersection.some((taskId) => !declaredTasks.has(taskId))) {
+            return { ok: false, message: `Worker Receipt historical finalize-slice task set does not exactly match its persisted disposition lineage: ${name}` };
+          }
+        }
+        continue;
+      }
+      const taskId = taskIdValue as string;
       if (declaredTasks !== undefined) {
         if (!declaredTasks.has(taskId)) {
           return { ok: false, message: `Worker Receipt in slice "${sliceId}" has task_id "${taskId}" not declared in slice: ${name}` };
@@ -513,6 +587,72 @@ export function deriveCompletedTaskIdsFromReceipts(
       } else if (!taskId.startsWith(`${sliceId}-`)) {
         return { ok: false, message: `Worker Receipt in slice "${sliceId}" has cross-slice task_id "${taskId}": ${name}` };
       }
+      if (matchesCurrentPrevTuple) {
+        completed.add(taskId);
+        continue;
+      }
+      if (exactAncestors !== undefined && exactAncestors.length > 0) {
+        if (exactAncestors.length !== 1) return { ok: false, message: `Worker Receipt has multiple exact disposition authorities: ${name}` };
+        const disposition = exactAncestors[0].dispositionFact.disposition;
+        const invalidated = disposition.invalidated_task_ids.includes(taskId);
+        const carriedForward = disposition.carry_forward_task_ids.includes(taskId);
+        if (invalidated && carriedForward) return { ok: false, message: `Worker Receipt task ${taskId} has overlapping invalidated/carry-forward lineage: ${name}` };
+        if (invalidated) continue;
+        if (carriedForward) {
+          completed.add(taskId);
+          continue;
+        }
+        return { ok: false, message: `Worker Receipt task ${taskId} is foreign to its exact disposition generation: ${name}` };
+      }
+      const isHistoricalInvalidated =
+        historicalBindings !== undefined &&
+        historicalBindings.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        );
+
+      if (isHistoricalInvalidated) {
+        continue;
+      }
+
+      if (
+        lineageExemptions !== undefined &&
+        lineageExemptions.invalidated.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        )
+      ) {
+        // Consumer-level exemption: this physical receipt belongs to an
+        // ancestor generation whose own disposition invalidated the task — it
+        // is stale history for THIS rotation, never a completion fact. A later
+        // rotation carrying the task forward legitimizes only the NEWER receipt.
+        continue;
+      }
+      if (
+        lineageExemptions !== undefined &&
+        lineageExemptions.carriedForward.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        )
+      ) {
+        // The disposition rotating this exact previous snapshot carried the
+        // task forward: this receipt remains a valid completion fact.
+        completed.add(taskId);
+        continue;
+      }
+
       if (record.manifest_digest !== previousManifestDigest) {
         return { ok: false, message: `Worker Receipt manifest_digest "${record.manifest_digest}" does not match previous epoch "${previousManifestDigest}": ${name}` };
       }
@@ -522,7 +662,7 @@ export function deriveCompletedTaskIdsFromReceipts(
       if (previousSnapshotDigest !== undefined && record.snapshot_digest !== previousSnapshotDigest) {
         return { ok: false, message: `Worker Receipt snapshot_digest "${record.snapshot_digest}" does not match previous epoch "${previousSnapshotDigest}": ${name}` };
       }
-      completed.add(taskId);
+      return { ok: false, message: `Worker Receipt is not bound to previous epoch: ${name}` };
     }
   }
   return { ok: true, task_ids: [...completed].sort() };
@@ -546,12 +686,68 @@ function parseTaskFromPlanContent(planContent: string, taskId: string): ParsedTa
     `^<!--\\s*proofloop:entity\\s+id="${taskId}"\\s+kind="task"\\s*-->\\s*$`,
   ).exec(firstLine);
   if (anchoredMarker === null) return null;
-  const block = lines.slice(1).join('\n');
+  const contentLines = lines.slice(1);
+  const block = contentLines.join('\n');
+
+  // Complete mechanical Task-contract parsing (S15-A-RECHECK12/14 family):
+  // 1. Task entity content lines must NOT contain any nested entity marker or SLICE marker
+  for (let i = 0; i < contentLines.length; i += 1) {
+    const l = contentLines[i];
+    if (l.includes('proofloop:entity') || l.includes('<!-- proofloop:entity')) {
+      throw new ReplanEpochError(
+        'REPLAN.FACT_INVALID',
+        `Task "${taskId}" entity block contains nested entity marker at line ${i + 2}`,
+      );
+    }
+    if (l.includes('SLICE:') || l.includes('<!-- SLICE:')) {
+      throw new ReplanEpochError(
+        'REPLAN.FACT_INVALID',
+        `Task "${taskId}" entity block contains SLICE marker at line ${i + 2}`,
+      );
+    }
+  }
+
+  // 2. The task's OWN checkbox line must appear exactly once AND be the first
+  // non-empty content line of its entity block — a missing, foreign,
+  // duplicate or misplaced checkbox must fail closed, never silently resolve
+  // to the goal of another task.
+  const ownCheckboxRe = new RegExp(`^\\s*-\\s*\\[[ xX]\\]\\s+${taskId}\\s+(?:—|-)`);
+  const ownCheckboxCount = contentLines.filter((l) => ownCheckboxRe.test(l)).length;
+  if (ownCheckboxCount !== 1) {
+    throw new ReplanEpochError(
+      'REPLAN.FACT_INVALID',
+      `Task "${taskId}" must declare its own checkbox line exactly once within its entity block`,
+    );
+  }
+  const firstNonEmpty = contentLines.find((l) => l.trim().length > 0);
+  if (firstNonEmpty === undefined || !ownCheckboxRe.test(firstNonEmpty)) {
+    throw new ReplanEpochError(
+      'REPLAN.FACT_INVALID',
+      `Task "${taskId}" checkbox line must be the first content line of its entity block`,
+    );
+  }
+
+  // 3. Each task body field line may appear at most once — a duplicate line must
+  // fail closed instead of being silently overwritten by a later match.
+  const bodyFieldRe: Array<[string, RegExp]> = [
+    ['refs', /^\s*-\s*refs:/],
+    ['Dependencies', /^\s*-\s*Dependencies:/],
+    ['Required Skills', /^\s*-\s*Required Skills:/],
+    ['execution_scope', /^\s*-\s*execution_scope:/],
+  ];
+  for (const [label, re] of bodyFieldRe) {
+    if (contentLines.filter((l) => re.test(l)).length > 1) {
+      throw new ReplanEpochError(
+        'REPLAN.FACT_INVALID',
+        `Task "${taskId}" declares "${label}:" more than once`,
+      );
+    }
+  }
 
   const result: ParsedTaskProjection = {};
 
-  // Goal (same-line only)
-  const goalMatch = new RegExp(`^[ \\t]*-[ \\t]*\\[[ xX]\\][ \\t]+${taskId}[ \\t]+(?:—|-)[ \\t]*([^\\r\\n]+)`, 'm').exec(block);
+  // Goal (own checkbox line only — it is the first content line)
+  const goalMatch = new RegExp(`^[ \\t]*-[ \\t]*\\[[ xX]\\][ \\t]+${taskId}[ \\t]+(?:—|-)[ \\t]*([^\\r\\n]+)`, 'm').exec(firstNonEmpty);
   if (goalMatch) {
     const rawGoal = goalMatch[1].trim();
     if (rawGoal.length > 0) {
@@ -601,13 +797,17 @@ function parseTaskFromPlanContent(planContent: string, taskId: string): ParsedTa
     }
   }
 
-  // execution_scope
+  // execution_scope (single-line compact JSON as emitted by the Materializer;
+  // malformed JSON must fail closed, never be silently ignored)
   const scopeMatch = /^\s*-\s*execution_scope:\s*(\{.*\})$/m.exec(block);
   if (scopeMatch) {
     try {
       result.execution_scope = JSON.parse(scopeMatch[1]);
     } catch {
-      // ignore
+      throw new ReplanEpochError(
+        'REPLAN.FACT_INVALID',
+        `Plan execution_scope is malformed JSON for task "${taskId}"`,
+      );
     }
   }
 
@@ -626,6 +826,16 @@ export function manifestToReplanPlanSnapshot(
     throw new ReplanEpochError(
       'REPLAN.FACT_INVALID',
       'planContent is required and must not be empty for manifestToReplanPlanSnapshot',
+    );
+  }
+
+  // S15-A-T02 (repair-15): manifestToReplanPlanSnapshot delegates structural validity
+  // to the single shared validator validatePlanProjectionStructure first.
+  const validation = validatePlanProjectionStructure(planContent, manifest);
+  if (!validation.ok) {
+    throw new ReplanEpochError(
+      'REPLAN.FACT_INVALID',
+      `Plan projection structural validation failed: ${validation.message}`,
     );
   }
 
@@ -652,186 +862,35 @@ export function manifestToReplanPlanSnapshot(
     return ref;
   };
 
-  const SLICE_BEGIN_MARKER_RE = /^\s*<!--\s*SLICE:([A-Za-z0-9_-]+):BEGIN\s*-->\s*$/;
-  const SLICE_END_MARKER_RE = /^\s*<!--\s*SLICE:([A-Za-z0-9_-]+):END\s*-->\s*$/;
-  // Anchored to the WHOLE line: any prefix/suffix pollution of a Task entity
-  // marker is a structural defect and must fail closed (CV
-  // S15-A-REPAIR10-PLAN-MARKER-SECTION-OWNERSHIP-SELF-ORACLE, counterexample 1).
-  const TASK_ENTITY_MARKER_RE = /^<!--\s*proofloop:entity\s+id="([^"]+)"\s+kind="task"\s*-->\s*$/;
-
-  const manifestSliceIds = new Set(manifest.slices.map((s) => s.slice_id));
-  const sliceTaskMap = new Map<string, Set<string>>();
-  const allDeclaredTasks = new Set<string>();
-
-  for (const s of manifest.slices) {
-    const sliceTaskIds = Object.keys(taskScopes).filter((id) => id.startsWith(`${s.slice_id}-`));
-    sliceTaskMap.set(s.slice_id, new Set(sliceTaskIds));
-    for (const taskId of sliceTaskIds) {
-      allDeclaredTasks.add(taskId);
-    }
-  }
-
   const lines = planContent.split('\n');
-  let currentSliceId: string | null = null;
-  const seenSliceBegins = new Set<string>();
-  const seenSliceEnds = new Set<string>();
-  const seenTaskIds = new Set<string>();
-  const taskBlocks = new Map<string, string>();
-  let currentTaskId: string | null = null;
-  let currentTaskLines: string[] = [];
-
-  const flushTaskBlock = () => {
-    if (currentTaskId !== null) {
-      taskBlocks.set(currentTaskId, currentTaskLines.join('\n'));
-      currentTaskId = null;
-      currentTaskLines = [];
-    }
-  };
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-
-    const sliceBegin = SLICE_BEGIN_MARKER_RE.exec(line);
-    if (sliceBegin !== null) {
-      flushTaskBlock();
-      const sliceId = sliceBegin[1];
-      if (!manifestSliceIds.has(sliceId)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains undeclared slice section "${sliceId}"`,
-        );
-      }
-      if (currentSliceId !== null) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains nested slice section "${sliceId}" inside "${currentSliceId}"`,
-        );
-      }
-      if (seenSliceBegins.has(sliceId)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains duplicate slice section "${sliceId}"`,
-        );
-      }
-      seenSliceBegins.add(sliceId);
-      currentSliceId = sliceId;
-      continue;
-    }
-
-    const sliceEnd = SLICE_END_MARKER_RE.exec(line);
-    if (sliceEnd !== null) {
-      flushTaskBlock();
-      const sliceId = sliceEnd[1];
-      if (currentSliceId === null) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains unmatched slice end marker "${sliceId}"`,
-        );
-      }
-      if (currentSliceId !== sliceId) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains mismatched slice end marker "${sliceId}" for active slice "${currentSliceId}"`,
-        );
-      }
-      if (seenSliceEnds.has(sliceId)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains duplicate slice end marker "${sliceId}"`,
-        );
-      }
-      seenSliceEnds.add(sliceId);
-      currentSliceId = null;
-      continue;
-    }
-
-    const taskMarker = TASK_ENTITY_MARKER_RE.exec(line);
-    if (taskMarker !== null) {
-      flushTaskBlock();
-      const taskId = taskMarker[1];
-      if (currentSliceId === null) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Task entity marker "${taskId}" is located outside any slice section`,
-        );
-      }
-      const declaredSliceTasks = sliceTaskMap.get(currentSliceId);
-      if (!declaredSliceTasks || !declaredSliceTasks.has(taskId) || !taskId.startsWith(`${currentSliceId}-`)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Task entity marker "${taskId}" is located in wrong slice section "${currentSliceId}"`,
-        );
-      }
-      if (!allDeclaredTasks.has(taskId)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains undeclared task entity marker "${taskId}"`,
-        );
-      }
-      if (seenTaskIds.has(taskId)) {
-        throw new ReplanEpochError(
-          'REPLAN.FACT_INVALID',
-          `Plan contains duplicate task entity marker "${taskId}"`,
-        );
-      }
-      seenTaskIds.add(taskId);
-      currentTaskId = taskId;
-      currentTaskLines = [line];
-      continue;
-    }
-
-    if (currentTaskId !== null) {
-      if (
-        line.startsWith('<!-- proofloop:entity') ||
-        line.startsWith('## ') ||
-        line.startsWith('### Mutable Execution Projection') ||
-        line.startsWith('### ')
-      ) {
-        flushTaskBlock();
-      } else {
-        currentTaskLines.push(line);
-      }
-    }
-  }
-
-  flushTaskBlock();
-
-  if (currentSliceId !== null) {
-    throw new ReplanEpochError(
-      'REPLAN.FACT_INVALID',
-      `Plan contains unclosed slice section "${currentSliceId}"`,
-    );
-  }
-
-  for (const s of manifest.slices) {
-    if (!seenSliceBegins.has(s.slice_id)) {
-      throw new ReplanEpochError(
-        'REPLAN.FACT_INVALID',
-        `Plan is missing slice section for declared slice "${s.slice_id}"`,
-      );
-    }
-    if (!seenSliceEnds.has(s.slice_id)) {
-      throw new ReplanEpochError(
-        'REPLAN.FACT_INVALID',
-        `Plan is missing slice end marker for declared slice "${s.slice_id}"`,
-      );
-    }
-  }
-
-  for (const taskId of allDeclaredTasks) {
-    if (!seenTaskIds.has(taskId)) {
-      throw new ReplanEpochError(
-        'REPLAN.FACT_INVALID',
-        `Plan is missing required task entity marker for declared task "${taskId}"`,
-      );
-    }
-  }
+  const taskMarkers = validation.analysis.taskMarkers;
 
   for (const s of manifest.slices) {
     const sliceTaskIds = Object.keys(taskScopes).filter((id) => id.startsWith(`${s.slice_id}-`));
     for (const taskId of sliceTaskIds) {
       const scope = taskScopes[taskId];
-      const block = taskBlocks.get(taskId) ?? '';
+      const markerLineIdx = taskMarkers.get(taskId);
+      if (markerLineIdx === undefined) {
+        throw new ReplanEpochError(
+          'REPLAN.FACT_INVALID',
+          `Plan is missing required task entity marker for declared task "${taskId}"`,
+        );
+      }
+      // Extract task block: from markerLineIdx to the next entity marker, section heading, or SLICE marker
+      const taskLines: string[] = [lines[markerLineIdx]];
+      for (let i = markerLineIdx + 1; i < lines.length; i += 1) {
+        const l = lines[i];
+        if (
+          l.startsWith('<!-- proofloop:entity') ||
+          l.startsWith('### ') ||
+          l.startsWith('## ') ||
+          l.includes('<!-- SLICE:')
+        ) {
+          break;
+        }
+        taskLines.push(l);
+      }
+      const block = taskLines.join('\n');
       const parsedTask = parseTaskFromPlanContent(block, taskId);
 
       if (parsedTask === null) {
@@ -1090,6 +1149,18 @@ export function produceAndPersistReplanDispositionFact(
   const candidateSnapshot = manifestToReplanPlanSnapshot(candidateManifest, head, candidatePlanContent);
 
   // 5. Derive completed_task_ids from receipts
+  let historicalBindings: ReplanHistoricalInvalidatedBinding[] = [];
+  let lineageExemptions: ReplanLineageReceiptExemptions | undefined;
+  let ancestorRecords: ReplanAncestorDispositionRecord[] = [];
+  try {
+    ancestorRecords = loadAncestorReplanDispositionRecords(root, stageId, current);
+    historicalBindings = deriveHistoricalInvalidatedBindings(ancestorRecords);
+    lineageExemptions = deriveLineageReceiptExemptions(ancestorRecords);
+  } catch (error) {
+    if (error instanceof ReplanEpochError) throw error;
+    fail('REPLAN.FACT_INVALID', 'failed to resolve ancestor disposition records: ' + (error instanceof Error ? error.message : String(error)));
+  }
+
   const derived = deriveCompletedTaskIdsFromReceipts(
     root,
     stageId,
@@ -1097,6 +1168,9 @@ export function produceAndPersistReplanDispositionFact(
     previousManifest.plan.plan_digest,
     previousSnapshot.slices,
     prevSnapshotDigest,
+    historicalBindings,
+    lineageExemptions,
+    ancestorRecords,
   );
   if (!derived.ok) {
     fail('REPLAN.FACT_INVALID', `Worker Receipt chain error: ${derived.message}`);
@@ -1414,6 +1488,249 @@ export function readCurrentEpoch(root: string, stageId: string): ReplanCurrentEp
   return { kind: 'epoch', stage_id: stageId, epoch_digest: tip, epoch: current.refs, spv: current.spv, stagePlan: current.stagePlan };
 }
 
+/**
+ * Canonical current-epoch admission authority reader for every vNext
+ * consumer (dispatch/next, CV, Commit, Integration, Gate, Review, Stage
+ * Close). After a replan the CURRENT SPV_PASS/STAGE_PLAN authority lives
+ * under `.proofloop/receipts/plan/<stage>/epochs/<epoch_digest>/`; the
+ * initial root-level receipts are historical and must never be consumed as
+ * the active authority. Stages without any persisted epoch resolve to the
+ * canonical initial receipt path (legacy/initial regression). The resolver
+ * projects ReplanEpochError onto the VNextHandoffError codes the consumers'
+ * catch blocks already map: REPLAN.EPOCH_NO_AUTHORITY → 'admission-missing'
+ * (DOMAIN.INVALID_TRANSITION at the tail consumers), everything else →
+ * 'admission-invalid' (fail closed).
+ */
+export function readCurrentVNextAdmissionAuthority(root: string, stageId: string): VNextAdmissionAuthority {
+  try {
+    const current = readCurrentEpoch(root, stageId);
+    return { stagePlan: current.stagePlan, spv: current.spv };
+  } catch (error) {
+    if (error instanceof VNextHandoffError) throw error;
+    if (error instanceof ReplanEpochError && error.code === 'REPLAN.EPOCH_NO_AUTHORITY') {
+      throw new VNextHandoffError('admission-missing', `vNext admission authority is unavailable: ${error.message}`);
+    }
+    throw new VNextHandoffError(
+      'admission-invalid',
+      `vNext current-epoch admission authority is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Walk the validated parent chain of the current epoch to retrieve all
+ * ancestor disposition fact records in newest-to-oldest order.
+ */
+export function loadAncestorReplanDispositionRecords(
+  root: string,
+  stageId: string,
+  currentEpochInput?: ReplanCurrentEpoch,
+): ReplanAncestorDispositionRecord[] {
+  const current = currentEpochInput ?? readCurrentEpoch(root, stageId);
+  if (current.kind !== 'epoch') return [];
+
+  const records: ReplanAncestorDispositionRecord[] = [];
+  const visitedEpochs = new Set<string>();
+  let cursorDigest = current.epoch_digest;
+  let cursorRefs: ReplanEpochRefs | undefined = current.epoch;
+
+  let initialDigest: string | undefined;
+  const getInitialDigest = (): string => {
+    if (initialDigest === undefined) {
+      const initialAuthority = readVNextAdmissionAuthority(root, stageId);
+      initialDigest = computeReplanEpochDigest({
+        stage_id: stageId,
+        parent_epoch_digest: '',
+        disposition_digest: '',
+        manifest_digest: initialAuthority.spv.manifest_digest,
+        plan_digest: initialAuthority.spv.plan_digest,
+        snapshot_digest: initialAuthority.spv.snapshot_digest,
+      });
+    }
+    return initialDigest;
+  };
+
+  while (cursorRefs !== undefined) {
+    if (visitedEpochs.has(cursorDigest)) {
+      fail('REPLAN.EPOCH_CHAIN_BROKEN', `epoch parent chain contains a cycle at "${cursorDigest}"`);
+    }
+    visitedEpochs.add(cursorDigest);
+
+    if (cursorRefs.stage_id !== stageId) {
+      fail('REPLAN.EPOCH_INVALID', `epoch "${cursorDigest}" stage_id "${cursorRefs.stage_id}" does not match requested Stage "${stageId}"`);
+    }
+    if (cursorRefs.epoch_digest !== cursorDigest) {
+      fail('REPLAN.EPOCH_INVALID', `epoch directory "${cursorDigest}" does not match its refs epoch_digest "${cursorRefs.epoch_digest}"`);
+    }
+
+    if (cursorRefs.disposition_ref !== '') {
+      const canonicalDisp = canonicalPathWithinRoot(root, cursorRefs.disposition_ref);
+      if (canonicalDisp === null) {
+        fail('REPLAN.ROOT_ESCAPE', `epoch "${cursorDigest}" disposition_ref escapes the root trust boundary: ${cursorRefs.disposition_ref}`);
+      }
+      const dispRel = path.relative(root, canonicalDisp).split(path.sep).join('/');
+      if (!dispRel.startsWith(`.proofloop/runtime/replan/${stageId}/`)) {
+        fail('REPLAN.EPOCH_INVALID', `epoch "${cursorDigest}" disposition_ref must live under .proofloop/runtime/replan/${stageId}/: ${cursorRefs.disposition_ref}`);
+      }
+      const dispFact = readReplanDispositionFact(root, cursorRefs.disposition_ref, cursorRefs.disposition_digest);
+      if (dispFact.stage_id !== stageId) {
+        fail('REPLAN.FACT_INVALID', `disposition fact stage_id "${dispFact.stage_id}" does not match requested Stage "${stageId}"`);
+      }
+      records.push({
+        dispositionFact: dispFact,
+        epochDigest: cursorDigest,
+        parentEpochDigest: cursorRefs.parent_epoch_digest,
+      });
+    }
+
+    const parentDigest = cursorRefs.parent_epoch_digest;
+    if (parentDigest === '' || parentDigest === getInitialDigest()) {
+      break;
+    }
+
+    const parentDir = path.join(root, '.proofloop', 'receipts', 'plan', stageId, 'epochs', parentDigest);
+    const parentRefsPath = path.join(parentDir, 'epoch.json');
+    if (canonicalPathWithinRoot(root, parentRefsPath) === null) {
+      fail('REPLAN.ROOT_ESCAPE', `parent epoch "${parentDigest}" path escapes project root`);
+    }
+    let parentRefsStat: fs.Stats;
+    try {
+      parentRefsStat = fs.lstatSync(parentRefsPath);
+    } catch {
+      fail('REPLAN.EPOCH_CHAIN_BROKEN', `epoch "${cursorDigest}" references a missing parent epoch "${parentDigest}"`);
+    }
+    if (!parentRefsStat.isFile()) {
+      fail('REPLAN.EPOCH_INVALID', `epoch refs is not a file at ${parentRefsPath}`);
+    }
+
+    const rawJson = readEpochJson<unknown>(root, parentRefsPath, 'REPLAN.EPOCH_INVALID', 'epoch refs');
+    const parentRefs = validateReplanEpochRefs(rawJson, stageId);
+    cursorDigest = parentDigest;
+    cursorRefs = parentRefs;
+  }
+
+  return records;
+}
+
+/**
+ * Derive the set of active historical invalidated task bindings across the
+ * ancestor disposition chain, accounting for carry_forward across epochs.
+ */
+export function deriveHistoricalInvalidatedBindings(
+  ancestorRecords: readonly ReplanAncestorDispositionRecord[],
+): ReplanHistoricalInvalidatedBinding[] {
+  const bindings: ReplanHistoricalInvalidatedBinding[] = [];
+  const boundKeys = new Set<string>();
+
+  // ancestorRecords is ordered from newest tip (index 0) to oldest ancestor (index N-1)
+  for (let i = 0; i < ancestorRecords.length; i++) {
+    const dispFact = ancestorRecords[i].dispositionFact;
+    const prevSnap = dispFact.previous_snapshot;
+    const disp = dispFact.disposition;
+
+    for (const taskId of disp.invalidated_task_ids) {
+      if (disp.carry_forward_task_ids.includes(taskId)) {
+        continue;
+      }
+      // Check if carried forward by any newer epoch disposition in the chain (0 <= j < i)
+      let carriedForwardLater = false;
+      for (let j = 0; j < i; j++) {
+        if (ancestorRecords[j].dispositionFact.disposition.carry_forward_task_ids.includes(taskId)) {
+          carriedForwardLater = true;
+          break;
+        }
+      }
+      if (!carriedForwardLater) {
+        const key = `${dispFact.stage_id}:${prevSnap.manifest_digest}:${prevSnap.plan_digest}:${prevSnap.snapshot_digest}:${taskId}`;
+        if (!boundKeys.has(key)) {
+          boundKeys.add(key);
+          bindings.push({
+            stage_id: dispFact.stage_id,
+            manifest_digest: prevSnap.manifest_digest,
+            plan_digest: prevSnap.plan_digest,
+            snapshot_digest: prevSnap.snapshot_digest,
+            task_id: taskId,
+          });
+        }
+      }
+    }
+  }
+
+  return bindings;
+}
+
+/**
+ * Per-generation Worker receipt exemptions derived DIRECTLY from the persisted
+ * ancestor disposition lineage (consumer-level; used by refresh preparation
+ * readers when building a disposition from the previous epoch).
+ *
+ * A physical TASK_COMPLETE receipt belongs to EXACTLY ONE ancestor generation:
+ * the generation whose disposition.previous_snapshot equals the receipt's
+ * (manifest, plan, snapshot, task) tuple. The lineage decides that receipt's
+ * fate through its OWN disposition, never through a cross-record aggregate:
+ *  - `invalidated`: THAT disposition listed the task in invalidated_task_ids
+ *    (and not in its carry_forward_task_ids) — the stale physical receipt must
+ *    be SKIPPED by later rotations. A LATER rotation carrying the task forward
+ *    legitimizes only the NEWER receipt created under the later snapshot; it
+ *    never resurrects the old one.
+ *  - `carriedForward`: THAT disposition carried the task forward — the receipt
+ *    created under that exact previous snapshot remains a valid completion fact
+ *    until a NEWER rotation invalidates the task again (fail-closed direction).
+ */
+export interface ReplanLineageReceiptExemptions {
+  readonly invalidated: readonly ReplanHistoricalInvalidatedBinding[];
+  readonly carriedForward: readonly ReplanHistoricalInvalidatedBinding[];
+}
+
+export function deriveLineageReceiptExemptions(
+  ancestorRecords: readonly ReplanAncestorDispositionRecord[],
+): ReplanLineageReceiptExemptions {
+  const invalidated: ReplanHistoricalInvalidatedBinding[] = [];
+  const carriedForward: ReplanHistoricalInvalidatedBinding[] = [];
+  const seenInvalidated = new Set<string>();
+  const seenCarriedForward = new Set<string>();
+
+  // ancestorRecords is ordered from newest tip (index 0) to oldest ancestor (index N-1)
+  for (let i = 0; i < ancestorRecords.length; i += 1) {
+    const dispFact = ancestorRecords[i].dispositionFact;
+    const prevSnap = dispFact.previous_snapshot;
+    const disp = dispFact.disposition;
+    const bindingKey = (taskId: string): string =>
+      `${dispFact.stage_id}:${prevSnap.manifest_digest}:${prevSnap.plan_digest}:${prevSnap.snapshot_digest}:${taskId}`;
+    const binding = (taskId: string): ReplanHistoricalInvalidatedBinding => ({
+      stage_id: dispFact.stage_id,
+      manifest_digest: prevSnap.manifest_digest,
+      plan_digest: prevSnap.plan_digest,
+      snapshot_digest: prevSnap.snapshot_digest,
+      task_id: taskId,
+    });
+
+    for (const taskId of disp.invalidated_task_ids) {
+      if (disp.carry_forward_task_ids.includes(taskId)) continue;
+      const key = bindingKey(taskId);
+      if (seenInvalidated.has(key)) continue;
+      seenInvalidated.add(key);
+      invalidated.push(binding(taskId));
+    }
+
+    for (const taskId of disp.carry_forward_task_ids) {
+      if (disp.invalidated_task_ids.includes(taskId)) continue;
+      // A carried-forward completion stays valid only while NO newer rotation
+      // invalidated the task again.
+      const invalidatedByNewerRotation = ancestorRecords
+        .slice(0, i)
+        .some((newer) => newer.dispositionFact.disposition.invalidated_task_ids.includes(taskId));
+      if (invalidatedByNewerRotation) continue;
+      const key = bindingKey(taskId);
+      if (seenCarriedForward.has(key)) continue;
+      seenCarriedForward.add(key);
+      carriedForward.push(binding(taskId));
+    }
+  }
+
+  return { invalidated, carriedForward };
+}
+
 // ============================================================
 // Epoch-qualified authority persistence (append-only, write-once)
 // ============================================================
@@ -1653,9 +1970,24 @@ export function verifyReplanAdmissionFact(
       const parsed = readVNextManifest(root, factPrevManifest);
       if (computeDigest(parsed) === prevManifestDigest && parsed.stage_id === bindings.stage_id) {
         realPrevManifest = parsed;
-        const prevPlanCanonical = canonicalPathWithinRoot(root, parsed.plan.ref);
-        if (prevPlanCanonical && fs.existsSync(prevPlanCanonical)) {
-          prevPlanContent = fs.readFileSync(prevPlanCanonical, 'utf8');
+        // Prefer reading previous plan content from the bound previous Git snapshot
+        try {
+          const gitRoot = resolveGitRoot(root);
+          const normPlan = path.posix.normalize(parsed.plan.ref).replace(/^\.\//, '');
+          prevPlanContent = execFileSync(
+            'git',
+            ['-C', gitRoot, 'show', `${prevSnapshotDigest}:${normPlan}`],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+          );
+        } catch {
+          try {
+            const prevPlanCanonical = canonicalPathWithinRoot(root, parsed.plan.ref);
+            if (prevPlanCanonical && fs.existsSync(prevPlanCanonical)) {
+              prevPlanContent = fs.readFileSync(prevPlanCanonical, 'utf8');
+            }
+          } catch {
+            // ignore
+          }
         }
       }
     } catch {
@@ -1683,7 +2015,14 @@ export function verifyReplanAdmissionFact(
             { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
           );
         } catch {
-          // ignore
+          try {
+            const prevPlanCanonical = canonicalPathWithinRoot(root, parsed.plan.ref);
+            if (prevPlanCanonical && fs.existsSync(prevPlanCanonical)) {
+              prevPlanContent = fs.readFileSync(prevPlanCanonical, 'utf8');
+            }
+          } catch {
+            // ignore
+          }
         }
       }
     } catch {
@@ -1731,6 +2070,18 @@ export function verifyReplanAdmissionFact(
   }
 
   // Derive completed_task_ids from TASK_COMPLETE receipt chain of previous epoch
+  let historicalBindings: ReplanHistoricalInvalidatedBinding[] = [];
+  let lineageExemptions: ReplanLineageReceiptExemptions | undefined;
+  let ancestorRecords: ReplanAncestorDispositionRecord[] = [];
+  try {
+    ancestorRecords = loadAncestorReplanDispositionRecords(root, bindings.stage_id, current);
+    historicalBindings = deriveHistoricalInvalidatedBindings(ancestorRecords);
+    lineageExemptions = deriveLineageReceiptExemptions(ancestorRecords);
+  } catch (error) {
+    if (error instanceof ReplanEpochError) throw error;
+    fail('REPLAN.FACT_INVALID', 'failed to resolve ancestor disposition records: ' + (error instanceof Error ? error.message : String(error)));
+  }
+
   const derived = deriveCompletedTaskIdsFromReceipts(
     root,
     bindings.stage_id,
@@ -1738,6 +2089,9 @@ export function verifyReplanAdmissionFact(
     prevPlanDigest,
     realPreviousSnapshot.slices,
     prevSnapshotDigest,
+    historicalBindings,
+    lineageExemptions,
+    ancestorRecords,
   );
   if (!derived.ok) {
     fail('REPLAN.FACT_INVALID', `Worker Receipt chain error: ${derived.message}`);

@@ -34,7 +34,6 @@ import {
   projectVNextRefutationObservation,
   projectVNextRoleContext,
   projectVNextWorkerDispatch,
-  readVNextAdmissionAuthority,
   readVNextManifest,
   verifyVNextRefutationObservationBinding,
   VNextHandoffError,
@@ -47,6 +46,11 @@ import type {
   VNextWorkerDispatch,
 } from '../vnext';
 import { verifyVNextWorkerContextBindings } from '../vnext/dispatch';
+import {
+  deriveHistoricalInvalidatedBindings,
+  loadAncestorReplanDispositionRecords,
+  readCurrentEpoch,
+} from '../vnext/replan-epoch';
 import {
   assertClosedVNextCvPayload,
   assertVNextCvChainSequence,
@@ -192,6 +196,12 @@ interface ResolvedManifestAuthority {
   readonly snapshotDigest: string;
 }
 
+/** Read the validated current epoch as the existing admission authority shape. */
+function readCurrentEpochAuthority(root: string, stage: string): VNextAdmissionAuthority {
+  const current = readCurrentEpoch(root, stage);
+  return { spv: current.spv, stagePlan: current.stagePlan };
+}
+
 /** Read the admitted Manifest + Stage Plan/SPV authority（snapshot binding）。 */
 function resolveManifestAuthority(
   root: string,
@@ -218,7 +228,7 @@ function resolveManifestAuthority(
   }
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, stage);
+    authority = readCurrentEpochAuthority(root, stage);
   } catch (error) {
     return errorEnvelope(
       command,
@@ -254,8 +264,25 @@ function resolveManifestAuthority(
   };
 }
 
+/** Historical invalidated Task IDs across ancestor replan epochs（与 next 同一事实源）。 */
+function readHistoricalInvalidatedTaskIds(root: string, stageId: string): Set<string> {
+  const currentEpoch = readCurrentEpoch(root, stageId);
+  const ancestorRecords = loadAncestorReplanDispositionRecords(root, stageId, currentEpoch);
+  const historicalBindings = deriveHistoricalInvalidatedBindings(ancestorRecords);
+  const taskIds = new Set<string>();
+  for (const b of historicalBindings) {
+    if (b.stage_id === stageId) {
+      taskIds.add(b.task_id);
+    }
+  }
+  return taskIds;
+}
+
 /** Completed Task IDs from persisted Worker Receipts（与 next 同一事实源）。 */
 function readCompletedTaskIds(root: string, stageId: string): string[] {
+  const currentEpoch = readCurrentEpoch(root, stageId);
+  const ancestorRecords = loadAncestorReplanDispositionRecords(root, stageId, currentEpoch);
+  const historicalBindings = deriveHistoricalInvalidatedBindings(ancestorRecords);
   const base = path.join(root, '.proofloop', 'receipts', 'tasks', stageId);
   let sliceDirs: string[];
   try {
@@ -294,12 +321,41 @@ function readCompletedTaskIds(root: string, stageId: string): string[] {
       }
       try {
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const payload = parsed.payload as Record<string, unknown> | undefined;
-        if (typeof payload?.task_id === 'string' && payload.task_id.length > 0) {
-          taskIds.push(payload.task_id);
+        const receipt = validateReceipt(parsed);
+        if (receipt.type !== 'TASK_COMPLETE') continue;
+        const payload = receipt.payload as Record<string, unknown> | undefined;
+        if (payload === undefined || typeof payload !== 'object') continue;
+        const taskId = payload.task_id;
+        if (typeof taskId !== 'string' || taskId.length === 0) continue;
+
+        // Outer envelope must bind to the requested stage and slice directory
+        if (receipt.stage_id !== stageId || receipt.slice_id !== sliceDir) continue;
+
+        // Resolve stage_id and slice_id: fallback to outer envelope when payload omits them;
+        // fail closed (skip receipt) if payload fields conflict with the outer envelope.
+        let receiptStageId = receipt.stage_id;
+        if (typeof payload.stage_id === 'string' && payload.stage_id.length > 0) {
+          if (payload.stage_id !== receipt.stage_id) continue;
+          receiptStageId = payload.stage_id;
         }
+
+        let receiptSliceId = receipt.slice_id;
+        if (typeof payload.slice_id === 'string' && payload.slice_id.length > 0) {
+          if (payload.slice_id !== receipt.slice_id) continue;
+          receiptSliceId = payload.slice_id;
+        }
+        const isHistoricalInvalidated = historicalBindings.some(
+          (binding) =>
+            binding.stage_id === receiptStageId &&
+            binding.manifest_digest === payload.manifest_digest &&
+            binding.plan_digest === payload.plan_digest &&
+            binding.snapshot_digest === payload.snapshot_digest &&
+            binding.task_id === taskId,
+        );
+        if (isHistoricalInvalidated) continue;
+        taskIds.push(taskId);
       } catch {
-        // non-JSON receipt files are not Worker facts
+        // non-JSON or invalid receipt files are not Worker facts
       }
     }
   }
@@ -403,23 +459,60 @@ function selectDispatchSliceId(
   return typeof candidate?.slice_id === 'string' ? candidate.slice_id : undefined;
 }
 
+/** Resolve the declared Worker task set before considering a finalize dispatch. */
+function declaredTaskIdsForSlice(
+  manifest: Record<string, unknown>,
+  sliceId: string,
+): string[] | undefined {
+  const slices = Array.isArray(manifest.slices)
+    ? (manifest.slices as Array<Record<string, unknown>>)
+    : [];
+  const slice = slices.find((candidate) => candidate.slice_id === sliceId);
+  if (slice === undefined) return undefined;
+  const proofIndex = slice.proof_index;
+  if (typeof proofIndex !== 'object' || proofIndex === null || Array.isArray(proofIndex)) {
+    throw new VNextHandoffError('manifest-invalid', `Slice ${sliceId} has no verified Proof Index`);
+  }
+  const taskRefs = (proofIndex as Record<string, unknown>).task_refs;
+  if (!Array.isArray(taskRefs) || taskRefs.length === 0 || !taskRefs.every((refId) => typeof refId === 'string')) {
+    throw new VNextHandoffError('manifest-invalid', `Slice ${sliceId} has no verified Proof Index task_refs`);
+  }
+  const referenceIndex = (manifest.reference_index ?? {}) as Record<string, Record<string, unknown>>;
+  const taskIds: string[] = [];
+  for (const refId of taskRefs as string[]) {
+    const descriptor = referenceIndex[refId];
+    const ref = typeof descriptor?.ref === 'string' ? descriptor.ref : '';
+    const taskId = /#\/entities\/([^/]+)$/.exec(ref)?.[1];
+    if (descriptor?.kind !== 'task' || taskId === undefined || !taskId.startsWith(`${sliceId}-`)) {
+      throw new VNextHandoffError('task-anchor-gap', `Task anchor for Slice ${sliceId} is not available from the verified Proof Index`);
+    }
+    taskIds.push(taskId);
+  }
+  return taskIds;
+}
+
 /**
  * Project the Worker dispatch with the SAME completion-mode rule as the next
- * consumer: first project with the default mode to resolve the Task anchor,
- * then re-project with `recover-task` when that Task's checkbox is already
- * checked in the worktree Plan projection.  Both projections are pure; only
- * the caller may persist through the Runtime seam.
+ * consumer.  A Slice whose verified Proof Index task set is fully completed
+ * projects `finalize-slice` without a task anchor; otherwise the existing
+ * implement/recover task projection remains unchanged.  Both projections are
+ * pure; only the caller may persist through the Runtime seam.
  */
 function projectWorkerDispatch(
   root: string,
   resolved: ResolvedManifestAuthority,
   requestedSliceId: string | undefined,
 ): VNextWorkerDispatch {
-  const completedTaskIds = readCompletedTaskIds(root, resolved.manifest.stage_id as string);
-  const committed = readCommittedSliceIds(root, resolved.manifest.stage_id as string);
+  const stageId = resolved.manifest.stage_id as string;
+  const completedTaskIds = readCompletedTaskIds(root, stageId);
+  const committed = readCommittedSliceIds(root, stageId);
+  const historicalInvalidatedTaskIds = readHistoricalInvalidatedTaskIds(root, stageId);
   const sliceId =
     requestedSliceId ??
     selectDispatchSliceId(resolved.manifest, completedTaskIds, committed);
+  if (sliceId === undefined) {
+    throw new Error('Slice anchor is not available: no eligible slice for dispatch');
+  }
   const base = {
     root,
     manifest: resolved.manifest,
@@ -430,12 +523,18 @@ function projectWorkerDispatch(
     completedTaskIds,
     provenCompleteSlices: committed,
   };
+  const declaredTaskIds = declaredTaskIdsForSlice(resolved.manifest, sliceId);
+  if (declaredTaskIds !== undefined && declaredTaskIds.every((taskId) => completedTaskIds.includes(taskId))) {
+    return projectVNextWorkerDispatch({ ...base, mode: 'finalize-slice' });
+  }
   const probe = projectVNextWorkerDispatch(base);
-  const mode = planTaskCheckboxChecked(
+  const isChecked = probe.task_id ? planTaskCheckboxChecked(
     root,
     (resolved.manifest.plan as { ref: string }).ref,
     probe.task_id,
-  )
+  ) : false;
+  const isHistoricalInvalidated = probe.task_id ? historicalInvalidatedTaskIds.has(probe.task_id) : false;
+  const mode = (isChecked || isHistoricalInvalidated)
     ? 'recover-task'
     : 'implement-task';
   if (mode === 'implement-task') return probe;
@@ -1961,7 +2060,7 @@ function runContextAdmitRefutationObservation(
   }
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, stage);
+    authority = readCurrentEpochAuthority(root, stage);
   } catch (error) {
     return errorEnvelope(
       command,

@@ -55,7 +55,7 @@ import {
   readVNextManifest,
   VNextHandoffError,
 } from './dispatch';
-import { readVNextAdmissionAuthority } from './next';
+import { readCurrentVNextAdmissionAuthority } from './replan-epoch';
 import {
   VNEXT_STAGE_CLOSE_ACTION,
   VNEXT_STAGE_CLOSE_RESULT_TYPE,
@@ -560,7 +560,11 @@ function validateFacts(
 
   let authority: VNextAdmissionAuthority;
   try {
-    authority = readVNextAdmissionAuthority(root, request.stageId);
+    // repair (current-authority parity): the Stage Close consumes the SAME
+    // canonical current-epoch authority reader as dispatch/next, CV, Commit
+    // and Integration — after a replan the active SPV/Stage Plan lives in
+    // the current epoch directory and stale root-level receipts are history.
+    authority = readCurrentVNextAdmissionAuthority(root, request.stageId);
   } catch (error) {
     if (!(error instanceof VNextHandoffError)) throw error;
     fail(

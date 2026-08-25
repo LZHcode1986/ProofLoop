@@ -10,7 +10,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { computeDigest } from '@proofloop/kernel';
-import { canonicalPathWithinRoot } from './path-guard';
 import {
   errorMessage,
   readRootBoundJson,
@@ -33,81 +32,10 @@ import {
   CandidateInputError,
   isActiveCandidateInput,
 } from './vnext/candidate-input';
-import {
-  readRootBoundFile,
-  VNextEntityResolutionError,
-} from './vnext/entity-resolver';
 import { writeVNextManifest } from './vnext/compiler';
 
-export type PlanManifestRoute = 'v1' | 'vnext' | 'unknown';
-
-/**
- * Inspect only the root-bound Manifest discriminator.
- *
- * The read itself is part of the route boundary: no-follow, regular-file and
- * post-read identity failures are route failures, never evidence of a legacy
- * Manifest.  A successfully read file selects v1 only with an explicit legacy
- * marker (`version: 1`) or the legacy stage/source shape used by the existing
- * v1 Manifest contract.  The one compatibility exception is an absent
- * default artifact, which remains on the legacy consumer so status/next retain
- * their canonical missing-Manifest finding. Any explicit vNext-like shape or
- * unknown discriminator is bounded as `unknown`, never silently downgraded.
- */
-export function detectPlanManifestRoute(
-  projectRoot: string,
-  manifestPath: string,
-): PlanManifestRoute {
-  const root = resolveProjectRoot(projectRoot);
-  if (canonicalPathWithinRoot(root, manifestPath) === null) return 'unknown';
-  let value: unknown;
-  try {
-    // `readRootBoundJson` intentionally keeps a broad error shape for CLI
-    // projections. Route detection needs the stronger read boundary instead:
-    // it must not turn no-follow symlink, non-regular, read or TOCTOU errors
-    // into a legacy route.
-    const read = readRootBoundFile(root, manifestPath);
-    value = JSON.parse(read.content) as unknown;
-  } catch (error) {
-    // A missing default artifact is still handed to the legacy consumer so
-    // status/next preserve their canonical DOMAIN.STAGE_NOT_FOUND result.  A
-    // path that existed and then disappeared is a TOCTOU failure, and every
-    // other read/no-follow/regular-file failure remains an unknown route.
-    if (error instanceof VNextEntityResolutionError && error.code === 'unreadable') {
-      const probePath = path.isAbsolute(manifestPath)
-        ? manifestPath
-        : path.resolve(root, manifestPath);
-      try {
-        fs.lstatSync(probePath);
-      } catch (probeError) {
-        if ((probeError as NodeJS.ErrnoException).code === 'ENOENT') return 'v1';
-      }
-    }
-    return 'unknown';
-  }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return 'unknown';
-  const record = value as Record<string, unknown>;
-  const version = record.version;
-  const schemaVersion = record.schema_version;
-  if (version !== undefined && version !== 1 && version !== 2) return 'unknown';
-  if (schemaVersion !== undefined && schemaVersion !== 2) return 'unknown';
-  const plan = record.plan;
-  if (plan !== undefined && (plan === null || typeof plan !== 'object' || Array.isArray(plan))) {
-    return 'unknown';
-  }
-  const planSchemaVersion =
-    plan === undefined ? undefined : (plan as Record<string, unknown>).schema_version;
-  if (plan !== undefined && planSchemaVersion !== 2) return 'unknown';
-  const hasVNextMarker = version === 2 || schemaVersion === 2 || planSchemaVersion === 2;
-  if (version === 1 && hasVNextMarker) return 'unknown';
-  if (hasVNextMarker) return 'vnext';
-  if (version === 1) return 'v1';
-  // Current v1 manifests predate the discriminator and are identified by the
-  // required stage/source anchors. Keep that legacy route for status/next
-  // compatibility without treating an arbitrary JSON object as v1.
-  return typeof record.stage_id === 'string' && typeof record.source_path === 'string'
-    ? 'v1'
-    : 'unknown';
-}
+export { detectPlanManifestRoute } from './vnext/manifest-route';
+export type { PlanManifestRoute } from './vnext/manifest-route';
 
 export interface CompileVNextPlanInput {
   readonly projectRoot: string;

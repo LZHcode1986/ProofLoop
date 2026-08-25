@@ -1,6 +1,5 @@
 /** Minimal vNext Stage Plan admission seam. */
 
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -15,12 +14,15 @@ import { canonicalPathWithinRoot } from "../path-guard";
 // S09-C-T03: the shared canonical Stage ID guard (`^S\d+$`).  Legacy parked
 // labels such as S08B0/S08B fail closed before any Runtime read/write.
 import { CANONICAL_STAGE_ID_RE } from "./stage-id";
+// S13-S17 remediation Phase 4 (CV repair #7): Stage Plan admission enforces
+// the mechanical Stage Composition Closure Audit before any authority write.
+import { auditVNextStageComposition } from "./stage-composition-audit";
 import {
   assertVNextManifestReferenceBindings,
   readVNextManifest,
   VNextHandoffError,
 } from "./dispatch";
-import { readGitHead, resolveGitRoot } from "../git-source";
+import { assertStableGitBoundary as assertStableGitBoundaryNeutral, StableGitBoundaryError } from "./git-boundary";
 // S14-A-T02 — replan epoch authority (append-only). The Runtime derives the
 // epoch digest, verifies the parent chain and recomputes the impact set; a
 // replan request can never declare a derived fact (epoch digest, impact
@@ -182,40 +184,12 @@ function ensureAbsent(target: string): void {
  * allowed, while tracked or non-ignored untracked files keep the flow closed.
  */
 export function assertStableGitBoundary(root: string, snapshotDigest?: string): string {
-  let gitRoot: string;
   try {
-    gitRoot = resolveGitRoot(root);
+    return assertStableGitBoundaryNeutral(root, snapshotDigest);
   } catch (error) {
-    fail("git-unavailable", "canonical Git project root is unavailable: " + (error instanceof Error ? error.message : String(error)));
+    if (error instanceof StableGitBoundaryError) fail(error.code, error.message);
+    throw error;
   }
-
-  let porcelain: string;
-  try {
-    porcelain = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {
-      cwd: gitRoot,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    fail("git-unavailable", "current Git worktree status is unavailable: " + (error instanceof Error ? error.message : String(error)));
-  }
-  if (porcelain.trim().length > 0) {
-    fail("worktree-dirty", "vNext Stage Plan admission requires a clean Git worktree at the canonical project root");
-  }
-
-  let head: string;
-  try {
-    head = readGitHead(gitRoot);
-  } catch (error) {
-    fail("git-unavailable", "current Git HEAD is unavailable: " + (error instanceof Error ? error.message : String(error)));
-  }
-  if (snapshotDigest !== undefined && snapshotDigest !== head) {
-    fail(
-      "snapshot-binding",
-      `vNext Stage Plan admission snapshot_digest "${snapshotDigest}" does not match current Git HEAD "${head}", fresh SPV is required`,
-    );
-  }
-  return head;
 }
 
 function admitValidated(request: VNextStagePlanAdmissionRequest): VNextStagePlanAdmissionSuccess {
@@ -238,6 +212,20 @@ function admitValidated(request: VNextStagePlanAdmissionRequest): VNextStagePlan
   if (manifest.plan.plan_digest !== request.plan_digest) fail("manifest-binding", "plan_digest does not match the vNext Manifest plan binding");
   try { assertVNextManifestReferenceBindings(root, manifest); }
   catch (error) { fail("manifest-binding", error instanceof Error ? error.message : String(error)); }
+
+  // S13-S17 remediation Phase 4 (CV repair #7): Stage Plan admission enforces
+  // the SAME mechanical Stage Composition Closure Audit before any authority
+  // write — a caller-supplied fresh SPV never substitutes for composition
+  // closure.  This runs BEFORE ensureAbsent/mkdir/writeOnceJson, so a gap is
+  // a zero-write rejection.
+  const composition = auditVNextStageComposition(manifest);
+  if (!composition.closure_valid) {
+    const first = composition.findings[0];
+    fail(
+      "manifest-invalid",
+      `stage composition closure audit failed: ${first.missing_step}: ${first.reason}`,
+    );
+  }
 
   let spv: VNextSpvPassReceipt;
   try { spv = validateVNextSpvPassReceipt(request.spv); }

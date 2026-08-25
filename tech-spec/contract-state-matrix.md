@@ -185,7 +185,7 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 | RoleContext | role/action, authority/plan/proof refs, bindings, snapshot, role-specific fields, context_digest | Context Resolver Contract | 写：Runtime；读：目标 Agent/admission | role projection matrix + self digest + root/identity | stale binding 重新生成；Agent 不可编辑 |
 | ExecutableRuntimeProofStep | id, type(`command\|service_start\|service_stop\|probe`), executable, args, cwd, timeout_ms, expected；按 type 可有 readiness_signal/service_ref；`not_applicable.reason` 为显式例外 | kernel Runtime Proof contract + S09 seam | 写：Plan Materializer closed input；digest：Runtime；执行：Gate runner | unknown field/type、非 root cwd、非正 timeout、caller-supplied digest fail closed；S10 至少一个 executable step | schema/type 变化需重新 compile/refresh/fresh SPV |
 | EvidenceRefreshRequest | stage_id, manifest_ref/digest, expected_previous_manifest_digest, evidence refs, `mode` (`refresh`\|`recover`\|`rollback`\|`replan`) | S09 seam + Replan epoch seam | 写：Runtime `plan refresh-evidence`；读：Planning/SPV/epoch admission | `refresh|recover|rollback` 仅 pre-admission pristine；`replan` 绑定 current/parent epoch、Disposition 并执行安全 rotation；全量预检 + transaction journal + compare-and-swap | 任何 non-pristine/stale/symlink、父链不一致或未恢复 transaction 直接阻断 |
-| ReplanDisposition | stage_id, parent_epoch_digest, `impact_scope` (`task-local`\|`slice-wide`), changed_task_ids, carry_forward_task_ids, invalidated_task_ids, previous/new plan+Manifest digests | Runtime `replan-impact` | 写：Runtime `plan refresh-evidence(mode=replan)` preparation；读：epoch/admission/next | 前后 current Manifest/Task contract、依赖闭包、Receipt/Evidence/scope 全部可重建；caller 不得提供派生集合 | 误判会导致静默复用或无谓重做；无法判定必须 no-write |
+| ReplanDisposition | stage_id, parent_epoch_digest, `impact_scope` (`task-local`\|`slice-wide`\|`stage-wide`\|`unresolved`), changed_task_ids, carry_forward_task_ids, invalidated_task_ids, previous/new plan+Manifest digests | Runtime `replan-impact` | 写：Runtime `plan refresh-evidence(mode=replan)` preparation；读：epoch/admission/next | 前后 current Manifest/Task contract、依赖闭包、Receipt/Evidence/scope 全部可重建；caller 不得提供派生集合 | 误判会导致静默复用或无谓重做；无法判定必须 no-write |
 | ReplanEpoch | epoch_digest, parent_epoch_digest?, stage_id, disposition_digest, current Manifest/Plan/snapshot digests, SPV/Stage Plan refs | Runtime `replan-epoch` + existing vNext SPV/Stage Plan admission | 写：现有 `plan admit-spv` / `plan admit-stage-plan` 的 epoch 扩展；读：next/Worker/CV/Commit/Integration/Gate/Review | epoch digest、父链、current epoch、receipt refs 和 Git snapshot 一致；不新增 ReceiptType | 旧 epoch 只作历史；当前 epoch 只能由完整 append-only chain 派生 |
 | VNextCvResultEnvelope | nested `CV_RESULT`：`schema_version` (`2`\|`3`), `type`, stage/slice/Worker tip/Manifest/Plan/Proof Index/Context/snapshot bindings, verification/refs/findings；v3 另含 `stage_contract_digest`, `slice_contract_digest`, `execution_binding_digest` | Code Verifier → `stage admit-cv` → shared validator → vNext CV consumer | 写：Runtime CV admission；读：`stage next`/Gate/Review/currentness | Manifest mode gate、Worker tip、Context、Proof Index、epoch/path/snapshot 与三层 binding 全部一致；v2/v3 混链 fail-closed | 外层 CLI schema 2 不得遮蔽 nested v3；v3 不得被 v2 consumer 消费 |
 
@@ -559,7 +559,7 @@ consumer 必须保持同一语义。
   "schema_version": 1,
   "stage_id": "S13",
   "parent_epoch_digest": "<sha256>",
-  "impact_scope": "task-local", // task-local | slice-wide
+  "impact_scope": "task-local", // task-local | slice-wide | stage-wide | unresolved
   "changed_task_ids": ["S13-A-T01"],
   "carry_forward_task_ids": ["S13-A-T00"],
   "invalidated_task_ids": ["S13-A-T01", "S13-A-T02"],
@@ -571,11 +571,20 @@ consumer 必须保持同一语义。
 }
 ```
 
-- `impact_scope` 判定：Stage contract、Slice proof index、权威引用、前置 Task 的目标/验收/证明
-  refs/dependencies/required_skills/execution_scope 任一变化，或依赖闭包无法证明时，必须
-  `slice-wide` 或直接 `REPLAN.IMPACT_UNRESOLVED`；不得降级为 `task-local`。
-- `carry_forward_task_ids` 只能包含 changed set 之前、Task contract digest 完全匹配且有
-  合法 Runtime `TASK_COMPLETE` 的 Task；当前被 replan 的 Task 绝不 carry forward。
+- `impact_scope` 为闭集四态（整改方案 §8.1）：
+  - `task-local`：仅 changed Task + same-slice successors + downstream closure 失效；
+    变化点之前、contract digest 完全匹配的已完成 Task 可 carry forward。
+  - `slice-wide`（精确）：Slice proof index / Slice dependency / Slice contract / 执行边界
+    变化，或可归属到具体 Slice 的权威引用变化，只失效目标 Slice 及其 transitive downstream
+    Slices；受影响区域之外、contract 未变的已完成 Task carry forward。绝不默认扩大为整个 Stage。
+  - `stage-wide`：Stage contract 变化，或全局 Authority 改变且无法归属任何单个 Slice
+    （含 Slice set 结构变化无法局部证明安全的情形），当前 Stage 全部 execution facts 失效，
+    无任何 carry forward。
+  - `unresolved`：依赖闭包无法证明（unknown dependency、dependency cycle 等）时 fail closed
+    为 `REPLAN.IMPACT_UNRESOLVED`；不得猜测降级为 `task-local`。
+- `carry_forward_task_ids` 只能包含失效区域之外（task-local 时还须位于 changed set 之前）、
+  Task contract digest 完全匹配且有合法 Runtime `TASK_COMPLETE` 的 Task；当前被 replan 的
+  Task 绝不 carry forward。
 - Disposition 的 canonical digest 由 Runtime 计算并写入 `.proofloop/runtime/replan/**` 的
   Runtime-owned preparation fact；它不是 Agent/Plan 的第二权威，也不能脱离 parent/current
   epoch 使用。admission 前需重新验证其 root、Manifest、Evidence、Receipt chain 和 snapshot。

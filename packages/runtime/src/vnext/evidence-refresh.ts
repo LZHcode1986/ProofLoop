@@ -51,6 +51,7 @@ import { execFileSync } from 'node:child_process';
 import {
   VNEXT_SCHEMA_VERSION,
   computeDigest,
+  isCanonicalStageId,
   validateReceipt,
   verifyReceiptChain,
   verifyReceiptDigest,
@@ -74,12 +75,20 @@ import {
 } from './binding-currentness';
 import {
   ReplanEpochError,
+  deriveHistoricalInvalidatedBindings,
+  deriveLineageReceiptExemptions,
+  loadAncestorReplanDispositionRecords,
   produceAndPersistReplanDispositionFact,
   readCurrentEpoch,
   readReplanDispositionFact,
   verifyReplanAdmissionFact,
 } from './replan-epoch';
-import type { ReplanCurrentEpoch, ReplanDispositionFact } from './replan-epoch';
+import type {
+  ReplanCurrentEpoch,
+  ReplanDispositionFact,
+  ReplanHistoricalInvalidatedBinding,
+  ReplanLineageReceiptExemptions,
+} from './replan-epoch';
 import {
   REPLAN_JOURNAL_FILE,
   REPLAN_EVIDENCE_ROTATION_BLOCKED,
@@ -2334,10 +2343,107 @@ function replanFailed(
   return failed(stageId, 'replan', errors, blockedRecovery);
 }
 
+/** Closed task-id grammar of the rotation core (evidence-rotation.ts
+ *  TASK_ID_GRAMMAR): canonical Stage-Slice-Task ids only. */
+const REPLAN_NOOP_TASK_ID_RE = /^S\d+-[A-Z0-9]+-T\d+$/;
+
+/** Closed-schema parser for a strict HEAD-only idempotent no-op replan disposition (§8.8). */
+function parseReplanNoOpDisposition(value: unknown): ReplanDisposition | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const required: ReadonlyArray<keyof ReplanDisposition> = [
+    'schema_version',
+    'stage_id',
+    'parent_epoch_digest',
+    'impact_scope',
+    'changed_task_ids',
+    'carry_forward_task_ids',
+    'invalidated_task_ids',
+    'previous_manifest_digest',
+    'manifest_digest',
+    'previous_plan_digest',
+    'plan_digest',
+    'snapshot_digest',
+  ];
+  if (required.some((field) => !(field in record))) return null;
+  const unknown = Object.keys(record).filter((field) => !(required as readonly string[]).includes(field));
+  if (unknown.length > 0) return null; // closed schema
+
+  if (record.schema_version !== 1) return null;
+  const stageId = record.stage_id;
+  if (typeof stageId !== 'string' || !isCanonicalStageId(stageId)) return null;
+  const parentEpochDigest = record.parent_epoch_digest;
+  if (typeof parentEpochDigest !== 'string' || !SHA256_HEX_RE.test(parentEpochDigest)) return null;
+  if (record.impact_scope !== 'task-local') return null;
+
+
+  // Runtime-repair (HEAD-only no-op carry-forward): the classifier's task-local
+  // no-op branch (replan-impact.ts) carries every completed current-epoch Task
+  // whose contract digest still exists in the candidate plan, so a no-op
+  // disposition may name a NON-EMPTY carry_forward_task_ids set. Only changed/
+  // invalidated must stay empty. The carried ids keep the closed task-id grammar
+  // of the rotation core (evidence-rotation.ts parseReplanDisposition): canonical
+  // grammar, stage-scoped, duplicate-free.
+  if (!Array.isArray(record.changed_task_ids) || record.changed_task_ids.length !== 0) return null;
+  if (!Array.isArray(record.invalidated_task_ids) || record.invalidated_task_ids.length !== 0) return null;
+  const carry = record.carry_forward_task_ids;
+  if (!Array.isArray(carry)) return null;
+  if (carry.some((id) => typeof id !== 'string')) return null;
+  const carryIds = carry as string[];
+  if (carryIds.some((id) => !REPLAN_NOOP_TASK_ID_RE.test(id) || !id.startsWith(`${stageId}-`))) return null;
+  if (new Set(carryIds).size !== carryIds.length) return null; // duplicates are forged
+
+  const prevManifest = record.previous_manifest_digest;
+  const candManifest = record.manifest_digest;
+  if (typeof prevManifest !== 'string' || !SHA256_HEX_RE.test(prevManifest)) return null;
+  if (typeof candManifest !== 'string' || !SHA256_HEX_RE.test(candManifest)) return null;
+  if (prevManifest !== candManifest) return null;
+
+  const prevPlan = record.previous_plan_digest;
+  const candPlan = record.plan_digest;
+  if (typeof prevPlan !== 'string' || !SHA256_HEX_RE.test(prevPlan)) return null;
+  if (typeof candPlan !== 'string' || !SHA256_HEX_RE.test(candPlan)) return null;
+  if (prevPlan !== candPlan) return null;
+
+  const snap = record.snapshot_digest;
+  if (typeof snap !== 'string' || !/^[0-9a-f]{40}$/.test(snap)) return null;
+
+  return {
+    schema_version: 1,
+    stage_id: stageId,
+    parent_epoch_digest: parentEpochDigest,
+    impact_scope: 'task-local',
+    changed_task_ids: [],
+    carry_forward_task_ids: carryIds,
+    invalidated_task_ids: [],
+    previous_manifest_digest: prevManifest,
+    manifest_digest: candManifest,
+    previous_plan_digest: prevPlan,
+    plan_digest: candPlan,
+    snapshot_digest: snap,
+  };
+}
+
+export function isReplanNoOpDisposition(disposition: ReplanDisposition): boolean {
+  // Runtime-repair (HEAD-only no-op carry-forward): aligned with the classifier
+  // (replan-impact.ts task-local no-op branch) — a no-op may carry completed
+  // current-epoch Tasks forward; changed/invalidated stay empty and the
+  // Manifest/Plan contracts stay unchanged, so the zero-write path is required.
+  return (
+    disposition.impact_scope === 'task-local' &&
+    disposition.changed_task_ids.length === 0 &&
+    disposition.invalidated_task_ids.length === 0 &&
+    disposition.previous_manifest_digest === disposition.manifest_digest &&
+    disposition.previous_plan_digest === disposition.plan_digest
+  );
+}
+
 /** Closed-schema rotation disposition of the verified fact. */
 function parseReplanRotationDisposition(fact: ReplanDispositionFact): ReplanDisposition | null {
   if (fact.disposition.impact_scope === 'unresolved') return null;
-  return parseReplanDisposition(fact.disposition);
+  const ordinary = parseReplanDisposition(fact.disposition);
+  if (ordinary !== null) return ordinary;
+  return parseReplanNoOpDisposition(fact.disposition);
 }
 
 /**
@@ -2603,12 +2709,34 @@ function verifyReplanRotationBindings(
   // to the previous Manifest/Plan the rotation rotates away from).  A
   // caller-forged completion set — inflated or truncated — fails closed even
   // when the rest of the fact is oracle-consistent.
+  let historicalBindings: ReplanHistoricalInvalidatedBinding[] = [];
+  let lineageExemptions: ReplanLineageReceiptExemptions | undefined;
+  try {
+    const ancestorRecords = loadAncestorReplanDispositionRecords(root, stageId, current);
+    historicalBindings = deriveHistoricalInvalidatedBindings(ancestorRecords);
+    lineageExemptions = deriveLineageReceiptExemptions(ancestorRecords);
+  } catch (error) {
+    if (error instanceof ReplanEpochError) throw error;
+    return {
+      ok: false,
+      errors: [
+        vnextError(
+          'REPLAN_DISPOSITION_INVALID',
+          'failed to resolve ancestor disposition records: ' + (error instanceof Error ? error.message : String(error)),
+          { path: dispositionRef },
+        ),
+      ],
+    };
+  }
+
   const derived = deriveCompletedTaskIdsFromReceipts(
     root,
     manifest,
     disposition.previous_manifest_digest,
     disposition.previous_plan_digest,
     fact.previous_snapshot.snapshot_digest,
+    historicalBindings,
+    lineageExemptions,
   );
   if (!derived.ok) {
     return {
@@ -2646,6 +2774,8 @@ function deriveCompletedTaskIdsFromReceipts(
   previousManifestDigest: string,
   previousPlanDigest: string,
   previousSnapshotDigest?: string,
+  historicalBindings?: readonly ReplanHistoricalInvalidatedBinding[],
+  lineageExemptions?: ReplanLineageReceiptExemptions,
 ): { ok: true; task_ids: string[] } | { ok: false; message: string } {
   const stageId = manifest.stage_id;
   const completed = new Set<string>();
@@ -2707,8 +2837,19 @@ function deriveCompletedTaskIdsFromReceipts(
         return { ok: false, message: `Worker Receipt payload is malformed: ${name}` };
       }
       const record = payload as Record<string, unknown>;
-      const taskId = record.task_id;
-      if (typeof taskId !== 'string' || taskId.length === 0) {
+      const mode = record.mode;
+      if (mode === undefined) {
+        return { ok: false, message: `Worker Receipt has no mode: ${name}` };
+      }
+      if (mode !== 'implement-task' && mode !== 'recover-task' && mode !== 'finalize-slice') {
+        return { ok: false, message: `Worker Receipt mode "${String(mode)}" is invalid: ${name}` };
+      }
+      const taskIdValue = record.task_id;
+      if (mode === 'finalize-slice') {
+        if (taskIdValue !== undefined) {
+          return { ok: false, message: `Worker Receipt finalize-slice must not carry a task_id: ${name}` };
+        }
+      } else if (typeof taskIdValue !== 'string' || taskIdValue.length === 0) {
         return { ok: false, message: `Worker Receipt has no task_id: ${name}` };
       }
       if (typeof record.snapshot_digest !== 'string' || record.snapshot_digest.length === 0) {
@@ -2726,6 +2867,19 @@ function deriveCompletedTaskIdsFromReceipts(
       if (record.slice_id !== undefined && record.slice_id !== slice.slice_id) {
         return { ok: false, message: `Worker Receipt payload slice_id "${record.slice_id}" does not match receipt slice "${slice.slice_id}": ${name}` };
       }
+      if (mode === 'finalize-slice') {
+        if (record.manifest_digest !== previousManifestDigest) {
+          return { ok: false, message: `Worker Receipt manifest_digest "${record.manifest_digest}" does not match previous epoch "${previousManifestDigest}": ${name}` };
+        }
+        if (record.plan_digest !== previousPlanDigest) {
+          return { ok: false, message: `Worker Receipt plan_digest "${record.plan_digest}" does not match previous epoch "${previousPlanDigest}": ${name}` };
+        }
+        if (previousSnapshotDigest !== undefined && record.snapshot_digest !== previousSnapshotDigest) {
+          return { ok: false, message: `Worker Receipt snapshot_digest "${record.snapshot_digest}" does not match previous epoch "${previousSnapshotDigest}": ${name}` };
+        }
+        continue;
+      }
+      const taskId = taskIdValue as string;
       if (declaredTasks !== undefined) {
         if (!declaredTasks.has(taskId)) {
           return { ok: false, message: `Worker Receipt in slice "${slice.slice_id}" has task_id "${taskId}" not declared in slice: ${name}` };
@@ -2733,6 +2887,54 @@ function deriveCompletedTaskIdsFromReceipts(
       } else if (!taskId.startsWith(`${slice.slice_id}-`)) {
         return { ok: false, message: `Worker Receipt in slice "${slice.slice_id}" has cross-slice task_id "${taskId}": ${name}` };
       }
+      const isHistoricalInvalidated =
+        historicalBindings !== undefined &&
+        historicalBindings.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        );
+      if (isHistoricalInvalidated) {
+        continue;
+      }
+
+      if (
+        lineageExemptions !== undefined &&
+        lineageExemptions.invalidated.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        )
+      ) {
+        // Consumer-level exemption: this physical receipt belongs to an
+        // ancestor generation whose own disposition invalidated the task — it
+        // is stale history for THIS rotation, never a completion fact. A later
+        // rotation carrying the task forward legitimizes only the NEWER receipt.
+        continue;
+      }
+      if (
+        lineageExemptions !== undefined &&
+        lineageExemptions.carriedForward.some(
+          (b) =>
+            b.stage_id === stageId &&
+            b.manifest_digest === record.manifest_digest &&
+            b.plan_digest === record.plan_digest &&
+            b.snapshot_digest === record.snapshot_digest &&
+            b.task_id === taskId,
+        )
+      ) {
+        // The disposition rotating this exact previous snapshot carried the
+        // task forward: this receipt remains a valid completion fact.
+        completed.add(taskId);
+        continue;
+      }
+
       if (record.manifest_digest !== previousManifestDigest) {
         return { ok: false, message: `Worker Receipt manifest_digest "${record.manifest_digest}" does not match previous epoch "${previousManifestDigest}": ${name}` };
       }
@@ -2753,8 +2955,11 @@ function deriveCompletedTaskIdsFromReceipts(
 // ------------------------------------------------------------
 
 const TASK_ENTITY_MARKER_RE = /^<!--\s*proofloop:entity\s+id="([^"]+)"\s+kind="task"\s*-->\s*$/;
-const SLICE_BEGIN_MARKER_RE = /^<!--\s*SLICE:([^:]+):BEGIN\s*-->\s*$/;
-const SLICE_END_MARKER_RE = /^<!--\s*SLICE:([^:]+):END\s*-->\s*$/;
+const ANY_ENTITY_MARKER_RE = /^<!--\s*proofloop:entity\s+id="([^"]+)"\s+kind="([^"]+)"\s*-->\s*$/;
+const SLICE_BEGIN_MARKER_RE = /^<!--\s*SLICE:([A-Za-z0-9_-]+):BEGIN\s*-->\s*$/;
+const SLICE_END_MARKER_RE = /^<!--\s*SLICE:([A-Za-z0-9_-]+):END\s*-->\s*$/;
+const SLICE_HEADING_RE = /^##\s+Slice\s+([A-Za-z0-9_-]+)\s+(?:—|-)\s+candidate\s*$/;
+const STAGE_TOP_LEVEL_SLICE_HEADING_RE = /^##\s+Slice\s+(?:Graph|(?:→|->)\s*Stage\s+Closure)\s*$/;
 const TASK_CHECKBOX_LINE_RE = /^-\s*\[([ xX])\]\s+(\S+)\s+(?:—|-)\s/;
 const CHECKBOX_ROW_RE = /^\s*-\s*checkbox:\s*(`?\[([ xX])\]`?)\s*$/;
 const WORKER_STATUS_ROW_RE = /^\s*-\s*Worker Status:\s*(`?([A-Za-z_]+)`?)\s*$/;
@@ -2772,10 +2977,11 @@ const SLICE_PROJ_HEADER_RE = /^###\s+(?:Slice\s+([A-Za-z0-9_-]+)\s+)?Mutable Exe
 // before the Task body fields is a defect — CV S15-A-RECHECK11).
 const TASK_BODY_FIELD_RE = /^\s*-\s*(?:refs|Dependencies|Required Skills|execution_scope):/;
 
-// A `## Slice <id> — ...` heading. It belongs at Stage top-level, immediately
-// before its own `<!-- SLICE:<id>:BEGIN -->`; it may never appear inside a
-// Slice section (strict Stage→Slice→Task section ownership).
-const SLICE_HEADING_RE = /^##\s+Slice\s+[A-Za-z0-9_-]+\s/;
+// A `## Slice <id> — candidate` heading belongs at Stage top-level only,
+// immediately before its own `<!-- SLICE:<id>:BEGIN -->`; the section scanner
+// rejects any `## ` heading inside a Slice section and requires exact full-value
+// slice_id and canonical suffix matching, together enforcing the ownership
+// and isolation invariants.
 
 /** Line indices of the three mutable projection rows of one projection section. */
 interface ProjectionRowSlots {
@@ -2785,7 +2991,7 @@ interface ProjectionRowSlots {
 }
 
 /** Structurally-verified Plan projection: canonical section slots + task marker indices. */
-interface PlanProjectionAnalysis {
+export interface PlanProjectionAnalysis {
   stageRows: ProjectionRowSlots;
   sliceRows: Map<string, ProjectionRowSlots>;
   /** taskId -> line index of its anchored entity marker. */
@@ -2797,14 +3003,17 @@ interface PlanProjectionAnalysis {
  * (tasks.md) against the Manifest. This is the SINGLE source of structural
  * truth for both the bounded restore (`renderRestoredPlanProjection`) and the
  * journaled recover/rollback projection step (CV S15-A-REPAIR10-
- * PLAN-MARKER-SECTION-OWNERSHIP-SELF-ORACLE, counterexamples 1-4):
- *  - the Task entity marker regex must anchor the WHOLE line (any prefix/suffix
- *    pollution fails closed);
+ * PLAN-MARKER-SECTION-OWNERSHIP-SELF-ORACLE, counterexamples 1-4, RECHECK14):
+ *  - every entity marker and SLICE marker must anchor the whole line with exact
+ *    syntax (any prefix/suffix pollution or foreign text fails closed);
+ *  - every Slice heading must match the exact slice_id and canonical suffix
+ *    (foreign headings like `S15-A-FOREIGN` or extra suffixes fail closed);
+ *  - no entity marker or SLICE marker may be nested in a Task body, projection
+ *    section, post-projection area, or outside valid Slice boundaries;
  *  - a Slice Mutable Execution Projection header that claims a different Slice
  *    id than its enclosing Slice section fails closed (ownership);
- *  - the Slice Mutable Execution Projection section must be the TERMINAL
- *    section of the Slice (deleting the real section and burying the
- *    header/rows inside a Task body fails closed);
+ *  - the Slice Mutable Execution Projection section must follow all tasks of the
+ *    slice and precede post-projection sections;
  *  - unknown, duplicate, missing, nested, cross-Slice, section-external and
  *    prefix-polluted markers/sections all fail closed.
  * The validator performs NO mutation. Returns projectional row slots and task
@@ -2829,6 +3038,38 @@ export function validatePlanProjectionStructure(
     for (const t of tasks) allDeclaredTasks.add(t);
   }
 
+  // 0. Global syntax & marker pollution checks across all lines
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    // Entity marker pollution check: any line containing entity marker syntax must be a whole-line exact match
+    if (line.includes('proofloop:entity') || line.includes('<!-- proofloop:entity')) {
+      if (!ANY_ENTITY_MARKER_RE.test(line)) {
+        return { ok: false, message: `malformed or prefix/suffix-polluted entity marker at line ${i + 1}: ${line.trim()}` };
+      }
+    }
+    // SLICE marker pollution check: any line containing SLICE marker syntax must be a whole-line exact match
+    if (line.includes('SLICE:') || line.includes('<!-- SLICE:')) {
+      if (!SLICE_BEGIN_MARKER_RE.test(line) && !SLICE_END_MARKER_RE.test(line)) {
+        return { ok: false, message: `malformed or prefix/suffix-polluted SLICE marker at line ${i + 1}: ${line.trim()}` };
+      }
+    }
+    // Slice heading syntax check: any line starting with `## Slice` must be a valid heading for a manifest-declared slice,
+    // unless it is a recognized Stage top-level section heading (e.g. `## Slice Graph`, `## Slice → Stage Closure`).
+    if (/^##\s+Slice\b/.test(line)) {
+      if (STAGE_TOP_LEVEL_SLICE_HEADING_RE.test(line)) {
+        continue;
+      }
+      const headingMatch = SLICE_HEADING_RE.exec(line);
+      if (!headingMatch) {
+        return { ok: false, message: `malformed Slice heading at line ${i + 1}: ${line.trim()}` };
+      }
+      const sliceId = headingMatch[1];
+      if (!manifestSliceIds.has(sliceId)) {
+        return { ok: false, message: `unknown or foreign Slice heading "${sliceId}" at line ${i + 1}` };
+      }
+    }
+  }
+
   // 1. Stage Mutable Execution Projection (exact cardinality === 1 across file)
   const stageHeaderIndices = lines
     .map((line, idx) => (STAGE_MUTABLE_PROJECTION_RE.test(line) ? idx : -1))
@@ -2837,15 +3078,13 @@ export function validatePlanProjectionStructure(
     return { ok: false, message: 'Stage Mutable Execution Projection header must appear exactly once' };
   }
   const stageHeaderIndex = stageHeaderIndices[0];
-  // The Stage projection section belongs at Stage top-level: it must appear
-  // BEFORE the first Slice section (strict Stage→Slice→Task section ordering).
   const firstSliceBegin = lines.findIndex((l) => SLICE_BEGIN_MARKER_RE.test(l));
   if (firstSliceBegin !== -1 && stageHeaderIndex > firstSliceBegin) {
     return { ok: false, message: 'Stage Mutable Execution Projection must appear before any Slice section' };
   }
   let stageEndIndex = lines.length;
   for (let i = stageHeaderIndex + 1; i < lines.length; i += 1) {
-    if (lines[i].startsWith('## ') || lines[i].startsWith('<!-- SLICE:')) {
+    if (lines[i].startsWith('## ') || lines[i].includes('<!-- SLICE:')) {
       stageEndIndex = i;
       break;
     }
@@ -2853,26 +3092,27 @@ export function validatePlanProjectionStructure(
 
   const stageRows: Partial<ProjectionRowSlots> = {};
   for (let i = stageHeaderIndex + 1; i < stageEndIndex; i += 1) {
+    const l = lines[i];
     if (
-      TASK_BODY_FIELD_RE.test(lines[i]) ||
-      TASK_CHECKBOX_LINE_RE.test(lines[i]) ||
-      lines[i].startsWith('<!-- proofloop:entity') ||
-      lines[i].startsWith('<!-- SLICE:') ||
-      lines[i].startsWith('### ')
+      TASK_BODY_FIELD_RE.test(l) ||
+      TASK_CHECKBOX_LINE_RE.test(l) ||
+      l.includes('proofloop:entity') ||
+      l.includes('SLICE:') ||
+      l.startsWith('### ')
     ) {
       return { ok: false, message: `Stage Mutable Execution Projection section contains forbidden content at line ${i + 1}` };
     }
-    if (CHECKBOX_ROW_RE.test(lines[i])) {
+    if (CHECKBOX_ROW_RE.test(l)) {
       if (stageRows.checkbox !== undefined) {
         return { ok: false, message: 'duplicate Stage checkbox row' };
       }
       stageRows.checkbox = i;
-    } else if (WORKER_STATUS_ROW_RE.test(lines[i])) {
+    } else if (WORKER_STATUS_ROW_RE.test(l)) {
       if (stageRows.worker !== undefined) {
         return { ok: false, message: 'duplicate Stage Worker Status row' };
       }
       stageRows.worker = i;
-    } else if (CV_STATUS_ROW_RE.test(lines[i])) {
+    } else if (CV_STATUS_ROW_RE.test(l)) {
       if (stageRows.cv !== undefined) {
         return { ok: false, message: 'duplicate Stage Current CV Status row' };
       }
@@ -2883,28 +3123,52 @@ export function validatePlanProjectionStructure(
     return { ok: false, message: 'Stage Mutable Execution Projection is missing a checkbox/Worker Status/Current CV Status row' };
   }
 
-  // 2. Slice boundaries, headings, Task markers (whole-line anchored) and
-  //    task-block guards; collect per-Slice projection pieces.
+  // 2. Scan Slice boundaries, headings, Task markers, and Task bodies
+  const seenSliceHeadings = new Set<string>();
+  const sliceHeadingIndices = new Map<string, number>();
   const seenSliceBegins = new Set<string>();
   const seenSliceEnds = new Set<string>();
   const seenTaskIds = new Set<string>();
   const sliceBegins = new Map<string, number>();
   const sliceEnds = new Map<string, number>();
-  const sliceTaskMarkers = new Map<string, number[]>(); // sliceId -> marker line indices (ascending)
-  const taskMarkers = new Map<string, number>(); // taskId -> marker line index
+  const sliceTaskMarkers = new Map<string, number[]>();
+  const taskMarkers = new Map<string, number>();
   const claimedProjHeaderIndices = new Set<number>();
+  const validEntityMarkerIndices = new Set<number>();
+
   let currentSliceId: string | null = null;
   let insideTaskBlock = false;
+  let currentTaskIdInBlock: string | null = null;
+  let inCandidateEntityMarkers = false;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+
+    // Check Slice Heading at Stage top level
+    const headingMatch = SLICE_HEADING_RE.exec(line);
+    if (headingMatch) {
+      if (currentSliceId !== null) {
+        return { ok: false, message: `Slice heading occurs inside Slice section "${currentSliceId}" at line ${i + 1}` };
+      }
+      const sliceId = headingMatch[1];
+      if (seenSliceHeadings.has(sliceId)) {
+        return { ok: false, message: `duplicate Slice heading "${sliceId}" at line ${i + 1}` };
+      }
+      seenSliceHeadings.add(sliceId);
+      sliceHeadingIndices.set(sliceId, i);
+      insideTaskBlock = false;
+      continue;
+    }
 
     const sliceBegin = SLICE_BEGIN_MARKER_RE.exec(line);
     if (sliceBegin !== null) {
       insideTaskBlock = false;
       const sliceId = sliceBegin[1];
       if (!manifestSliceIds.has(sliceId) || seenSliceBegins.has(sliceId) || currentSliceId !== null) {
-        return { ok: false, message: `unknown, duplicate or nested Slice section "${sliceId}"` };
+        return { ok: false, message: `unknown, duplicate or nested Slice section "${sliceId}" at line ${i + 1}` };
+      }
+      if (!seenSliceHeadings.has(sliceId)) {
+        return { ok: false, message: `Slice section "${sliceId}" begins without preceding Slice heading at line ${i + 1}` };
       }
       seenSliceBegins.add(sliceId);
       sliceBegins.set(sliceId, i);
@@ -2917,7 +3181,7 @@ export function validatePlanProjectionStructure(
       insideTaskBlock = false;
       const sliceId = sliceEnd[1];
       if (currentSliceId !== sliceId || seenSliceEnds.has(sliceId)) {
-        return { ok: false, message: `mismatched or duplicate Slice end marker "${sliceId}"` };
+        return { ok: false, message: `mismatched or duplicate Slice end marker "${sliceId}" at line ${i + 1}` };
       }
       seenSliceEnds.add(sliceId);
       sliceEnds.set(sliceId, i);
@@ -2925,70 +3189,119 @@ export function validatePlanProjectionStructure(
       continue;
     }
 
-    const marker = TASK_ENTITY_MARKER_RE.exec(line);
-    if (marker !== null) {
-      const taskId = marker[1];
-      if (currentSliceId === null) {
-        return { ok: false, message: `Task entity marker "${taskId}" is outside any Slice section` };
-      }
-      const declaredSliceTasks = sliceTaskMap.get(currentSliceId);
-      if (!declaredSliceTasks || !declaredSliceTasks.has(taskId) || !taskId.startsWith(`${currentSliceId}-`)) {
-        return { ok: false, message: `Task entity marker "${taskId}" is in the wrong Slice section "${currentSliceId}"` };
-      }
-      if (!allDeclaredTasks.has(taskId)) {
-        return { ok: false, message: `Plan contains an undeclared Task entity marker "${taskId}"` };
-      }
-      if (seenTaskIds.has(taskId)) {
-        return { ok: false, message: `Plan contains a duplicate Task entity marker "${taskId}"` };
-      }
-      seenTaskIds.add(taskId);
-      taskMarkers.set(taskId, i);
-      const markerList = sliceTaskMarkers.get(currentSliceId) ?? [];
-      markerList.push(i);
-      sliceTaskMarkers.set(currentSliceId, markerList);
+    // Check entity markers
+    const entityMatch = ANY_ENTITY_MARKER_RE.exec(line);
+    if (entityMatch) {
+      const entityId = entityMatch[1];
+      const entityKind = entityMatch[2];
 
-      const next = lines[i + 1];
-      if (next === undefined) {
-        return { ok: false, message: `Task entity marker "${taskId}" has no following line` };
+      if (entityKind === 'task') {
+        if (currentSliceId === null) {
+          return { ok: false, message: `Task entity marker "${entityId}" is outside any Slice section at line ${i + 1}` };
+        }
+        const declaredSliceTasks = sliceTaskMap.get(currentSliceId);
+        if (!declaredSliceTasks || !declaredSliceTasks.has(entityId) || !entityId.startsWith(`${currentSliceId}-`)) {
+          return { ok: false, message: `Task entity marker "${entityId}" is in the wrong Slice section "${currentSliceId}" at line ${i + 1}` };
+        }
+        if (seenTaskIds.has(entityId)) {
+          return { ok: false, message: `duplicate Task entity marker "${entityId}" at line ${i + 1}` };
+        }
+        seenTaskIds.add(entityId);
+        taskMarkers.set(entityId, i);
+        validEntityMarkerIndices.add(i);
+        const markerList = sliceTaskMarkers.get(currentSliceId) ?? [];
+        markerList.push(i);
+        sliceTaskMarkers.set(currentSliceId, markerList);
+
+        const next = lines[i + 1];
+        if (next === undefined) {
+          return { ok: false, message: `Task entity marker "${entityId}" has no following line` };
+        }
+        const taskLine = TASK_CHECKBOX_LINE_RE.exec(next);
+        if (taskLine === null || taskLine[2] !== entityId) {
+          return { ok: false, message: `Task entity marker "${entityId}" must be followed by its own checkbox line at line ${i + 2}` };
+        }
+        insideTaskBlock = true;
+        currentTaskIdInBlock = entityId;
+        continue;
+      } else if (entityKind === 'goal') {
+        if (insideTaskBlock) {
+          return { ok: false, message: `Goal entity marker "${entityId}" appears inside Task block "${currentTaskIdInBlock}" at line ${i + 1}` };
+        }
+        if (currentSliceId === null) {
+          validEntityMarkerIndices.add(i);
+          continue;
+        } else {
+          if (entityId !== `${currentSliceId}-goal`) {
+            return { ok: false, message: `Slice goal entity marker id "${entityId}" does not match slice "${currentSliceId}" at line ${i + 1}` };
+          }
+          validEntityMarkerIndices.add(i);
+          continue;
+        }
+      } else {
+        if (insideTaskBlock) {
+          return { ok: false, message: `entity marker "${entityId}" appears inside Task block "${currentTaskIdInBlock}" at line ${i + 1}` };
+        }
+        if (inCandidateEntityMarkers || currentSliceId === null) {
+          validEntityMarkerIndices.add(i);
+          continue;
+        } else {
+          return { ok: false, message: `entity marker "${entityId}" (${entityKind}) in unexpected location at line ${i + 1}` };
+        }
       }
-      const taskLine = TASK_CHECKBOX_LINE_RE.exec(next);
-      if (taskLine === null || taskLine[2] !== taskId) {
-        return { ok: false, message: `Task entity marker "${taskId}" must be followed by its own checkbox line` };
+    }
+
+    // Top-level sections tracking
+    if (line.startsWith('## ')) {
+      if (currentSliceId !== null) {
+        return { ok: false, message: `## heading occurs inside Slice section "${currentSliceId}" at line ${i + 1}: ${line.trim()}` };
       }
-      insideTaskBlock = true;
+      insideTaskBlock = false;
+      if (line.startsWith('## Candidate Entity Markers')) {
+        inCandidateEntityMarkers = true;
+      } else {
+        inCandidateEntityMarkers = false;
+      }
       continue;
     }
 
-    // Heading lines close an open Task entity block.
-    if (line.startsWith('## ') || line.startsWith('### ')) {
-      // A Slice heading belongs at Stage top-level only: it may never appear
-      // inside a Slice section (strict Stage→Slice→Task ownership).
-      if (SLICE_HEADING_RE.test(line) && currentSliceId !== null) {
-        return { ok: false, message: `Slice heading "${line.trim()}" appears inside Slice section "${currentSliceId}"` };
-      }
+    if (line.startsWith('### ')) {
       insideTaskBlock = false;
       continue;
     }
 
-    // HTML-comment lines close an open Task entity block.
-    if (line.startsWith('<!-- ')) {
-      // A proofloop entity marker may never be nested inside a Task body
-      // (Task body ownership — an entity can only appear at section level).
-      if (insideTaskBlock && line.startsWith('<!-- proofloop:entity')) {
-        return { ok: false, message: `entity marker appears inside a Task entity block: ${line}` };
+    // Inside a Task block: check forbidden content
+    if (insideTaskBlock) {
+      if (line.includes('proofloop:entity') || line.includes('SLICE:')) {
+        return { ok: false, message: `entity or SLICE marker inside Task block "${currentTaskIdInBlock}" at line ${i + 1}` };
       }
-      insideTaskBlock = false;
-      continue;
+      if (CHECKBOX_ROW_RE.test(line) || WORKER_STATUS_ROW_RE.test(line) || CV_STATUS_ROW_RE.test(line)) {
+        return { ok: false, message: `projection row inside Task block "${currentTaskIdInBlock}" at line ${i + 1}` };
+      }
     }
 
-    // A projection row must never appear inside a Task entity block.
-    if (insideTaskBlock && (CHECKBOX_ROW_RE.test(line) || WORKER_STATUS_ROW_RE.test(line) || CV_STATUS_ROW_RE.test(line))) {
-      return { ok: false, message: 'projection row appears inside a Task entity block' };
+    // Outside Slice (between slices or post-slice):
+    if (currentSliceId === null && seenSliceBegins.size > 0) {
+      if (line.includes('SLICE:')) {
+        return { ok: false, message: `SLICE marker outside Slice boundaries at line ${i + 1}` };
+      }
+      if (line.includes('proofloop:entity') && !inCandidateEntityMarkers) {
+        return { ok: false, message: `entity marker outside Slice boundaries at line ${i + 1}` };
+      }
+      if (CHECKBOX_ROW_RE.test(line) || WORKER_STATUS_ROW_RE.test(line) || CV_STATUS_ROW_RE.test(line)) {
+        return { ok: false, message: `projection row outside Slice boundaries at line ${i + 1}` };
+      }
+      if (TASK_CHECKBOX_LINE_RE.test(line) || TASK_BODY_FIELD_RE.test(line)) {
+        return { ok: false, message: `Task content outside Slice boundaries at line ${i + 1}` };
+      }
     }
   }
 
   if (currentSliceId !== null) {
     return { ok: false, message: `unclosed Slice section "${currentSliceId}"` };
+  }
+  if (seenSliceHeadings.size !== manifest.slices.length) {
+    return { ok: false, message: `missing Slice headings (found ${seenSliceHeadings.size}, expected ${manifest.slices.length})` };
   }
   if (seenSliceBegins.size !== manifest.slices.length || seenSliceEnds.size !== manifest.slices.length) {
     return { ok: false, message: 'missing Slice sections or end markers' };
@@ -2997,23 +3310,18 @@ export function validatePlanProjectionStructure(
     return { ok: false, message: 'missing Task entity markers for declared Tasks' };
   }
 
-  // 3. Per-Slice: heading, projection header ownership and placement, and its
-  //    projection row slots.
+  // 3. Per-Slice: heading placement, projection header ownership and placement, and projection row slots.
   const sliceRows = new Map<string, ProjectionRowSlots>();
   for (const slice of manifest.slices) {
     const sliceId = slice.slice_id;
-    const headingRegex = new RegExp(`^##\\s+Slice\\s+${sliceId}\\b`);
-    // CE-1 (S15-A-RECHECK11) — every Manifest Slice must have EXACTLY ONE
-    // `## Slice <id>` heading; a duplicate heading is accepted only by the
-    // legacy `lines.some` check and must fail closed.
-    const headingCount = lines.reduce((acc, l) => (headingRegex.test(l) ? acc + 1 : acc), 0);
-    if (headingCount !== 1) {
-      return { ok: false, message: `Slice "${sliceId}" must have exactly one Slice heading (found ${headingCount})` };
-    }
+    const headingIndex = sliceHeadingIndices.get(sliceId);
     const begin = sliceBegins.get(sliceId);
     const end = sliceEnds.get(sliceId);
-    if (begin === undefined || end === undefined) {
+    if (headingIndex === undefined || begin === undefined || end === undefined) {
       return { ok: false, message: `missing Slice section boundaries for "${sliceId}"` };
+    }
+    if (headingIndex > begin) {
+      return { ok: false, message: `Slice heading for "${sliceId}" appears after Slice begin marker` };
     }
 
     const headerLines: number[] = [];
@@ -3028,8 +3336,7 @@ export function validatePlanProjectionStructure(
     const projHeaderIndex = headerLines[0];
     claimedProjHeaderIndices.add(projHeaderIndex);
 
-    // CE-2 — header ownership: a header that names a Slice must own the Slice
-    // it is physically inside.
+    // CE-2 — header ownership: a header that names a Slice must own the Slice it is physically inside.
     const owned = SLICE_PROJ_HEADER_RE.exec(lines[projHeaderIndex])![1];
     if (owned !== undefined && owned !== sliceId) {
       return {
@@ -3038,9 +3345,7 @@ export function validatePlanProjectionStructure(
       };
     }
 
-    // CE-3 — the Slice projection section must be the TERMINAL section of the
-    // Slice: it may not appear before any Task of the Slice (deleting the real
-    // section and burying header+rows inside a prior Task body is a defect).
+    // The Slice Mutable Execution Projection must come AFTER every Task of the Slice.
     const markerIndices = sliceTaskMarkers.get(sliceId) ?? [];
     if (markerIndices.length > 0 && projHeaderIndex < markerIndices[markerIndices.length - 1]) {
       return {
@@ -3049,14 +3354,17 @@ export function validatePlanProjectionStructure(
       };
     }
 
-    // Terminal boundary (S15-A-RECHECK11 family): from the projection header to
-    // the Slice END, ONLY the three projection rows (each exactly once) plus
-    // non-structural blurb/blank lines are legal. Any Task content (checkbox,
-    // body field), entity marker, Slice marker, `## `/`### ` heading or
-    // duplicate projection row fails closed — the projection section is the
-    // TERMINAL block of the Slice and nothing may reopen a Task after it.
-    const rows: Partial<ProjectionRowSlots> = {};
+    // Projection section span: [header, next `### ` heading or Slice END)
+    let projSectionEnd = end;
     for (let i = projHeaderIndex + 1; i < end; i += 1) {
+      if (lines[i].startsWith('### ') || lines[i].startsWith('## ')) {
+        projSectionEnd = i;
+        break;
+      }
+    }
+
+    const rows: Partial<ProjectionRowSlots> = {};
+    for (let i = projHeaderIndex + 1; i < projSectionEnd; i += 1) {
       const l = lines[i];
       if (CHECKBOX_ROW_RE.test(l)) {
         if (rows.checkbox !== undefined) {
@@ -3076,23 +3384,41 @@ export function validatePlanProjectionStructure(
       } else if (
         TASK_BODY_FIELD_RE.test(l) ||
         TASK_CHECKBOX_LINE_RE.test(l) ||
-        l.startsWith('<!-- proofloop:entity') ||
-        l.startsWith('<!-- SLICE:') ||
+        l.includes('proofloop:entity') ||
+        l.includes('SLICE:') ||
         l.startsWith('## ') ||
         l.startsWith('### ')
       ) {
-        return { ok: false, message: `Slice "${sliceId}" projection section terminal boundary violated at line ${i + 1}` };
+        return { ok: false, message: `Slice "${sliceId}" projection section contains forbidden content at line ${i + 1}` };
       }
-      // any other line (e.g. `- `plan_digest` excludes ...` blurb, blank) is tolerated
     }
     if (rows.checkbox === undefined || rows.worker === undefined || rows.cv === undefined) {
       return { ok: false, message: `Slice "${sliceId}" projection is missing a checkbox/Worker Status/Current CV Status row` };
     }
     sliceRows.set(sliceId, { checkbox: rows.checkbox, worker: rows.worker, cv: rows.cv });
+
+    // Post-projection section: [projSectionEnd, end)
+    for (let i = projSectionEnd; i < end; i += 1) {
+      const l = lines[i];
+      if (
+        CHECKBOX_ROW_RE.test(l) ||
+        WORKER_STATUS_ROW_RE.test(l) ||
+        CV_STATUS_ROW_RE.test(l) ||
+        TASK_BODY_FIELD_RE.test(l) ||
+        TASK_CHECKBOX_LINE_RE.test(l)
+      ) {
+        return { ok: false, message: `projection/Task content after the projection section of Slice "${sliceId}" at line ${i + 1}` };
+      }
+      if (l.includes('proofloop:entity') || l.includes('SLICE:')) {
+        return { ok: false, message: `entity/slice marker (incl. pollution) after the projection section of Slice "${sliceId}" at line ${i + 1}` };
+      }
+      if (l.startsWith('## ')) {
+        return { ok: false, message: `## heading after the projection section of Slice "${sliceId}" at line ${i + 1}` };
+      }
+    }
   }
 
-  // 4. Global scan — every projection row and every projection header must be
-  //    claimed by a valid section; nothing extraneous may survive anywhere.
+  // 4. Global scan — every projection row and every projection header must be claimed
   const validRowIndices = new Set<number>([stageRows.checkbox, stageRows.worker, stageRows.cv]);
   for (const rows of sliceRows.values()) {
     validRowIndices.add(rows.checkbox);
@@ -3110,6 +3436,9 @@ export function validatePlanProjectionStructure(
     }
     if (SLICE_PROJ_HEADER_RE.test(lines[i]) && !claimedProjHeaderIndices.has(i)) {
       return { ok: false, message: `extraneous Slice projection header at line ${i + 1}` };
+    }
+    if (ANY_ENTITY_MARKER_RE.test(lines[i]) && !validEntityMarkerIndices.has(i)) {
+      return { ok: false, message: `extraneous entity marker at line ${i + 1}` };
     }
   }
 
@@ -4182,6 +4511,326 @@ function completeOrRevertReplanJournalEntry(
  *   identity/journal failure leaves the whole transaction recoverable or
  *   rollback-able through the journals — never partial state.
  */
+/**
+ * S15-A-T02 (repair-18) — verify if a replan rotation has already completed
+ * under the current verified disposition. When a rotation completed at an earlier
+ * HEAD, and subsequent commit advanced HEAD to include the rotated Evidence/Plan,
+ * the rotate phase treats the proven completed state as an idempotent no-op.
+ *
+ * Strict fail-closed verification requires ALL of the following:
+ * 1. No replan journal exists for any slice.
+ * 2. The history archive directory for the parent epoch exists and contains ONLY
+ *    the exact expected archive files for all declared slices (no foreign/extra files).
+ * 3. For each declared slice:
+ *    - The archive file exists, parses to the previous plan/manifest digests, and contains
+ *      the byte-for-byte carry-forward Task Evidence blocks.
+ *    - The canonical Evidence file exists (regular file), parses to the candidate
+ *      plan/manifest digests, and matches EXACTLY the rotated content derived from the
+ *      candidate skeleton and archive carry-forward blocks.
+ * 4. The current Plan projection is structurally valid and matches the restored candidate
+ *    projection.
+ * Any missing file, digest mismatch, content mismatch, foreign archive, or malformed
+ * structure returns { ok: false } and allows the caller to proceed to normal preflight
+ * (which will fail closed if corrupted).
+ */
+function verifyAlreadyCompletedReplanRotation(
+  root: string,
+  manifest: VNextManifest,
+  manifestDigest: string,
+  disposition: ReplanDisposition,
+): { ok: true; archivePaths: readonly string[] } | { ok: false } {
+  const stageId = manifest.stage_id;
+
+  // 1. No replan journal exists
+  for (const slice of manifest.slices) {
+    const journalRelative = replanJournalPathOf(slice.evidence_path);
+    const journalFile = resolveRootBoundPath(root, journalRelative, 'replan journal');
+    if (fs.existsSync(journalFile)) {
+      return { ok: false };
+    }
+  }
+
+  // 2. History archive directory exists and contains exactly declared slice archives
+  const historyDirRel = `delivery/stages/${stageId}/evidence/history/${disposition.parent_epoch_digest}`;
+  const historyDirCanonical = canonicalPathWithinRoot(root, historyDirRel);
+  if (historyDirCanonical === null || !fs.existsSync(historyDirCanonical) || !fs.statSync(historyDirCanonical).isDirectory()) {
+    return { ok: false };
+  }
+  const archiveEntries = fs.readdirSync(historyDirCanonical);
+  const expectedArchiveFileNames = new Set(manifest.slices.map((s) => `${s.slice_id}.md`));
+  if (archiveEntries.length !== manifest.slices.length) {
+    return { ok: false };
+  }
+  for (const entry of archiveEntries) {
+    if (!expectedArchiveFileNames.has(entry)) {
+      return { ok: false };
+    }
+  }
+
+  // 3. For each declared slice, verify archive and current Evidence
+  const archivePaths: string[] = [];
+  for (const slice of manifest.slices) {
+    const sliceId = slice.slice_id;
+    const archivePath = replanArchivePathOf(stageId, disposition.parent_epoch_digest, sliceId);
+    const archiveFile = resolveRootBoundPath(root, archivePath, 'history archive');
+    if (!fs.existsSync(archiveFile)) {
+      return { ok: false };
+    }
+
+    let archiveContent: string;
+    try {
+      archiveContent = fs.readFileSync(archiveFile, 'utf8');
+    } catch {
+      return { ok: false };
+    }
+
+    const archiveBinding = parseEvidencePlanBinding(archiveContent);
+    if (
+      archiveBinding === null ||
+      archiveBinding.stage_id !== stageId ||
+      archiveBinding.slice_id !== sliceId ||
+      archiveBinding.plan_digest !== disposition.previous_plan_digest ||
+      archiveBinding.manifest_digest !== disposition.previous_manifest_digest ||
+      archiveBinding.plan_ref !== manifest.plan.ref
+    ) {
+      return { ok: false };
+    }
+
+    // Verify current canonical Evidence
+    const opened = openNoFollowRead(root, slice.evidence_path);
+    if (!opened.ok) {
+      return { ok: false };
+    }
+    let currentContent: string;
+    try {
+      currentContent = fs.readFileSync(opened.fd, 'utf8');
+    } catch {
+      return { ok: false };
+    } finally {
+      try {
+        fs.closeSync(opened.fd);
+      } catch {
+        // ignore
+      }
+    }
+
+    const currentBinding = parseEvidencePlanBinding(currentContent);
+    if (
+      currentBinding === null ||
+      currentBinding.stage_id !== stageId ||
+      currentBinding.slice_id !== sliceId ||
+      currentBinding.plan_digest !== disposition.plan_digest ||
+      currentBinding.manifest_digest !== disposition.manifest_digest ||
+      currentBinding.plan_ref !== manifest.plan.ref
+    ) {
+      return { ok: false };
+    }
+
+    // Verify carry-forward blocks from archive match current evidence exactly
+    const newSkeleton = renderVNextEvidenceSkeleton(manifest, slice, manifestDigest);
+    const carriedBlocks: string[] = [];
+    for (const taskId of disposition.carry_forward_task_ids) {
+      if (!taskId.startsWith(`${sliceId}-`)) continue;
+      const blockFromArchive = extractTaskEvidenceBlock(archiveContent, taskId);
+      if (blockFromArchive === null) {
+        return { ok: false };
+      }
+      carriedBlocks.push(blockFromArchive);
+    }
+
+    const expectedRotatedContent = buildReplanRotatedContent(newSkeleton, carriedBlocks);
+    if (currentContent !== expectedRotatedContent) {
+      return { ok: false };
+    }
+
+    archivePaths.push(archivePath);
+  }
+
+  // 4. Verify current Plan projection is structurally valid and represents candidate projection
+  let currentProjContent: string;
+  try {
+    currentProjContent = readRootBoundFile(root, manifest.plan.ref).content;
+  } catch {
+    return { ok: false };
+  }
+
+  const projValidation = validatePlanProjectionStructure(currentProjContent, manifest);
+  if (!projValidation.ok) {
+    return { ok: false };
+  }
+
+  const expectedRestored = renderRestoredPlanProjection(
+    currentProjContent,
+    new Set(disposition.carry_forward_task_ids),
+    manifest,
+  );
+  if (expectedRestored === null || expectedRestored !== currentProjContent) {
+    return { ok: false };
+  }
+
+  return { ok: true, archivePaths };
+}
+
+/**
+ * S15-A-T02 (repair-24) — verify strict, explicit HEAD-only idempotent no-op state.
+ *
+ * For replan_phase rotate, no-op must be ZERO-WRITE and fail closed unless:
+ * 1. Every declared Slice has no replan journal.
+ * 2. Every declared Slice has a root-bound regular current Evidence file with the candidate
+ *    manifest/plan binding.
+ * 3. The current Plan projection passes the shared structural validator and is already the
+ *    candidate projection.
+ *
+ * Any missing, forged, foreign, malformed, symlinked, journaled, or binding-mismatched
+ * state returns failure with zero writes.
+ */
+function verifyReplanNoOpState(
+  root: string,
+  manifest: VNextManifest,
+  manifestDigest: string,
+  disposition: ReplanDisposition,
+): { ok: true } | { ok: false; errors: VNextCliError[] } {
+  const stageId = manifest.stage_id;
+  const errors: VNextCliError[] = [];
+
+  // 1. Every declared slice must have NO unrecovered replan journal
+  for (const slice of manifest.slices) {
+    const journalRelative = replanJournalPathOf(slice.evidence_path);
+    const journalFile = resolveRootBoundPath(root, journalRelative, 'replan journal');
+    if (fs.existsSync(journalFile)) {
+      errors.push(
+        vnextError(
+          'UNRECOVERED_TRANSACTION',
+          `an unrecovered rotation journal exists for slice "${slice.slice_id}"; run mode=replan recover/rollback before rotating`,
+          { path: journalRelative, slice_id: slice.slice_id },
+        ),
+      );
+    }
+  }
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  // 2. For every declared slice: root-bound regular current Evidence file with candidate manifest/plan binding
+  for (const slice of manifest.slices) {
+    const sliceId = slice.slice_id;
+    const opened = openNoFollowRead(root, slice.evidence_path);
+    if (!opened.ok) {
+      errors.push(
+        vnextError(
+          'REPLAN_PREFLIGHT_FAILED',
+          `Evidence is missing, a symlink, or unreadable: ${slice.evidence_path}`,
+          { path: slice.evidence_path, slice_id: sliceId },
+        ),
+      );
+      continue;
+    }
+
+    let currentContent: string;
+    try {
+      const stat = fs.fstatSync(opened.fd);
+      if (!stat.isFile()) {
+        errors.push(
+          vnextError(
+            'REPLAN_PREFLIGHT_FAILED',
+            `Evidence is not a regular file: ${slice.evidence_path}`,
+            { path: slice.evidence_path, slice_id: sliceId },
+          ),
+        );
+        continue;
+      }
+      currentContent = fs.readFileSync(opened.fd, 'utf8');
+    } catch (error) {
+      errors.push(
+        vnextError(
+          'REPLAN_PREFLIGHT_FAILED',
+          `Evidence cannot be read: ${errorMessage(error)}`,
+          { path: slice.evidence_path, slice_id: sliceId },
+        ),
+      );
+      continue;
+    } finally {
+      try {
+        fs.closeSync(opened.fd);
+      } catch {
+        // ignore
+      }
+    }
+
+    const currentBinding = parseEvidencePlanBinding(currentContent);
+    if (
+      currentBinding === null ||
+      currentBinding.stage_id !== stageId ||
+      currentBinding.slice_id !== sliceId ||
+      currentBinding.plan_digest !== disposition.plan_digest ||
+      currentBinding.manifest_digest !== disposition.manifest_digest ||
+      currentBinding.plan_ref !== manifest.plan.ref
+    ) {
+      errors.push(
+        vnextError(
+          'REPLAN_BINDING_MISMATCH',
+          `Evidence plan binding does not match candidate manifest/plan binding: ${slice.evidence_path}`,
+          { path: slice.evidence_path, slice_id: sliceId },
+        ),
+      );
+    }
+  }
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
+  // 3. Current Plan projection passes the shared structural validator and is already the candidate projection
+  let currentProjContent: string;
+  try {
+    currentProjContent = readRootBoundFile(root, manifest.plan.ref).content;
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [
+        vnextError(
+          'REPLAN_PREFLIGHT_FAILED',
+          `Plan projection cannot be read: ${errorMessage(error)}`,
+          { path: manifest.plan.ref },
+        ),
+      ],
+    };
+  }
+
+  const projValidation = validatePlanProjectionStructure(currentProjContent, manifest);
+  if (!projValidation.ok) {
+    return {
+      ok: false,
+      errors: [
+        vnextError(
+          'REPLAN_PREFLIGHT_FAILED',
+          `Plan projection structure is invalid: ${projValidation.message}`,
+          { path: manifest.plan.ref },
+        ),
+      ],
+    };
+  }
+
+  const expectedRestored = renderRestoredPlanProjection(
+    currentProjContent,
+    new Set(disposition.carry_forward_task_ids),
+    manifest,
+  );
+  if (expectedRestored === null || expectedRestored !== currentProjContent) {
+    return {
+      ok: false,
+      errors: [
+        vnextError(
+          'REPLAN_PREFLIGHT_FAILED',
+          'Plan projection does not match candidate projection',
+          { path: manifest.plan.ref },
+        ),
+      ],
+    };
+  }
+
+  return { ok: true };
+}
+
 function runReplanRotate(
   root: string,
   request: RefreshVNextSliceEvidenceRequest,
@@ -4192,6 +4841,54 @@ function runReplanRotate(
   const verified = verifyReplanRotationBindings(root, request, manifest, manifestDigest);
   if (!verified.ok) return replanFailed(stageId, verified.errors);
   const { fact, disposition, parentEpochDigest } = verified;
+
+  // S15-A-T02 (repair-24): Strict HEAD-only idempotent no-op path.
+  // When Manifest/Plan contracts are unchanged and all derived sets are empty (HEAD advance
+  // without re-rotation), return successful zero-write envelope after validating clean state.
+  if (isReplanNoOpDisposition(disposition)) {
+    const noOpCheck = verifyReplanNoOpState(root, manifest, manifestDigest, disposition);
+    if (!noOpCheck.ok) {
+      return replanFailed(stageId, noOpCheck.errors);
+    }
+    return {
+      success: true,
+      stage_id: stageId,
+      schema_version: VNEXT_SCHEMA_VERSION,
+      mode: 'replan',
+      refreshed: manifest.slices.map((slice) => slice.evidence_path),
+      recovered: false,
+      rolled_back: false,
+      blocked_recovery: false,
+      errors: [],
+      replan_phase: 'rotate',
+      disposition_digest: fact.digest,
+      parent_epoch_digest: parentEpochDigest,
+      archive_paths: [],
+      projection_restored: true,
+    };
+  }
+
+  // S15-A-T02 (repair-18): Check if rotation is already completed and proven
+  // at the current verified snapshot (idempotent no-op for advanced Git HEAD).
+  const alreadyCompleted = verifyAlreadyCompletedReplanRotation(root, manifest, manifestDigest, disposition);
+  if (alreadyCompleted.ok) {
+    return {
+      success: true,
+      stage_id: stageId,
+      schema_version: VNEXT_SCHEMA_VERSION,
+      mode: 'replan',
+      refreshed: manifest.slices.map((slice) => slice.evidence_path),
+      recovered: false,
+      rolled_back: false,
+      blocked_recovery: false,
+      errors: [],
+      replan_phase: 'rotate',
+      disposition_digest: fact.digest,
+      parent_epoch_digest: parentEpochDigest,
+      archive_paths: alreadyCompleted.archivePaths,
+      projection_restored: true,
+    };
+  }
 
   const preflight = preflightReplanRotation(root, manifest, manifestDigest, disposition);
   if (!preflight.ok) {
@@ -4263,7 +4960,12 @@ function runReplanJournalRecovery(
 ): RefreshVNextSliceEvidenceResult {
   const stageId = manifest.stage_id;
   const verified = verifyReplanRotationBindings(root, request, manifest, manifestDigest);
-  if (!verified.ok) return replanFailed(stageId, verified.errors, true);
+  if (!verified.ok) {
+    const errors = verified.errors.map((e) =>
+      vnextError('UNRECOVERED_TRANSACTION', e.message, { path: e.path, slice_id: e.slice_id }),
+    );
+    return replanFailed(stageId, errors, true);
+  }
   const { fact, disposition, parentEpochDigest } = verified;
   const dispositionDigest = computeReplanDispositionDigest(disposition);
 

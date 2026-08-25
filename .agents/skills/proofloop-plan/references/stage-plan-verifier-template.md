@@ -95,10 +95,37 @@ SPV 必须在 stable Git boundary 后 fresh、只读，并按以下顺序验证�
 7. 验证每个 `implementation` Task 的 immutable `execution_scope` 存在，`code_paths`
    和 `test_paths` 非空、root-bound、无 forbidden overlap，并且 scope 参与
    `plan_digest`；`evidence-only` Task 不得被投影为 `implement-task`；
-8. ~~验证 Runtime Proof 只引用结构化 `ProofSpecification`~~（b6b0d3a 移除：Manifest/Gate 不再有
+8. **Stage Composition Closure Audit（S13-S17 整改 §9.2–§9.6）**：运行闭合命令
+   `node packages/runtime/dist/cli/validate-vnext-stage.js <tasks.md> <manifest.json>
+   <evidence-dir> <root>`（即 `proofloop plan validate` 同一 seam），确认输出中
+   不含 `type: "STAGE_COMPOSITION_GAP"` 错误。该命令已在 Runtime 内机械完成
+   Manifest Task → Worker admission → finalize-slice → CV → Slice Commit →
+   Integration → Gate → Review → Close 的行为/版本/数量/tip/public-route 五闭环
+   推导；SPV 不得用自然语言自行推断应有 Consumer。任何 `STAGE_COMPOSITION_GAP`
+   错误必须逐条映射为下述 PLAN_DEFECT 结构（`error.stage_composition` 字段携带
+   missing_step/producer/consumer/binding_mode/expected_schema/reason），且不得
+   返回 `PLAN_READY`：
+
+   ```yaml
+   result: PLAN_DEFECT
+   route_code: PLAN_GAP
+   subtype: STAGE_COMPOSITION_GAP
+   missing_step: <step>
+   producer: <producer>
+   consumer: <consumer>
+   binding_mode: <mode>
+   expected_schema: <version>
+   reason: <reason>
+   invalidation_scope:
+     - candidate-plan
+   resume_target:
+     owner: proofloop-plan
+     phase: STAGE_PLANNING
+   ```
+9. ~~验证 Runtime Proof 只引用结构化 `ProofSpecification`~~（b6b0d3a 移除：Manifest/Gate 不再有
    runtime proof；candidate input 亦不接受 runtime_proof 投影）；
-9. 验证 candidate Plan 没有被当作 admitted Plan；
-10. 验证没有 CV Level、Proof Profile 或自然语言命令推断依赖。
+10. 验证 candidate Plan 没有被当作 admitted Plan；
+11. 验证没有 CV Level、Proof Profile 或自然语言命令推断依赖。
 
 语义内容位置：Acceptance/Seam/Oracle/Risk 的语义正文（实质内容）只存在于权威文件，
 candidate 只承载 ref 引用（`<root-relative-path>#/entities/<id>`），不复制语义正文。
