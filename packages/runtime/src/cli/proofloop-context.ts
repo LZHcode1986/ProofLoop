@@ -57,6 +57,7 @@ import {
   assertVNextCvReceiptTypeVerdict,
 } from '../vnext/cv-validation';
 import type { VNextCvPayloadBinding } from '../vnext/cv-validation';
+import { deriveVNextWorkerDispatchForStage } from '../vnext/next';
 import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import {
   errorEnvelope,
@@ -504,41 +505,19 @@ function projectWorkerDispatch(
   requestedSliceId: string | undefined,
 ): VNextWorkerDispatch {
   const stageId = resolved.manifest.stage_id as string;
-  const completedTaskIds = readCompletedTaskIds(root, stageId);
-  const committed = readCommittedSliceIds(root, stageId);
-  const historicalInvalidatedTaskIds = readHistoricalInvalidatedTaskIds(root, stageId);
-  const sliceId =
-    requestedSliceId ??
-    selectDispatchSliceId(resolved.manifest, completedTaskIds, committed);
-  if (sliceId === undefined) {
-    throw new Error('Slice anchor is not available: no eligible slice for dispatch');
+  if (requestedSliceId !== undefined) {
+    const declaredSliceIds = (resolved.manifest.slices as Array<{ slice_id: string }>).map((s) => s.slice_id);
+    if (!declaredSliceIds.includes(requestedSliceId)) {
+      throw new VNextHandoffError('task-anchor-gap', `requested slice "${requestedSliceId}" is not declared by the Manifest`);
+    }
   }
-  const base = {
-    root,
-    manifest: resolved.manifest,
-    manifestDigest: resolved.manifestDigest,
+  const dispatch = deriveVNextWorkerDispatchForStage(root, stageId, {
     snapshotDigest: resolved.snapshotDigest,
-    authority: resolved.authority,
-    sliceId,
-    completedTaskIds,
-    provenCompleteSlices: committed,
-  };
-  const declaredTaskIds = declaredTaskIdsForSlice(resolved.manifest, sliceId);
-  if (declaredTaskIds !== undefined && declaredTaskIds.every((taskId) => completedTaskIds.includes(taskId))) {
-    return projectVNextWorkerDispatch({ ...base, mode: 'finalize-slice' });
+  });
+  if (requestedSliceId !== undefined && dispatch.slice_id !== requestedSliceId) {
+    throw new VNextHandoffError('task-anchor-gap', `requested slice "${requestedSliceId}" does not match the canonical dispatch slice "${dispatch.slice_id}"`);
   }
-  const probe = projectVNextWorkerDispatch(base);
-  const isChecked = probe.task_id ? planTaskCheckboxChecked(
-    root,
-    (resolved.manifest.plan as { ref: string }).ref,
-    probe.task_id,
-  ) : false;
-  const isHistoricalInvalidated = probe.task_id ? historicalInvalidatedTaskIds.has(probe.task_id) : false;
-  const mode = (isChecked || isHistoricalInvalidated)
-    ? 'recover-task'
-    : 'implement-task';
-  if (mode === 'implement-task') return probe;
-  return projectVNextWorkerDispatch({ ...base, mode });
+  return dispatch;
 }
 
 /** Validate the `ref` parameter shape（root-relative digest-addressed Context）。 */

@@ -35,13 +35,14 @@ export const VNEXT_ROUTE_TABLE: readonly VNextRouteTableEntry[] = [
   {
     operation: 'stage next',
     handler: 'runStage',
-    // One public operation fans out to TWO consumer seams depending on the
-    // derived step: task dispatch projects a Worker Context, while the
-    // finalize-slice step is admitted through the worker-admission consumer
-    // under its own mode discrimination.
-    consumer:
-      'projectVNextWorkerDispatch + persistVNextWorkerContext | admitVNextWorkerResult',
-    schema_seam: 'Context schema_version 2 | closed v2 TASK_COMPLETE credential',
+    consumer: 'VNextNextActionService.nextAction (read-only decision)',
+    schema_seam: 'vNext NextActionOutput (read-only decision)',
+  },
+  {
+    operation: 'context prepare',
+    handler: 'runContext',
+    consumer: 'persistVNextWorkerContext | persistVNextRoleContext',
+    schema_seam: 'Context schema_version 2 (persistence seam)',
   },
   {
     operation: 'stage admit-worker',
@@ -82,8 +83,8 @@ export const VNEXT_ROUTE_TABLE: readonly VNextRouteTableEntry[] = [
   {
     operation: 'review prepare-stage',
     handler: 'runReview',
-    consumer: 'runReview(prepare-stage) read-only projection',
-    schema_seam: 'vNext Manifest route precondition',
+    consumer: 'persistVNextStageReviewPreparation',
+    schema_seam: 'VNextStageReviewPreparation schema_version 2 (persisted prepared fact)',
   },
   {
     operation: 'review finalize-stage',

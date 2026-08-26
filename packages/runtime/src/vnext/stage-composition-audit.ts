@@ -64,6 +64,8 @@ import { admitVNextIntegration } from './integration-admission';
 import { admitVNextGateResult } from './gate-admission';
 import { admitVNextStageReview } from './review-admission';
 import { admitVNextStageClose } from './stage-close-admission';
+import { persistVNextStageReviewPreparation } from './review-preparation';
+import { VNextNextActionService, persistVNextRoleContext, persistVNextWorkerContext } from './next';
 // Version closure probes run through the SHARED credential discriminator —
 // never a re-derived copy of its rules.
 import { credentialSchemaVersionMismatch } from './cv-validation';
@@ -442,13 +444,24 @@ function sliceChainSteps(
   for (const [index, taskId] of taskIds.entries()) {
     steps.push({
       step: `dispatch(${taskId})`,
-      producer: 'brain (vNext next/context seam)',
+      producer: 'brain (stage next)',
       public_operation: 'proofloop stage next',
-      consumer: 'projectVNextWorkerDispatch + persistVNextWorkerContext',
+      consumer: 'VNextNextActionService.nextAction (read-only decision)',
       accepted_binding_mode: bindingMode,
-      accepted_schema: 'Context schema_version 2',
+      accepted_schema: 'vNext NextActionOutput (read-only decision)',
       required_predecessor: index === 0 ? null : `worker-admission(${taskIds[index - 1]})`,
       required_binding: `manifest_digest + plan_digest + snapshot_digest + task_scopes[${taskId}]`,
+      restart_reader: 'reconcileStage / deriveNextAction canonical lifecycle decision',
+    });
+    steps.push({
+      step: `prepare-context(${taskId})`,
+      producer: 'brain (context prepare)',
+      public_operation: 'proofloop context prepare',
+      consumer: 'persistVNextWorkerContext',
+      accepted_binding_mode: bindingMode,
+      accepted_schema: 'Context schema_version 2 (persistence seam)',
+      required_predecessor: `dispatch(${taskId})`,
+      required_binding: `context_digest + manifest_digest + plan_digest + snapshot_digest + task_scopes[${taskId}]`,
       restart_reader: 'persisted root-bound Worker Context (.proofloop/context)',
     });
     steps.push({
@@ -458,7 +471,7 @@ function sliceChainSteps(
       consumer: 'admitVNextWorkerResult',
       accepted_binding_mode: bindingMode,
       accepted_schema: credentialSchema,
-      required_predecessor: `dispatch(${taskId})`,
+      required_predecessor: `prepare-context(${taskId})`,
       required_binding: `context_digest + manifest/plan/proof_index/snapshot digests + execution_scope(${taskId})`,
       restart_reader: 'task-receipts(stage, slice) TASK_COMPLETE chain reader',
     });
@@ -466,8 +479,8 @@ function sliceChainSteps(
   steps.push({
     step: 'finalize-slice',
     producer: 'worker (completion mode finalize-slice)',
-    public_operation: 'proofloop stage next',
-    consumer: 'admitVNextWorkerResult (mode discrimination)',
+    public_operation: 'proofloop stage admit-worker',
+    consumer: 'admitVNextWorkerResult',
     accepted_binding_mode: bindingMode,
     accepted_schema: credentialSchema,
     required_predecessor: taskIds.length > 0 ? `worker-admission(${taskIds[taskIds.length - 1]})` : null,
@@ -545,12 +558,12 @@ function stageChainSteps(
       step: 'review-prepare',
       producer: 'brain (review assembler)',
       public_operation: 'proofloop review prepare-stage',
-      consumer: 'runReview(prepare-stage) read-only projection',
+      consumer: 'persistVNextStageReviewPreparation',
       accepted_binding_mode: bindingMode,
-      accepted_schema: `GATE_RESULT payload schema_version ${VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.GATE_RESULT} precondition`,
+      accepted_schema: `VNextStageReviewPreparation schema_version 2 (persisted prepared fact)`,
       required_predecessor: 'GATE PASS tip',
       required_binding: `gate receipt digest + Manifest/Plan binding tuple of stage ${manifest.stage_id}`,
-      restart_reader: 'review-receipts(stage) review projection input reassembly',
+      restart_reader: 'review-preparations(stage) prepared fact reader',
     },
     {
       step: 'review-finalize',
@@ -709,7 +722,23 @@ export function auditRouteTableWiring(
       const normalizedCandidate = normalizeConsumer(candidate);
       const known =
         candidate in liveConsumers || normalizedCandidate in liveConsumers;
-      if (!known) continue; // read-only/handler-internal seams: proven by the top-level CLI smoke matrix
+      if (!known) {
+        // Strict closure: an unmapped consumer name is an UNPROBED row — it
+        // must never silently count as closed (the CLI smoke matrix only
+        // proves rows this audit already models).
+        findings.push(
+          finding(
+            'behavior',
+            step.step,
+            step.producer,
+            candidate,
+            bindingMode,
+            step.accepted_schema,
+            `route table consumer "${candidate}" has no liveness-map entry; the closure audit cannot prove the seam exists`,
+          ),
+        );
+        continue;
+      }
       const seam = liveConsumers[candidate] ?? liveConsumers[normalizedCandidate];
       if (!isLiveFunction(seam)) {
         findings.push(
@@ -926,7 +955,11 @@ export function auditVNextStageComposition(manifest: VNextManifest): VNextStageC
   // Behavior closure liveness tables — the named runtime seams must be live
   // functions or the expected action has no downstream consumer.
   const seamLiveness: Record<string, unknown> = {
+    'VNextNextActionService.nextAction (read-only decision)': VNextNextActionService,
+    'persistVNextWorkerContext': persistVNextWorkerContext,
+    'persistVNextRoleContext': persistVNextRoleContext,
     'projectVNextWorkerDispatch + persistVNextWorkerContext': projectVNextWorkerDispatch,
+    'persistVNextStageReviewPreparation': persistVNextStageReviewPreparation,
     'admitVNextWorkerResult': admitVNextWorkerResult,
     'admitVNextWorkerResult (mode discrimination)': admitVNextWorkerResult,
     'admitVNextCVResult': admitVNextCVResult,
@@ -965,20 +998,43 @@ export function auditVNextStageComposition(manifest: VNextManifest): VNextStageC
         ),
       );
     }
-    // Behavior closure: the named runtime consumer seam must be live.
-    const seam = seamLiveness[step.consumer];
-    if (seam !== undefined && !isLiveFunction(seam)) {
-      findings.push(
-        finding(
-          'behavior',
-          step.step,
-          step.producer,
-          step.consumer,
-          bindingMode,
-          step.accepted_schema,
-          `consumer seam "${step.consumer}" is not a live runtime function; the expected action has no downstream consumer`,
-        ),
-      );
+    // Behavior closure: every named runtime consumer seam must be a live
+    // function. A '|'-composite consumer names SEPARATE seams — each member
+    // is probed; an unknown member is itself a closure gap (an unprobed row
+    // must never silently count as closed).
+    const seamNames = step.consumer
+      .split('|')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+    for (const seamName of seamNames) {
+      const seam = seamLiveness[seamName];
+      if (seam === undefined) {
+        findings.push(
+          finding(
+            'behavior',
+            step.step,
+            step.producer,
+            seamName,
+            bindingMode,
+            step.accepted_schema,
+            `consumer seam "${seamName}" has no liveness-map entry; the closure audit cannot prove the seam exists`,
+          ),
+        );
+        continue;
+      }
+      if (!isLiveFunction(seam)) {
+        findings.push(
+          finding(
+            'behavior',
+            step.step,
+            step.producer,
+            seamName,
+            bindingMode,
+            step.accepted_schema,
+            `consumer seam "${seamName}" is not a live runtime function; the expected action has no downstream consumer`,
+          ),
+        );
+      }
     }
     // Persistence layout liveness: every restart reader names a receipt-layout
     // seam that must exist for restart to re-derive the category.

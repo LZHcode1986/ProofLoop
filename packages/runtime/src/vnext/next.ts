@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   computeDigest,
+  computeReceiptDigest,
   SchemaValidationError,
   validateReceipt,
   validateVNextManifest,
@@ -59,11 +60,13 @@ import {
   projectVNextWorkerDispatch,
   readVNextAdmissionAuthority,
   readVNextManifest,
+  verifyVNextWorkerContextBindings,
   VNextHandoffError,
 } from './dispatch';
 export { readVNextAdmissionAuthority } from './dispatch';
 import type {
   VNextAdmissionAuthority,
+  VNextWorkerContext,
   VNextWorkerDispatch,
 } from './dispatch';
 import { assertStableGitBoundary } from './git-boundary';
@@ -2543,6 +2546,8 @@ export interface VNextStageGateTipFacts {
   readonly verdict: 'PASS' | 'FAIL';
   /** The digest-addressed name of the tip Receipt. */
   readonly digest: string;
+  /** The snapshot digest bound by the tip Receipt. */
+  readonly snapshot_digest: string;
 }
 
 /**
@@ -2575,7 +2580,8 @@ function readVNextStageGateTipFacts(
     throw new VNextHandoffError('admission-invalid', `stage-gate Receipt chain is invalid for ${stageId}`);
   }
   let tip: VNextStageGateTipFacts | null = null;
-  for (const name of names) {
+  for (const item of chain.receipts) {
+    const name = path.basename(item);
     const file = path.join(directory, name);
     const opened = openNoFollowRead(root, file);
     if (!opened.ok) {
@@ -2590,8 +2596,11 @@ function readVNextStageGateTipFacts(
           `Receipt ${name} is not a GATE_PASS/GATE_FAIL fact in the stage-gate category`,
         );
       }
-      if (!verifyReceiptDigest(file)) {
-        throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid digest`);
+      // Self-digest from the SAME opened-fd content that the tuple checks
+      // below consume — never a second path-following read (TOCTOU).
+      const { digest: storedGateDigest, ...gateContent } = parsed as Record<string, unknown>;
+      if (computeReceiptDigest(gateContent) !== storedGateDigest) {
+        throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid self-digest`);
       }
       const payload = receipt.payload;
       if (
@@ -2631,7 +2640,7 @@ function readVNextStageGateTipFacts(
       if (payload.verdict !== 'PASS' && payload.verdict !== 'FAIL') {
         throw new VNextHandoffError('admission-invalid', `stage-gate Receipt ${name} has an invalid verdict`);
       }
-      tip = { verdict: payload.verdict, digest: receipt.digest };
+      tip = { verdict: payload.verdict, digest: receipt.digest, snapshot_digest: payload.snapshot_digest as string };
     } catch (error) {
       if (error instanceof VNextHandoffError) throw error;
       throw new VNextHandoffError(
@@ -2650,6 +2659,10 @@ export interface VNextStageReviewTipFacts {
   readonly verdict: 'ACCEPTED' | 'REPAIR';
   /** The digest-addressed name of the tip Receipt. */
   readonly digest: string;
+  /** The stage-gate receipt digest bound by the tip Receipt, if any. */
+  readonly stage_gate_receipt_digest?: string;
+  /** The snapshot digest bound by the tip Receipt. */
+  readonly snapshot_digest?: string;
 }
 
 /**
@@ -2682,7 +2695,8 @@ function readVNextStageReviewTipFacts(
     throw new VNextHandoffError('admission-invalid', `stage review Receipt chain is invalid for ${stageId}`);
   }
   let tip: VNextStageReviewTipFacts | null = null;
-  for (const name of names) {
+  for (const item of chain.receipts) {
+    const name = path.basename(item);
     const file = path.join(directory, name);
     const opened = openNoFollowRead(root, file);
     if (!opened.ok) {
@@ -2697,8 +2711,11 @@ function readVNextStageReviewTipFacts(
           `Receipt ${name} is not a STAGE_REVIEW_PASS fact in the stage review category`,
         );
       }
-      if (!verifyReceiptDigest(file)) {
-        throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid digest`);
+      // Self-digest from the SAME opened-fd content that the tuple checks
+      // below consume — never a second path-following read (TOCTOU).
+      const { digest: storedReviewDigest, ...reviewContent } = parsed as Record<string, unknown>;
+      if (computeReceiptDigest(reviewContent) !== storedReviewDigest) {
+        throw new VNextHandoffError('admission-invalid', `Receipt ${name} has an invalid self-digest`);
       }
       const payload = receipt.payload;
       if (
@@ -2738,7 +2755,12 @@ function readVNextStageReviewTipFacts(
       if (payload.verdict !== 'ACCEPTED' && payload.verdict !== 'REPAIR') {
         throw new VNextHandoffError('admission-invalid', `stage review Receipt ${name} has an invalid verdict`);
       }
-      tip = { verdict: payload.verdict, digest: receipt.digest };
+      tip = {
+        verdict: payload.verdict,
+        digest: receipt.digest,
+        stage_gate_receipt_digest: typeof payload.stage_gate_receipt_digest === 'string' ? payload.stage_gate_receipt_digest : undefined,
+        snapshot_digest: typeof payload.snapshot_digest === 'string' ? payload.snapshot_digest : undefined,
+      };
     } catch (error) {
       if (error instanceof VNextHandoffError) throw error;
       throw new VNextHandoffError(
@@ -3303,7 +3325,6 @@ function readValidRepairEnvelopeForCvRepairTip(
     try {
       context = JSON.parse(fs.readFileSync(contextOpened.fd, 'utf8'));
     } catch {
-      fs.closeSync(contextOpened.fd);
       continue;
     } finally {
       fs.closeSync(contextOpened.fd);
@@ -3315,6 +3336,11 @@ function readValidRepairEnvelopeForCvRepairTip(
     if (ctx['slice_id'] !== sliceId) continue;
     if (ctx['manifest_digest'] !== manifestDigest) continue;
     if (ctx['repairs_cv_receipt_digest'] !== cvRepairReceiptDigest) continue;
+    try {
+      verifyVNextWorkerContextBindings(root, manifest, ctx as unknown as VNextWorkerContext);
+    } catch {
+      continue;
+    }
     return true;
   }
   return false;
@@ -3562,7 +3588,11 @@ function deriveVNextCanonicalNextAction(
   let gatePassPresent = false;
   let gateFailPresent = false;
   const gateTip = readVNextStageGateTipFacts(input.projectRoot, input.stageId, stageLevelBinding);
-  if (gateTip !== null && gateTip.verdict === 'PASS') gatePassPresent = true;
+  const gitHead = readGitHead(resolveGitRoot(input.projectRoot));
+  const currentGitHead = gitHead ?? authoritySnapshot;
+  if (gateTip !== null && gateTip.verdict === 'PASS' && gateTip.snapshot_digest === currentGitHead) {
+    gatePassPresent = true;
+  }
   if (gateTip !== null && gateTip.verdict === 'FAIL') gateFailPresent = true;
   // P0-2 closed Review chain: Gate PASS derives PREPARE_STAGE_REVIEW until a
   // prepared fact binds exactly this Gate PASS tip (stale facts never count).
@@ -3573,10 +3603,10 @@ function deriveVNextCanonicalNextAction(
         manifestDigest,
         planDigest: manifest.plan.plan_digest,
         gateReceiptDigest: gateTip.digest,
-        snapshotDigest: authoritySnapshot,
+        snapshotDigest: gateTip.snapshot_digest,
       }) !== null;
   }
-  if (gatePassPresent) {
+  if (gatePassPresent && gateTip !== null) {
     const reviewTip = readVNextStageReviewTipFacts(input.projectRoot, input.stageId, stageLevelBinding);
     if (reviewTip?.verdict === 'ACCEPTED') {
       // §6.3: Review ACCEPTED converges through the PUBLIC Stage Close
@@ -3589,12 +3619,14 @@ function deriveVNextCanonicalNextAction(
           `stage "${input.stageId}" Stage Review is ACCEPTED; run the public Stage Close contract to archive the stage`,
       });
     } else if (reviewTip?.verdict === 'REPAIR') {
-      findings.push({
-        code: 'DOMAIN.INVALID_TRANSITION',
-        severity: 'error',
-        message:
-          `stage "${input.stageId}" has a STAGE_REVIEW REPAIR tip; a re-gate (new GATE_PASS at the advanced HEAD) is required before the next review round`,
-      });
+      if (reviewTip.stage_gate_receipt_digest === undefined || reviewTip.stage_gate_receipt_digest === gateTip.digest) {
+        findings.push({
+          code: 'DOMAIN.INVALID_TRANSITION',
+          severity: 'error',
+          message:
+            `stage "${input.stageId}" has a STAGE_REVIEW REPAIR tip; a re-gate (new GATE_PASS at the advanced HEAD) is required before the next review round`,
+        });
+      }
     }
   }
 
@@ -3620,7 +3652,6 @@ function deriveVNextCanonicalNextAction(
         sliceId: entry.sliceId,
         taskId: entry.taskId,
         mode: 'implement-task',
-        outcome: 'completed',
         evidenceRef: '',
         changedFiles: [],
         verificationRuns: [],
@@ -3650,6 +3681,69 @@ function deriveVNextCanonicalNextAction(
 }
 
 /**
+ * Derive the exact VNextWorkerDispatch tuple for a DISPATCH_WORKER canonical decision.
+ */
+export function deriveWorkerDispatch(
+  input: VNextNextActionInput,
+  manifest: VNextManifest,
+  manifestDigest: string,
+  authority: VNextAdmissionAuthority,
+  requestedSnapshot: string,
+  derived: DerivedNextAction,
+  workerFacts: readonly VNextWorkerFact[],
+  committedSliceIds: ReadonlySet<string>,
+  cvRepairTips: ReadonlyMap<string, string>,
+): VNextWorkerDispatch {
+  const slice = manifest.slices.find((candidate) => candidate.slice_id === derived.slice_id);
+  if (slice === undefined || derived.mode === undefined) {
+    throw new VNextHandoffError(
+      'task-anchor-gap',
+      `canonical decision dispatched an unresolvable Slice/mode: ${derived.slice_id ?? '<missing>'}/${derived.mode ?? '<missing>'}`,
+    );
+  }
+  const sliceId = slice.slice_id;
+  const completedTaskIds = new Set(
+    workerFacts
+      .filter((fact) => fact.slice.slice_id === sliceId && fact.taskId !== undefined)
+      .map((fact) => fact.taskId as string),
+  );
+  if (derived.mode === 'repair') {
+    const repairedCvReceiptDigest = cvRepairTips.get(slice.slice_id);
+    if (repairedCvReceiptDigest === undefined) {
+      throw new VNextHandoffError(
+        'task-anchor-gap',
+        `canonical repair dispatch for slice "${slice.slice_id}" has no outstanding CV_REPAIR chain tip`,
+      );
+    }
+    return projectVNextWorkerDispatch({
+      root: input.projectRoot,
+      manifest,
+      manifestDigest,
+      snapshotDigest: requestedSnapshot,
+      authority,
+      sliceId,
+      completedTaskIds: [],
+      mode: 'repair',
+      repairsCvReceiptDigest: repairedCvReceiptDigest,
+      provenCompleteSlices: committedSliceIds,
+      verifyReferenceBindings: input.verifyReferenceBindings,
+    });
+  }
+  return projectVNextWorkerDispatch({
+    root: input.projectRoot,
+    manifest,
+    manifestDigest,
+    snapshotDigest: requestedSnapshot,
+    authority,
+    sliceId,
+    completedTaskIds: [...completedTaskIds],
+    mode: derived.mode,
+    provenCompleteSlices: committedSliceIds,
+    verifyReferenceBindings: input.verifyReferenceBindings,
+  });
+}
+
+/**
  * Translate the canonical decision into the vNext output contract. DISPATCH
  * decisions still flow through the dispatch seam (Context generation stays a
  * vNext execution fact, not a lifecycle decision); RUN_CV reuses the shared
@@ -3668,75 +3762,38 @@ function projectVNextDerivedAction(
   cvRepairTips: ReadonlyMap<string, string>,
 ): VNextNextActionOutput {
   if (derived.action === 'DISPATCH_WORKER') {
-    const slice = manifest.slices.find((candidate) => candidate.slice_id === derived.slice_id);
-    if (slice === undefined || derived.mode === undefined) {
-      throw new VNextHandoffError(
-        'task-anchor-gap',
-        `canonical decision dispatched an unresolvable Slice/mode: ${derived.slice_id ?? '<missing>'}/${derived.mode ?? '<missing>'}`,
-      );
-    }
-    const sliceId = slice.slice_id;
-    const completedTaskIds = new Set(
-      workerFacts
-        .filter((fact) => fact.slice.slice_id === sliceId && fact.taskId !== undefined)
-        .map((fact) => fact.taskId as string),
-    );
-    // Closed REPAIR loop projection: a canonical repair dispatch is anchored
-    // to the Slice's outstanding CV_REPAIR chain tip — never to a Task.
-    if (derived.mode === 'repair') {
-      const repairedCvReceiptDigest = cvRepairTips.get(slice.slice_id);
-      if (repairedCvReceiptDigest === undefined) {
-        throw new VNextHandoffError(
-          'task-anchor-gap',
-          `canonical repair dispatch for slice "${slice.slice_id}" has no outstanding CV_REPAIR chain tip`,
-        );
-      }
-      const repairDispatch = projectVNextWorkerDispatch({
-        root: input.projectRoot,
-        manifest,
-        manifestDigest,
-        snapshotDigest: requestedSnapshot,
-        authority,
-        sliceId,
-        completedTaskIds: [],
-        mode: 'repair',
-        repairsCvReceiptDigest: repairedCvReceiptDigest,
-        provenCompleteSlices: committedSliceIds,
-        verifyReferenceBindings: input.verifyReferenceBindings,
-      });
-      if (input.persistContext === true) persistVNextWorkerContext(input.projectRoot, repairDispatch);
-      return {
-        action: repairDispatch.action,
-        action_detail:
-          'DISPATCH_WORKER mode=' + repairDispatch.mode + ' for slice ' + repairDispatch.slice_id +
-          ' repairs CV_REPAIR receipt ' + repairedCvReceiptDigest +
-          ' context_ref ' + repairDispatch.context_ref,
-        responsible_role: repairDispatch.responsible_role,
-        receipt_chain_valid: repairDispatch.receipt_chain_valid,
-        stage_id: repairDispatch.stage_id,
-        slice_id: repairDispatch.slice_id,
-        mode: repairDispatch.mode,
-        context_ref: repairDispatch.context_ref,
-        manifest_digest: repairDispatch.manifest_digest,
-        plan_digest: repairDispatch.plan_digest,
-        proof_index_digest: repairDispatch.proof_index_digest,
-        snapshot_digest: repairDispatch.snapshot_digest,
-        findings: repairDispatch.findings,
-      };
-    }
-    const dispatch = projectVNextWorkerDispatch({
-      root: input.projectRoot,
+    const dispatch = deriveWorkerDispatch(
+      input,
       manifest,
       manifestDigest,
-      snapshotDigest: requestedSnapshot,
       authority,
-      sliceId,
-      completedTaskIds: [...completedTaskIds],
-      mode: derived.mode,
-      provenCompleteSlices: committedSliceIds,
-      verifyReferenceBindings: input.verifyReferenceBindings,
-    });
+      requestedSnapshot,
+      derived,
+      workerFacts,
+      committedSliceIds,
+      cvRepairTips,
+    );
     if (input.persistContext === true) persistVNextWorkerContext(input.projectRoot, dispatch);
+    if (dispatch.mode === 'repair') {
+      return {
+        action: dispatch.action,
+        action_detail:
+          'DISPATCH_WORKER mode=' + dispatch.mode + ' for slice ' + dispatch.slice_id +
+          ' repairs CV_REPAIR receipt ' + (dispatch.context as unknown as Record<string, unknown>).repairs_cv_receipt_digest +
+          ' context_ref ' + dispatch.context_ref,
+        responsible_role: dispatch.responsible_role,
+        receipt_chain_valid: dispatch.receipt_chain_valid,
+        stage_id: dispatch.stage_id,
+        slice_id: dispatch.slice_id,
+        mode: dispatch.mode,
+        context_ref: dispatch.context_ref,
+        manifest_digest: dispatch.manifest_digest,
+        plan_digest: dispatch.plan_digest,
+        proof_index_digest: dispatch.proof_index_digest,
+        snapshot_digest: dispatch.snapshot_digest,
+        findings: dispatch.findings,
+      };
+    }
     return {
       action: dispatch.action,
       action_detail:
@@ -3779,245 +3836,251 @@ function projectVNextDerivedAction(
   };
 }
 
+type ResolvedNextContext =
+  | { readonly archived: true; readonly closeFacts: ReturnType<typeof readStageCloseFacts> }
+  | {
+      readonly archived: false;
+      readonly manifest: VNextManifest;
+      readonly manifestDigest: string;
+      readonly authority: VNextAdmissionAuthority;
+      readonly authoritySnapshot: string;
+      readonly requestedSnapshot: string;
+      readonly derived: DerivedNextAction;
+      readonly workerFacts: readonly VNextWorkerFact[];
+      readonly committedSliceIds: ReadonlySet<string>;
+      readonly cvRepairTips: ReadonlyMap<string, string>;
+    };
+
+function resolveVNextNextActionContext(input: VNextNextActionInput): ResolvedNextContext {
+  assertCanonicalStageId(input.stageId, 'stageId');
+  const closeFacts = readStageCloseFacts(input.projectRoot, input.stageId);
+  if (closeFacts.archived) {
+    return { archived: true, closeFacts };
+  }
+  const manifestPath = input.manifestPath ?? path.join(input.projectRoot, '.proofloop', 'manifests', `${input.stageId}.json`);
+  const manifest = readVNextManifest(input.projectRoot, manifestPath);
+  if (manifest.stage_id !== input.stageId) {
+    throw new VNextHandoffError('manifest-binding', `Manifest stage_id "${manifest.stage_id}" does not match "${input.stageId}"`);
+  }
+  const manifestDigest = computeDigest(manifest);
+  const authority = resolveNextAdmissionAuthority(input.projectRoot, input.stageId, input.admissionPath);
+  if (input.verifyReferenceBindings !== false) {
+    assertVNextManifestReferenceBindings(input.projectRoot, manifest);
+  }
+  const authoritySnapshot = authority.spv.snapshot_digest;
+  const replanDispositions = loadAncestorReplanDispositionRecords(input.projectRoot, input.stageId);
+  const historicalInvalidatedForCurrentness = computeChainInvalidatedTaskIds(replanDispositions);
+  const sliceLocalChain =
+    manifest.binding !== undefined
+      ? readVNextIntegrationReceiptChain(input.projectRoot, manifest, historicalInvalidatedForCurrentness)
+      : [];
+  const currentIntegratedSliceIds = readVNextCurrentIntegratedSliceIds(
+    input.projectRoot,
+    manifest,
+    manifestDigest,
+    sliceLocalChain,
+    historicalInvalidatedForCurrentness,
+  );
+  const { workerFacts, finalizeFacts, historicalInvalidatedTaskIds } = readVNextWorkerFacts(
+    input.projectRoot,
+    manifest,
+    manifestDigest,
+    authoritySnapshot,
+    currentIntegratedSliceIds,
+    sliceLocalChain,
+    replanDispositions,
+  );
+  const committedSliceIds = readVNextCommittedSliceIds(
+    input.projectRoot,
+    manifest,
+    manifestDigest,
+    manifest.plan.plan_digest,
+    authoritySnapshot,
+    workerFacts,
+    finalizeFacts,
+    currentIntegratedSliceIds,
+    sliceLocalChain,
+    replanDispositions,
+  );
+  const activeWorkerFacts = workerFacts.filter(
+    (fact) => !committedSliceIds.has(fact.slice.slice_id),
+  );
+  if (activeWorkerFacts.length > 0) {
+    assertIgnoredProtectedPaths(
+      input.projectRoot,
+      activeWorkerFacts.map((fact) => ({
+        stageId: manifest.stage_id,
+        sliceId: fact.slice.slice_id,
+        taskId: fact.taskId ?? '',
+        manifestDigest: fact.manifestDigest,
+        planDigest: fact.planDigest,
+        snapshotDigest: fact.snapshotDigest,
+        contextRef: fact.contextRef,
+        mode: fact.mode,
+      })),
+    );
+  }
+  const requestedSnapshot = input.snapshotDigest ?? authoritySnapshot;
+  if (typeof input.snapshotDigest === 'string' && !/^[a-f0-9]{40}$/.test(input.snapshotDigest)) {
+    throw new VNextHandoffError(
+      'snapshot-binding',
+      'requested snapshot_digest must be a canonical Git HEAD digest',
+    );
+  }
+  if (requestedSnapshot !== authoritySnapshot) {
+    assertExecutionSnapshotChain(
+      resolveGitRoot(input.projectRoot),
+      requestedSnapshot,
+      authoritySnapshot,
+      'requested',
+    );
+  }
+  const factSlices = unique(activeWorkerFacts.map((fact) => fact.slice.slice_id));
+  if (factSlices.length > 1) {
+    throw new VNextHandoffError(
+      'task-anchor-gap',
+      'vNext execution facts for multiple Slices are ambiguous before downstream CV admission',
+    );
+  }
+  const selectedSlice =
+    activeWorkerFacts.length > 0
+      ? activeWorkerFacts[0].slice
+      : manifest.slices.length === 1
+        ? (committedSliceIds.has(manifest.slices[0].slice_id)
+            ? undefined
+            : manifest.slices[0])
+        : manifest.slices.find(
+            (candidate) =>
+              !committedSliceIds.has(candidate.slice_id) &&
+              candidate.depends_on.every((dependency) => committedSliceIds.has(dependency)),
+          );
+  const selectedSliceScope = () =>
+    selectedSlice === undefined
+      ? []
+      : unique(
+          taskIdsForSlice(manifest, selectedSlice).flatMap((taskId) =>
+            taskAllowedScope(input.projectRoot, manifest, selectedSlice, taskId),
+          ),
+        );
+  const preExecutionDirty = gitChangedPaths(input.projectRoot);
+  const executionStarted = activeWorkerFacts.length > 0 || committedSliceIds.size > 0 || replanDispositions.length > 0;
+  if (!executionStarted) {
+    if (preExecutionDirty.length === 0) {
+      assertStableGitBoundary(input.projectRoot, requestedSnapshot);
+    } else {
+      assertExecutionDirtyBoundary(input.projectRoot, authoritySnapshot, selectedSliceScope());
+      const firstTaskId = selectedSlice === undefined ? undefined : taskIdsForSlice(manifest, selectedSlice)[0];
+      if (firstTaskId === undefined) {
+        throw new VNextHandoffError('task-anchor-gap', 'Slice has no declarable Task anchor');
+      }
+      if (completionModeForDispatch(input.projectRoot, manifest, firstTaskId, historicalInvalidatedTaskIds) === 'implement-task') {
+        throw new VNextHandoffError(
+          'execution-scope-gap',
+          `planning clean boundary: scope-bound dirty worktree without Worker facts and without a recover binding fails closed (${firstTaskId} checkbox is unchecked)`,
+        );
+      }
+    }
+  } else {
+    assertExecutionDirtyBoundary(
+      input.projectRoot,
+      authoritySnapshot,
+      unique([
+        ...activeWorkerFacts.flatMap((fact) => fact.allowedScope),
+        ...selectedSliceScope(),
+      ]),
+    );
+  }
+  assertActiveVNextAuthority(
+    authority,
+    input.stageId,
+    manifestDigest,
+    manifest.plan.plan_digest,
+    authoritySnapshot,
+  );
+  const cvRepairTips = new Map<string, string>();
+  const derived = deriveVNextCanonicalNextAction(
+    {
+      input,
+      manifest,
+      manifestDigest,
+      authority,
+      authoritySnapshot,
+      currentIntegratedSliceIds,
+      workerFacts,
+      finalizeFacts,
+      committedSliceIds,
+      sliceLocalChain,
+      historicalInvalidatedTaskIds,
+      replanDispositions,
+    },
+    cvRepairTips,
+  );
+  return {
+    archived: false,
+    manifest,
+    manifestDigest,
+    authority,
+    authoritySnapshot,
+    requestedSnapshot,
+    derived,
+    workerFacts,
+    committedSliceIds,
+    cvRepairTips,
+  };
+}
+
+export function deriveVNextWorkerDispatchForStage(
+  projectRoot: string,
+  stageId: string,
+  options?: { readonly verifyReferenceBindings?: boolean; readonly snapshotDigest?: string },
+): VNextWorkerDispatch {
+  const input: VNextNextActionInput = {
+    projectRoot,
+    stageId,
+    persistContext: false,
+    verifyReferenceBindings: options?.verifyReferenceBindings,
+    snapshotDigest: options?.snapshotDigest,
+  };
+  const resolved = resolveVNextNextActionContext(input);
+  if (resolved.archived) {
+    throw new VNextHandoffError('task-anchor-gap', `stage "${stageId}" is archived`);
+  }
+  if (resolved.derived.action !== 'DISPATCH_WORKER') {
+    throw new VNextHandoffError(
+      'task-anchor-gap',
+      `stage "${stageId}" is not in DISPATCH_WORKER state (current action: ${resolved.derived.action})`,
+    );
+  }
+  return deriveWorkerDispatch(
+    input,
+    resolved.manifest,
+    resolved.manifestDigest,
+    resolved.authority,
+    resolved.requestedSnapshot,
+    resolved.derived,
+    resolved.workerFacts,
+    resolved.committedSliceIds,
+    resolved.cvRepairTips,
+  );
+}
+
 export class VNextNextActionService {
   nextAction(input: VNextNextActionInput): VNextNextActionOutput {
     try {
-      // S09-REVIEW-001: canonical Stage ID guard at the earliest entry — the
-      // Manifest/Authority must never be read for a parked legacy label.
-      assertCanonicalStageId(input.stageId, 'stageId');
-      // P-11 task B: archived-Stage guard at the earliest entry — a Stage
-      // with a legal v2 STAGE_CLOSE_RESULT envelope must never be projected
-      // for dispatch/CV (its Manifest is a historical snapshot).  The probe
-      // is root-bound and fail-closed; an unreadable/corrupt stage-close
-      // directory falls into the shared VALIDATE failure contract below.
-      const closeFacts = readStageCloseFacts(input.projectRoot, input.stageId);
-      if (closeFacts.archived) {
-        return archivedOutput(input.stageId, closeFacts);
+      const resolved = resolveVNextNextActionContext(input);
+      if (resolved.archived) {
+        return archivedOutput(input.stageId, resolved.closeFacts);
       }
-      const manifestPath = input.manifestPath ?? path.join(input.projectRoot, '.proofloop', 'manifests', `${input.stageId}.json`);
-      const manifest = readVNextManifest(input.projectRoot, manifestPath);
-      if (manifest.stage_id !== input.stageId) {
-        throw new VNextHandoffError('manifest-binding', `Manifest stage_id "${manifest.stage_id}" does not match "${input.stageId}"`);
-      }
-      const manifestDigest = computeDigest(manifest);
-      const authority = resolveNextAdmissionAuthority(input.projectRoot, input.stageId, input.admissionPath);
-      if (input.verifyReferenceBindings !== false) {
-        assertVNextManifestReferenceBindings(input.projectRoot, manifest);
-      }
-      const authoritySnapshot = authority.spv.snapshot_digest;
-      // S12-D-T02: the slice-local currentness exemption set is computed
-      // BEFORE the Worker facts are read — a committed+current Slice's
-      // historical facts must be exempted while its receipts are consumed
-      // (the committed determination itself needs the Worker facts, so the
-      // exemption is derived from the INTEGRATION chain, not from the
-      // committer chain). Legacy manifests (no `binding`) stay strict.
-      // S12-D repair (v3 consumer chain): the INTEGRATION chain is read ONCE
-      // and shared by the exemption set, the v3 Worker/Commit credential
-      // binding validation and the CV credential binding validation — the
-      // same chain facts, never re-read per consumer.
-      const replanDispositions = loadAncestorReplanDispositionRecords(input.projectRoot, input.stageId);
-      const historicalInvalidatedForCurrentness = computeChainInvalidatedTaskIds(replanDispositions);
-      const sliceLocalChain =
-        manifest.binding !== undefined
-          ? readVNextIntegrationReceiptChain(input.projectRoot, manifest, historicalInvalidatedForCurrentness)
-          : [];
-      const currentIntegratedSliceIds = readVNextCurrentIntegratedSliceIds(
-        input.projectRoot,
-        manifest,
-        manifestDigest,
-        sliceLocalChain,
-        historicalInvalidatedForCurrentness,
-      );
-      const { workerFacts, finalizeFacts, historicalInvalidatedTaskIds } = readVNextWorkerFacts(
-        input.projectRoot,
-        manifest,
-        manifestDigest,
-        authoritySnapshot,
-        currentIntegratedSliceIds,
-        sliceLocalChain,
-        replanDispositions,
-      );
-      const committedSliceIds = readVNextCommittedSliceIds(
-        input.projectRoot,
-        manifest,
-        manifestDigest,
-        manifest.plan.plan_digest,
-        authoritySnapshot,
-        workerFacts,
-        finalizeFacts,
-        currentIntegratedSliceIds,
-        sliceLocalChain,
-        replanDispositions,
-      );
-      // A committed Slice's execution chain is closed (Worker → CV → Slice
-      // Commit); its persisted Worker facts must never re-project RUN_CV or a
-      // Worker dispatch for that Slice. Only facts of not-yet-committed
-      // Slices drive the current execution state.
-      const activeWorkerFacts = workerFacts.filter(
-        (fact) => !committedSliceIds.has(fact.slice.slice_id),
-      );
-      if (activeWorkerFacts.length > 0) {
-        assertIgnoredProtectedPaths(
-          input.projectRoot,
-          activeWorkerFacts.map((fact) => ({
-            stageId: manifest.stage_id,
-            sliceId: fact.slice.slice_id,
-            taskId: fact.taskId ?? '',
-            manifestDigest: fact.manifestDigest,
-            planDigest: fact.planDigest,
-            snapshotDigest: fact.snapshotDigest,
-            contextRef: fact.contextRef,
-            mode: fact.mode,
-          })),
-        );
-      }
-      const requestedSnapshot = input.snapshotDigest ?? authoritySnapshot;
-      if (typeof input.snapshotDigest === 'string' && !/^[a-f0-9]{40}$/.test(input.snapshotDigest)) {
-        throw new VNextHandoffError(
-          'snapshot-binding',
-          'requested snapshot_digest must be a canonical Git HEAD digest',
-        );
-      }
-      // S13-S17 remediation §6.3: after Slice Commits HEAD legitimately
-      // advanced past the admission boundary, so a requested snapshot may be
-      // the admitted snapshot OR a verified Git descendant of it; any other
-      // digest fails closed.
-      if (requestedSnapshot !== authoritySnapshot) {
-        assertExecutionSnapshotChain(
-          resolveGitRoot(input.projectRoot),
-          requestedSnapshot,
-          authoritySnapshot,
-          'requested',
-        );
-      }
-      // Before any Worker fact exists, the pre-execution boundary is the
-      // planning clean gate. When a Worker session was lost AFTER producing
-      // implementation evidence but BEFORE its TASK_COMPLETE was admitted
-      // (S08-E-T07 §Recovery), the worktree is already dirty with no Receipt.
-      // That dirty state is the persisted recover binding: it must fall
-      // exactly inside the Manifest-declared execution scope of the dispatch
-      // Slice, and the next dispatch is then a `recover-task` consistency
-      // recheck instead of a planning-clean implement dispatch.
-      const factSlices = unique(activeWorkerFacts.map((fact) => fact.slice.slice_id));
-      if (factSlices.length > 1) {
-        throw new VNextHandoffError(
-          'task-anchor-gap',
-          'vNext execution facts for multiple Slices are ambiguous before downstream CV admission',
-        );
-      }
-      const selectedSlice =
-        activeWorkerFacts.length > 0
-          ? activeWorkerFacts[0].slice
-          : manifest.slices.length === 1
-            ? (committedSliceIds.has(manifest.slices[0].slice_id)
-                ? undefined
-                : manifest.slices[0])
-            : manifest.slices.find(
-                (candidate) =>
-                  !committedSliceIds.has(candidate.slice_id) &&
-                  candidate.depends_on.every((dependency) => committedSliceIds.has(dependency)),
-              );
-      // The Manifest-declared Slice scope is needed only when an execution
-      // dirty boundary must be proven (recovery with no admitted fact, or an
-      // in-flight Task of the current Slice); a clean pre-execution boundary
-      // never consults the scope.
-      const selectedSliceScope = () =>
-        selectedSlice === undefined
-          ? []
-          : unique(
-              taskIdsForSlice(manifest, selectedSlice).flatMap((taskId) =>
-                taskAllowedScope(input.projectRoot, manifest, selectedSlice, taskId),
-              ),
-            );
-      const preExecutionDirty = gitChangedPaths(input.projectRoot);
-      // Once any execution boundary exists (a Worker fact or a committed
-      // Slice), the execution dirty boundary applies: HEAD may legitimately
-      // have advanced to a descendant of the admission snapshot via Slice
-      // Commit, so the strict planning clean gate must not be re-applied.
-      const executionStarted = activeWorkerFacts.length > 0 || committedSliceIds.size > 0;
-      if (!executionStarted) {
-        if (preExecutionDirty.length === 0) {
-          assertStableGitBoundary(input.projectRoot, requestedSnapshot);
-        } else {
-          // Pre-execution scope-bound dirty is admissible ONLY as a persisted
-          // recover binding: the first Task checkbox of the dispatch Slice
-          // must already be checked (session loss after implementation
-          // evidence, before the TASK_COMPLETE fact was admitted). The scope
-          // check runs first so an out-of-scope dirty path reports the
-          // execution dirty boundary violation; a scope-bound dirty worktree
-          // without a checked checkbox has no recover binding, so it fails
-          // the planning clean gate closed — it must never dispatch into a
-          // dirty worktree as implement-task.
-          assertExecutionDirtyBoundary(input.projectRoot, authoritySnapshot, selectedSliceScope());
-          const firstTaskId = selectedSlice === undefined ? undefined : taskIdsForSlice(manifest, selectedSlice)[0];
-          if (firstTaskId === undefined) {
-            throw new VNextHandoffError('task-anchor-gap', 'Slice has no declarable Task anchor');
-          }
-          if (completionModeForDispatch(input.projectRoot, manifest, firstTaskId, historicalInvalidatedTaskIds) === 'implement-task') {
-            throw new VNextHandoffError(
-              'execution-scope-gap',
-              `planning clean boundary: scope-bound dirty worktree without Worker facts and without a recover binding fails closed (${firstTaskId} checkbox is unchecked)`,
-            );
-          }
-        }
-      } else {
-        assertExecutionDirtyBoundary(
-          input.projectRoot,
-          authoritySnapshot,
-          unique([
-            ...activeWorkerFacts.flatMap((fact) => fact.allowedScope),
-            // In-flight/recovery scope: a Task dispatched from the current
-            // Slice may legitimately dirty its Manifest-declared scope
-            // before its TASK_COMPLETE is admitted (session loss); the
-            // immutable Manifest scope is the recovery binding for that
-            // dirty state.
-            ...selectedSliceScope(),
-          ]),
-        );
-      }
-      // The authority binding is asserted against the ADMITTED snapshot, not
-      // the requested one: Slice Commit legitimately advanced HEAD past the
-      // admission boundary while the authority stays bound to it, and a
-      // requested descendant digest never re-binds the authority.
-      assertActiveVNextAuthority(
-        authority,
-        input.stageId,
-        manifestDigest,
-        manifest.plan.plan_digest,
-        authoritySnapshot,
-      );
-      // ── S13-S17 remediation §6.2 — canonical decision bridge ──
-      // Fact resolution/validation happened above; the ONE canonical Stage
-      // lifecycle decision now comes from `deriveNextAction` (vNext keeps no
-      // parallel action state machine).
-      const cvRepairTips = new Map<string, string>();
-      const derived = deriveVNextCanonicalNextAction(
-        {
-          input,
-          manifest,
-          manifestDigest,
-          authority,
-          authoritySnapshot,
-          currentIntegratedSliceIds,
-          workerFacts,
-          finalizeFacts,
-          committedSliceIds,
-          sliceLocalChain,
-          historicalInvalidatedTaskIds,
-          replanDispositions,
-        },
-        cvRepairTips,
-      );
       return projectVNextDerivedAction(
         input,
-        manifest,
-        manifestDigest,
-        authority,
-        requestedSnapshot,
-        derived,
-        workerFacts,
-        committedSliceIds,
-        cvRepairTips,
+        resolved.manifest,
+        resolved.manifestDigest,
+        resolved.authority,
+        resolved.requestedSnapshot,
+        resolved.derived,
+        resolved.workerFacts,
+        resolved.committedSliceIds,
+        resolved.cvRepairTips,
       );
     } catch (error) {
       return failureOutput(input.stageId, error);

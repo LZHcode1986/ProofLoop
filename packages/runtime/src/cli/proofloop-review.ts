@@ -26,7 +26,10 @@
  * 直通入口（`dist/cli/proofloop-review.js`，与 stage/gate 域同构）。
  */
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { computeReceiptDigest, validateReceipt, type Receipt } from '@proofloop/kernel';
+import { canonicalPathWithinRoot, openNoFollowRead } from '../path-guard';
 import {
   errorEnvelope,
   failureEnvelope,
@@ -212,6 +215,118 @@ function runReviewStatus(
   }
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function readValidatedGateTipSnapshot(
+  root: string,
+  gateTipRef: string,
+  expectedDigest: string,
+  stage: string,
+):
+  | { readonly ok: true; readonly snapshotDigest: string }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly code:
+        | 'DOMAIN.INVALID_TRANSITION'
+        | 'RUNTIME.SCHEMA_MISMATCH'
+        | 'RUNTIME.RECEIPT_CHAIN_BROKEN';
+    } {
+  const canonical = canonicalPathWithinRoot(root, path.join(root, gateTipRef));
+  if (canonical === null) {
+    return {
+      ok: false,
+      message: `Gate tip receipt ref escapes the project root: ${gateTipRef}`,
+      code: 'DOMAIN.INVALID_TRANSITION',
+    };
+  }
+  const opened = openNoFollowRead(root, canonical);
+  if (!opened.ok) {
+    return {
+      ok: false,
+      message: `Gate tip receipt cannot be opened safely (${opened.reason}): ${gateTipRef}`,
+      code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+    };
+  }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(opened.fd, 'utf8');
+  } catch (err) {
+    return {
+      ok: false,
+      message: `Gate tip receipt could not be read: ${err instanceof Error ? err.message : String(err)}`,
+      code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+    };
+  } finally {
+    fs.closeSync(opened.fd);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {
+      ok: false,
+      message: `Gate tip receipt is not valid JSON: ${gateTipRef}`,
+      code: 'RUNTIME.SCHEMA_MISMATCH',
+    };
+  }
+  let receipt: Receipt;
+  try {
+    receipt = validateReceipt(parsed);
+  } catch (err) {
+    return {
+      ok: false,
+      message: `Gate tip receipt failed schema validation: ${err instanceof Error ? err.message : String(err)}`,
+      code: 'RUNTIME.SCHEMA_MISMATCH',
+    };
+  }
+  if (receipt.type !== 'GATE_PASS') {
+    return {
+      ok: false,
+      message: `Gate tip receipt type is not GATE_PASS (got ${receipt.type})`,
+      code: 'DOMAIN.INVALID_TRANSITION',
+    };
+  }
+  // Self-digest computed from the SAME opened-fd content parsed above — never
+  // a second path-following read (no TOCTOU between fd read and re-read).
+  const { digest: storedDigest, ...contentWithoutDigest } = parsed as Record<string, unknown>;
+  if (receipt.digest !== expectedDigest || computeReceiptDigest(contentWithoutDigest) !== receipt.digest) {
+    return {
+      ok: false,
+      message: `Gate tip receipt digest mismatch (expected ${expectedDigest}, got ${receipt.digest})`,
+      code: 'RUNTIME.RECEIPT_CHAIN_BROKEN',
+    };
+  }
+  const payload = receipt.payload;
+  if (
+    !isRecord(payload) ||
+    payload.schema_version !== 2 ||
+    payload.type !== 'GATE_RESULT' ||
+    payload.action !== 'GATE' ||
+    payload.stage_id !== stage ||
+    payload.verdict !== 'PASS'
+  ) {
+    return {
+      ok: false,
+      message: 'Gate tip receipt payload is not a valid v2 GATE_RESULT PASS fact',
+      code: 'RUNTIME.SCHEMA_MISMATCH',
+    };
+  }
+  if (
+    typeof payload.snapshot_digest !== 'string' ||
+    !/^[a-f0-9]{40}$/.test(payload.snapshot_digest)
+  ) {
+    return {
+      ok: false,
+      message: 'Gate tip receipt snapshot_digest must be a 40-hex canonical Git SHA',
+      code: 'RUNTIME.SCHEMA_MISMATCH',
+    };
+  }
+  return { ok: true, snapshotDigest: payload.snapshot_digest };
+}
+
 function runReviewPrepare(
   root: string,
   command: CliCommand,
@@ -246,6 +361,22 @@ function runReviewPrepare(
         'review prepare-stage blocked: a current GATE PASS receipt is required before preparing the stage review',
       );
     }
+    const gateValidation = readValidatedGateTipSnapshot(root, gateTip.ref, gateTip.digest, stage);
+    if (!gateValidation.ok) {
+      return errorEnvelope(
+        command,
+        gateValidation.code,
+        `review prepare-stage blocked: ${gateValidation.message}`,
+      );
+    }
+    const gateSnapshot = gateValidation.snapshotDigest;
+    if (gateSnapshot !== report.snapshot_digest) {
+      return errorEnvelope(
+        command,
+        'DOMAIN.INVALID_TRANSITION',
+        `review prepare-stage blocked: stage-gate chain tip does not bind the current integrated snapshot (${report.snapshot_digest} vs ${gateSnapshot})`,
+      );
+    }
     if (
       assembled.request.manifestDigest !== report.manifest_digest ||
       assembled.request.snapshotDigest !== report.snapshot_digest
@@ -262,7 +393,7 @@ function runReviewPrepare(
       manifest_digest: report.manifest_digest,
       plan_digest: report.plan_digest,
       gate_receipt_digest: gateTip.digest,
-      snapshot_digest: report.snapshot_digest,
+      snapshot_digest: gateSnapshot,
       review_input_refs: [
         path.posix.join('.proofloop', 'manifests', `${stage}.json`),
         gateTip.ref,

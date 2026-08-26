@@ -105,7 +105,7 @@ type ReviewAdmissionCode =
   | 'RUNTIME.RECEIPT_CHAIN_BROKEN'
   | 'DOMAIN.INVALID_TRANSITION';
 
-class VNextReviewAdmissionError extends Error {
+export class VNextReviewAdmissionError extends Error {
   constructor(
     readonly code: ReviewAdmissionCode,
     message: string,
@@ -619,6 +619,154 @@ function validateClosedReviewRecord(
   return null;
 }
 
+
+// ============================================================
+// Shared full-chain v2 Review binding validation（P-09 re-gate 共享）
+// ============================================================
+
+/**
+ * Binding context for `validateVNextStageReviewChain`: the ACTIVE tuple the
+ * chain must bind, the persisted Gate digests acceptable as bindable history,
+ * and the current integrated snapshot boundary.
+ */
+export interface VNextStageReviewChainBindingInput {
+  /** Trust root used for the Git ancestry probes. */
+  readonly root: string;
+  /** The ordered review-chain Receipts (from the shared chain reader). */
+  readonly receipts: readonly Receipt[];
+  /** Chain label used in error messages (e.g. "stage review chain"). */
+  readonly label: string;
+  readonly stageId: string;
+  readonly manifestDigest: string;
+  readonly planDigest: string;
+  readonly authorityStagePlanDigest: string;
+  readonly authoritySpvDigest: string;
+  /** Every persisted Stage Gate Receipt digest acceptable as a binding target. */
+  readonly gateReceiptDigests: ReadonlySet<string>;
+  /** The CURRENT Stage Gate tip digest (the exact-binding target). */
+  readonly gateTipDigest: string;
+  /** The current integrated snapshot boundary (ancestor-or-equal rule). */
+  readonly snapshotDigest: string;
+  /**
+   * Tip rule:
+   *  - 'review-admission': an ACCEPTED tip certifies the current Gate tip
+   *    and the current integrated snapshot EXACTLY (terminal closed review);
+   *    every other member binds membership + ancestry.
+   *  - 're-gate' (P-09): the tip MUST be an open REPAIR bound EXACTLY to
+   *    `gateTipDigest` — the old Gate PASS the re-gate supersedes — with a
+   *    snapshot that is an ancestor of (or equal to) the re-gate boundary.
+   */
+  readonly tipRule: 'review-admission' | 're-gate';
+}
+
+/**
+ * Validate EVERY Receipt of one v2 Stage Review chain at the closed-schema +
+ * full-binding strength shared by the Stage Review admission and the Gate's
+ * P-09 re-gate precondition.  A self-consistent-but-forged REPAIR fact
+ * (valid envelope/self-digest/chain linkage with a wrong tuple/Gate/snapshot
+ * binding) fails closed here in BOTH consumers.  Throws
+ * VNextReviewAdmissionError.
+ */
+export function validateVNextStageReviewChain(input: VNextStageReviewChainBindingInput): void {
+  for (let index = 0; index < input.receipts.length; index += 1) {
+    const receipt = input.receipts[index]!;
+    if (receipt.type !== 'STAGE_REVIEW_PASS') {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains ${receipt.type}; expected only STAGE_REVIEW_PASS vNext facts`,
+      );
+    }
+    const payload = receipt.payload;
+    if (
+      !isRecord(payload) ||
+      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
+      payload.type !== 'STAGE_REVIEW_RESULT' ||
+      payload.action !== 'STAGE_REVIEW'
+    ) {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains a legacy v1 Review fact or a vNext Review fact without the STAGE_REVIEW_RESULT/STAGE_REVIEW discriminator`,
+      );
+    }
+    const reviewRecordError = validateClosedReviewRecord(
+      payload,
+      `${input.label} Receipt ${receipt.digest} payload`,
+    );
+    if (reviewRecordError !== null) {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains a Review Receipt that fails the closed v2 schema: ${reviewRecordError}`,
+      );
+    }
+    // Manifest/Authority tuple bindings stay STRICT for every Receipt
+    // (tip and history alike): re-gate does not change these tuples.
+    if (
+      payload.stage_id !== input.stageId ||
+      payload.manifest_digest !== input.manifestDigest ||
+      payload.plan_digest !== input.planDigest ||
+      payload.stage_plan_receipt_digest !== input.authorityStagePlanDigest ||
+      payload.spv_receipt_digest !== input.authoritySpvDigest
+    ) {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains a Review Receipt that does not bind the active Manifest/Authority tuple`,
+      );
+    }
+    if (typeof payload.snapshot_digest !== 'string' || !SNAPSHOT_RE.test(payload.snapshot_digest)) {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains a Review Receipt with an invalid snapshot binding`,
+      );
+    }
+    const isChainTip = index === input.receipts.length - 1;
+    // Re-gate mode: the chain TIP must be an open REPAIR bound EXACTLY to the
+    // old Gate PASS being superseded; its snapshot precedes (or equals) the
+    // re-gate boundary.  Any other tip state refuses the re-gate.
+    if (input.tipRule === 're-gate' && isChainTip) {
+      if (payload.verdict !== 'REPAIR') {
+        fail(
+          'DOMAIN.INVALID_TRANSITION',
+          `${input.label} tip is not a valid v2 REPAIR verdict (re-gate requires a REPAIR-driven re-run)`,
+        );
+      }
+      if (payload.stage_gate_receipt_digest !== input.gateTipDigest) {
+        fail(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `${input.label} tip does not bind the current Stage Gate tip`,
+        );
+      }
+      assertAncestor(input.root, payload.snapshot_digest, input.snapshotDigest, `${input.label} tip snapshot`);
+      continue;
+    }
+    // Review-admission terminal rule: an ACCEPTED tip certifies the CURRENT
+    // Gate tip and the CURRENT integrated snapshot EXACTLY (a closed review
+    // can never be followed by a re-gate, so any deviation is forged).
+    if (input.tipRule === 'review-admission' && isChainTip && payload.verdict === 'ACCEPTED') {
+      if (payload.stage_gate_receipt_digest !== input.gateTipDigest) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${input.label} tip does not bind the current Stage Gate tip`);
+      }
+      if (payload.snapshot_digest !== input.snapshotDigest) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${input.label} tip does not bind the current integrated snapshot`);
+      }
+      continue;
+    }
+    // Historical Receipts and open REPAIR tips under review-admission: the
+    // gate binding must exist in the current gate chain (a re-gate keeps
+    // every earlier PASS as write-once history; a foreign digest is forged →
+    // fail-closed) and the snapshot must be an ancestor of (or equal to) the
+    // current boundary.
+    if (
+      typeof payload.stage_gate_receipt_digest !== 'string' ||
+      !input.gateReceiptDigests.has(payload.stage_gate_receipt_digest)
+    ) {
+      fail(
+        'RUNTIME.SCHEMA_MISMATCH',
+        `${input.label} contains a Review Receipt that does not bind a persisted Stage Gate Receipt`,
+      );
+    }
+    assertAncestor(input.root, payload.snapshot_digest, input.snapshotDigest, `${input.label} historical Review Receipt snapshot`);
+  }
+}
 function authorityBindingsAreValid(
   root: string,
   authority: VNextAdmissionAuthority,
@@ -828,71 +976,20 @@ function validateFacts(
   // is an OPEN round that the incoming Review supersedes, so it is
   // validated with the historical fail-closed rules below.
   const gateReceiptDigests = new Set(gateChain.receipts.map((gateReceipt) => gateReceipt.digest));
-  for (let reviewIndex = 0; reviewIndex < reviewChain.receipts.length; reviewIndex += 1) {
-    const receipt = reviewChain.receipts[reviewIndex];
-    if (receipt.type !== 'STAGE_REVIEW_PASS') {
-      fail('RUNTIME.SCHEMA_MISMATCH', `stage review chain contains ${receipt.type}; expected only STAGE_REVIEW_PASS vNext facts`);
-    }
-    const payload = receipt.payload;
-    if (
-      !isRecord(payload) ||
-      payload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
-      payload.type !== 'STAGE_REVIEW_RESULT' ||
-      payload.action !== 'STAGE_REVIEW'
-    ) {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a legacy v1 Review fact or a vNext Review fact without the STAGE_REVIEW_RESULT/STAGE_REVIEW discriminator');
-    }
-    const reviewRecordError = validateClosedReviewRecord(
-      payload,
-      `stage review chain Receipt ${receipt.digest} payload`,
-    );
-    if (reviewRecordError !== null) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `stage review chain contains a Review Receipt that fails the closed v2 schema: ${reviewRecordError}`);
-    }
-    // Manifest/Authority tuple bindings stay STRICT for every Receipt
-    // (tip and history alike): re-gate does not change these tuples.
-    if (
-      payload.stage_id !== request.stageId ||
-      payload.manifest_digest !== manifestDigest ||
-      payload.plan_digest !== planDigest ||
-      payload.stage_plan_receipt_digest !== authority.stagePlan.digest ||
-      payload.spv_receipt_digest !== authority.spv.digest
-    ) {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a Review Receipt that does not bind the active Manifest/Authority tuple');
-    }
-    if (typeof payload.snapshot_digest !== 'string' || !SNAPSHOT_RE.test(payload.snapshot_digest)) {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a Review Receipt with an invalid snapshot binding');
-    }
-    const isChainTip = reviewIndex === reviewChain.receipts.length - 1;
-    if (isChainTip && payload.verdict === 'ACCEPTED') {
-      // TIP + ACCEPTED (terminal): strict bindings — the closed review must
-      // certify the CURRENT gate tip and the CURRENT integrated snapshot
-      // EXACTLY (unchanged).
-      if (payload.stage_gate_receipt_digest !== gateTip.digest) {
-        fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain tip does not bind the current Stage Gate tip');
-      }
-      if (payload.snapshot_digest !== snapshotDigest) {
-        fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain tip does not bind the current integrated snapshot');
-      }
-    } else {
-      // Historical Receipt (non-tip) OR an open REPAIR tip superseded by the
-      // current round: the gate binding must still exist in the current gate
-      // chain (a re-gate keeps every earlier PASS as write-once history; a
-      // digest that is not in the chain is forged → fail-closed) and the
-      // snapshot must be an ANCESTOR of (or equal to) the current boundary
-      // (the old gate's snapshot precedes the advanced HEAD).
-      if (
-        typeof payload.stage_gate_receipt_digest !== 'string' ||
-        !gateReceiptDigests.has(payload.stage_gate_receipt_digest)
-      ) {
-        fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a Review Receipt that does not bind a persisted Stage Gate Receipt');
-      }
-      assertAncestor(root, payload.snapshot_digest, snapshotDigest, 'stage review chain historical Review Receipt snapshot');
-    }
-    if (payload.verdict !== 'ACCEPTED' && payload.verdict !== 'REPAIR') {
-      fail('RUNTIME.SCHEMA_MISMATCH', 'stage review chain contains a Review Receipt with an invalid verdict');
-    }
-  }
+  validateVNextStageReviewChain({
+    root,
+    receipts: reviewChain.receipts,
+    label: 'stage review chain',
+    stageId: request.stageId,
+    manifestDigest,
+    planDigest,
+    authorityStagePlanDigest: authority.stagePlan.digest,
+    authoritySpvDigest: authority.spv.digest,
+    gateReceiptDigests,
+    gateTipDigest: gateTip.digest,
+    snapshotDigest,
+    tipRule: 'review-admission',
+  });
 
   if (options.allowInstalledReviewTip === undefined) {
     if (reviewTipDigest !== null) {

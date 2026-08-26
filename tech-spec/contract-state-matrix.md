@@ -57,7 +57,7 @@ runtime:
 | `plan` | `materialize`, `compile`, `validate`, `initialize-evidence`, `refresh-evidence`, `status`, `admit-spv`, `admit-stage-plan` | 保存 closed AI plan input/candidate；编译 Manifest；机械验证；初始化或安全刷新 Evidence skeleton；受理初始或 Replan epoch 的 SPV 与 Stage Plan authority | candidate/Manifest/Evidence/SPV/Stage Plan/epoch refs |
 | `context` | `prepare`, `show`, `admit-refutation-observation` | 按 target action/role 生成或读取 content-addressed Context；CV 反驳观察固定后才解锁 Evidence read | Planning/SPV/Worker/CV/Committer/Reviewer 的不同 Context ref/content |
 | `stage` | `status`, `next`, `admit-worker`, `admit-cv`, `admit-slice-commit`, `admit-integration`, `run-gate` | Stage state/next；受理 AI/Committer 结构化结果；执行并受理 Gate | NextAction/Context/Receipt/Gate refs |
-| `review` | `status`, `prepare-stage`, `finalize-stage` | 组装 Stage Review Context；受理 ACCEPTED/REPAIR | Review Context / Stage Review Receipt |
+| `review` | `status`, `prepare-stage`, `finalize-stage` | 持久化 Stage Review preparation fact，组装 Review Context；受理 ACCEPTED/REPAIR | Review Context / Stage Review Receipt |
 | `project` | `status`, `compile-acceptance`, `run-e2e`, `prepare-review`, `finalize-review` | 项目验收 Manifest、E2E Gate、Project Review Context/Receipt | Project refs/verdict |
 | `doctor` | `run` | Runtime/CLI 版本、Git、project root、schema、commands/services、filesystem capability；Host API 项仅在 adapter 自身诊断 | structured diagnostics |
 
@@ -123,7 +123,7 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 | Operation | Input | Output | Producer | Verification |
 |---|---|---|---|---|
 | stage_status | stage_id | 状态摘要 | reconcileStage | spec |
-| prepare_stage_review | stage_id, scope 输入准备 | ReviewInput 组装 | 只读组装（无 Receipt 写入） | spec |
+| prepare_stage_review | stage_id, scope 输入准备 | ReviewInput 组装 + preparation fact 持久化 | 持久化 prepared fact 并组装 ReviewInput | spec |
 | finalize_stage_review | stage_id, verdict(ACCEPTED/REPAIR), summary | AdmitResult（REPAIR 为 no-Receipt warn 分支） | admission.admitStageReview（v1/vNext 显式分流） | parity vs vNext CLI |
 
 ### 1.4 proofloop_project — visible: brain, project-reviewer

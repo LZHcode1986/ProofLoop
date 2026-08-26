@@ -79,6 +79,12 @@ import {
   VNextHandoffError,
 } from './dispatch';
 import { readCurrentVNextAdmissionAuthority } from './replan-epoch';
+// P-09 re-gate shares the FULL closed-schema Review chain validator with the
+// Stage Review consumer — one fact source, no weaker duplicate.
+import {
+  validateVNextStageReviewChain,
+  VNextReviewAdmissionError,
+} from './review-admission';
 // Shared vNext Slice binding (Proof Index digest + evidence/plan paths from
 // the Manifest, root-bound): the reduced Gate consumes only this pure
 // binding — the Worker → CV → Slice Commit prefix revalidation was removed
@@ -1095,12 +1101,35 @@ function validateFacts(
   }
 
   // P-09: an explicit re-gate is the REPAIR-driven re-run path — legal ONLY
-  // when the stage review chain tip is a REPAIR verdict.  The review chain
-  // read is root-bound and fail-closed (readReceiptChain); an empty chain or
-  // a tip that is not a closed v2 REPAIR fact refuses the re-gate so the
-  // PASS-tip relaxation can never be abused to re-run a Gate without a
-  // review-requested repair.
+  // when the stage review chain carries a full, closed v2 STAGE_REVIEW_RESULT
+  // history whose TIP is an open REPAIR bound EXACTLY to the OLD Gate tip
+  // this re-gate supersedes.  The SHARED validator (same fact source as the
+  // Stage Review consumer) enforces, for EVERY historical and current member,
+  // the closed v2 schema + active Manifest/Authority tuple binding +
+  // persisted-Gate-digest membership + snapshot ancestry; the tip additionally
+  // binds stage_id/manifest_digest/plan_digest/stage_plan_receipt_digest/
+  // spv_receipt_digest to the active tuple and stage_gate_receipt_digest to
+  // the exact old Gate tip.  A forged self-consistent REPAIR receipt (valid
+  // envelope/self-digest/chain linkage, wrong bindings) can never trigger a
+  // new GATE_PASS.
   if (request.re_gate === true) {
+    // The open REPAIR binds the PRE-re-gate Gate tip.  In the after-write
+    // re-validation hop the just-installed PASS is already the chain tip, so
+    // the exact-binding target is the tip EXCLUDING that freshly installed
+    // Receipt (the pre-write tip); on the pre-write hop it IS the tip.
+    const installedTip = options.allowInstalledGateTip;
+    const previousGateTip =
+      installedTip !== undefined &&
+      gateChain.receipts.length > 1 &&
+      gateChain.receipts[gateChain.receipts.length - 1].digest === installedTip
+        ? gateChain.receipts[gateChain.receipts.length - 2].digest
+        : gateTip;
+    if (previousGateTip === null) {
+      fail(
+        'DOMAIN.INVALID_TRANSITION',
+        `re-gate refused: stage "${request.stageId}" has no Stage Gate tip to re-gate`,
+      );
+    }
     const reviewChain = readReceiptChain(
       root,
       reviewReceiptDir(root, request.stageId),
@@ -1112,20 +1141,26 @@ function validateFacts(
         `re-gate refused: stage "${request.stageId}" has no Stage Review REPAIR tip (re-gate requires a REPAIR-driven re-run)`,
       );
     }
-    const reviewTip = reviewChain.receipts[reviewChain.receipts.length - 1];
-    const reviewPayload = reviewTip.payload;
-    if (
-      reviewTip.type !== 'STAGE_REVIEW_PASS' ||
-      !isRecord(reviewPayload) ||
-      reviewPayload.schema_version !== VNEXT_STAGE_TAIL_PAYLOAD_SCHEMA_VERSIONS.STAGE_REVIEW_RESULT ||
-      reviewPayload.type !== 'STAGE_REVIEW_RESULT' ||
-      reviewPayload.action !== 'STAGE_REVIEW' ||
-      reviewPayload.verdict !== 'REPAIR'
-    ) {
-      fail(
-        'DOMAIN.INVALID_TRANSITION',
-        `re-gate refused: stage "${request.stageId}" review chain tip is not a valid v2 REPAIR verdict (re-gate requires a REPAIR-driven re-run)`,
-      );
+    try {
+      validateVNextStageReviewChain({
+        root,
+        receipts: reviewChain.receipts,
+        label: 'stage review chain',
+        stageId: request.stageId,
+        manifestDigest,
+        planDigest,
+        authorityStagePlanDigest: authority.stagePlan.digest,
+        authoritySpvDigest: authority.spv.digest,
+        gateReceiptDigests: new Set(gateChain.receipts.map((gateReceipt) => gateReceipt.digest)),
+        gateTipDigest: previousGateTip,
+        snapshotDigest,
+        tipRule: 're-gate',
+      });
+    } catch (error) {
+      if (error instanceof VNextReviewAdmissionError) {
+        fail(error.code, `re-gate refused: ${error.message}`);
+      }
+      throw error;
     }
   }
 
