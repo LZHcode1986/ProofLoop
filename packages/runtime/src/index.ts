@@ -98,7 +98,7 @@ export type { WorkerStepDispatchInput } from './worker-step-service';
 // Canonical receipt category directory layout policy (PO-S02-C-05)
 // Runtime-owned Artifact Path Policy: every persisted receipt lives in one of
 // 8 canonical content category directories under `.proofloop/receipts/`
-// (plan/tasks/cv/committer/integration/stage-gate/review/project) plus a
+// (plan/tasks/cv/committer (SLICE_COMMIT)/integration/stage-gate/review/project) plus a
 // `.tmp/` scratch dir that is never read as receipts. Reconcile (S02-C-T03)
 // reads ONLY this layout; kernel ReceiptWriter writes into it.
 export {
@@ -729,6 +729,19 @@ export type {
   VNextTaskWorkerContext,
   VNextFinalizeWorkerContext,
   VNextNextAction,
+} from './vnext';
+export {
+  loadVNextSliceCommitPolicyFacts,
+  loadSliceCommitPolicy,
+  validateSliceCommitChangedFiles,
+  validateSliceCommitCvBinding,
+  SliceCommitPolicyError,
+} from './vnext';
+export type {
+  VNextSliceCommitPolicyInput,
+  SliceCommitPolicyFacts,
+  SliceCommitPolicy,
+  SliceCommitChangedFilesOptions,
 } from './vnext';
 export { proofloopCli } from './cli/proofloop';
 export type { ProofloopCliOptions } from './cli/proofloop';

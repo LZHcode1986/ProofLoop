@@ -99,8 +99,8 @@ resume_target:
 
 After Brain accepts the result:
 1. Brain updates Tech Spec and Hard Part status
-2. Committer creates authority-update boundary
-3. If Checkpoint Commit is `on-success` or `always`, Committer creates a local `prototype-checkpoint` commit on the Prototype branch (no push, no merge into Stage/main)
+2. Brain calls Boundary CLI for the authority-update boundary
+3. If Checkpoint Commit is `on-success` or `always`, Brain calls Boundary CLI for a local `prototype-checkpoint` commit on the Prototype branch (no push, no merge into Stage/main)
 4. Remove worktree
 5. Delete local prototype branch
 

@@ -211,7 +211,7 @@ HP-012/HP-015。
   harness SDK；现有单用途 scripts 不是公共合同。
 - Acceptance B（Authority/Plan/Context）：CLI 能检查所选 Authority refs、保存 closed AI plan
   input/candidate、compile/validate/initialize/refresh/admit Plan，并为 Planning、SPV、Worker、initial
-  CV、CV recheck、Committer、Stage Reviewer、Project Reviewer 生成各自不同且 digest-bound
+  CV、CV recheck、Stage Reviewer、Project Reviewer 生成各自不同且 digest-bound
   的 Context；initial CV Evidence read gate 保持有效。
 - Acceptance C（execution persistence）：Worker/CV/Slice Commit/Integration/Gate 的 structured
   result 只能经 CLI→Runtime public admission 保存；每次重验 Context/scope/snapshot/changed

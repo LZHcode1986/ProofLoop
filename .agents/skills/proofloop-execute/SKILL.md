@@ -1,6 +1,6 @@
 ---
 name: proofloop-execute
-description: STAGE_EXECUTION 阶段技能：ProofLoop 的执行指导：以 Runtime Primary Next Action 驱动 Worker、CV、Committer、Gate 与 Stage Review 的可恢复 Stage Delivery Loop。
+description: STAGE_EXECUTION 阶段技能：ProofLoop 的执行指导：以 Runtime Primary Next Action 驱动 Worker、CV、Boundary CLI、Gate 与 Stage Review 的可恢复 Stage Delivery Loop。
 ---
 
 # proofloop-execute
@@ -10,7 +10,7 @@ description: STAGE_EXECUTION 阶段技能：ProofLoop 的执行指导：以 Runt
 - 阶段：STAGE_EXECUTION（Brain + `proofloop-execute` + Runtime）
 - 进入条件：admitted Manifest、有效 Evidence paths、Runtime 入口 Gate 通过
 - 完成信号：所有 Slice 集成且持久化 Stage Gate PASS，随后 Stage Review（`brain/stage-review.md`）
-- 交接：Stage Review ACCEPTED 后进入 Stage Close（Committer）；阶段切换由 Runtime admission 与 Stage Review 驱动
+- 交接：Stage Review ACCEPTED 后进入 Stage Close（Brain 调用 Boundary CLI）；阶段切换由 Runtime admission 与 Stage Review 驱动
 - 回退：Stage Review REPAIR 或 Gate FAIL 时，Brain 按 Runtime 指引回到本技能派发 repair；计划变更则回到 `proofloop-plan`
 
 本技能是 Brain 的 Stage Delivery 指导。Runtime 是唯一状态
@@ -35,10 +35,10 @@ Runtime 负责：
 
 - reconcile、状态派生和唯一 `Primary Next Action`；
 - Context Projection、digest 校验和失效；
-- Worker/CV/Commit/Integration/Gate/Review admission；
+- Worker/CV/Slice Commit/Integration/Gate/Review admission；
 - Receipt 写入和完成判断。
 
-Worker、CV、Committer 和 Stage Reviewer 负责各自的角色工作。它们不能
+Worker、CV 和 Stage Reviewer 负责各自的角色工作；Brain 负责调用 Boundary CLI。它们不能
 通过叙事替代 Runtime 状态迁移或 Receipt。
 
 ## 入口门禁
@@ -157,7 +157,8 @@ ADMIT_CV_RESULT
 → Runtime admission；仅 PASS/REPAIR 可进入 admission
 
 ADMIT_SLICE_COMMIT
-→ references/committer-template.md
+→ `proofloop boundary close`（boundary_type=slice-output）
+→ `proofloop stage admit-slice-commit`
 
 ADMIT_INTEGRATION
 → Runtime/Git 集成边界
@@ -236,10 +237,10 @@ admission（见「动作路由」），其余 verdict 只能进入 Brain 路由�
 
 ## 提交、集成与 Gate
 
-`PASS` 后使用 `references/committer-template.md`（提交边界见模板「提交边界」段）：
+`PASS` 后，Brain 按 Runtime 返回的边界契约调用 Boundary CLI 完成 Slice Git boundary：
 
-1. Committer 验证 CV PASS、snapshot 和 changed-file boundary；
-2. Committer 提交 Slice 成果：代码、测试、tasks projection、Evidence 和 CV Receipt；
+1. Boundary CLI revalidates CV PASS、snapshot、Manifest/Plan binding 和 changed-file boundary；
+2. Boundary CLI 只提交当前 Slice 的代码、测试、tasks projection 与 Evidence；
 3. Runtime 写入 Slice Commit Receipt；
 4. Runtime/Git 执行 no-ff Integration 并写入 Integration Receipt；
 5. 所有 Slice 集成后由 Runtime 执行 typed Runtime Proof 与 Stage Gate；
@@ -267,7 +268,7 @@ Gate PASS 持久化后：
 5. Runtime/Plugin admission 写 Stage Review Receipt；
 6. ACCEPTED 才能进入 Stage Close；
 7. Brain 更新 `progress.md`，记录 Stage 划分摘要、完成引用、剩余 AWI、阻塞和恢复方向；
-8. Committer 提交 Stage Close boundary；
+8. Brain 调用 Boundary CLI 提交 Stage Close boundary；
 9. Brain 重新读取 Git/Receipt/Manifest，再选择下一个 Stage。
 
 `progress.md` 是快照，不是 Stage 权威。根目录 `progress.md` 内的插件实施
@@ -278,7 +279,7 @@ Gate PASS 持久化后：
 - Worker 的 session 继续/恢复条件和 `recover-task` 规则见
   `references/worker-template.md` 的「恢复」段；
 - CV initial/recheck 默认 fresh；纯 runtime interruption 且输入完全不变时才允许安全继续；
-- Committer 的继续条件见 `references/committer-template.md` 的「恢复」段；
+- Boundary CLI 的继续条件：纯 Runtime interruption 且 HEAD、index、worktree 和 changed-file set 完全未变；
 - 任何 Plan、Authority、Context、Manifest、snapshot 或 scope 变化都触发重新判断；
 - SPV 复用与 fresh 条件见「计划到执行边界」段。
 

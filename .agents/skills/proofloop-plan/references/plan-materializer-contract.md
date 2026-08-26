@@ -33,11 +33,11 @@ compile/validate/admission 或 Evidence 初始化。Brain 必须先加载 `proof
 - 任意 Manifest 或 `.proofloop/manifests/**`；
 - 任意 Evidence directory/file；
 - 任意 Receipt、SPV/admission、Runtime State、Gate 或 Review artifact；
-- Worker/CV/Committer output、代码或实现文件；
+- Worker/CV output、代码或实现文件；
 - 任意第二份独立 Plan/Authority fact source。
 
 `plan materialize` 只渲染 candidate `tasks.md`，不写 Receipt，不派发
-Worker/CV/Committer，不执行 `proofloop_stage(next)`。candidate output 永远是
+Worker/CV，不执行 `proofloop_stage(next)`。candidate output 永远是
 `CANDIDATE_ONLY`，不能授权执行。
 
 `CANDIDATE_ONLY` 只描述 `plan materialize` 产出的 admission 前投影。若 Brain/Authority

@@ -198,15 +198,15 @@ fail closed。
   candidate input/Evidence 的最终 Git boundary → fresh SPV（绑定 clean worktree 的当前 Git
   HEAD）→ Runtime Stage Plan admission（再次
   校验 clean worktree 与 HEAD）→ `proofloop_stage(next)` → Runtime 返回最小 Context →
-  Worker/CV/Committer/Gate/Review 按对应 admission 边界推进。
+  Worker/CV/Slice Commit/Integration/Gate/Review 按对应 admission 边界推进。
 - Boundary: candidate、checkbox、progress、Agent narrative 和 SPV 结果本身不能授权执行；
   candidate Plan、candidate input 和 Evidence skeleton 必须先完成最终 Git boundary；只有
   admitted Manifest/Receipt 与当前 snapshot 一致、且 SPV/admission 之间没有相关 dirty
   或 commit 变化时才允许进入 Stage action。
 - Formal Stage interpretation: S08 是正式 execution Stage。`tasks.md` 和
   `candidate-input.json` 中的 `candidate_only` 只描述 admission 之前的候选投影和
-  Materializer 的写入边界；Stage Plan admission 成功后，S08 的 Worker、CV、Committer、
-  Integration、Gate 和 Review 属于 Stage Goal 的正式执行范围。它们不能被 candidate
+  Materializer 的写入边界；Stage Plan admission 成功后，S08 的 Worker、CV、Integration、
+  Gate 和 Review 属于 Stage Goal 的正式执行范围。它们不能被 candidate
   projection 的 planning-only 文字再次排除，也不能被 Brain 直接补造权限。
 - Stability: SPV `PLAN_READY` 后，如果 Authority、Plan、Manifest binding 和 snapshot 未变化，
   `next/context` 继续使用既有 admission，不重复 SPV；任一真实边界变化都必须 fail closed
@@ -231,15 +231,15 @@ fail closed。
 - Trigger: S08 正式执行链已闭环；用户要求先形成跨 OpenCode/Pi/Claude Code 通用 CLI，
   OpenCode Plugin 完善后置。
 - Scope: 将 Authority/Plan preflight、candidate materialization、Manifest/Validator/Evidence/
-  SPV/Stage Plan admission、role-specific Context、Worker/CV/Commit/Integration、Gate、Stage
+  SPV/Stage Plan admission、role-specific Context、Worker/CV/Slice Commit/Integration、Gate、Stage
   Review、Project Acceptance、doctor/recovery 收敛到稳定 CLI command family。
 - Role transfer: AI 负责把用户决定写入 PRD/Tech Spec 并完成语义工作；CLI 根据当前 action
   从 Authority/Plan/Manifest/Receipt/Evidence/Git 解析对应角色的最小 Context。Planning、
-  SPV、Worker、CV、Committer、Reviewer 收到的内容必须不同，且由 ref/digest 绑定。
+  SPV、Worker、CV、Reviewer 收到的内容必须不同，且由 ref/digest 绑定。
 - Persistence: candidate Plan、Context、Evidence skeleton、Agent result Receipt、Gate/Review/
   Project Receipt 均由各自 Runtime owner 写入；CLI 只调 public service，不提供任意文件写接口。
-- Preflight: 每次 Authority→Planning、Planning→Execution、Task→CV、CV→Commit、
-  Commit→Integration、Gate→Review、Stages→Project Acceptance 前执行目标边界检查，并返回
+- Preflight: 每次 Authority→Planning、Planning→Execution、Task→CV、CV→Slice Commit、
+  Slice Commit→Integration、Gate→Review、Stages→Project Acceptance 前执行目标边界检查，并返回
   ready/blocked、Findings、refs 与唯一 next action。
 - Bootstrap prerequisite: 原 S08B（现 canonical S10）首次 compile/Validator/Evidence initialization 复核发现
   `runtime_proof.resolved_steps` 仍只有 `not_applicable`；active candidate parser 与 Materializer

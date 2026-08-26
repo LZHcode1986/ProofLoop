@@ -52,7 +52,6 @@ export type VNextResponsibleRole =
   | 'stage-reviewer'
   | 'researcher'
   | 'prototype'
-  | 'committer'
   | 'general';
 
 /**

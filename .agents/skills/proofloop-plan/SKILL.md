@@ -105,7 +105,7 @@ Manifest、Evidence 或 admission 成功。
    非空 Evidence，initializer 对非空文件 fail closed/skip 的具体行为由 Runtime
    Contract 决定。
 10. 重新读取 candidate Plan、candidate input、Manifest 和全部 Evidence skeleton，确认
-    digest/ref 绑定一致后，由 Committer 建立最终稳定 Git boundary：canonical project root
+    digest/ref 绑定一致后，由 Brain 调用 Boundary CLI 建立最终稳定 Git boundary：canonical project root
     必须是 clean worktree。Git 的正常 `.gitignore` 规则继续生效，允许被忽略的
     `.proofloop` Runtime artifacts；tracked 或未被忽略的 untracked 文件都必须先处理。
 11. 读取最终 boundary 的当前 Git HEAD 和已编译绑定，使用
@@ -214,7 +214,7 @@ schema、exit code 和 root/path 约束由当前 CLI `--help` 与对应 Runtime 
 ## 禁止事项
 
 - 不启动正式 Stage；
-- 不派发 Worker/CV/Committer；
+- 不派发 Worker/CV；
 - 不执行 `proofloop_stage(next)`；
 - `plan materialize` 不生成/更新 Manifest、Evidence、Receipt 或 Runtime State；
 - 不写 Stage Plan admission、SPV、Task、CV、Gate 或 Review Receipt；

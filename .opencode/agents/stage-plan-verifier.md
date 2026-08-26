@@ -227,5 +227,5 @@ resume_target:
 
 For `vnext` results, use the allowed result and route envelope in the Skill
 reference template. `PLAN_READY` only permits Brain to invoke Runtime Stage Plan
-admission; it never authorizes Worker, CV, Committer, Gate or Review execution by
+admission; it never authorizes Worker, CV, Boundary CLI, Gate or Review execution by
 itself.

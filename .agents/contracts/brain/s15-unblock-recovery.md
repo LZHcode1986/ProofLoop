@@ -21,7 +21,7 @@
 
 - Brain：冻结事实、检查 scope、调度、验证 Git boundary、触发 fresh SPV/admission 和恢复。
 - Runtime/Host repair specialist：实现既有 CV v3 route/test scope。
-- Committer：建立独立 Runtime repair Git boundary。
+- Boundary CLI：在 Brain 确认后建立独立 Runtime repair Git boundary。
 - Runtime：唯一负责 Context、currentness、recover/recheck、Receipt 和 admission。
 - General：只可执行只读审计，不得修改生产 Runtime 代码。
 
@@ -162,7 +162,7 @@ Dependency、public operation、ReceiptType 或任何 Evidence/Receipt 内容。
 冻结 S15 Plan/Manifest/Receipt/Evidence
 → 停放现有 S15 recovery patch
 → Runtime/Host specialist 实现 route 修复
-→ Committer 建立独立 Runtime repair Git boundary
+→ Brain 调用 Boundary CLI 建立独立 Runtime repair Git boundary
 → 当前 HEAD fresh SPV
 → Stage Plan admission
 → 恢复现有 patch

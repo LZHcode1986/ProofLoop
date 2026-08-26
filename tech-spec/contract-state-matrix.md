@@ -55,8 +55,8 @@ runtime:
 |---|---|---|---|
 | `authority` | `check` | 验证 Brain/Authority Skill 已选择的 Authority entity refs、root/digest 和 closed handoff shape；不判断用户是否确认或正文是否正确 | Planning/Architecture mechanical handoff + refs/Findings |
 | `plan` | `materialize`, `compile`, `validate`, `initialize-evidence`, `refresh-evidence`, `status`, `admit-spv`, `admit-stage-plan` | 保存 closed AI plan input/candidate；编译 Manifest；机械验证；初始化或安全刷新 Evidence skeleton；受理初始或 Replan epoch 的 SPV 与 Stage Plan authority | candidate/Manifest/Evidence/SPV/Stage Plan/epoch refs |
-| `context` | `prepare`, `show`, `admit-refutation-observation` | 按 target action/role 生成或读取 content-addressed Context；CV 反驳观察固定后才解锁 Evidence read | Planning/SPV/Worker/CV/Committer/Reviewer 的不同 Context ref/content |
-| `stage` | `status`, `next`, `admit-worker`, `admit-cv`, `admit-slice-commit`, `admit-integration`, `run-gate` | Stage state/next；受理 AI/Committer 结构化结果；执行并受理 Gate | NextAction/Context/Receipt/Gate refs |
+| `context` | `prepare`, `show`, `admit-refutation-observation` | 按 target action/role 生成或读取 content-addressed Context；CV 反驳观察固定后才解锁 Evidence read | Planning/SPV/Worker/CV/Reviewer 的不同 Context ref/content |
+| `stage` | `status`, `next`, `admit-worker`, `admit-cv`, `admit-slice-commit`, `admit-integration`, `run-gate` | Stage state/next；受理 Worker/CV/Slice Commit/Integration 结构化结果；执行并受理 Gate | NextAction/Context/Receipt/Gate refs |
 | `review` | `status`, `prepare-stage`, `finalize-stage` | 持久化 Stage Review preparation fact，组装 Review Context；受理 ACCEPTED/REPAIR | Review Context / Stage Review Receipt |
 | `project` | `status`, `compile-acceptance`, `run-e2e`, `prepare-review`, `finalize-review` | 项目验收 Manifest、E2E Gate、Project Review Context/Receipt | Project refs/verdict |
 | `doctor` | `run` | Runtime/CLI 版本、Git、project root、schema、commands/services、filesystem capability；Host API 项仅在 adapter 自身诊断 | structured diagnostics |
@@ -85,7 +85,6 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 | Worker | 一个 Task、Slice goal、acceptance/seam/oracle/risk refs、skills、Evidence path、allowed/forbidden scope、current snapshot | 其他 Task 实现范围、Receipt/Manifest 写权限 |
 | Initial CV | pre-refutation Authority/goal/proof、代码/测试/diff/snapshot refs；`evidence_read:false` | Worker Evidence 正文/摘要（观察固定前） |
 | CV recheck | previous criterion/counterexample/signature、repair diff、required regression scope、current bindings | 无关 Slice 或扩大后的验收范围 |
-| Committer/Integrator | accepted CV/Task Receipt refs、精确 Git boundary、changed-file set、expected HEAD/index/worktree | 语义修复、额外文件、Receipt 直写 |
 | Stage Reviewer | Stage goal、integrated snapshot、Stage Gate/CV/Slice refs、unresolved findings、Authority refs | 未集成工作、Agent narrative 代替 persisted facts |
 | Project Reviewer | PRD goals/AC refs、全部 accepted Stage Review/Gate refs、E2E Receipt、limitations | 缺失 Stage 的口头完成声明 |
 
@@ -167,7 +166,7 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 | `.proofloop/logs/**` | Runtime CLI / adapter logger | 诊断 | 文本 | — | 追加 | — |
 | `.proofloop/context/<digest>.json` | Runtime Context Resolver（经 CLI/adapter） | 当前 role Agent / admission | JSON（derived Context） | role/action、input refs/digests、snapshot、scope、self digest | write-once、可重建、非 Receipt authority | root/digest/identity + source bindings |
 | `delivery/stages/<stage>/candidate-input.json` | Brain closed input → `plan materialize` | Runtime materializer/compiler | closed JSON | schema/caller/owner/refs/goals/slices/tasks/scope | candidate transient source；不是第二权威 | CLI schema/entity/path checks |
-| `delivery/stages/<stage>/tasks.md` | Active Plan Materializer → Committer boundary | Runtime compiler / SPV / Context Resolver | Markdown + checkbox | Stage 头 + SLICE 区块 + `- [ ] T-id:` 行 | candidate → final Git boundary before SPV；checkbox/status 仍是人类投影（非权威） | entity/ref/plan digest + clean Git gate |
+| `delivery/stages/<stage>/tasks.md` | Active Plan Materializer → Boundary CLI | Runtime compiler / SPV / Context Resolver | Markdown + checkbox | Stage 头 + SLICE 区块 + `- [ ] T-id:` 行 | candidate → final Git boundary before SPV；checkbox/status 仍是人类投影（非权威） | entity/ref/plan digest + clean Git gate |
 | `delivery/stages/<stage>/evidence/<slice>.md` | Runtime Evidence initializer/refresh before SPV → Worker → CV | SPV / Runtime / CV | Markdown | Plan/Manifest/Proof Index binding + Task Evidence + Current Slice Evidence + Current CV Status | skeleton 必须在 final Git boundary 前存在；manifest 变化只允许 Runtime 对 pre-admission pristine skeleton 原子 refresh；已有执行内容后不可覆盖 | manifest evidence_path + pristine-template parser + receipt/status absence + clean Git gate + CV contract |
 | `delivery/stages/<stage>/evidence/history/<epoch>/<slice>.md` | Runtime Replan Evidence rotation | audit/recovery only；不得作为当前 Evidence path | archived Markdown | 原 Evidence 内容、旧 binding、epoch/parent refs、archive digest | append-only；不得作为当前 Worker/CV Evidence | root-bound/no-follow、旧文件 identity/digest、epoch chain；Brain/Worker 不可写 |
 
@@ -297,12 +296,12 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 <!-- proofloop:entity id="PLUGINV2-S08B-CLI-SEAM" kind="seam" -->
 - Public seam：§0 的 `proofloop <domain> <operation>` 是唯一 harness-neutral public CLI。
   它必须覆盖 Authority/Plan preflight 与 materialization、Manifest/Validator/Evidence/SPV/
-  Stage Plan admission、role Context、Worker/CV/Commit/Integration/Gate、Stage Review、Project
+  Stage Plan admission、role Context、Worker/CV/Slice Commit/Integration/Gate、Stage Review、Project
   Acceptance、doctor/recovery。现有单用途脚本只能作为内部迁移入口。
 - AI/CLI boundary：AI 负责解释用户、维护 Authority、规划、实现、反驳和评审；CLI 只消费
   closed AI output，按当前持久事实生成角色 Context，机械验证并交给 Runtime owner 保存。
   不提供 generic prompt、任意文件写或“替 AI 判断”的 operation。
-- Role transfer：Planning/SPV/Worker/CV/Committer/Stage Reviewer/Project Reviewer 使用 §0.5
+- Role transfer：Planning/SPV/Worker/CV/Stage Reviewer/Project Reviewer 使用 §0.5
   的不同 Context。`context prepare/show` 的 output 必须受 ref/digest/snapshot 绑定，不能由
   Brain 复制完整文档或手工拼 Packet。Initial CV 的 Evidence 继续受反驳观察 gate 保护。
 - Preflight：任何写 command 必须在同一调用内重复校验相关 precondition（read-only）；ready 只代表机械制品满足，不代表

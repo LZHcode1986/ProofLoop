@@ -43,7 +43,6 @@ permission:
     "stage-reviewer": allow
     "researcher": allow
     "prototype": allow
-    "committer": allow
 ---
 
 
@@ -115,8 +114,8 @@ Brain must not:
 
 - implement or repair production code;
 - create or edit Stage plans or Slice evidence;
-- perform SPV, Worker, Code Verifier, Stage Reviewer, Researcher, Prototype, or Committer work;
-- mutate Git state or resolve merge conflicts;
+- perform SPV, Worker, Code Verifier, Stage Reviewer, Researcher, Prototype work, or make a Git boundary outside the Boundary CLI;
+- mutate Git state directly or resolve merge conflicts; Git boundary writes go through the Boundary CLI;
 - independently invent or revise PRD or Tech Spec semantics.
 
 During the active `pluginv2` Stage Delivery route, Brain dispatches direct role Agents only through their active Skill/template. Worker uses an explicit Host routing profile: `transport: herdr-link` when a Link Adapter and stable Agent Names are available; `transport: herdr-legacy` only as an explicit compatibility route; `transport: subagent` is the harness-native compatibility route. The selected transport is fixed for the Worker Session; Brain never implements role work, writes Receipts, or replaces Runtime admission.
@@ -285,7 +284,7 @@ After upstream repair, apply invalidation, rehydrate persisted facts, and recomp
 | `STAGE_EXECUTION` | Admitted Manifest, valid Evidence paths, and Runtime entry Gates pass | Brain + `proofloop-execute` + Runtime | `proofloop-execute/SKILL.md` | All Slices integrated and persisted Stage Gate PASS | `STAGE_REVIEW` |
 | `STAGE_GATE` | All Slices complete and Runtime Proof is admitted | Runtime, driven by `proofloop-execute` | Runtime Gate operation | Persisted Gate PASS/FAIL/INTERRUPTED Receipt | `STAGE_REVIEW` or typed recovery |
 | `STAGE_REVIEW` | All Slice CV PASS; all Slices integrated; integrated Snapshot fixed; Manifest declares Slice Evidence; Stage Gate PASS; Stage Gate Receipt exists | Brain + Stage Reviewer | `brain/stage-review.md` + `proofloop_review` | Admission ACCEPTED or REPAIR (REJECTED maps to REPAIR; BLOCKED persists nothing) | Close or typed recovery |
-| `STAGE_CLOSE` | Review accepted and close preconditions pass | Brain + Committer | `brain/commit-boundary.md` + `proofloop-execute/references/committer-template.md` | `STAGE_CLOSE_COMMITTED` plus progress snapshot | Recompute remaining work |
+| `STAGE_CLOSE` | Review accepted and close preconditions pass | Brain + Boundary CLI | `brain/commit-boundary.md` | `STAGE_CLOSE_COMMITTED` plus progress snapshot | Recompute remaining work |
 | `PROJECT_ACCEPTANCE` | All Work Items closed, all Stages ACCEPTED, PRD valid | Brain + Project Reviewer | `brain/execute-project-acceptance.md` + `proofloop_project` | `PROJECT_ACCEPTED`, `PROJECT_REJECTED`, or `PROJECT_BLOCKED` | Terminal or typed recovery |
 
 Before `PRD_CONFIRMED`, do not perform solution research, framework selection, API or Schema design, architecture decomposition, or implementation-task decomposition.
@@ -476,7 +475,7 @@ stage_plan:
 
 `progress.md` stores human-readable invalidation summaries and resume orientation. Each affected artifact stores its own authoritative status and reason.
 
-`PLAN_READY` is not execution authorization. No Worker, CV, Committer, Gate, or
+`PLAN_READY` is not execution authorization. No Worker, CV, Boundary CLI, Gate, or
 Stage Review action may start until `admission: ADMITTED` is supported by the
 canonical Stage Plan admission Receipt.
 
@@ -537,7 +536,7 @@ returns, and receipt/admission boundary.
 ### Brain Session Relay
 
 Brain manages session relay for its direct agents: Stage Plan Verifier,
-Code Verifier, Committer, Stage Reviewer, Researcher, Prototype, and General.
+Code Verifier, Stage Reviewer, Researcher, Prototype, and General.
 Worker session relay is selected by the Host routing profile: Herdr uses the
 Herdr control Skill and relay template; the explicit `subagent` compatibility
 route uses the harness-native Worker wrapper while preserving the same Worker
@@ -589,7 +588,7 @@ Brain may persist authority documents only while the owning Skill controls seman
 - technical clarification → `prd-to-tech-design-prep`
 - Tech Spec → `prd-to-ai-architecture`
 
-When an approved authority change affects multiple documents, update them as one consistency transaction and dispatch Committer for the authority boundary.
+When an approved authority change affects multiple documents, update them as one consistency transaction and call the Boundary CLI for the authority boundary.
 
 ### Authority and Hard Part pointers
 
@@ -632,7 +631,6 @@ The active direct OpenCode task roles are:
 ```text
 stage-plan-verifier
 code-verifier
-committer
 stage-reviewer
 researcher
 prototype

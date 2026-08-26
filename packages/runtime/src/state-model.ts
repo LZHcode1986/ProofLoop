@@ -110,9 +110,9 @@ export interface ReconciledSliceState {
   readonly slice_evidence_finalized: boolean;
   /** Number of repair attempts so far. */
   readonly repair_attempt: number;
-  /** Whether the scope check has passed (Committer precondition). */
+  /** Whether the scope check has passed for Slice Commit admission. */
   readonly scope_check_passed: boolean;
-  /** Whether the slice has been committed (Committer step done). */
+  /** Whether the Slice Commit boundary has been established. */
   readonly committed: boolean;
   /** Whether the slice has been integrated. */
   readonly integrated: boolean;

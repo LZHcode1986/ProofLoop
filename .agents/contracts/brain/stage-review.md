@@ -174,7 +174,7 @@ Stage Reviewer returns structured verdict (ACCEPTED | REJECTED | BLOCKED)
 → Brain routes to STAGE_CLOSE (if ACCEPTED) or typed recovery
 ```
 
-The Committer requires the persisted Stage Review Receipt to exist before executing stage-close. The `commit-boundary.md` contract's `stage-close` preconditions reference it by path.
+The Boundary CLI requires the persisted Stage Review Receipt before closing `stage-close`; the `commit-boundary.md` contract's preconditions reference it by path.
 
 ### review_scope: project
 

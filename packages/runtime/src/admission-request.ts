@@ -132,7 +132,7 @@ export interface SliceCommitAdmissionRequest {
 
 /**
  * Integration admit — `commitSha` must bind the SAME commit SHA the
- * SLICE_COMMIT receipt recorded (committer/integration boundary binding).
+ * SLICE_COMMIT receipt recorded (Slice Commit/Integration boundary binding).
  */
 export interface IntegrationAdmissionRequest {
   readonly type: 'integration';

@@ -38,7 +38,7 @@
 
 - 进行 Stage 规划、candidate `tasks.md` 或 `plan materialize` 时，先读取 `.agents/skills/proofloop-plan/SKILL.md`、其引用的 materializer Contract 和 dispatch 指定的 active Contract；candidate Plan 不授予执行权。
 - 规划到执行必须遵循当前 vNext 顺序：candidate Plan/Evidence skeleton → stable Git boundary → Runtime 编译/校验 → fresh SPV → Stage Plan admission → `proofloop_stage(next)`/Context → Worker。
-- 进行 admitted Stage execution、Worker、CV、Committer、Integration、Gate 或 Review 时，先读取 `.agents/skills/proofloop-execute/SKILL.md` 及 dispatch 指定的 role Contract/template；Runtime 是状态和 admission 的唯一权威。
+- 进行 admitted Stage execution、Worker、CV、Boundary CLI、Integration、Gate 或 Review 时，先读取 `.agents/skills/proofloop-execute/SKILL.md` 及 dispatch 指定的 role Contract/template；Runtime 是状态和 admission 的唯一权威。
 - vNext 的 Worker Result、CV、Commit、Integration、Gate 和 Review 必须使用当前 vNext consumer 与绑定链；不得把 v2 事实送入 legacy consumer，也不得用旧 v1 路由替代当前流程。
 - 处理 Manifest、Context、Receipt、Evidence 或 Plan projection 时，必须按当前 Contract 验证 root、scope、digest、snapshot 和前序 Receipt；不能用 progress、checkbox 或 Agent 叙事补全绑定。
 
@@ -56,7 +56,7 @@
 - 任何文件写入工具发生失败或部分应用后，立即停止重试；重新读取当前文件、Git status 和 Git diff，确认实际落盘状态后，再基于当前内容生成新操作；禁止重放旧上下文。
 - Agent 被中断或取消后，磁盘内容和 Git diff 是唯一事实源；不得假设回滚或重复覆盖 partial state。
 - 尚未 Runtime admission 的 Worker 代码、测试、Evidence 或 tasks projection 必须作为 recovery patch 保留。Runtime/Host 修复单独提交并因 HEAD 变化重新执行 fresh SPV/admission，再通过 `recover-task`/`recheck` 重新绑定和接纳现有成果；不得重写或重新派发实现 Task。
-- 任何 Agent 不得绕过 Runtime 手写 Receipt、Manifest 或 Context，也不得替代 Committer 建立 Git boundary。
+- 任何 Agent 不得绕过 Runtime 手写 Receipt、Manifest 或 Context，也不得替代 Brain 调用 Boundary CLI 建立 Git boundary。
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

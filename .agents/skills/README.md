@@ -31,10 +31,10 @@ Brain must reuse the same protocol across planning, execution, and recovery.
 1. Brain owns user intent, domain context, PRD, Tech Spec, progress, and global routing.
 2. Direct bounded task goes to `general`.
 3. Active pluginv2 Stage planning loads `proofloop-plan`; its Stage Plan Verifier dispatch uses the Skill reference template.
-4. Active pluginv2 Stage execution loads `proofloop-execute`, which selects the Brain-owned role dispatch template for `worker`, `code-verifier`, or `committer`.
+4. Active pluginv2 Stage execution loads `proofloop-execute`, which selects the Brain-owned role dispatch template for `worker` or `code-verifier`; Git boundaries use Runtime `boundary close`.
 5. Technical unknowns go to `researcher` / `prototype`; only validated conclusions enter Tech Spec.
 6. Stage review goes to `stage-reviewer`; all findings return to Brain.
-7. Git boundaries are owned by `committer` — no agent commits directly.
+7. Git boundaries are owned by the Runtime `boundary close` CLI — no Agent commits directly.
 8. Skills are loaded by agents on demand; agent files do not duplicate skill content.
 9. Active Skill reference templates define complete vNext dispatch packets and allowed returns; they do not authorize Runtime state transitions.
 10. Templates are selected by the active Skill and contain no authority claim beyond their declared dispatch scope.

@@ -1,6 +1,6 @@
 /**
  * Deterministic Git boundary closure for the public `proofloop boundary close`
- * command (docs/ProofLoop_v2_Technical_Architecture_Blueprint_Committer_to_Boundary_CLI.md,
+ * command (the Boundary CLI architecture blueprint,
  * Part B §4–§7; .agents/contracts/brain/commit-boundary.md is the semantic
  * source for per-type scope and canonical commit messages).
  *
@@ -21,6 +21,13 @@ import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import { canonicalPathWithinRoot } from './path-guard';
 import { readGitHead, resolveGitRoot } from './git-source';
+import { loadVNextSliceCommitPolicyFacts } from './vnext/commit-admission';
+import {
+  loadSliceCommitPolicy,
+  validateSliceCommitChangedFiles,
+  validateSliceCommitCvBinding,
+} from './vnext/slice-commit-policy';
+import type { SliceCommitPolicy } from './vnext/slice-commit-policy';
 
 export const BOUNDARY_TYPES = [
   'baseline-authority',
@@ -72,7 +79,8 @@ export type GitBoundaryErrorCode =
   | 'BOUNDARY.RENAME_INVALID'
   | 'BOUNDARY.COMMIT_FAILED'
   | 'BOUNDARY.POST_COMMIT_INVALID'
-  | 'BOUNDARY.SLICE_POLICY_REQUIRED';
+  | 'BOUNDARY.SLICE_POLICY_REQUIRED'
+  | 'BOUNDARY.SLICE_POLICY_INVALID';
 
 export class GitBoundaryError extends Error {
   public readonly code: GitBoundaryErrorCode;
@@ -313,7 +321,7 @@ function prefixScope(request: BoundaryCloseRequest): readonly string[] {
   const stage = validateStage(request.stage, STAGE_REQUIRED_TYPES.has(type));
   switch (type) {
     case 'baseline-authority':
-      return ['CONTEXT.md', 'PRD.md', 'tech-spec'];
+      return ['CONTEXT.md', 'PRD.md', 'progress.md', 'tech-spec'];
     case 'stage-plan':
       return [`delivery/stages/${stage as string}`];
     case 'stage-close':
@@ -335,10 +343,12 @@ function requestedPaths(
   request: BoundaryCloseRequest,
   root: string,
   actual: readonly string[],
+  slicePolicy?: SliceCommitPolicy,
 ): string[] {
   if (EXACT_PATH_TYPES.has(request.boundary_type)) {
     const declared = requirePaths(request, root);
     assertExactTypeScope(request, declared);
+    if (request.boundary_type === 'artifact-archive') return declared;
     const dirty = new Set(actual);
     const missing = declared.filter((value) => !dirty.has(value));
     if (missing.length > 0) {
@@ -349,7 +359,12 @@ function requestedPaths(
     }
     return declared;
   }
-  const allowed = prefixScope(request);
+  const allowed = request.boundary_type === 'slice-output'
+    ? slicePolicy?.allowedPaths ?? []
+    : prefixScope(request);
+  if (request.boundary_type === 'slice-output' && slicePolicy === undefined) {
+    fail('BOUNDARY.SLICE_POLICY_REQUIRED', 'slice-output requires the shared Runtime slice-commit policy');
+  }
   const selected = actual.filter((value) => allowed.some((base) => pathWithin(value, base)));
   if (selected.length === 0) {
     fail(
@@ -394,16 +409,11 @@ function readIndexEntries(root: string, path: string): readonly string[] {
 }
 
 /**
- * artifact-archive accepts exactly one pre-staged pure rename (Brain ran
- * `git mv` itself; the adapter never moves content) covering precisely the
- * declared paths, inside the SAME delivery/stages/<stage>/ directory, with
- * the digest-qualified destination carrying the invalidated Manifest digest.
- * Blob identity is verified against the pre-commit HEAD: the staged
- * destination entry must carry the SAME blob and mode the source had at
- * HEAD, and the source must be fully removed from the index. This catches
- * drift that is already `git add`-ed (clean worktree, changed staged
- * content), which porcelain status alone cannot see. Unrelated
- * untracked/dirty files elsewhere do not matter here — only the staged set.
+ * Validate the pure rename created by this adapter for artifact-archive.
+ * Brain supplies exact source and destination paths; the adapter performs the
+ * Git-native move, then verifies that the staged result covers precisely those
+ * paths inside the same Stage directory and preserves the source blob/mode.
+ * Unrelated dirty files elsewhere do not matter here — only the staged set.
  */
 function assertArtifactArchiveRename(
   root: string,
@@ -584,6 +594,18 @@ function assertStagedSet(root: string, expected: readonly string[]): void {
   }
 }
 
+function readTreePaths(root: string, commitSha: string): string[] {
+  return runGit(
+    root,
+    ['ls-tree', '-r', '--name-only', commitSha, '--'],
+    'BOUNDARY.GIT_UNAVAILABLE',
+  )
+    .split('\n')
+    .map((value) => value.trimEnd())
+    .filter((value) => value.length > 0)
+    .map((value, index) => relativePath(root, value, `Git tree path[${index}]`));
+}
+
 function readCommittedPaths(root: string, commitSha: string): string[] {
   // Plumbing diff-tree has no rename detection by default; --no-renames makes
   // that explicit so a pure archive rename reports both paths deterministically.
@@ -618,14 +640,9 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
     fail('BOUNDARY.REQUEST_INVALID', 'prototype-checkpoint requires expected_branch');
   }
   if (request.boundary_type === 'slice-output') {
-    // Slice-output has a Runtime-owned scope/credential policy shared with
-    // `stage admit-slice-commit` (blueprint §8). Until that policy seam is
-    // extracted, this generic adapter must not become a second admission
-    // consumer: fail closed instead of committing on partial checks.
-    fail(
-      'BOUNDARY.SLICE_POLICY_REQUIRED',
-      'slice-output requires the shared Runtime slice-commit policy before it can close a boundary',
-    );
+    if (request.stage === undefined || request.slice === undefined || cvReceiptDigest === undefined) {
+      fail('BOUNDARY.REQUEST_INVALID', 'slice-output requires stage, slice, and cv_receipt_digest');
+    }
   }
   if (request.boundary_type === 'artifact-archive' && oldManifestDigest === undefined) {
     fail('BOUNDARY.REQUEST_INVALID', 'artifact-archive requires old_manifest_digest');
@@ -651,8 +668,9 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   }
   assertBranch(gitRoot, request.expected_branch);
 
+
   const before = parseStatus(runGit(gitRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], 'BOUNDARY.GIT_UNAVAILABLE'));
-  if (hasStagedIndex(before) && request.boundary_type !== 'artifact-archive') {
+  if (hasStagedIndex(before)) {
     fail('BOUNDARY.INDEX_NOT_EMPTY', 'boundary close requires an initially empty Git index');
   }
   // Root-bound/protection gate over EVERY dirty path: a modified tracked file
@@ -660,18 +678,65 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   // broken repository state that Brain must recover — never silently commit
   // around it.
   const actual = statusPaths(before).map((value, index) => relativePath(gitRoot, value, `Git changed path[${index}]`));
-  const requested = requestedPaths(request, gitRoot, actual);
+  let slicePolicy: SliceCommitPolicy | undefined;
+  if (request.boundary_type === 'slice-output') {
+    try {
+      const facts = loadVNextSliceCommitPolicyFacts(
+        {
+          stageId: request.stage as string,
+          sliceId: request.slice as string,
+          cvReceiptDigest: cvReceiptDigest as string,
+        },
+        { projectRoot: gitRoot },
+      );
+      slicePolicy = loadSliceCommitPolicy(facts);
+      validateSliceCommitCvBinding(slicePolicy, cvReceiptDigest as string);
+      if (request.manifest_digest !== undefined && request.manifest_digest !== slicePolicy.manifestDigest) {
+        fail(
+          'BOUNDARY.SCOPE_VIOLATION',
+          `manifest_digest does not match the active vNext Manifest: ${request.manifest_digest} != ${slicePolicy.manifestDigest}`,
+        );
+      }
+    } catch (error) {
+      if (error instanceof GitBoundaryError) throw error;
+      fail('BOUNDARY.SLICE_POLICY_INVALID', `vNext Slice Commit policy is unavailable: ${errorText(error)}`);
+    }
+  }
 
+  const requested = requestedPaths(request, gitRoot, actual, slicePolicy);
+
+  if (slicePolicy !== undefined) {
+    try {
+      validateSliceCommitChangedFiles(slicePolicy, requested, {
+        treePaths: readTreePaths(gitRoot, preCommitHead),
+        phase: 'pre-commit',
+      });
+    } catch (error) {
+      if (error instanceof GitBoundaryError) throw error;
+      fail('BOUNDARY.SLICE_POLICY_INVALID', `slice-output changed-file policy rejected the boundary: ${errorText(error)}`);
+    }
+  }
   let pureArchiveRename = false;
   if (request.boundary_type === 'artifact-archive') {
-    assertArtifactArchiveRename(gitRoot, request, before, requested, oldManifestDigest as string, preCommitHead);
+    const destinations = requested.filter((value) => value.includes(oldManifestDigest as string));
+    const sources = requested.filter((value) => !value.includes(oldManifestDigest as string));
+    if (destinations.length !== 1 || sources.length !== 1) {
+      fail('BOUNDARY.RENAME_INVALID', 'artifact-archive requires exactly one source and one digest-qualified destination path');
+    }
+    runGit(
+      gitRoot,
+      ['mv', '--', sources[0] as string, destinations[0] as string],
+      'BOUNDARY.RENAME_INVALID',
+    );
+    const afterMove = parseStatus(runGit(gitRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], 'BOUNDARY.RENAME_INVALID'));
+    assertArtifactArchiveRename(gitRoot, request, afterMove, requested, oldManifestDigest as string, preCommitHead);
     pureArchiveRename = true;
   }
   const message = commitMessage(request, oldManifestDigest);
 
   // ---- Stage exactly the validated set ----
   if (pureArchiveRename) {
-    // The rename is already staged by the caller's `git mv`; only validate it.
+    // The adapter's Git-native move already staged the rename; only validate it.
   } else {
     runGit(gitRoot, ['diff', '--check', '--', ...requested], 'BOUNDARY.DIFF_INVALID');
     runGit(gitRoot, ['add', '--', ...requested], 'BOUNDARY.COMMIT_FAILED');
@@ -700,6 +765,18 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
       'BOUNDARY.POST_COMMIT_INVALID',
       `committed changed-file set drifted from the validated boundary (expected=${requested.join(',')} actual=${committed.join(',')})`,
     );
+  }
+  if (slicePolicy !== undefined) {
+    try {
+      validateSliceCommitCvBinding(slicePolicy, cvReceiptDigest as string);
+      validateSliceCommitChangedFiles(slicePolicy, committed, {
+        treePaths: readTreePaths(gitRoot, commitSha),
+        phase: 'post-commit',
+      });
+    } catch (error) {
+      if (error instanceof GitBoundaryError) throw error;
+      fail('BOUNDARY.POST_COMMIT_INVALID', `slice-output post-commit policy validation failed: ${errorText(error)}`);
+    }
   }
   const dirtyAfter = runGit(gitRoot, ['status', '--porcelain=v1', '--untracked-files=all'], 'BOUNDARY.POST_COMMIT_INVALID').trim().length > 0;
   return {

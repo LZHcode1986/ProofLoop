@@ -40,9 +40,8 @@ Claude Code 等宿主中的 Agent 通过相同命令运行可恢复流程；流�
 | Planning Skill | 规划能力 | 构造 closed 结构化输入并调用 `plan materialize` 生成最小 candidate Plan；不发明产品或技术事实 |
 | Worker | 单 Task 实现者 | 只执行 Runtime 指定的 Task；先写 Evidence，再更新执行投影 |
 | Code Verifier（CV） | 独立反驳者 | 先独立设计反例，再读取 Worker Evidence；使用统一验证方式 |
-| Committer / Integrator | Git 边界责任人 | 只在对应 Receipt 和验证通过后提交/集成 |
 | Stage Reviewer / Project Reviewer | 阶段/项目独立评审者 | 依据目标、权威、代码和 Gate/E2E 事实给出独立结论 |
-| Runtime / CLI | 通用机械流程层 | 解析引用、派生状态、按角色生成最小上下文、持久化结构化结果、执行 Gate；不依赖 harness 工具 API |
+| Runtime / CLI | 通用机械流程层（含 `boundary close` Git 边界） | 解析引用、派生状态、按角色生成最小上下文、持久化结构化结果、执行 Gate；不依赖 harness 工具 API |
 | OpenCode Plugin | ~~CLI 成熟后的宿主增强~~ **已退役（2026-08-14）**：提供 OpenCode tools/hooks/权限与体验增强；不创建第二套流程语义，也不是 S10 前提。退役后由 CLI + Agent 配置承担 |
 
 ## 4. User scenarios
@@ -84,7 +83,7 @@ Claude Code 等宿主中的 Agent 通过相同命令运行可恢复流程；流�
 1. 用户在任意受支持 harness 中由 Brain/Authority Skill 理解需求并维护 PRD/Tech Spec；AI 负责语义，CLI 不替代判断。
 2. Brain/Planning Skill 生成最小候选计划；通用 CLI 解析并绑定 Authority refs，检查计划制品和 Git 边界。
 3. CLI 编译、验证并受理满足条件的计划；只有完整的机械认可边界才允许进入执行。
-4. CLI 根据唯一下一动作，为 Worker、CV、Committer 或 Reviewer 生成各自不同的最小 Context ref；Brain 只机械转交给对应 Agent。
+4. CLI 根据唯一下一动作，为 Worker、CV 或 Reviewer 生成各自不同的最小 Context ref；Brain 只机械转交给对应 Agent。
 5. Agent 完成语义工作后返回结构化结果；CLI 验证 Context、scope、snapshot、diff 和前序 Receipt 后保存本地事实。
 6. CLI 继续推进 Slice Commit/Integration、Stage Gate、Stage Review 和 Project Acceptance；每次转换前检查所需制品。
 7. 会话或 harness 更换、权威/计划/snapshot 变化时，CLI 从 Git/Manifest/Receipt/Evidence/Context 等本地事实恢复或安全阻断。
@@ -144,7 +143,7 @@ Claude Code 等宿主中的 Agent 通过相同命令运行可恢复流程；流�
 ### FR-007: 按角色隔离工具
 - Description: 默认全局 deny，按角色 allow；即使宿主只支持权限阻止，插件仍运行时二次校验调用者角色。
 - Acceptance criteria:
-  - When Worker/CV/Committer/Researcher/Prototype/General 请求 ProofLoop 工具，被拒绝。
+  - When Worker/CV/Researcher/Prototype/General 请求 ProofLoop 工具，被拒绝。
   - When 角色与工具不匹配（如 Worker 请求规划或 Reviewer 请求写入），被拒绝并返回 HOST 权限 Finding。
 - Status: confirmed
 
@@ -240,7 +239,7 @@ Claude Code 等宿主中的 Agent 通过相同命令运行可恢复流程；流�
 - Acceptance criteria:
   - When OpenCode、Pi 或 Claude Code Agent 发起同一种机械操作，调用相同 CLI 命令和输入
     合同，不依赖 harness SDK、tool registration 或 hook。
-  - When 派发 Brain/Planning、SPV、Worker、CV、Committer、Stage Reviewer 或 Project
+  - When 派发 Brain/Planning、SPV、Worker、CV、Stage Reviewer 或 Project
     Reviewer，CLI 根据持久事实生成该角色所需且不同的最小 Context ref；缺失或 stale
     binding 时返回 Finding，不生成派发授权。
   - When AI 返回结构化结果，CLI 校验当前 Context、scope、snapshot、changed files 和前序
@@ -324,7 +323,7 @@ Claude Code 等宿主中的 Agent 通过相同命令运行可恢复流程；流�
   - When 逐条核查 13 个问题，每条都有防复发机制归属（机械/契约/清单），无孤儿教训。
   - When admission 失败后重跑计划渲染，触发显式禁令或已受理投影保留机制（#2）。
   - When 派发模板/技能包含：CV 结果（含 REPAIR）立即受理再派 repair（#7）、admission digest 从
-    context 逐字段核对（#4）、Git 写操作只归 Committer（#1/#3）。
+    context 逐字段核对（#4）、Git 写操作只归 Runtime `boundary close` CLI（#1/#3）。
   - When 对照表纳入权威文档，Stage Review 可审计。
 - Status: confirmed
 

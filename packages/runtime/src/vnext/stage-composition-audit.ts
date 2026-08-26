@@ -528,18 +528,18 @@ function sliceChainSteps(
   });
   steps.push({
     step: 'slice-commit-admission',
-    producer: 'committer',
+    producer: 'boundary-cli',
     public_operation: 'proofloop stage admit-slice-commit',
     consumer: 'admitVNextSliceCommit',
     accepted_binding_mode: bindingMode,
     accepted_schema: credentialSchema,
     required_predecessor: 'CV PASS tip',
     required_binding: 'cv_receipt_digest + commit_sha + changed_files boundary',
-    restart_reader: 'committer-receipts(stage, slice) SLICE_COMMIT tip reader',
+    restart_reader: 'slice-commit-receipts(stage, slice) SLICE_COMMIT tip reader',
   });
   steps.push({
     step: 'integration-admission',
-    producer: 'committer',
+    producer: 'brain',
     public_operation: 'proofloop stage admit-integration',
     consumer: 'admitVNextIntegration',
     accepted_binding_mode: bindingMode,
@@ -997,7 +997,7 @@ export function auditVNextStageComposition(manifest: VNextManifest): VNextStageC
   const dirLiveness: ReadonlyArray<readonly [string, unknown]> = [
     ['task-receipts', tasksReceiptDir],
     ['cv-receipts', cvReceiptDir],
-    ['committer-receipts', committerReceiptDir],
+    ['slice-commit-receipts', committerReceiptDir],
     ['integration-receipts', integrationReceiptDir],
     ['stage-gate-receipts', stageGateReceiptDir],
     ['review-receipts', reviewReceiptDir],
