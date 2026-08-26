@@ -477,13 +477,38 @@ function sliceChainSteps(
     });
   }
   steps.push({
+    step: 'dispatch(finalize-slice)',
+    producer: 'brain (stage next)',
+    public_operation: 'proofloop stage next',
+    consumer: 'VNextNextActionService.nextAction (read-only decision)',
+    accepted_binding_mode: bindingMode,
+    accepted_schema: 'vNext NextActionOutput (read-only decision)',
+    required_predecessor:
+      taskIds.length > 0 ? `worker-admission(${taskIds[taskIds.length - 1]})` : null,
+    required_binding:
+      'manifest_digest + plan_digest + snapshot_digest + worker chain completion (FINALIZE decision, no task scope)',
+    restart_reader: 'reconcileStage / deriveNextAction canonical lifecycle decision',
+  });
+  steps.push({
+    step: 'prepare-context(finalize-slice)',
+    producer: 'brain (context prepare)',
+    public_operation: 'proofloop context prepare',
+    consumer: 'persistVNextWorkerContext',
+    accepted_binding_mode: bindingMode,
+    accepted_schema: 'Context schema_version 2 (persistence seam)',
+    required_predecessor: 'dispatch(finalize-slice)',
+    required_binding:
+      'context_digest + manifest_digest + plan_digest + snapshot_digest + finalize-slice mode projection (no task scope)',
+    restart_reader: 'persisted root-bound Worker Context (.proofloop/context)',
+  });
+  steps.push({
     step: 'finalize-slice',
     producer: 'worker (completion mode finalize-slice)',
     public_operation: 'proofloop stage admit-worker',
     consumer: 'admitVNextWorkerResult',
     accepted_binding_mode: bindingMode,
     accepted_schema: credentialSchema,
-    required_predecessor: taskIds.length > 0 ? `worker-admission(${taskIds[taskIds.length - 1]})` : null,
+    required_predecessor: 'prepare-context(finalize-slice)',
     required_binding: 'exactly 1 finalize fact per Slice, no task identity, worker chain tip',
     restart_reader: 'task-receipts(stage, slice) finalize fact reader',
   });
@@ -955,7 +980,7 @@ export function auditVNextStageComposition(manifest: VNextManifest): VNextStageC
   // Behavior closure liveness tables — the named runtime seams must be live
   // functions or the expected action has no downstream consumer.
   const seamLiveness: Record<string, unknown> = {
-    'VNextNextActionService.nextAction (read-only decision)': VNextNextActionService,
+    'VNextNextActionService.nextAction (read-only decision)': VNextNextActionService.prototype.nextAction,
     'persistVNextWorkerContext': persistVNextWorkerContext,
     'persistVNextRoleContext': persistVNextRoleContext,
     'projectVNextWorkerDispatch + persistVNextWorkerContext': projectVNextWorkerDispatch,

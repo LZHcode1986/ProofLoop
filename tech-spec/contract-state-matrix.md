@@ -124,7 +124,7 @@ Unknown domain/operation 必须在任何 filesystem write 前返回 `RUNTIME.SCH
 |---|---|---|---|---|
 | stage_status | stage_id | 状态摘要 | reconcileStage | spec |
 | prepare_stage_review | stage_id, scope 输入准备 | ReviewInput 组装 + preparation fact 持久化 | 持久化 prepared fact 并组装 ReviewInput | spec |
-| finalize_stage_review | stage_id, verdict(ACCEPTED/REPAIR), summary | AdmitResult（REPAIR 为 no-Receipt warn 分支） | admission.admitStageReview（v1/vNext 显式分流） | parity vs vNext CLI |
+| finalize_stage_review | stage_id, verdict(ACCEPTED/REPAIR), summary | AdmitResult；vNext 持久化 STAGE_REVIEW_PASS(verdict=REPAIR)，仅 v1 走 no-Receipt warn 分支 | admission.admitStageReview（v1/vNext 显式分流） | parity vs vNext CLI |
 
 ### 1.4 proofloop_project — visible: brain, project-reviewer
 | Operation | Status | Input | Output | Producer | Verification |
