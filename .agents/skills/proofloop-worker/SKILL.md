@@ -13,20 +13,19 @@ Manifest、Plan 和当前 action 才是执行授权。
 
 Worker 收到 `contract_mode: vnext-template` packet 后，Host 按以下顺序加载：
 
-1. `transport: herdr-link` 或显式 `herdr-legacy` 时先加载 `.agents/skills/herdr/SKILL.md`：通用 Herdr 控制面、CLI 和 lifecycle 规则；Link route 的普通消息使用 `herdr_link_send`，不使用 raw CLI；
+1. `transport: herdr-link` 时加载 `.agents/skills/proofloop-execute/references/herdr-worker-template.md`：`herdr-link` Host relay、Session 绑定和结果读取映射；
 2. 本文件 `.agents/skills/proofloop-worker/SKILL.md`：通用 Worker 行为和结果回传；
-3. `transport: herdr-link` 或 legacy Herdr route 时加载 `.agents/skills/proofloop-execute/references/worker-template.md`：ProofLoop Worker Contract（任务契约）；
-4. Herdr route 最后加载 `.agents/skills/proofloop-execute/references/herdr-worker-template.md`：Link 优先的 Session/lifecycle 映射和显式 legacy 兼容规则；
-5. `transport: subagent` 时使用 harness-native wrapper（宿主原生包装器），但必须产出同一 Worker Result Contract（Worker 结果契约）。
+3. `transport: herdr-link` 时加载 `.agents/skills/proofloop-execute/references/worker-template.md`：ProofLoop Worker Contract（任务契约）；
+4. `transport: subagent` 时使用 harness-native wrapper（宿主原生包装器），但必须产出同一 Worker Result Contract（Worker 结果契约）。
 
 自然语言“你是 Worker”不能替代上述加载链。`skill_ref`、当前 Context 和
 `actionToken` 必须来自 Brain 的结构化 packet。
 
 ## Herdr Link 传输优先级
 
-当选定的 Herdr Runtime 已加载 `herdr-link/1` Adapter 且当前 Agent 有稳定 Agent Name 时，`herdr_link_send` 是正常的派发和结果通道。Task packet 放入 `message`，Worker 将严格 Result payload 作为 `reply_to` 回复。Brain 校验 `actionToken`/digest 并重读 Runtime 事实后再 admission；Link 的 `status: sent` 只表示消息已投递，不表示完成。
+当选定的 Herdr Runtime 已加载 `herdr-link` Adapter 且当前 Agent 有稳定 Agent Name 时，`herdr_link_send` 是正常的派发和结果通道。Task packet 放入 `message`，Worker 通过 `herdr_link_send` 返回严格 Result reply（关联原 dispatch message）。Brain 校验 `actionToken`/digest 并重读 Runtime 事实后再 admission；Link 的 `status: sent` 只表示消息已投递，不表示完成。
 
-`.agents/skills/herdr/SKILL.md` 和 Herdr CLI 仍是 pane 创建、Agent 启动/恢复、identity 检查及显式兼容路由的控制依赖。Link 可用时，它们不是普通消息通道。下方 ACP/READY 与 `recent-unwrapped` 规则仅适用于显式选择的 legacy Herdr route，不能与 Link route 静默混用。当前 Brain 生命周期规则以 `.agents/contracts/brain/herdr-link-worker-lifecycle.md` 为准。
+pane/Agent 创建、启动和宿主生命周期由 Host/运行环境负责，不属于 `herdr-link`，也不是普通消息通道。当前 Brain 生命周期规则以 `.agents/contracts/brain/herdr-link-worker-lifecycle.md` 为准。
 ## 执行边界
 
 - 只执行当前 packet 中唯一的 Runtime Primary Next Action；不选择未来 Task，不猜路径，
@@ -54,7 +53,7 @@ envelope `mode='repair'` 语义：repair 结果是持久化交接事实而非
 `stage admit-worker` 提交 repair envelope——Runtime 在 admission 处显式拒绝，
 repair 由 `stage next` 绑定校验消费后触发 fresh bounded CV recheck。
 
-`PROOFLOOP-WORKER-READY` 仅是 legacy ACP route 的兼容唤醒头。Herdr Link route 使用 `reply_to` 关联完整 Result；任何 route 中，`result_available` 都是不受信任提示，不能替代 Result、Evidence、Git/diff 或 Runtime Receipt。
+任何 route 中，`result_available` 都是不受信任提示，不能替代 Result、Evidence、Git/diff 或 Runtime Receipt。
 
 ## Worker Result 传输协议
 
@@ -65,20 +64,17 @@ Worker 必须先完成代码、测试、Evidence 和允许的 Plan projection，
 当 Herdr Link Adapter 可用且 Worker 有稳定 Agent Name：
 
 1. Brain 使用 `herdr_link_send` 发送 Task packet，保存返回的 Link message `id`；不等待、不轮询。
-2. Worker 使用 `herdr_link_send` 向 Brain 回复，设置 `reply_to` 为该 dispatch message `id`，`message` 内放当前 `VNextWorkerResultEnvelope` 的闭集正文。
-3. `reply_to` 是传输关联和唤醒信号，不是 Runtime admission；Link `status: sent` 不是完成证据。
-4. Brain 收到回复后校验 `reply_to`、`actionToken`、digest 和闭集字段，重读 Evidence、Context、tasks projection、Git/diff 和 Receipts，再交给适用的 Runtime/CV consumer。
-5. Worker Result 缺失、截断、重复、错目标、错 `reply_to`、错 action 或 schema 无效时 fail closed；不得由 `idle`、`done`、模型总结或 Git diff 补全。
+2. Worker 使用 `herdr_link_send` 向 Brain 回复，关联原 dispatch message `id`，`message` 内放当前 `VNextWorkerResultEnvelope` 的闭集正文。
+3. 回复关联是传输关联和唤醒信号，不是 Runtime admission；Link `status: sent` 不是完成证据。
+4. Brain 收到回复后校验回复关联、`actionToken`、digest 和闭集字段，重读 Evidence、Context、tasks projection、Git/diff 和 Receipts，再交给适用的 Runtime/CV consumer。
+5. Worker Result 缺失、截断、重复、错目标、错回复关联、错 action 或 schema 无效时 fail closed；不得由 `idle`、`done`、模型总结或 Git diff 补全。
 
 结果正文仍使用当前字段：`schemaVersion`、`actionToken`、`stageId`、`sliceId`、`taskId`、`mode`、`outcome`、`evidenceRef`、`changedFiles`、`verificationRuns`、`manifestDigest`、`planDigest`、`proofIndexDigest`、`snapshotDigest`、`contextRef`、`contextDigest`，以及仅 `mode='repair'` 时允许出现的 `repairsCvReceiptDigest`（64hex，非 repair mode 禁止携带）。未知别名或自由扩展字段必须拒绝。
 
-### Legacy Herdr route
+## Herdr Link 边界
 
-仅当 Session 显式选择没有 Link Adapter 的 legacy route 时，才使用旧 ACP/READY/`recent-unwrapped` 规则。该 route 必须遵守原有严格 marker、actionToken/digest、idle/done 和 fail-closed 约束；不能与 Herdr Link route 静默混用。
+`herdr-link` 只承载消息；pane/Agent 创建、启动和宿主生命周期由 Host/运行环境负责，不属于 Link，也不是普通消息通道。Brain 的 dispatch/continue/recall 决策以 `.agents/contracts/brain/herdr-link-worker-lifecycle.md` 为准。
 
-## Herdr Skill/CLI 边界
-
-Herdr Skill/CLI 仍用于 pane 创建/布局、Agent 启动/恢复、identity/lifecycle 检查和显式兼容 route。Link 可用时，不得使用 raw `agent prompt`、`--wait`、`agent.read`、`pane.read`、`send-text` 或 `send-keys` 传输普通消息。Brain 的 dispatch/continue/recall 决策以 `.agents/contracts/brain/herdr-link-worker-lifecycle.md` 为准。
 ## Subagent 兼容路线
 
 `transport: subagent` 不使用 Herdr wait/read/callback，但必须通过其 adapter 取得
@@ -101,8 +97,8 @@ Herdr Skill/CLI 仍用于 pane 创建/布局、Agent 启动/恢复、identity/li
 
 Worker/Host 只有同时满足以下条件才可返回成功 readiness：
 1. 当前 Task/repair 的代码、测试、Evidence 和允许 projection 已完成；
-2. Herdr Link route 已收到与当前 dispatch message `id` 关联的完整 Result reply；legacy route 才使用完整 ACP/READY block；
-3. Brain 已校验 `reply_to`、`actionToken`、digest 和闭集 schema，并重读持久化事实；
+2. Herdr Link route 已收到与当前 dispatch message `id` 关联的完整 Result reply；
+3. Brain 已校验回复关联、`actionToken`、digest 和闭集 schema，并重读持久化事实；
 4. Brain 已把结果交给正确的 Runtime/CV consumer；Worker 的 `idle`/`done`、Link `status: sent` 或模型总结均不替代这些条件。
 
 `READY_FOR_CV` 不是 CV PASS，`TASK_COMPLETE` 不是 Slice Complete，任何 lifecycle

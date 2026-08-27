@@ -22,8 +22,8 @@ Brain 负责：
 
 - Stage 入口条件和全局路由；
 - 加载本技能、共享 `.agents/skills/proofloop-worker/SKILL.md` 和对应 role template；
-- 通过当前 Host relay 路由 Worker（`herdr-link` 为通信优先，Herdr Skill/CLI 负责 pane/Agent 生命周期控制，`herdr-legacy` 为显式兼容路线，`subagent` 为 harness-native 兼容路线）；三种 Worker route 见本技能的 `DISPATCH_WORKER` 分支；
-- Herdr Link 可用时，使用 `herdr_link_send` 派发并通过 `reply_to` 接收 Worker Result；Brain 重读 Context、Evidence、Git/diff 和 Receipts 后交给正确 consumer。Link 不可用时只能选择明确的兼容 route；不得静默改用 raw ACP、`recent-unwrapped` 或 `--wait`。
+- 通过当前 Host relay 路由 Worker（`herdr-link` 为跨 Agent / 跨 pane 的通信优先；`subagent` 为显式同 harness 兼容路线）；两条 Worker route 见本技能的 `DISPATCH_WORKER` 分支；
+- Herdr Link 可用时，使用 `herdr_link_send` 派发并接收 Worker Result（回复关联由 `herdr_link_send` 完成）；Brain 重读 Context、Evidence、Git/diff 和 Receipts 后交给正确 consumer。Link 不可用时只能选择明确的 `subagent` 兼容 route；不存在自动或显式的 legacy 派发路线。
   `repair`/`diagnose` 不送入当前 `stage admit-worker`；
 - CV repair 派发纪律：CV_REPAIR admitted 后，所有 repair 一律以
   `DISPATCH_WORKER mode=repair` 派发（taskless Context，携带
@@ -140,13 +140,11 @@ Runtime 返回的 `context_ref` 是 Agent 的最小上下文入口。
 ```text
 DISPATCH_WORKER
 → resolve host_relay.transport
-→ Herdr Link available: `.agents/skills/herdr/SKILL.md` for lifecycle control
 → `.agents/skills/proofloop-worker/SKILL.md`
 → `.agents/skills/proofloop-execute/references/worker-template.md`
-→ `.agents/skills/proofloop-execute/references/herdr-worker-template.md`（生命周期与显式 legacy route）
-→ `herdr-link`: `herdr_link_send` Task message → `reply_to` Result → re-read durable facts
-→ legacy Herdr route: explicit ACP/READY compatibility only; no silent fallback
-→ `subagent`: harness-native Worker wrapper with the same Result Contract
+→ `.agents/skills/proofloop-execute/references/herdr-worker-template.md`（Link Task/Result 映射）
+→ `herdr-link`: `herdr_link_send` Task message → Result reply → re-read durable facts
+→ `subagent`: explicit same-harness Worker wrapper with the same Result Contract
 RUN_CV
 → references/code-verifier-template.md
 
@@ -178,7 +176,7 @@ VALIDATE
 
 ## Task 与 Slice 循环
 
-Worker 每次只接收一个 Runtime 指定的 Task，并且只接收 admitted Plan 投影的 immutable execution scope（dispatch packet、`mode` 语义和 Worker 角色规则见 `references/worker-template.md`）。Stage 支持 `herdr-link`、显式 `herdr-legacy` 和 `subagent` 三种 Worker route；Link Adapter 可用时优先 `herdr-link`，没有 Link 时不得静默切换。transport 在 Session 创建时固定；缺少所选 route 的 Contract、环境守卫或 adapter 时返回 bounded blocker。
+Worker 每次只接收一个 Runtime 指定的 Task，并且只接收 admitted Plan 投影的 immutable execution scope（dispatch packet、`mode` 语义和 Worker 角色规则见 `references/worker-template.md`）。Stage 支持 `herdr-link` 与显式 `subagent` 两种 Worker route；Link Adapter 可用时优先 `herdr-link`，没有 Link 时不得静默切换。`herdr-link` 是跨 Agent / 跨 pane 的 Task/Result 通道；`subagent` 是显式同 harness 兼容路线，不是跨 pane 通信。transport 在 Session 创建时固定；缺少所选 route 的 Contract、环境守卫或 adapter 时返回 bounded blocker。
 
 ```text
 DISPATCH_WORKER
@@ -227,7 +225,7 @@ admission（见「动作路由」），其余 verdict 只能进入 Brain 路由�
   等于最新 CV_REPAIR tip digest、Context 文件存在且 digest 匹配）→
   `cvStatus = PENDING_RECHECK` → `RUN_CV recheck`；recheck 再次失败会产生
   新的 CV_REPAIR（digest 不同），旧 envelope 失配并回到 REPAIR 状态进入
-  下一轮修复。Worker repair 的 Herdr Link Result（或显式 legacy Result）
+  下一轮修复。Worker repair 的 Herdr Link Result
   经过 action/digest 校验后同样不得送入当前 `stage admit-worker`；
 - Goal、Authority refs、Proof Index、Manifest、Plan、Context 或验证边界变化时，必须重新 initial CV；
 - Worker repair 后的 fresh CV recheck 再次返回 `REPAIR` 时，Brain 必须加载

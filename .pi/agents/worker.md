@@ -27,7 +27,7 @@ validate the Worker Contract:
 .agents/skills/proofloop-execute/references/worker-template.md
 ```
 
-For `transport: herdr-link` or explicit `herdr-legacy`, the Host relay additionally loads `.agents/skills/herdr/SKILL.md` and `.agents/skills/proofloop-execute/references/herdr-worker-template.md`. In the Link route, send one strict Result payload to Brain through `herdr_link_send` with `reply_to` set to the dispatch message id; do not use raw Herdr CLI, `--wait`, pane reads or terminal input for ordinary messages. The legacy route alone uses ACP/READY/`recent-unwrapped` compatibility rules. A missing or mismatched Result is `WORKER_RESULT_MISSING` and must fail closed.
+For `transport: herdr-link`, the Host relay additionally loads `.agents/skills/proofloop-execute/references/herdr-worker-template.md`. In the Link route, send one strict Result payload to Brain through `herdr_link_send`, which carries the reply association; pane/Agent resources are created and started by the Host. A missing or mismatched Result is `WORKER_RESULT_MISSING` and must fail closed.
 
 Brain owns the Worker session relay for this mode. Runtime remains the owner of admission, Receipt writing and completion judgment. The vNext template takes precedence over legacy-only packet fields; do not request Brain to reconstruct missing fields from the old Executor Contract.
 

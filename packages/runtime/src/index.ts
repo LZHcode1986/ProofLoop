@@ -746,7 +746,7 @@ export type {
 export { proofloopCli } from './cli/proofloop';
 export type { ProofloopCliOptions } from './cli/proofloop';
 export { runBoundaryDomain } from './cli/proofloop-boundary';
-export { closeGitBoundary, BOUNDARY_TYPES, GitBoundaryError } from './git-boundary';
+export { closeGitBoundary, BOUNDARY_TYPES, GitBoundaryError, assertStageCloseTipBindings } from './git-boundary';
 export type { BoundaryCloseRequest, BoundaryCloseResult, BoundaryType } from './git-boundary';
 // S13-S17 remediation §7.3: the public next CLI route seam is part of the
 // Runtime public surface so consumers and tests share one import path.

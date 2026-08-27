@@ -7,7 +7,11 @@ around the call.
 Brain owns the judgment that a boundary is ready and owns recovery decisions.
 Runtime owns the deterministic Git transaction and all Runtime Receipt
 admission. Brain and every Agent MUST NOT establish a write Git boundary by
-running `git add`, `git mv`, or `git commit` directly.
+running `git add`, `git mv`, or `git commit` directly. The ONE explicit
+exception is `artifact-archive`: Brain pre-executes the exact `git mv` (the
+pure rename) so that the CLI only validates the already-staged rename and
+commits it; no other Agent may run any write Git command.
+
 
 ## Use when
 
@@ -51,13 +55,16 @@ The request is a closed object sent to the public Runtime CLI:
 ```
 
 Only fields applicable to the selected boundary type are sent. The CLI rejects
-unknown fields, path escapes, protected `.git/**`/`.proofloop/**` paths, an
-unexpected HEAD/branch, and a non-empty index.
+unknown fields, path escapes, protected `.git/**`/`.proofloop/**` paths, and an
+unexpected HEAD/branch. Ordinary boundaries also require an initially empty
+index; `artifact-archive` is the sole exception, allowing exactly one already
+staged exact pure rename (validated before commit).
 
-For `slice-output`, Brain sends `stage`, `slice`, `cv_receipt_digest` and, when
-available, `manifest_digest`/`expected_head`; it does not supply a second
-scope authority through `paths`. Runtime loads the current Manifest, Stage
-Plan/SPV, Worker chain and CV chain, then derives the shared Slice Commit
+For `slice-output`, Brain MUST send `stage`, `slice`, `cv_receipt_digest` and
+`expected_head` (the current HEAD is pinned so a mismatch fails before any Git
+write); `manifest_digest` is also sent when available. It does not supply a
+second scope authority through `paths`. Runtime loads the current Manifest,
+Stage Plan/SPV, Worker chain and CV chain, then derives the shared Slice Commit
 policy. The CLI validates the policy before and after the commit.
 
 ## Preconditions
@@ -65,7 +72,7 @@ policy. The CLI validates the policy before and after the commit.
 Brain must re-read and establish, before invoking the CLI:
 
 - canonical Trust Root and expected branch;
-- current HEAD and an empty index;
+- current HEAD and an empty index (except `artifact-archive`, where Brain has already staged the single exact rename);
 - the selected boundary's exact scope and no unresolved scope decision;
 - the applicable Manifest/Plan/Evidence/Receipt bindings;
 - for `slice-output`: admitted Worker completion facts, finalized Evidence,
@@ -76,17 +83,23 @@ Brain must re-read and establish, before invoking the CLI:
 
 ### Boundary-specific semantic preconditions
 
-- `stage-plan`: Validator PASS；Manifest 已由 Runtime 编译并存储，所有 Manifest-declared Slice Evidence skeleton 完整且 digest 一致；每个 `implement-task` 都有非空、不可变、root-relative `execution_scope.code_paths` 与 `test_paths`；candidate Plan、candidate input 和 Evidence skeleton 位于最终 tracked Git boundary。SPV `PLAN_READY` 不属于本次提交前置条件，必须在 boundary 完成后对新 HEAD fresh 执行。
-- `stage-close`: Stage Gate PASS、Stage Reviewer ACCEPTED、对应 Receipt 路径可读且语义有效、integrated snapshot 与 Receipt 一致，并且所有 Manifest-declared Slice Evidence 已 finalized。
+- `stage-plan`: Validator PASS；Manifest 已由 Runtime 编译并存储，所有 Manifest-declared Slice Evidence skeleton 完整且 digest 一致；每个 `implement-task` 都有非空、不可变、root-relative `execution_scope.code_paths` 与 `test_paths`；candidate Plan、candidate input 和 Evidence skeleton 位于最终 tracked Git boundary。`manifest_digest` 必填且必须等于 Runtime 持久化 Manifest 的实际 digest（CLI 在写操作前校验）；SPV `PLAN_READY` 不属于本次提交前置条件，必须在 boundary 完成后对新 HEAD fresh 执行。
+- `stage-close`: Stage Gate PASS、Stage Reviewer ACCEPTED、对应 Receipt 路径可读且语义有效、integrated snapshot 与 Receipt 一致，并且所有 Manifest-declared Slice Evidence 已 finalized。CLI 在写操作前做强校验（只读，不写 Receipt）：Gate tip 为 GATE_PASS 且其 snapshot_digest 精确等于当前 integrated HEAD；Review tip 为 ACCEPTED 且其 snapshot_digest 精确等于当前 HEAD 并绑定当前 Gate tip digest；已 archived 的 Stage 一律 fail-closed 拒绝再次 close；每个 Manifest-declared Slice Evidence 通过 `isSliceEvidenceFinalized`（经 no-follow 打开 fd 读取内容）校验为非 skeleton/placeholder（`*None*` 占位行视为未 finalized 并拒绝）。
 - `artifact-archive`: packet 必须证明待归档 artifact 是 Validator/SPV 使其失效的、admission 前的 pristine planning artifact；没有 admitted Stage Plan 或执行 Receipt 依赖它；source 已 tracked 且在 expected HEAD 未改变，destination 缺失、带 old Manifest digest，且不是 active Manifest-declared Evidence path。
 - `authority-update` / `workflow-contract-update`: Brain 已取得相应批准，并提供完整、精确、无歧义的 root-relative path set；不得把边界 CLI 当作 authority 或 contract 语义判断者。
 - `prototype-checkpoint`: 使用指定 Prototype worktree 与 expected branch；no-push、no-merge 约束由 Brain 保持，CLI 只建立本地边界。
 - `runtime-repair`: packet 必须声明 governing recovery Contract、exact repair paths、pre-commit HEAD 和 test evidence；这是 Runtime/Host repair boundary，不是 Slice Commit，也不得包含 Stage、Receipt、Authority 或 Agent configuration。
 
-A dirty or untracked path outside the selected boundary is not silently
-claimed by the boundary. The CLI leaves it untouched and reports
-`dirty_after`; Brain decides whether it is user work, another execution, or a
-recovery blocker.
+Strict dirty gate: BEFORE any Git write (and before the CLI resolves the
+commit path set), every actual dirty/untracked path must belong to the
+selected boundary's tolerated scope. A scope-external dirty path — including
+an outside-only worktree where the declared/prefix scope has no hits — fails
+closed with `BOUNDARY.SCOPE_VIOLATION` (never mis-reported as `NO_CHANGES`)
+and leaves HEAD and the index unchanged; the CLI never resets, unstages, or
+stashes. For `slice-output`, the current Slice committable paths plus the
+other-Slice declared dirty files are tolerated in the worktree, but other-Slice
+files are NEVER committed by this boundary (they remain dirty and are reported
+through `dirty_after`).
 
 ## Scope table
 
@@ -94,14 +107,14 @@ recovery blocker.
 |---|---|
 | `baseline-authority` | `CONTEXT.md`, `PRD.md`, `tech-spec/*`, `progress.md` |
 | `stage-plan` | dirty paths under `delivery/stages/<stage-id>/` |
-| `artifact-archive` | exactly the two requested source/destination paths; the CLI performs and verifies the pure Git rename |
+| `artifact-archive` | exactly the two requested source/destination paths; Brain pre-executes the exact `git mv`; the CLI validates the already-staged pure rename and commits it |
 | `authority-update` | explicit paths under approved authority roots |
-| `workflow-contract-update` | explicit paths under `.agents/skills`, `.agents/contracts`, `.opencode/agents` |
+| `workflow-contract-update` | explicit paths under `.agents/skills`, `.agents/contracts`, `.opencode/agents`, `.pi/brain-workflow.md` and active `.pi/agents` (no arbitrary `.pi` files) |
 | `prototype-checkpoint` | explicit Prototype worktree paths with an expected branch |
 | `stage-close` | dirty paths under `delivery/stages/<stage-id>/` and `progress.md` |
 | `direct-fix` | explicit task-bounded paths |
 | `runtime-repair` | explicit paths, excluding Stage/Receipt/Authority/agent configuration roots |
-| `slice-output` | Runtime-derived Slice policy: current Slice execution scope plus already-admitted interleaved Slice declarations; system-protected paths are always forbidden |
+| `slice-output` | Runtime-derived Slice policy: current Slice execution scope only (other-Slice declared dirty files are tolerated but NEVER committable); system-protected paths are always forbidden |
 
 ## CLI transaction
 
@@ -117,7 +130,7 @@ transaction:
 
 1. canonical root, HEAD, branch, index, status and request checks;
 2. boundary-specific scope derivation;
-3. `diff --check` and exact staging (or the exact archive rename);
+3. `diff --check` and exact staging; for `artifact-archive`, validation of the Brain-staged exact rename (no `git mv` by the CLI);
 4. staged-set and cached-diff verification;
 5. the canonical Git commit message and `git commit`;
 6. post-commit HEAD and changed-file verification;
@@ -162,8 +175,9 @@ facts.
 
 ## Prohibited actions
 
-- Direct write Git commands from Brain, Worker, CV, Reviewer, Prototype or any
-  other Agent;
+- Direct write Git commands from Worker, CV, Reviewer, Prototype or any Agent
+  other than the single `artifact-archive` exception where Brain pre-executes
+  the exact `git mv` rename;
 - `git add .`, broad staging, implicit path expansion or a second scope policy;
 - manual `SLICE_COMMIT`, Integration, Gate or Review Receipt creation;
 - replacing the compatibility Receipt category as part of this refactor;

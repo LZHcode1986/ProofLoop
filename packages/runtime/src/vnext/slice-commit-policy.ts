@@ -18,12 +18,27 @@ export interface SliceCommitPolicyFacts {
   readonly planDigest: string;
   readonly snapshotDigest: string;
   readonly cvReceiptDigest: string;
-  /** Union of the current Slice scope and already-admitted interleaved outputs. */
+  /**
+   * Current Slice committable scope only — never includes another Slice's
+   * declared files. A parallel Slice's dirty output is tolerated in the
+   * worktree but MUST NOT be staged or committed by this Slice boundary (see
+   * otherSliceDeclaredFiles).
+   */
   readonly allowedPaths: readonly string[];
+
+  /**
+   * Files declared by OTHER Manifest Slices' persisted Worker facts. These are
+   * dirty-eligible (tolerated in an interleaved worktree) but NEVER committable by
+   * the current Slice boundary; they remain outside the staging scope.
+   */
+  readonly otherSliceDeclaredFiles: readonly string[];
+
   /** System-protected paths and any other policy-level forbidden paths. */
   readonly forbiddenPaths: readonly string[];
+
   /** Files declared by the persisted Worker completion facts. */
   readonly workerChangedFiles: readonly string[];
+
   /** REPAIR permits repair-only files, but still requires every Worker fact file. */
   readonly hasRepairHistory: boolean;
 }
@@ -37,6 +52,8 @@ export interface SliceCommitPolicy {
   readonly snapshotDigest: string;
   readonly cvReceiptDigest: string;
   readonly allowedPaths: readonly string[];
+  /** Dirty-eligible but never committable: other Slices' declared worker outputs. */
+  readonly otherSliceDeclaredFiles: readonly string[];
   readonly forbiddenPaths: readonly string[];
   readonly workerChangedFiles: readonly string[];
   readonly hasRepairHistory: boolean;
@@ -113,6 +130,9 @@ export function loadSliceCommitPolicy(facts: SliceCommitPolicyFacts): SliceCommi
   const workerChangedFiles = unique(
     facts.workerChangedFiles.map((value, index) => canonicalPath(value, `Slice Commit Worker file[${index}]`)),
   );
+  const otherSliceDeclaredFiles = unique(
+    facts.otherSliceDeclaredFiles.map((value, index) => canonicalPath(value, `Slice Commit other-Slice declared file[${index}]`)),
+  );
   if (allowedPaths.length === 0) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy must contain a non-empty allowed scope');
   }
@@ -125,6 +145,7 @@ export function loadSliceCommitPolicy(facts: SliceCommitPolicyFacts): SliceCommi
     snapshotDigest: facts.snapshotDigest,
     cvReceiptDigest: facts.cvReceiptDigest,
     allowedPaths,
+    otherSliceDeclaredFiles,
     forbiddenPaths,
     workerChangedFiles,
     hasRepairHistory: facts.hasRepairHistory,

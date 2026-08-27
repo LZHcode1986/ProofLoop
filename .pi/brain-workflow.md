@@ -72,7 +72,7 @@ Brain must not:
 - mutate Git state directly or resolve merge conflicts; Git boundary writes go through the Boundary CLI;
 - independently invent or revise PRD or Tech Spec semantics.
 
-During the active `pluginv2` Stage Delivery route, Brain dispatches direct role Agents only through their active Skill/template. Worker uses an explicit Host routing profile: `transport: herdr-link` when a Link Adapter and stable Agent Names are available; `transport: herdr-legacy` only as an explicit compatibility route; `transport: subagent` is the harness-native compatibility route. The selected transport is fixed for the Worker Session; Brain never implements role work, writes Receipts, or replaces Runtime admission.
+During the active `pluginv2` Stage Delivery route, Brain dispatches direct role Agents only through their active Skill/template. Worker uses an explicit Host routing profile: `transport: herdr-link` when a Link Adapter and stable Agent Names are available; `transport: subagent` is the explicit same-harness compatibility route. The selected transport is fixed for the Worker Session; Brain never implements role work, writes Receipts, or replaces Runtime admission.
 
 In the active pluginv2 route, `proofloop-plan` owns candidate Plan guidance,
 Runtime owns compilation/validation/admission, and Brain dispatches fresh SPV
@@ -491,10 +491,10 @@ returns, and receipt/admission boundary.
 
 Brain manages session relay for its direct agents: Stage Plan Verifier,
 Code Verifier, Stage Reviewer, Researcher, Prototype, and General.
-Worker session relay is selected by the Host routing profile: Herdr uses the
-Herdr control Skill and relay template; the explicit `subagent` compatibility
-route uses the harness-native Worker wrapper while preserving the same Worker
-Contract and Runtime admission.
+Worker session relay is selected by the Host routing profile: `herdr-link` uses
+the Herdr relay template; the explicit `subagent` compatibility route uses the
+harness-native Worker wrapper while preserving the same Worker Contract and
+Runtime admission.
 
 On each dispatch, Brain resolves the runtime session by matching:
 - role (agent type)
@@ -508,7 +508,7 @@ If a matching session exists with unchanged inputs and is available for continua
 Session relay rules are owned by each role Skill/template:
 
 - Direct role agents continue only with unchanged semantic inputs; lost sessions or changed digests require a fresh dispatch.
-- Worker continuation follows the selected `herdr-link`, explicit `herdr-legacy`, or `subagent` transport and the active Worker templates. The transport cannot change silently within a Session.
+- Worker continuation follows the selected `herdr-link` or explicit `subagent` transport and the active Worker templates. The transport cannot change silently within a Session.
 
 Session IDs are runtime relay information only. Brain must **never** write
 session IDs into:
@@ -593,7 +593,7 @@ general
 
 Worker is not in this direct-dispatch list by default. A Stage may explicitly
 select the compatibility `subagent` transport, which uses the existing Worker
-wrapper; the default `herdr` transport uses the relay described below. Both
+wrapper; the default `herdr-link` transport uses the relay described below. Both
 routes share the Worker Contract and Runtime admission.
 
 Create a fresh agent with:
@@ -647,29 +647,27 @@ Rules:
 
 - Do not use the legacy `subagent(...)`, OpenCode `task`, Planner, or Executor relay APIs.
 - Do not use `inherit_context` by default; each dispatch Contract must be complete.
-- Do not use pi-subagents automatic `isolation: worktree` for Prototype because it auto-commits changes. Prototype uses the explicit Contract worktree. Boundary writes use the Runtime Boundary CLI. Worker uses Herdr by default; the explicit `subagent` compatibility route remains available during migration.
+- Do not use pi-subagents automatic `isolation: worktree` for Prototype because it auto-commits changes. Prototype uses the explicit Contract worktree. Boundary writes use the Runtime Boundary CLI. Worker uses `herdr-link` by default; the explicit `subagent` same-harness compatibility route remains available.
 - SPV is always fresh. Initial/recheck CV is fresh. Reviewer is fresh when semantic inputs change. Boundary CLI calls may be retried only after a pure interruption with identical Git state.
 - If an Agent ID is lost, create a fresh agent from persisted facts.
 
-### Worker dispatch: Herdr Link, legacy Herdr, or subagent
+### Worker dispatch: herdr-link or subagent
 
 The single source of truth for `dispatch → continue → recall` is `.agents/contracts/brain/herdr-link-worker-lifecycle.md`; load it before selecting a Worker route. This workflow records only the route summary:
-- `herdr-link`: Link Adapter + stable Agent Name required; use `herdr_link_send`/`reply_to` for Task/Result messages.
-- `herdr-legacy`: explicit migration route when Link is unavailable; ACP/READY/`recent-unwrapped` applies only there.
-- `subagent`: explicit harness-native compatibility route; no implicit Herdr fallback.
-- Herdr Skill/CLI controls pane/Agent lifecycle and identity; Link route does not use raw CLI for ordinary messages. If Link is unavailable without an explicit compatibility route, return a typed blocker.
+- `herdr-link`: Link Adapter + stable Agent Name required; `herdr_link_peers` discovers live peers; `herdr_link_send` carries Task/Result messages with reply association.
+- `subagent`: explicit same-harness compatibility route; not cross-pane communication and no implicit Herdr fallback.
+- `herdr-link` only carries messages; pane/Agent creation, startup and host lifecycle are the Host/runtime's responsibility. If Link is unavailable without an explicit compatibility route, return a typed blocker.
 - Dispatch sends one Runtime-selected Task without waiting; continuation requires unchanged bindings and an admitted prior action; existing work after Session loss uses `recover-task`/`recheck`.
 - Recall requires canonical Runtime CV `PASS` plus Slice close/invalidation, or an explicit pause/cancel boundary with safe recovery state; for independent read-only/documentation Workers, a complete Result plus Brain fact re-read and no continuation/recovery/pending action is also a recall condition; `idle`/`done` alone does not close a Worker.
-Herdr pane layout is Host-only display policy. On creation of new Worker
+Pane layout is Host-only display policy. On creation of new Worker
 harnesses, slots 1 and 2 split right; slots 3 and 4 split down within the Worker
-region. Host must explicitly bind the split target and direction, preserve live
-pane/session bindings, and consult `.agents/skills/herdr/SKILL.md`/installed
-`--help` for command syntax. Layout never changes Runtime authority; slots beyond
+region. Host must explicitly bind the split target and direction and preserve
+live pane/session bindings. Layout never changes Runtime authority; slots beyond
 4 require an explicit Host decision.
 
 Session recovery preserves the original action, Context binding and transport.
 If a Worker has already produced a diff or Evidence, use `recover-task`/recheck;
-do not silently switch to a new implementation Task. Switching between Herdr
+do not silently switch to a new implementation Task. Switching between herdr-link
 and subagent is allowed only when creating an explicit new/recovery Session and
 is never an implicit fallback.
 

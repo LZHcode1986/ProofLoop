@@ -1389,6 +1389,11 @@ function buildSliceCommitPolicyFacts(
     tuple.stageId,
     tuple.sliceId,
   );
+  // P0 slice-output isolation: the current Slice's committable staging scope is
+  // its OWN execution scope ONLY. A parallel Slice's declared dirty output is
+  // dirty-eligible (tolerated in an interleaved worktree) but NEVER committable
+  // by this Slice boundary, so it is carried in the separate
+  // otherSliceDeclaredFiles field and must never be staged or committed here.
   return {
     root,
     stageId: tuple.stageId,
@@ -1397,7 +1402,8 @@ function buildSliceCommitPolicyFacts(
     planDigest: tuple.planDigest,
     snapshotDigest: tuple.snapshotDigest,
     cvReceiptDigest: cv.tipDigest as string,
-    allowedPaths: unique([...slice.allowedExecutionScope, ...otherSliceDeclaredFiles]),
+    allowedPaths: unique([...slice.allowedExecutionScope]),
+    otherSliceDeclaredFiles: unique(otherSliceDeclaredFiles),
     forbiddenPaths: systemForbiddenPaths(root),
     workerChangedFiles: unique(worker.facts.flatMap((fact) => fact.changedFiles)),
     hasRepairHistory: cv.envelopes.some((envelope) => envelope.verdict === 'REPAIR'),
