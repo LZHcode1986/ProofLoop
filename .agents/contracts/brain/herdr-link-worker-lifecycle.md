@@ -28,9 +28,9 @@ Link **不创建也不启动** pane 或 Agent。资源创建、Agent 启动、Se
 `transport` 必须在 Session 创建时固定：
 
 - `herdr-link`：已安装 Link Adapter 且当前 Agent 有稳定 Agent Name，普通消息和 Result 使用 Link；
-- `subagent`：显式的同 harness 兼容路线，必须产出同一 Worker Result Contract，不是跨 pane 通信，也不是 Herdr 失败后的 fallback。
+- `subagent`：显式的同 harness 兼容路线，必须产出同一 Worker Result Contract，不是跨 pane 通信，也不是 Herdr 失败后的自动 fallback。
 
-`herdr-link` 是唯一跨 Agent / 跨 pane 的 Task/Result 消息通道；不存在自动/隐式的 legacy 派发路线。Link 不可用时不得自动或显式 fallback 到其他消息路线。
+`herdr-link` 是唯一跨 Agent / 跨 pane 的 Task/Result 消息通道；不存在自动/隐式的其他派发路线。Link 不可用且当前 Session 已选择 `herdr-link` 时不得切换 transport；只有明确创建新/recovery `subagent` Session 才能使用兼容路线。
 
 Link 不可用且未明确选择 `subagent` 时，返回 typed blocker；不能假定 Link 已加载或混用多个 transport。
 

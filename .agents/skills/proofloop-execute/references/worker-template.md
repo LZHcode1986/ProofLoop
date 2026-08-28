@@ -1,24 +1,10 @@
-# Worker 派发模板
+# Worker Packet / Result Template
 
-本模板供 `proofloop-execute` 由 Brain 直接调度 Worker 使用。它定义跨 harness 的 Worker Contract；通用 Worker 行为、Evidence 顺序、结果输出和主动唤醒协议以 `.agents/skills/proofloop-worker/SKILL.md` 为唯一事实源。Host relay 的启动、等待、读取和 Session 生命周期由所选 transport 的模板负责。
+本模板只定义 Worker packet、Result envelope、字段约束和 Runtime handoff。Worker 的执行顺序与
+Evidence 行为以 `.agents/skills/proofloop-worker/SKILL.md` 为唯一事实源；`herdr-link` Host relay 的
+Session/transport 适配以 `herdr-worker-template.md` 为准。
 
-## Host relay 选择
-
-Worker 的目标 Host 由 Brain/dispatch routing 在 Session 创建时确定。当前通信优先使用 Herdr Link；没有 Link Adapter 时只能显式选择 subagent：
-```yaml
-host_relay:
-  transport: herdr-link | subagent
-  profile_ref: herdr-worker | subagent-worker
-  agent_kind: agy # Host route only
-```
-
-- `host_relay` 是一次性派发元数据，不属于 Manifest、Context、Evidence、Receipt 或 Runtime Result Contract。
-- `transport: herdr-link` 时，Brain/adapter 使用 `.agents/skills/proofloop-worker/SKILL.md` 的 Link Result 规则和 `references/herdr-worker-template.md` 的 Session 映射；普通消息使用 `herdr_link_send` 传输并携带回复关联。
-- `transport: subagent` 使用现有 harness-native Worker wrapper；该路由是显式同 harness 兼容路径，不是跨 pane 通信，也不是 Herdr 失败后的隐式 fallback。
-- `agent_kind` 只适用于 `herdr-link` route；`agy` 为默认 harness，`pi` 表示 Host 启动独立 Pi harness，不是 `pi-subagents` 扩展。
-- 同一 Worker Session 的相邻 Task、`finalize-slice` 和 CV repair/recheck 必须保持同一 transport、Session 和 harness binding；切换只能在新 Session 或显式 recovery route 中发生。
-
-## 派发数据包
+## Dispatch packet schema
 
 ```yaml
 target_agent: worker
@@ -29,14 +15,14 @@ contract_mode: vnext-template
 mode: implement-task | recover-task | finalize-slice | repair
 stage_id: <stage-id>
 slice_id: <slice-id>
-task_id: <single-current-task-id | null for finalize-slice | repair>
+task_id: <single-current-task-id | omitted for finalize-slice | repair>
 project_root: <canonical-trust-root>
 manifest_path: .proofloop/manifests/<stage-id>.json
 manifest_digest: <sha256>
 plan_digest: <sha256>
 context_ref: .proofloop/context/<context-digest>.json
 context_digest: <sha256>
-repairs_cv_receipt_digest: <sha256> # 仅 mode: repair；taskless Context 携带
+repairs_cv_receipt_digest: <sha256> # only mode: repair; taskless Context
 snapshot_digest: <sha256>
 evidence_path: delivery/stages/<stage-id>/evidence/<slice-id>.md
 plan_projection_path: delivery/stages/<stage-id>/tasks.md
@@ -57,7 +43,8 @@ required_skills: []
 allowed_code_scope: []
 forbidden_scope: []
 stop_conditions: []
-expected_result: TASK_COMPLETE | READY_FOR_CV
+expected_result: TASK_COMPLETE | READY_FOR_CV | REPAIR_HANDOFF
+              # mode: repair → REPAIR_HANDOFF：结果只被 CV recheck 消费，永不形成 TASK_COMPLETE
 host_relay:
   transport: herdr-link | subagent
   profile_ref: herdr-worker | subagent-worker
@@ -65,87 +52,102 @@ host_relay:
   # worker_session_ref is ephemeral and never persisted
 ```
 
-`host_relay` 仅供 Brain/Herdr adapter 使用；Runtime admission 只消费当前 Worker Contract、Context 和非权威 Worker Result envelope。Herdr 的 lifecycle 状态不能代替 `TASK_COMPLETE`、CV verdict 或 Receipt。
+## Packet invariants
 
-## 必需规则
-
-- `implement-task`、`recover-task` 必须只有一个 `task_id`；
-- `implement-task` 必须携带与 Context/Manifest 完全一致的 immutable `execution_scope`；
-  `code_paths`、`test_paths` 和 `allowed_code_scope` 非空且 root-bound，不能只有
-  Evidence path；`evidence-only` scope 不能路由为 `implement-task`；
+- `implement-task`/`recover-task` 有且仅有一个 `task_id`；`finalize-slice`/`repair` 为 taskless Context。
+- `implement-task`/`recover-task` 的 `execution_scope.kind`、`code_paths`、`test_paths` 和
+  `allowed_code_scope` 必须非空、root-bound 且与 Context/Manifest/Plan digest 完全一致；
+  `evidence-only` 不得路由为 `implement-task`。
 - `plan_projection_path` 必须等于 admitted `Manifest.plan.ref` 的 root-bound 路径；
-  `scope.mutable_projection_paths` 必须只列出该 path，`scope.allowed_paths` 必须包含
-  code/test paths、当前 Slice Evidence path 和该 Plan projection path；
-- `allowed_code_scope` 只能是 `execution_scope.code_paths` 与 `test_paths` 的并集，
-  不得包含 `plan_projection_path`、Evidence path 或其他 `tasks.md` 路径；
-- 不提供未来 Task 正文或完整 `tasks.md`；
-- `previous_task_receipts` 必须逐项绑定 evidence path、source/current snapshot 和 result；
-- Worker 必须先写 Task Evidence，再更新 checkbox projection；
-- Worker 只能修改当前 Slice 的实现范围、当前 Task 的 checkbox/Worker Status
-  projection 和指定 Evidence sections；`tasks.md` 不是 implementation code scope；
-- `tasks.md` 禁止修改 Stage/Slice/Task goal、refs、dependencies、required_skills、
-  `execution_scope`、Proof Index、entity markers、其他 Task/Slice 或 candidate input；
-- 若 immutable Plan 内容发生变化，或 Context/packet 的 `plan_digest` 不匹配 admitted
-  Plan/Manifest，必须 fail closed 并返回 bounded blocker，不得继续或自行修复 Plan；
-- Worker 不写 Receipt、Current CV Status、Gate verdict，不提交 Git；
-- `finalize-slice` 只更新 Current Slice Evidence，不能修改实现或 checkbox；
-- repair 是 taskless 派发：无 `task_id/task_ref`，packet/Context 携带
-  `repairs_cv_receipt_digest`（当前 CV_REPAIR receipt digest）；只能修复 CV
-  指定的 bounded failure；repair 派发必须要求加载 `diagnose` 技能（复现 →
-  根因隔离 → bounded 修复 → 验证）。
+  `scope.mutable_projection_paths` 只能列该 path，`scope.allowed_paths` 还须包含 code/test、当前
+  Slice Evidence 和该 projection path。`repair` 例外：其 `scope.mutable_projection_paths` 为空，
+  因为 repair 只改实现代码、不编辑 Plan projection，其结果不可 admit 所以任何 checkbox 不得移动。
+- `allowed_code_scope` 只能是 `execution_scope.code_paths ∪ test_paths`，不能包含 Evidence、
+  `tasks.md` 或 Plan projection。
+- `scope.forbidden_paths`、`execution_scope.forbidden_paths` 和 `forbidden_scope` 必须保留系统/Task
+  禁止范围；Worker 不从 goal、Markdown、模糊搜索或未来 Task 推断 scope。
+- `previous_task_receipts` 必须逐项绑定 Task、Evidence path、source/current snapshot 和 result；
+  `slice_task_ids`/`completed_task_ids` 只能来自 Runtime Context。
+- Worker 必须先写/更新允许的 Task Evidence，再更新 checkbox/Worker Status；`tasks.md` 只能改
+  Context 允许的 mutable projection，不得改 Goal、refs、Dependencies、Required Skills、Proof Index、
+  `execution_scope`、其他 Task/Slice 或 candidate input。
+- Worker 不写 Receipt、Current CV Status、Gate/Review verdict，不提交 Git，不修改 Manifest/Context
+  authority；immutable Plan/Manifest/Context/snapshot mismatch 必须 fail closed。
+- `repair` 必须 taskless、携带 `repairs_cv_receipt_digest`，只修复 CV 指定 bounded failure；普通
+  `stage admit-worker` 不接纳 repair envelope。Repair 的诊断/复现/根因/验证顺序由 Worker Skill 负责。
 
-## 完成回传与 Runtime 路由
+## Result envelope schema
 
-Worker 的完整 Result 传输使用 Herdr Link：Brain 通过 `herdr_link_send` 发送 Task message，Worker 通过 `herdr_link_send` 返回严格 Result（回复关联原 dispatch message）；`.agents/skills/proofloop-worker/SKILL.md` 规定 Link route 和失败关闭规则。
-本 Contract 只补充以下路由边界：
-- `implement-task`、`recover-task` 的完整 Result 读取后，Brain 重读持久化事实，再交给 `stage admit-worker`；
-- `finalize-slice` 的 `READY_FOR_CV` 只表示 Slice 证据可供 CV，不能按普通 `TASK_COMPLETE` 接纳；
-- `repair` 的 Result 是持久化交接事实而非 `TASK_COMPLETE`：envelope 为
-  `mode='repair'`，此时 `repairsCvReceiptDigest` 必填（等于当前 CV_REPAIR
-  receipt digest）、`taskId` 免填；该 envelope 不进入 `stage admit-worker`
-  （Runtime 显式拒绝），由 `stage next` 校验 envelope 绑定后置
-  `PENDING_RECHECK` 并触发 fresh bounded CV recheck；`diagnose` 的 Result
-  同样只进入 fresh CV recheck。禁止把 repair 伪装成 `implement-task` 或
-  `recover-task`；
-- Link 消息关联、`status: sent`、Herdr lifecycle、模型总结和工作区 diff 都不是 Receipt 或完成授权；Brain 必须重读 durable facts。
-## Task Evidence 书写规范
+`herdr-link` 和 `subagent` 两条 transport 必须产出同一闭集 envelope；camelCase 字段名如下：
 
-- 每个任务的 Task Evidence 小节标题必须为 `### <task_id>`（该任务的
-  task id），同文件内**恰好一个且唯一**——不得出现第二个相同标题；
-- 任务内子记录（RED/GREEN Receipt 字段、修复记录、状态等）一律用 `####`
-  子标题或 `- label:` 列表项，**不得**使用 `###`；
-- 违规后果：admission（`assertCurrentTaskEvidence`）会拒绝该 Worker 结果
-  且不写 Receipt——标题缺失时提示缺少 `### <task_id>` 标题（应为
-  `### <taskId>`）；标题重复时提示重复位置（行号）并要求子记录改用
-  `####` 或 `- label:`。
+```yaml
+schemaVersion: 2
+actionToken: <current-runtime-action-token>
+stageId: <stage-id>
+sliceId: <slice-id>
+taskId: <task-id | omitted>
+mode: implement-task | recover-task | finalize-slice | repair
+outcome: completed | blocked | needs-decision | failed
+evidenceRef: <root-relative-evidence-ref>
+changedFiles: []
+verificationRuns: []
+summary: <non-empty result summary>
+manifestDigest: <sha256>
+planDigest: <sha256>
+proofIndexDigest: <sha256>
+snapshotDigest: <40-hex Git HEAD>
+contextRef: <root-relative-context-ref>
+contextDigest: <sha256>
+repairsCvReceiptDigest: <sha256> # only mode: repair; forbidden otherwise
+```
 
-## 允许的结果
+- `outcome: completed` 是 Worker envelope 值；Runtime admission 才形成 `TASK_COMPLETE`。
+- `finalize-slice` 必须 taskless，`evidenceRef` 指向当前 Slice Evidence，并返回 `READY_FOR_CV` 语义；
+  它不表示 CV PASS、Slice Commit 或 Integration。
+- `repair` 必须 `mode: repair`、`taskId` omitted、当前 `repairsCvReceiptDigest`；`outcome` 仍使用上述
+  Runtime closed set，由 `mode` 与 digest 表示 repair handoff；该结果不进入 `stage admit-worker`。
+- `actionToken`、所有 digest、`evidenceRef` 和 `changedFiles` 都是候选事实；Brain 必须重读 Evidence、
+  tasks projection、Context、Git HEAD/diff 和相关 Receipts，再交给 Runtime consumer。
+- Host lifecycle、模型摘要、Link delivery 或 `git diff` 不能替代 envelope，也不能加入 Runtime-owned
+  Receipt/Manifest/Context 字段。
+
+## Runtime handoff
+
+```text
+implement-task / recover-task + completed
+  → Brain re-read durable facts
+  → stage admit-worker
+  → Runtime computes next action
+
+finalize-slice + completed
+  → Brain re-read Slice Evidence/binding
+  → Runtime accepts READY_FOR_CV
+  → fresh Code Verifier
+
+repair + completed/blocked/needs-decision/failed
+  → Brain re-read repair evidence and binding
+  → stage next validates the repair handoff by mode + digest
+  → Runtime sets PENDING_RECHECK or returns typed blocker
+  → fresh bounded CV recheck
+```
+
+缺失、截断、重复、错 action、错 digest、错关联或 schema 失败时，Brain 返回 typed blocker 并按
+lifecycle/execute recovery；不重发、不补写、不以 `status: sent` 或 Agent `done` 代替 admission。
+
+## Task Evidence marker
+
+每个 Task Evidence 小节标题必须是该 Task 的唯一 `### <task_id>`；Task 内子记录使用 `####` 或
+`- label:`，不得再用 `###`。Evidence 至少覆盖 packet 指定 PO 的 expected/actual、commands/exit
+codes、changed files、test/seam/oracle validity、risk/regression 和 remaining unknowns；详见
+`proofloop-worker/SKILL.md`。Runtime admission 会拒绝缺失、重复或仍为 skeleton/placeholder 的标题。
+
+## 允许结果
 
 ```text
 implement-task / recover-task → TASK_COMPLETE 或结构化 blocker
-finalize-slice / repair → READY_FOR_CV 或结构化 blocker（repair envelope 为
-  `mode='repair'` + `repairsCvReceiptDigest`：持久化交接事实，不经
-  `stage admit-worker` 接纳）
+finalize-slice              → READY_FOR_CV 或结构化 blocker
+repair                       → mode: repair + closed outcome + repairsCvReceiptDigest（handoff，不经 stage admit-worker）或结构化 blocker
 ```
 
-结构化 blocker 必须包含 `route_code`、`subtype`、`reason`、
-`invalidation_scope` 和 `resume_target`。Worker 不得把自身结果写成 CV PASS、Slice COMPLETE 或 Stage COMPLETE。
-
-## 恢复
-
-同 Slice 且 semantic input digest 未变时可以继续原 Worker session；Herdr 路由应复用原 agent/pane。session
-丢失时 Brain 从 Manifest、Context、Plan projection、Evidence、Git 和
-Receipts 构造 fresh packet。`recover-task` 只负责已存在成果的 Evidence/checkbox
-一致性重检：必须携带与当前 Context/Manifest/Plan/snapshot 绑定的 recovery
-discriminator，Runtime Result admission 必须能区分 recovery consistency recheck
-与新的 implementation，不得静默改写为 `implement-task`；没有可持久化、可校验的
-discriminator 时必须返回 `RUNTIME_BLOCKER`，不得绕过，也不得重新实现已存在的
-代码。Herdr 恢复只恢复 relay/session，不恢复 Runtime 授权；恢复后必须重新读取
-当前 action、Context、Evidence、Git/diff 和 Receipt。session ID 不得进入任何持久化制品。
-
-当 `herdr-link` transport 被选中时，Worker 最后输出必须使用
-`herdr-worker-template.md` 定义的带边界 Worker Result transport payload；Herdr
-adapter 严格解析并交给 Runtime admission。当 `subagent` transport 被选中时，
-harness-native wrapper 必须产出同一跨 harness Worker Result Contract，并由对应
-adapter 做同等绑定校验。任一路由的终端 lifecycle、自由文本和 harness 叙事都不是
-完成事实。
+结构化 blocker 必须包含 `route_code`、`subtype`、`reason`、`invalidation_scope` 和 `resume_target`。
+Worker 不能把自身结果写成 CV `PASS`、Slice `COMPLETE` 或 Stage `COMPLETE`。

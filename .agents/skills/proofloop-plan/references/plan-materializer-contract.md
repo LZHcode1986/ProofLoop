@@ -13,7 +13,7 @@ node packages/runtime/dist/cli/proofloop.js plan materialize --json '{"stage":"<
 不传 `check` 或 `"check": false` 为生成/更新模式 → `CANDIDATE_READY`。）
 
 `plan materialize` 是 Runtime CLI 的确定性命令，是 candidate `tasks.md` 的唯一
-写入者。它不是 SPV，也不是 Executor；它只渲染 candidate Plan，不执行
+写入者。它不是 SPV 或 Stage Plan admission；它只渲染 candidate Plan，不执行
 compile/validate/admission 或 Evidence 初始化。Brain 必须先加载 `proofloop-plan`，
 再按本 Contract 调用该命令；不能把 Brain 的直接手写编辑当作 materialization。
 
@@ -37,7 +37,7 @@ compile/validate/admission 或 Evidence 初始化。Brain 必须先加载 `proof
 - 任意第二份独立 Plan/Authority fact source。
 
 `plan materialize` 只渲染 candidate `tasks.md`，不写 Receipt，不派发
-Worker/CV，不执行 `proofloop_stage(next)`。candidate output 永远是
+Worker/CV，不执行 `proofloop stage next`。candidate output 永远是
 `CANDIDATE_ONLY`，不能授权执行。
 
 `CANDIDATE_ONLY` 只描述 `plan materialize` 产出的 admission 前投影。若 Brain/Authority
@@ -45,11 +45,10 @@ Worker/CV，不执行 `proofloop_stage(next)`。candidate output 永远是
 `plan materialize` 不拥有的写入和 Runtime 事实（Manifest、Receipt、Worker/CV/Commit/Gate/Review
 admission），不能把 admission 成功后的 Stage Goal 永久标为 out of scope。正式执行事实
 仍必须由 `proofloop-execute` 和 Runtime/Host admission owners 产生；Gate 为 facts-only
-（S08-REVIEW-010 / b6b0d3a：candidate input 不接受 `runtime_proof` 投影）。
+（S08-REVIEW-010 / b6b0d3a：active candidate/compile seam 不接受 `runtime_proof` 投影，Gate 只消费 facts。）
 
-`plan materialize` 返回后，Brain 按 `SKILL.md` 规划循环步骤 8–14 交接（compile →
-validate → exclusive-create Evidence skeleton → 最终稳定 Git boundary → fresh SPV
-→ admission），不能跳步。
+`plan materialize` 返回后，Brain 按 `SKILL.md` 的 candidate-artifact、stable-boundary、fresh SPV 和
+admission handoff 执行；该命令本身不编译 Manifest、不初始化 Evidence、不执行 SPV/admission。
 
 ## 必需输入
 
@@ -60,7 +59,7 @@ schema_version: 2
 mode: initial | replan
 binding_mode: slice-local   # 可选（S13）；仅允许 "slice-local"，省略 = legacy stage-wide；未知值/类型错误必须 fail closed
 caller: brain
-owner: pluginv2-active-plan-materializer
+owner: pluginv2-active-plan-materializer  # Runtime 保留的 canonical owner/compatibility identifier；不代表已退役 OpenCode Plugin 或当前 package
 project_root: <absolute canonical trust root>
 stage_id: <candidate stage id>
 candidate_plan_path: delivery/stages/<stage-id>/tasks.md
@@ -151,8 +150,7 @@ slices:
    `proof_digest`、Worker/CV packet、裸的实现文件清单和 admission 字段不属于输入
    schema。Task 可以携带由 Brain 根据 Authority/Contract 明确给出的结构化
    `execution_scope`；`plan materialize` 不得从 goal、Markdown 或代码搜索推断 scope。
-   **candidate input 不接受 `runtime_proof` 投影**（b6b0d3a / S08-REVIEW-010 关闭：
-   Manifest runtime_proof 与 gate proof 执行 seam 已整体移除；Gate 为 facts-only，
+   **candidate input 不接受 `runtime_proof` 投影**（b6b0d3a / S08-REVIEW-010 关闭：active vNext compile output 不产生该字段；Kernel 仍保留可选兼容类型，但 Gate 为 facts-only，不执行或绑定该字段；
    build/test 由 Stage Review 承担）。`reference_index` 仍可登记指向
    candidate `tasks.md` 的 `proof_spec` 实体（若未来需要显式 proof 声明），但
    materialize 不生成、不校验可执行 step 投影。
@@ -165,10 +163,7 @@ slices:
 - **refs 必须同时登记**：`selected_work_item_refs`、`authority_entity_refs` 以及
   Proof Index 用到的每个 `ref_id` 都必须同时出现在 `reference_index` 中
   （缺登记 → `INCOMPLETE_PROOF_INDEX` / `MISSING_ACCEPTANCE_AUTHORITY`）。
-- **`cwd` 必须 root-relative 且不是 `"."`**：runtime proof steps 已随 b6b0d3a 移除；
-  若未来恢复 executable proof 投影，`runtime_proof.resolved_steps[].cwd` 写
-  `packages/runtime`，不要写 `.`、`./packages/runtime` 或绝对路径
-  （`.` 产生空路径段 → `CANDIDATE_PATH_ESCAPE`）。
+- **字段不由 materializer 推断**：candidate input 只接受 Contract 声明的结构化字段；可执行 proof 命令、Manifest、Receipt、Evidence 初始化和 admission 字段均由 Runtime 的后续 consumer 负责。
 - **路径不以 `/` 结尾**：`execution_scope.forbidden_paths`、`code_paths`、
   `test_paths`、`evidence_path` 等路径不能以 `/` 结尾（尾斜杠产生空路径段，
   违反 root-relative 校验）。
@@ -183,7 +178,7 @@ slices:
 ```yaml
 ok: true
 result: CANDIDATE_READY | CANDIDATE_CHECKED
-owner: pluginv2-active-plan-materializer
+owner: pluginv2-active-plan-materializer  # Runtime 保留的 canonical owner/compatibility identifier；不代表已退役 OpenCode Plugin 或当前 package
 caller: brain
 stage_id: <stage-id>
 candidate_plan_path: delivery/stages/<stage-id>/tasks.md

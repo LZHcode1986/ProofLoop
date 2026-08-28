@@ -66,9 +66,7 @@ console.log('reference_index_digest', computeDigest(m.reference_index));
 console.log('proof_index_digest     ', computeDigest(m.slices.map(s => s.proof_index)));
 "
 ```
-
-注：Manifest runtime_proof 字段已随 b6b0d3a（S08-REVIEW-010 关闭）删除，不再提取
-runtime_proof_digest；boundary helper 亦不再校验它（active-spv-boundary-check.mjs 头部注释）。
+注：当前 `plan compile` 的 vNext output 不产生 `runtime_proof`；SPV helper closed arguments 不含 `runtime_proof_digest`，未知 flag 会 fail closed，且不提取/绑定该 digest。
 
 `<root>` 是 canonical trust root；`snapshot_digest` 取当前 Git HEAD（`git rev-parse HEAD`）。
 helper 会重算比对，误传 digest 会 fail closed，所以提取值必须来自上述同一 Manifest 文件。
@@ -81,8 +79,7 @@ SPV 必须在 stable Git boundary 后 fresh、只读，并按以下顺序验证�
    `node .agents/skills/proofloop-plan/references/active-spv-boundary-check.mjs
    --project-root <root> --manifest <root-relative-manifest> --snapshot <HEAD>
    --plan-digest <digest> --manifest-digest <digest>
-   --reference-index-digest <digest> --proof-index-digest <digest>
-   --runtime-proof-digest <digest>`；只接受 `valid:true`，以此确认 canonical Git root、
+   --reference-index-digest <digest> --proof-index-digest <digest>`；只接受 `valid:true`，以此确认 canonical Git root、
    clean worktree、`snapshot_digest = HEAD` 和 canonical digest；helper fail/缺失或返回非闭合
    结果时必须返回 `RUNTIME_BLOCKER`，不得降级为 Read/Grep 或 Brain narrative；
 2. 读取 Stage/Slice/Task Goal 和 Authority refs；
@@ -122,17 +119,15 @@ SPV 必须在 stable Git boundary 后 fresh、只读，并按以下顺序验证�
      owner: proofloop-plan
      phase: STAGE_PLANNING
    ```
-9. ~~验证 Runtime Proof 只引用结构化 `ProofSpecification`~~（b6b0d3a 移除：Manifest/Gate 不再有
-   runtime proof；candidate input 亦不接受 runtime_proof 投影）；
-10. 验证 candidate Plan 没有被当作 admitted Plan；
-11. 验证没有 CV Level、Proof Profile 或自然语言命令推断依赖。
+9. 验证 candidate Plan 没有被当作 admitted Plan；candidate projection 不得提供 execution authority；
+10. 验证没有 CV Level、Proof Profile 或自然语言命令推断依赖。
 
 语义内容位置：Acceptance/Seam/Oracle/Risk 的语义正文（实质内容）只存在于权威文件，
 candidate 只承载 ref 引用（`<root-relative-path>#/entities/<id>`），不复制语义正文。
 SPV 对 candidate 只验证引用可解析、kind 对齐且 root-bound，对权威文件验证实体内容
 非空；不得要求 candidate 内嵌语义正文，也不得把实体内容非空推迟到后续轮次。
 
-SPV 不读取或修改 Worker Evidence，不修改 Plan，不执行 Runtime Proof，不写 Receipt。
+SPV 不读取或修改 Worker Evidence，不修改 Plan，不执行候选文件中的命令或写 Receipt；Stage Gate 的 facts-only 语义由 Runtime Contract 负责。
 
 ## 允许的结果
 

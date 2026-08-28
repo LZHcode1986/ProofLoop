@@ -124,8 +124,12 @@ Brain invokes the CLI through the single public entry, for example:
 node packages/runtime/dist/cli/proofloop.js boundary close --json '<closed request>'
 ```
 
-The exact CLI argument encoding comes from the Runtime `--help` contract; Brain
-must not construct a parallel Git command sequence. The CLI performs, in one
+The exact CLI argument encoding comes from this Contract and the current Runtime CLI
+source (dispatcher/parser and operation-handler validation; for vNext route mapping,
+also `packages/runtime/src/cli/vnext-route-table.ts`). The public `--help` currently
+exposes only global usage/domain-list output, not operation-specific fields or closed
+schemas, so it is not the operation-contract authority. Brain must not construct a
+parallel Git command sequence. The CLI performs, in one
 transaction:
 
 1. canonical root, HEAD, branch, index, status and request checks;
