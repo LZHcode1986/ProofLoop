@@ -117,6 +117,7 @@ const ID_MESSAGE_TYPES: ReadonlySet<BoundaryType> = new Set([
   'baseline-authority',
   'stage-plan',
   'artifact-archive',
+  'slice-output',
   'stage-close',
 ]);
 
@@ -569,6 +570,8 @@ function commitMessage(request: BoundaryCloseRequest, oldManifestDigest: string 
         return `${type}: ${request.stage as string}`;
       case 'artifact-archive':
         return `artifact-archive: ${request.stage as string} ${oldManifestDigest as string}`;
+      case 'slice-output':
+        return `slice-output: ${request.stage as string}-${request.slice as string}`;
     }
   }
   if (request.description === undefined) {

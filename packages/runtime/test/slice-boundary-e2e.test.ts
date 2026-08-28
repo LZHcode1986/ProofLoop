@@ -18,6 +18,7 @@ test('real vNext slice boundary recipe', () => {
     assert.equal(fixture.worker.accepted, true);
     assert.equal(fixture.cv.accepted, true);
     assert.equal(fixture.boundary.ok, true);
+    assert.equal(fixture.boundary.result.commit_message, `slice-output: ${fixture.stageId}-${fixture.sliceId}`);
     assert.equal(fixture.stageCommit.ok, true);
     assert.equal(fixture.committerReceipt.payload.commit_sha, fixture.boundary.result.commit_sha);
     assert.equal(fixture.committerReceipt.payload.cv_receipt_digest, fixture.cv.receipt_ref);

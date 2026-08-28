@@ -416,7 +416,6 @@ test('fixture implementation', () => assert.equal(answer(), 2));
       slice: SLICE_ID,
       manifest_digest: manifestDigest,
       cv_receipt_digest: cv.receipt_ref,
-      description: 'fixture slice output boundary',
     }));
     const commitSha = boundary.result.commit_sha;
     if (typeof commitSha !== 'string' || !/^[a-f0-9]{40}$/.test(commitSha)) {

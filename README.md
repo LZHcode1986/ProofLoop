@@ -3,8 +3,8 @@
 本仓库是 **ProofLoop v2 通用 CLI 流程**的干净模板：包含迁移到新项目所需的流程文件，以及 `packages/runtime/test/` 中的 Runtime 测试与 fixtures；
 不含任何历史 Stage 数据或机器事实（`.proofloop/`）。
 
-**用途**：把本仓库复制到新项目，按 `MIGRATION.md` 改写需求文档并初始化，即可在新项目
-中运行同一套可验证的 AI 流程（规划 → 计划认可 → 派工 → 验证 → 评审 → 验收）。
+**用途**：把本仓库复制到新项目，按 `MIGRATION.md` 改写需求文档并初始化。
+本模板包含 ProofLoop 的完整目标流程结构；当前可执行能力与尚未闭合的流程项，以 `PRD.md` 和 `tech-spec/` 中标注的 `confirmed/open` 状态为准。
 
 ## 结构
 
