@@ -80,7 +80,7 @@ Stage Gate PASS 后只进入 Stage Review；`ACCEPTED` 才能进入 Stage Close�
 
 每个循环只消费 Runtime 返回的一个 action：
 
-- `DISPATCH_WORKER`：加载 `proofloop-worker`、`.agents/skills/proofloop-execute/references/worker-template.md`；选定 `transport: herdr-link` 时再加载 `herdr-worker-template.md`。
+- `DISPATCH_WORKER`：加载 `proofloop-worker` 与 `.agents/skills/proofloop-execute/references/worker-template.md`，使用固定的 `subagent` Host wrapper。
 - `RUN_CV`：加载 `.agents/skills/proofloop-execute/references/code-verifier-template.md`，由 fresh CV 产生结构化结果。
 - `ADMIT_WORKER_RESULT`、`ADMIT_CV_RESULT`、`ADMIT_SLICE_COMMIT`、`ADMIT_INTEGRATION`、`RUN_GATE`：调用对应 Runtime public CLI/consumer；Brain 不手写 Receipt、Manifest、Context、Gate 或 Review 状态。
 - `PREPARE_STAGE_REVIEW`、`FINALIZE_STAGE_REVIEW`：按 Stage Review Contract 准备并调度 fresh Reviewer。
@@ -90,14 +90,11 @@ Stage Gate PASS 后只进入 Stage Review；`ACCEPTED` 才能进入 Stage Close�
 
 ## Worker transport 触发
 
-在选择 Worker route 前先读取 `.agents/contracts/brain/herdr-link-worker-lifecycle.md`。Session 创建时固定 transport：
-
-- `herdr-link` 是唯一跨 Agent / 跨 pane 的 Task/Result 消息通道；只使用 `herdr_link_peers`、`herdr_link_send`、`herdr_link_close`。Link 只承载 opaque message，pane/Agent 创建、启动和生命周期由 Host/运行环境负责。
-- `subagent` 是显式同 harness 兼容路线，使用 host-native Worker wrapper；它不是跨 pane 通信，也不是 `herdr-link` 不可用时的隐式切换。
-- `herdr_link_send` 的 `status: sent`、Agent `idle`/`done`、模型摘要和 Git diff 都不是完成证据。回复必须关联原 dispatch message，Brain 必须重读 durable facts 后才交给 Runtime。
-
-Transport 缺少 Adapter、稳定 Agent Name 或必需绑定时，返回 typed `RUNTIME_BLOCKER`；已有成果按 lifecycle Contract 走 `recover-task`/`recheck`，不重做 Task。
-
+Session 创建时固定 `subagent` transport，并使用 host-native Worker wrapper：
+- Worker packet/result 必须遵守 `.agents/skills/proofloop-worker/SKILL.md` 与
+  `.agents/skills/proofloop-execute/references/worker-template.md`。
+- Agent `idle`/`done`、模型摘要和 Git diff 都不是完成证据；Brain 必须重读 durable facts 后再交给 Runtime。
+- Host/adapter 缺少必需绑定时返回 typed `RUNTIME_BLOCKER`；已有成果按 `recover-task`/`recheck` 恢复，不重做 Task。
 ## 恢复与失效
 
 | 事实 | 处理 |

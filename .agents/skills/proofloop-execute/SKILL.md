@@ -21,11 +21,9 @@ description: STAGE_EXECUTION：admitted Manifest 和 Runtime Primary Next Action
 
 1. 本 Skill：Stage loop、action 路由、分支和完成标准；
 2. `.agents/skills/proofloop-worker/SKILL.md`：通用 Worker 行为、Evidence 顺序和 transport Result；
-3. `references/worker-template.md`：Worker packet/schema；`references/herdr-worker-template.md`：
-   `transport: herdr-link` 的 Host relay；
+3. `references/worker-template.md`：Worker packet/schema 与固定 `subagent` Host relay；
 4. `references/code-verifier-template.md`：CV packet/schema；
-5. `.agents/contracts/brain/herdr-link-worker-lifecycle.md`、`.agents/contracts/brain/commit-boundary.md`
-   和 Brain dispatch 指定的 Stage Review Contract：生命周期与 boundary 语义。
+5. `.agents/contracts/brain/commit-boundary.md` 和 Brain dispatch 指定的 Stage Review Contract：boundary 与 review 语义。
 
 不要把完整 `tasks.md`、Authority 或旧 packet 复制到 role；Runtime 返回的 `context_ref`、digest 和
 immutable scope 才是当前 action 的输入。
@@ -67,7 +65,7 @@ CV Evidence gate 的真实 owner/order 是：Brain/Host 以已验证 task anchor
 
 | Runtime action | 处理入口 | 完成条件 |
 |---|---|---|
-| `DISPATCH_WORKER` | `proofloop-worker` + `worker-template`；`herdr-link` route 另加 `herdr-worker-template` | 绑定当前 action 的完整 Worker Result 已发送并被 `stage admit-worker` 接纳 |
+| `DISPATCH_WORKER` | `proofloop-worker` + `worker-template` | 绑定当前 action 的完整 Worker Result 已发送并被 `stage admit-worker` 接纳 |
 | `RUN_CV` | `code-verifier-template`，fresh CV；先满足可证明的 Evidence gate | 当前 handoff 缺失时只返回非 admission `BLOCKED`/既有 `RUNTIME_BLOCKER`；只有真实 Context/observation handoff 与 Runtime consumer 闭合后，`PASS`/`REPAIR` 才能进入 CV admission |
 | `ADMIT_WORKER_RESULT` | Runtime Worker admission | Runtime 从 durable facts 计算下一个合法 Task 或 `RUN_CV` |
 | `ADMIT_CV_RESULT` | Runtime CV admission | `PASS` 进入 Slice Commit；`REPAIR` 进入 bounded repair/recheck |
@@ -85,15 +83,13 @@ Receipt、Manifest、Context、Gate 或 Review 状态。
 ## Worker 与 Slice loop
 
 - Worker 每次只接收 Runtime 指定的一个 Task 及 admitted immutable `execution_scope`；同一 Session 的
-  transport 在创建时固定。`herdr-link` 是唯一跨 Agent/pane Task/Result 通道，使用
-  `herdr_link_peers`/`herdr_link_send`/`herdr_link_close`；`subagent` 仅是显式同 harness 兼容路线，
-  不是隐式切换。生命周期细则见 lifecycle Contract。
+- Worker 每次只接收 Runtime 指定的一个 Task 及 admitted immutable `execution_scope`；`subagent` Host wrapper 在 Session 创建时固定，不能在同一 Session 中替换。生命周期细则见 `references/worker-template.md`。
 - `implement-task` 顺序由 `proofloop-worker` Skill 负责：RED → 最小实现 → GREEN → Task Evidence →
   checkbox → `TASK_COMPLETE`；Evidence 先于 checkbox。
 - 所有 Task 完成后才派 `finalize-slice`，由 Worker 更新当前 Slice Evidence 并返回 `READY_FOR_CV`；
   它不是 CV `PASS` 或 Slice Commit。
 - Brain 收到 Result 后先重读 Evidence、tasks projection、Git/diff、Context 和 Receipts，再交给 Runtime；
-  不用 Link delivery 状态或模型叙事补全。
+  不用 transport delivery 状态或模型叙事补全。
 
 ## CV 与 bounded repair
 

@@ -1,13 +1,12 @@
 ---
 name: proofloop-worker
-description: Worker 行为与交接：当 Runtime dispatch packet 指定 Worker，或收到 `herdr-link` Worker Result/READY 回调时，按绑定 scope、Evidence 顺序和固定 transport 完成一个 Task/repair/finalize。
+description: Worker 行为与交接：当 Runtime dispatch packet 指定 Worker 时，按绑定 scope、Evidence 顺序和固定 `subagent` transport 完成一个 Task/repair/finalize。
 ---
 
 # proofloop-worker
 
 本 Skill 只规定跨 harness 的 Worker 行为和顺序。Contract 定义语义、字段、状态和错误码；
-`references/worker-template.md` 定义 packet/result schema；`references/herdr-worker-template.md`
-定义 `herdr-link` Host relay。Worker 不把本 Skill 当作 Runtime 授权。
+`references/worker-template.md` 定义 packet/result schema 与 Host-native `subagent` relay。Worker 不把本 Skill 当作 Runtime 授权。
 
 ## 触发与加载
 
@@ -15,9 +14,7 @@ description: Worker 行为与交接：当 Runtime dispatch packet 指定 Worker�
   加载 `references/worker-template.md`，再按本 Skill 执行。
 - 收到 taskless `mode: repair` Context：同样加载 Worker Template；repair history、root cause 和
   bounded failure scope 已由 Runtime/Brain 绑定。
-- `transport` 在 Session 创建时固定。跨 Agent/pane 只使用
-  `herdr_link_peers`、`herdr_link_send`、`herdr_link_close`；explicit `subagent` 兼容路线使用 Host
-  native relay，不能在 Session 中自动切换。
+- `subagent` 是唯一 Worker transport，在 Session 创建时固定并使用 Host-native relay；不能在 Session 中自动切换。
 
 ## Preflight
 
@@ -77,12 +74,8 @@ description: Worker 行为与交接：当 Runtime dispatch packet 指定 Worker�
    `.agents/contracts/brain/multi-round-repair.md` 处理，不由 Worker 自行延长。
 
 ## Transport 与 Result
-
-- `herdr-link` route：Host 先创建并固定 Session，Worker 通过 `herdr_link_send` 回传完整 Result；`status: sent`。
-  只表示 gateway 接收，不表示 Runtime admission。READY/Result 回调缺失、重复、截断或绑定错误时
-  fail closed 并走 lifecycle recovery。
-- `subagent` route：通过 host-native wrapper 回传同一 Template schema；禁止把 host callback 当作
-  Receipt 或状态迁移。
+- `subagent` 是唯一 transport：通过 Host-native wrapper 回传同一 Template schema；禁止把 host callback 当作
+  Receipt 或状态迁移。结果缺失、截断、重复或绑定错误时 fail closed。
 - 每个结果只对应当前 `actionToken`/Context；结果字段、枚举、Evidence marker、digest 和错误码只读
   Worker Template/Contract，不在此文件复制第二份 schema。
 
@@ -92,7 +85,7 @@ Worker 完成标准按 `mode` 分别判定：
 - `implement-task` / `recover-task`：`execution_scope.code_paths` 与 `test_paths` 中的实际 code/test 已完成，Task Evidence 已按 Template 非空落盘，且 Context 允许的 `tasks.md` checkbox/Worker Status projection 已更新。
 - `finalize-slice`：当前 Slice 的完整 Slice Evidence 与 Slice-level binding 已落盘，并经固定 transport 返回 `READY_FOR_CV`；不要求新增 code/test，也不得虚构 Task-level code/test 或 projection。
 - `repair`：bounded repair evidence/handoff 已按 Runtime 允许的 repair scope 落盘，并携带当前 `repairsCvReceiptDigest` 经固定 transport 发出；不要求或更新 `tasks.md` projection。
-- 各 mode 的结果都必须可由 Brain/Runtime 重新读取；以下均不能单独算完成：Agent `idle`/`done`、模型摘要、checkbox、Link delivery、测试通过但无 Evidence，或声称已写 Receipt。
+- 各 mode 的结果都必须可由 Brain/Runtime 重新读取；以下均不能单独算完成：Agent `idle`/`done`、模型摘要、checkbox、transport delivery、测试通过但无 Evidence，或声称已写 Receipt。
 
 Worker 不调用 Runtime admission、不写 Manifest/Context/Receipt/Gate/Review 状态、不创建 Git boundary、
 不提交 Git、不派发其他 Agent；需要权限、Authority、Plan、scope、环境或 Runtime 修复时返回 typed blocker。

@@ -97,7 +97,7 @@ Stage delivery 的 vNext 顺序、Stage Context handoff 和 close handoff 以自
 
 每个循环只消费 Runtime 返回的一个 action：
 
-- `DISPATCH_WORKER`：加载 `proofloop-worker`、`.agents/skills/proofloop-execute/references/worker-template.md`；选定 `transport: herdr-link` 时再加载 `herdr-worker-template.md`。
+- `DISPATCH_WORKER`：加载 `proofloop-worker` 与 `.agents/skills/proofloop-execute/references/worker-template.md`，使用固定的 `subagent` Host wrapper。
 - `RUN_CV`：加载 `.agents/skills/proofloop-execute/references/code-verifier-template.md`，由 fresh CV 产生结构化结果。
 - `ADMIT_WORKER_RESULT`、`ADMIT_CV_RESULT`、`ADMIT_SLICE_COMMIT`、`ADMIT_INTEGRATION`、`RUN_GATE`：调用对应 Runtime public CLI/consumer；Brain 不手写 Receipt、Manifest、Context、Gate 或 Review 状态。
 - `PREPARE_STAGE_REVIEW`、`FINALIZE_STAGE_REVIEW`：按 `.agents/contracts/brain/stage-review.md` 准备并调度 fresh Reviewer。
@@ -107,16 +107,10 @@ Stage delivery 的 vNext 顺序、Stage Context handoff 和 close handoff 以自
 
 - 直接 role 为 `general`、`stage-plan-verifier`、`code-verifier`、`stage-reviewer`、`researcher`、
   `prototype`；各 role 文件只描述宿主职责，业务字段和步骤由对应 Contract/Skill/template 提供。
-- Worker route 在 Session 创建时固定 `transport`。读取
-  `.agents/contracts/brain/herdr-link-worker-lifecycle.md` 后，`herdr-link` 使用
-  `herdr_link_peers`、`herdr_link_send`、`herdr_link_close` 传递 Task/Result；Link 只承载消息，
-  pane/Agent 创建、启动和生命周期由 Host/运行环境负责。
-- `subagent` 是显式同 harness 兼容路线，使用 host-native Worker wrapper；它不是跨 pane 通信，
-  也不是 `herdr-link` 不可用时的隐式切换。两条路线都必须遵守
-  `.agents/skills/proofloop-worker/SKILL.md` 与
-  `.agents/skills/proofloop-execute/references/worker-template.md`。
-- `status: sent`、Agent `idle`/`done`、模型摘要和 Git diff 都不是完成事实；Result 缺失、截断、
-  重复或绑定不符时 fail closed，并按 lifecycle Contract recovery。
+- Worker route 在 Session 创建时固定为 `subagent`，使用 host-native Worker wrapper；Task/Result 必须遵守
+  `.agents/skills/proofloop-worker/SKILL.md` 与 `.agents/skills/proofloop-execute/references/worker-template.md`。
+- `idle`、`done`、模型摘要和 Git diff 都不是完成事实；Result 缺失、截断、重复或绑定不符时 fail closed，
+  并按 Worker recovery 规则处理。
 
 ## Runtime 与权限边界
 

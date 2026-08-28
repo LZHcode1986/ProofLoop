@@ -1,8 +1,8 @@
 # Worker Packet / Result Template
 
 本模板只定义 Worker packet、Result envelope、字段约束和 Runtime handoff。Worker 的执行顺序与
-Evidence 行为以 `.agents/skills/proofloop-worker/SKILL.md` 为唯一事实源；`herdr-link` Host relay 的
-Session/transport 适配以 `herdr-worker-template.md` 为准。
+Evidence 行为以 `.agents/skills/proofloop-worker/SKILL.md` 为唯一事实源；`subagent` Host wrapper
+使用本模板定义的 packet/result，不另设 transport 模板。
 
 ## Dispatch packet schema
 
@@ -46,9 +46,8 @@ stop_conditions: []
 expected_result: TASK_COMPLETE | READY_FOR_CV | REPAIR_HANDOFF
               # mode: repair → REPAIR_HANDOFF：结果只被 CV recheck 消费，永不形成 TASK_COMPLETE
 host_relay:
-  transport: herdr-link | subagent
-  profile_ref: herdr-worker | subagent-worker
-  agent_kind: agy # herdr-link route only
+  transport: subagent
+  profile_ref: subagent-worker
   # worker_session_ref is ephemeral and never persisted
 ```
 
@@ -78,7 +77,7 @@ host_relay:
 
 ## Result envelope schema
 
-`herdr-link` 和 `subagent` 两条 transport 必须产出同一闭集 envelope；camelCase 字段名如下：
+`subagent` transport 必须产出本模板定义的闭集 envelope；camelCase 字段名如下：
 
 ```yaml
 schemaVersion: 2
@@ -108,7 +107,7 @@ repairsCvReceiptDigest: <sha256> # only mode: repair; forbidden otherwise
   Runtime closed set，由 `mode` 与 digest 表示 repair handoff；该结果不进入 `stage admit-worker`。
 - `actionToken`、所有 digest、`evidenceRef` 和 `changedFiles` 都是候选事实；Brain 必须重读 Evidence、
   tasks projection、Context、Git HEAD/diff 和相关 Receipts，再交给 Runtime consumer。
-- Host lifecycle、模型摘要、Link delivery 或 `git diff` 不能替代 envelope，也不能加入 Runtime-owned
+- Host lifecycle、模型摘要、transport delivery 或 `git diff` 不能替代 envelope，也不能加入 Runtime-owned
   Receipt/Manifest/Context 字段。
 
 ## Runtime handoff

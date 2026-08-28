@@ -22,7 +22,7 @@ Slice/repair action。Runtime Context、admitted Manifest/Plan 和 active Contra
 
 1. `.agents/skills/proofloop-worker/SKILL.md`：通用 Worker 步骤、Evidence 顺序和结果语义；
 2. `.agents/skills/proofloop-execute/references/worker-template.md`：当前 packet、scope、字段和允许结果；
-3. `transport: herdr-link` 时再加载 `.agents/skills/proofloop-execute/references/herdr-worker-template.md`：Host relay 映射。
+3. `subagent` Host wrapper 使用 `worker-template.md` 中的固定 packet/result 约束。
 
 缺少 packet 字段、Context、action 绑定或必需 scope 时，按 active Contract 返回 typed blocker；
 不得从任务目标、Markdown、progress 或对话记忆推断替代值。
@@ -39,13 +39,7 @@ Slice/repair action。Runtime Context、admitted Manifest/Plan 和 active Contra
 
 ## Transport 与结果
 
-- `herdr-link` 是唯一跨 Agent / 跨 pane 的 Task/Result 消息通道；只使用
-  `herdr_link_peers`、`herdr_link_send`、`herdr_link_close`。Link 只承载 opaque message，
-  pane/Agent 创建、启动和生命周期由 Host/运行环境负责。
-- `transport` 在 Session 创建时固定。`subagent` 是显式同 harness 兼容路线，必须产出同一
-  Worker Result Contract；它不是跨 pane 通信，也不是隐式 fallback。
-- `herdr-link` route 的 Result 通过 `herdr_link_send` 回复原 dispatch message；`status: sent`、
-  `idle`、`done`、模型总结或 Git diff 都不代表完成。结果缺失、截断、重复或绑定不符时 fail closed。
+- `subagent` 是唯一 Worker transport，通过 host-native wrapper 回传 `worker-template.md` 定义的 Result；host callback、`idle`、`done`、模型总结或 Git diff 都不代表完成。结果缺失、截断、重复或绑定不符时 fail closed。
 
 ## 模式与完成
 
