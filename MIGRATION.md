@@ -6,11 +6,11 @@
 
 | 路径 | 说明 |
 |---|---|
-| `packages/kernel/`、`packages/runtime/` | 校验核心 + CLI（含 `dist/` 构建产物，复制即用） |
-| `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces、4-worker OOM 防护） |
-| `.agents/contracts/brain/` | Brain 角色契约（评审/提交/验收/研究/原型/多轮修复等 9 个） |
-| `.agents/skills/`（13 个） | 流程技能：`proofloop-plan`、`proofloop-execute`、`ai-structured-prd`、`prd-to-ai-architecture`、`prd-to-tech-design-prep`、`codebase-design`、`test-driven-development`、`security-and-hardening`、`diagnose`、`code-review-and-quality`、`handoff`、`wayfinder`、`writing-great-skills` |
-| 角色定义（二选一或都带） | Pi：`.pi/agents/`（8 个）+ `.pi/brain-workflow.md` + `.pi/extensions/proofloop-mode.ts`；OpenCode：`.opencode/agents/`（9 个） |
+| `packages/kernel/`、`packages/runtime/` | 校验核心 + public CLI 源码；复制后执行 `npm run build` 生成 dist |
+| `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces 与 TypeScript 项目引用） |
+| `.agents/contracts/brain/` | Brain 角色契约（按目录中的当前文件复制） |
+| `.agents/skills/` | 流程技能（按目录中的当前技能复制） |
+| 角色定义（二选一或都带） | Pi：`.pi/agents/`（7 个）+ `.pi/brain-workflow.md` + `.pi/extensions/proofloop-mode.ts`；OpenCode：`.opencode/agents/`（8 个） |
 | `AGENTS.md` | 项目规则（流程纪律、职责边界） |
 | `opencode.json`、`.pi/subagents.json` | harness 配置（按需） |
 
@@ -31,7 +31,7 @@
 
 ### runtime.lock 初始化
 
-新项目需创建 `.proofloop/runtime.lock`（示例，`host_adapter` 按实际 harness 改）：
+新项目需创建 `.proofloop/runtime.lock`（示例；`host_adapter` 填调用 harness/CLI 标识，不代表 Plugin）：
 
 ```json
 {
@@ -51,7 +51,7 @@
 npm install
 npm run build
 node packages/runtime/dist/cli/proofloop.js doctor run --json   # 应 exit 0
-node packages/runtime/dist/cli/proofloop.js cutover status --json --stage S1   # 应报告 clean（无 legacy）
+node packages/runtime/dist/cli/proofloop.js doctor status --json   # 应返回结构化状态
 ```
 
 ## 注意

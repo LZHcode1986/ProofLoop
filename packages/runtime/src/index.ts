@@ -98,7 +98,7 @@ export type { WorkerStepDispatchInput } from './worker-step-service';
 // Canonical receipt category directory layout policy (PO-S02-C-05)
 // Runtime-owned Artifact Path Policy: every persisted receipt lives in one of
 // 8 canonical content category directories under `.proofloop/receipts/`
-// (plan/tasks/cv/committer/integration/stage-gate/review/project) plus a
+// (plan/tasks/cv/committer (SLICE_COMMIT)/integration/stage-gate/review/project) plus a
 // `.tmp/` scratch dir that is never read as receipts. Reconcile (S02-C-T03)
 // reads ONLY this layout; kernel ReceiptWriter writes into it.
 export {
@@ -730,10 +730,23 @@ export type {
   VNextFinalizeWorkerContext,
   VNextNextAction,
 } from './vnext';
+export {
+  loadVNextSliceCommitPolicyFacts,
+  loadSliceCommitPolicy,
+  validateSliceCommitChangedFiles,
+  validateSliceCommitCvBinding,
+  SliceCommitPolicyError,
+} from './vnext';
+export type {
+  VNextSliceCommitPolicyInput,
+  SliceCommitPolicyFacts,
+  SliceCommitPolicy,
+  SliceCommitChangedFilesOptions,
+} from './vnext';
 export { proofloopCli } from './cli/proofloop';
 export type { ProofloopCliOptions } from './cli/proofloop';
 export { runBoundaryDomain } from './cli/proofloop-boundary';
-export { closeGitBoundary, BOUNDARY_TYPES, GitBoundaryError } from './git-boundary';
+export { closeGitBoundary, BOUNDARY_TYPES, GitBoundaryError, assertStageCloseTipBindings } from './git-boundary';
 export type { BoundaryCloseRequest, BoundaryCloseResult, BoundaryType } from './git-boundary';
 // S13-S17 remediation §7.3: the public next CLI route seam is part of the
 // Runtime public surface so consumers and tests share one import path.

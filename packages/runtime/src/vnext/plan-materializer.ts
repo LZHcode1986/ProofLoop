@@ -1045,7 +1045,7 @@ export function renderCandidatePlan(plan: MaterializerPlan): string {
   lines.push('');
   lines.push('## Runtime Handoff');
   lines.push('- Runtime must compile and mechanically validate this candidate before fresh SPV.');
-  lines.push('- No Worker/CV/Committer dispatch is authorized by this file.');
+  lines.push('- No Worker/CV dispatch or Boundary CLI execution is authorized by this file.');
   return `${lines.join('\n')}\n`;
 }
 

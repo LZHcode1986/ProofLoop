@@ -68,7 +68,7 @@ export interface NextActionServiceInput {
 /**
  * proofloop_next-aligned output (§1 Tool Contracts):
  * `action` ∈ 15-value NextAction closed set, non-empty readable
- * `action_detail`, `responsible_role` ∈ 10-value RoleType closed set,
+ * `action_detail`, `responsible_role` ∈ 9-value RoleType closed set,
  * boolean `receipt_chain_valid`, `findings` ≤ 20 entries.
  */
 export interface NextActionOutput {

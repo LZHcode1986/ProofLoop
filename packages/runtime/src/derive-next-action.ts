@@ -94,7 +94,7 @@ export type DeriveNextActionInput = ReconciledStageState & NextActionExtras;
 /**
  * The unique next action aligned with the proofloop_next contract:
  * action ∈ 15-value closed set, non-empty readable action_detail,
- * responsible_role ∈ 10-value RoleType closed set, boolean chain validity,
+ * responsible_role ∈ 9-value RoleType closed set, boolean chain validity,
  * findings array. Slice/task/mode context is attached for DISPATCH_WORKER /
  * RUN_CV / ADMIT class actions so the T02 pipeline can wrap without
  * re-deriving.
@@ -441,8 +441,8 @@ export function deriveNextAction(state: DeriveNextActionInput): DerivedNextActio
       action: 'ADMIT_SLICE_COMMIT',
       action_detail:
         `ADMIT_SLICE_COMMIT — slice "${commitSlice.slice_id}" CV_PASSED without a ` +
-        `SLICE_COMMIT receipt (cv receipt digest binding is the Committer precondition)`,
-      responsible_role: 'committer',
+        `SLICE_COMMIT receipt (boundary close and CV receipt binding are required)`,
+      responsible_role: 'executor',
       slice_id: commitSlice.slice_id,
     });
   }

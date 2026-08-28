@@ -21,9 +21,10 @@
 
 - 只执行当前任务 Contract 明确授权的 Stage、Slice、Task、文件和验证范围。
 - 每个角色只完成自己的职责，不以 Agent 叙事替代 Runtime 状态迁移或 Receipt。
-- Worker 只能在 Context.allowed_paths 内工作；缺少非空 code/test scope 或 mutable projection scope 时先阻塞，不猜路径、不扩大权限。
+- Worker 只能在 Context.allowed_paths 内工作：`implement-task`/`recover-task` 必须有非空且 immutable 的 root-bound `code/test scope`；`finalize-slice` 按 taskless/evidence 规则，`repair` 按 Runtime 绑定的 bounded failure scope 执行；`diagnose` 仅作为 repair 的失败输入，不单独授予 Worker mode。所选 mode 缺少必需 scope，或试图扩大 scope 时先阻塞，不猜路径、不越权。
 - `scope.mutable_projection_paths` 只允许 checkbox/Worker Status projection；Plan digest 和其他 immutable scope 保持不变。
-- 不修改未授权的 Authority、Manifest、Receipt、Evidence 或 Git 状态；旧路径、旧制品和兼容代码必须等对应 Cutover Gate 通过后再处理。
+- 不修改未授权的 Authority、Manifest、Receipt、Evidence 或 Git 状态；历史旧路径与旧制品仅按当前 Contract 的显式 compatibility/archive 规则处理，不自动迁移或恢复。
+- `artifact-archive` 是唯一受控例外：Contract 明确授权且目标为同一 Stage 内的精确纯 rename 时，Brain 可预执行该次 `git mv`；随后只由 `boundary close` 校验已 staging 的单一 rename 并提交，其他 Git 写操作仍走 Runtime Boundary CLI。
 - 不新增无法说明真实失败防护价值的功能、门禁、机制或治理制品；已有机制不再必要时才删除。
 
 ## 3. 权威引用与持久化制品
@@ -37,8 +38,8 @@
 ## 4. 分支入口与执行边界
 
 - 进行 Stage 规划、candidate `tasks.md` 或 `plan materialize` 时，先读取 `.agents/skills/proofloop-plan/SKILL.md`、其引用的 materializer Contract 和 dispatch 指定的 active Contract；candidate Plan 不授予执行权。
-- 规划到执行必须遵循当前 vNext 顺序：candidate Plan/Evidence skeleton → stable Git boundary → Runtime 编译/校验 → fresh SPV → Stage Plan admission → `proofloop_stage(next)`/Context → Worker。
-- 进行 admitted Stage execution、Worker、CV、Committer、Integration、Gate 或 Review 时，先读取 `.agents/skills/proofloop-execute/SKILL.md` 及 dispatch 指定的 role Contract/template；Runtime 是状态和 admission 的唯一权威。
+- 规划到执行必须遵循当前 vNext 顺序：candidate Plan/Evidence skeleton → stable Git boundary → Runtime 编译/校验 → fresh SPV → Stage Plan admission → public `proofloop stage next`（只读）→ Brain/Host 按 action 必要时调用 `proofloop context prepare` 并在 dispatch 前校验 Context → Worker 直接消费 supplied Context；CV 仅在未闭合 Evidence gate 的既定顺序内调用允许的 `context admit-refutation-observation`/`context show` seam；其他 Runtime admission 仍由 Brain 调用。
+- 进行 admitted Stage execution、Worker、CV、Boundary CLI、Integration、Gate 或 Review 时，先读取 `.agents/skills/proofloop-execute/SKILL.md` 及 dispatch 指定的 role Contract/template；Runtime 是状态和 admission 的唯一权威。
 - vNext 的 Worker Result、CV、Commit、Integration、Gate 和 Review 必须使用当前 vNext consumer 与绑定链；不得把 v2 事实送入 legacy consumer，也不得用旧 v1 路由替代当前流程。
 - 处理 Manifest、Context、Receipt、Evidence 或 Plan projection 时，必须按当前 Contract 验证 root、scope、digest、snapshot 和前序 Receipt；不能用 progress、checkbox 或 Agent 叙事补全绑定。
 
@@ -56,7 +57,7 @@
 - 任何文件写入工具发生失败或部分应用后，立即停止重试；重新读取当前文件、Git status 和 Git diff，确认实际落盘状态后，再基于当前内容生成新操作；禁止重放旧上下文。
 - Agent 被中断或取消后，磁盘内容和 Git diff 是唯一事实源；不得假设回滚或重复覆盖 partial state。
 - 尚未 Runtime admission 的 Worker 代码、测试、Evidence 或 tasks projection 必须作为 recovery patch 保留。Runtime/Host 修复单独提交并因 HEAD 变化重新执行 fresh SPV/admission，再通过 `recover-task`/`recheck` 重新绑定和接纳现有成果；不得重写或重新派发实现 Task。
-- 任何 Agent 不得绕过 Runtime 手写 Receipt、Manifest 或 Context，也不得替代 Committer 建立 Git boundary。
+- 任何 Agent 不得绕过 Runtime 手写 Receipt、Manifest 或 Context，也不得替代 Brain 调用 Boundary CLI 建立 Git boundary。
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

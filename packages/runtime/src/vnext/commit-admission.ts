@@ -54,6 +54,11 @@ import { loadAncestorReplanDispositionRecords, readCurrentEpoch } from './replan
 import { isVNextHistoricalInvalidatedCommitPayload, isVNextHistoricalInvalidatedCvPayload, isVNextHistoricalInvalidatedWorkerPayload } from './finalize-lineage';
 import { assertHistoricalInvalidatedWorkerGenerations } from './integration-validation';
 import {
+  loadSliceCommitPolicy,
+  validateSliceCommitChangedFiles,
+} from './slice-commit-policy';
+import type { SliceCommitPolicyFacts } from './slice-commit-policy';
+import {
   assertVNextManifestReferenceBindings,
   readVNextManifest,
 } from './dispatch';
@@ -811,21 +816,6 @@ function assertTuple(value: Record<string, unknown>, tuple: TupleBinding, label:
   }
 }
 
-function assertPathsWithinScope(
-  paths: readonly string[],
-  allowed: readonly string[],
-  forbidden: readonly string[],
-  label: string,
-): void {
-  for (const value of paths) {
-    if (forbidden.some((base) => pathsOverlap(value, base))) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `${label} contains a forbidden path: ${value}`);
-    }
-    if (!allowed.some((base) => pathWithin(value, base))) {
-      fail('RUNTIME.SCHEMA_MISMATCH', `${label} expands beyond the admitted execution scope: ${value}`);
-    }
-  }
-}
 
 function validateWorkerFacts(
   root: string,
@@ -1336,6 +1326,90 @@ function assertWorkingTreeBoundary(root: string, manifest: VNextManifest, tuple:
   }
 }
 
+function collectOtherSliceDeclaredFiles(
+  root: string,
+  manifest: VNextManifest,
+  stageId: string,
+  currentSliceId: string,
+): string[] {
+  const declared = new Set<string>();
+  for (const otherSlice of manifest.slices) {
+    if (otherSlice.slice_id === currentSliceId || otherSlice.proof_index.task_refs.length === 0) continue;
+    const otherSliceScope = sliceBinding(root, manifest, otherSlice.slice_id).allowedExecutionScope;
+    const otherReceipts = readReceiptChain(
+      root,
+      tasksReceiptDir(root, stageId, otherSlice.slice_id),
+      `vNext Worker Receipt chain for ${otherSlice.slice_id}`,
+    );
+    for (const receipt of otherReceipts.receipts) {
+      if (receipt.type !== 'TASK_COMPLETE') continue;
+      const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${otherSlice.slice_id}].payload`);
+      try {
+        assertUpstreamTaskCompleteSemantics(
+          payload,
+          otherSlice.evidence_path,
+          `TASK_COMPLETE[${otherSlice.slice_id}]`,
+          {
+            verifyContextPersisted: (contextRef, contextDigest) =>
+              assertDeclaredContextPersisted(root, contextRef, contextDigest),
+            stageHasBinding: manifest.binding !== undefined,
+            allowedScope: otherSliceScope,
+          },
+        );
+      } catch (error) {
+        fail(
+          'RUNTIME.SCHEMA_MISMATCH',
+          `TASK_COMPLETE[${otherSlice.slice_id}] does not pass the complete admission-chain semantics: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      const files = payload['changed_files'];
+      if (Array.isArray(files)) {
+        for (const file of files) {
+          declared.add(rootRelativePath(root, file, 'other Slice declared file'));
+        }
+      }
+    }
+  }
+  return [...declared];
+}
+
+function buildSliceCommitPolicyFacts(
+  root: string,
+  manifest: VNextManifest,
+  tuple: TupleBinding,
+  slice: SliceBinding,
+  worker: WorkerFacts,
+  cv: CvFacts,
+): SliceCommitPolicyFacts {
+  const otherSliceDeclaredFiles = collectOtherSliceDeclaredFiles(
+    root,
+    manifest,
+    tuple.stageId,
+    tuple.sliceId,
+  );
+  // P0 slice-output isolation: the current Slice's committable staging scope is
+  // its OWN execution scope ONLY. A parallel Slice's declared dirty output is
+  // dirty-eligible (tolerated in an interleaved worktree) but NEVER committable
+  // by this Slice boundary, so it is carried in the separate
+  // otherSliceDeclaredFiles field and must never be staged or committed here.
+  return {
+    root,
+    stageId: tuple.stageId,
+    sliceId: tuple.sliceId,
+    manifestDigest: tuple.manifestDigest,
+    planDigest: tuple.planDigest,
+    snapshotDigest: tuple.snapshotDigest,
+    cvReceiptDigest: cv.tipDigest as string,
+    allowedPaths: unique([...slice.allowedExecutionScope]),
+    otherSliceDeclaredFiles: unique(otherSliceDeclaredFiles),
+    forbiddenPaths: systemForbiddenPaths(root),
+    workerChangedFiles: unique(worker.facts.flatMap((fact) => fact.changedFiles)),
+    hasRepairHistory: cv.envelopes.some((envelope) => envelope.verdict === 'REPAIR'),
+  };
+}
+
 function assertCommittedChangedFiles(
   root: string,
   manifest: VNextManifest,
@@ -1405,120 +1479,27 @@ function assertCommittedChangedFiles(
   if (changed.length === 0) {
     fail('DOMAIN.INVALID_TRANSITION', 'Slice Commit requires a non-empty committed Slice boundary');
   }
-  // User authorization A8: the committed boundary may carry files admitted
-  // by OTHER Slices DECLARED BY THE CURRENT MANIFEST whose TASK_COMPLETE
-  // receipts are already persisted (a shared worktree with interleaved Slice
-  // outputs — S12-D/S12-E).  The allowed side is therefore the union of this
-  // Slice's execution scope and the changed_files declared by every other
-  // Manifest-declared admitted Worker receipt of the same Stage.  Every
-  // committed path must still belong to SOME admitted receipt (fail-closed
-  // for un-declared files), and the SYSTEM forbidden paths still bind every
-  // committed path.  S12-E REPAIR-FINAL: unknown slices / receipt
-  // directories not declared in the Manifest are ignored (they never expand
-  // the allowed side), and every TASK_COMPLETE receipt must pass the
-  // complete admission-chain payload semantics.  S12-E REPAIR-FINAL round 3:
-  // every file an other slice declares must itself stay inside THAT slice's
-  // Manifest task scope (the union of all its tasks' allowedCodeScope plus
-  // evidence/plan projections) and its Context must be persisted — a forged
-  // "declared Slice" credential can never pass out-of-scope files through
-  // the A8 merge.
-  const otherSliceDeclaredFiles = new Set<string>();
-  for (const otherSlice of manifest.slices) {
-    if (otherSlice.slice_id === tuple.sliceId) continue;
-    if (otherSlice.proof_index.task_refs.length === 0) continue;
-    const otherSliceScope = sliceBinding(root, manifest, otherSlice.slice_id).allowedExecutionScope;
-    const otherReceipts = readReceiptChain(
-      root,
-      tasksReceiptDir(root, tuple.stageId, otherSlice.slice_id),
-      `vNext Worker Receipt chain for ${otherSlice.slice_id}`,
-    );
-    for (const receipt of otherReceipts.receipts) {
-      if (receipt.type !== 'TASK_COMPLETE') continue;
-      const payload = requireRecord(receipt.payload, `TASK_COMPLETE[${otherSlice.slice_id}].payload`);
-      try {
-        assertUpstreamTaskCompleteSemantics(
-          payload,
-          otherSlice.evidence_path,
-          `TASK_COMPLETE[${otherSlice.slice_id}]`,
-          {
-            verifyContextPersisted: (contextRef, contextDigest) =>
-              assertDeclaredContextPersisted(root, contextRef, contextDigest),
-            stageHasBinding: manifest.binding !== undefined,
-            allowedScope: otherSliceScope,
-          },
-        );
-      } catch (error) {
-        fail(
-          'RUNTIME.SCHEMA_MISMATCH',
-          `TASK_COMPLETE[${otherSlice.slice_id}] does not pass the complete admission-chain semantics: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-      const files = payload['changed_files'];
-      if (Array.isArray(files)) {
-        for (const f of files) otherSliceDeclaredFiles.add(rootRelativePath(root, f, 'other Slice declared file'));
-      }
-    }
-  }
-  assertPathsWithinScope(
-    changed,
-    unique([...slice.allowedExecutionScope, ...otherSliceDeclaredFiles]),
-    // The committed boundary carries the union of every task's output, so it
-    // is bounded by the union of the task allowed scopes and the SYSTEM
-    // forbidden paths.  Task-level forbidden lists constrain only their own
-    // task's TASK_COMPLETE facts (checked per task above); a path one task
-    // is admitted to edit must not veto the Slice commit because another
-    // task must not touch it (S12-D: T02 edits next.ts while T01/T04 forbid
-    // it).
-    systemForbiddenPaths(root),
-    'Git committed changed files',
-  );
-
-  const declared = unique(worker.facts.flatMap((fact) => fact.changedFiles)).sort();
-  const hasRepairHistory = cv.envelopes.some((envelope) => envelope.verdict === 'REPAIR');
-  if (hasRepairHistory) {
-    // A Worker repair does not produce a new Worker Receipt or Worker fact,
-    // so the committed boundary may legitimately contain repair-only files
-    // that no Worker fact declared (REPAIR → recheck sequence).  The scope
-    // check above still bounds every committed path inside the admitted
-    // execution scope; every declared file must still be present in the
-    // commit.  Without a REPAIR history the exact-match gate below stays
-    // fail-closed.
-    if (!declared.every((value) => changed.includes(value))) {
-      fail(
-        'RUNTIME.SCHEMA_MISMATCH',
-        `committed changed-file set does not contain every persisted Worker fact (declared=${declared.join(',')} actual=${changed.join(',')})`,
-      );
-    }
-  } else if (
-    // User authorization A8b/A8c: with interleaved infrastructure/runtime-fix
-    // commits between slice boundaries, the committed boundary may contain
-    // files beyond the Worker-fact declaration set, and a declared
-    // projection (tasks.md) that is already present in HEAD history without
-    // a new worktree change satisfies its declaration through the persisted
-    // snapshot.  The fail-closed gate becomes: every DECLARED file must be
-    // present in the commit OR already present in the HEAD tree (no
-    // declared-but-missing-and-uncommitted), while extra committed files
-    // are still bounded by the allowed-scope check above (which A8 extended
-    // with other admitted-Slice declarations).  Un-declared committed files
-    // outside every allowed scope still fail there.
-    !declared.every(
-      (value) => changed.includes(value) || gitTreeContains(root, commitSha, value),
-    )
-  ) {
+  const policy = loadSliceCommitPolicy(buildSliceCommitPolicyFacts(root, manifest, tuple, slice, worker, cv));
+  try {
+    validateSliceCommitChangedFiles(policy, changed, {
+      treePaths: gitTreePaths(root, commitSha),
+      phase: 'post-commit',
+    });
+  } catch (error) {
     fail(
       'RUNTIME.SCHEMA_MISMATCH',
-      `committed changed-file set does not contain every persisted Worker fact (declared=${declared.join(',')} actual=${changed.join(',')})`,
+      error instanceof Error ? error.message : String(error),
     );
   }
   return changed;
 }
 
-function validateFacts(
-  request: SliceCommitAdmissionRequest,
+type LoadedCommitFacts = Omit<ValidatedCommitFacts, 'commitSha' | 'changedFiles'>;
+
+function loadCommitFacts(
+  request: Pick<SliceCommitAdmissionRequest, 'stageId' | 'sliceId' | 'cvReceiptDigest'>,
   dependencies: VNextSliceCommitAdmissionDependencies,
-): ValidatedCommitFacts {
+): LoadedCommitFacts {
   const root = canonicalProjectRoot(dependencies.projectRoot);
   const manifestPath = path.join(root, '.proofloop', 'manifests', `${request.stageId}.json`);
   assertVNextManifestRoute(root, manifestPath, request.stageId);
@@ -1581,11 +1562,8 @@ function validateFacts(
     ...tupleBase,
     proofIndexDigest: slice.proofIndexDigest,
   };
-  // S12-D-T04 (S12-D REPLAN): slice-local mode — every credential of the
-  // Slice (Worker chain, CV chain) must bind the SAME Manifest contract
-  // digests and the recomputed execution binding. The base snapshot is the
-  // admitted SPV snapshot (the Stage's canonical integration HEAD at
-  // admission), stable for the whole Stage.
+  // S12-D-T04 (S12-D REPLAN): the slice-local binding expectation is shared
+  // by the Worker/CV/Slice Commit/Integration credential consumers.
   const sliceLocalBinding =
     manifest.binding !== undefined
       ? computeSliceLocalBindingExpectation(
@@ -1606,8 +1584,6 @@ function validateFacts(
       `cv_receipt_digest does not match the latest vNext CV_PASS Receipt: ${request.cvReceiptDigest} != ${cv.tipDigest}`,
     );
   }
-
-  const changedFiles = assertCommittedChangedFiles(root, manifest, tuple, request.commitSha, slice, worker, cv);
   const committerChain = readReceiptChain(
     root,
     committerReceiptDir(root, request.stageId, request.sliceId),
@@ -1627,17 +1603,28 @@ function validateFacts(
     });
     if (!historicalOnly) fail('DOMAIN.INVALID_TRANSITION', 'a vNext Slice Commit Receipt already exists for this Slice');
   }
-  return {
-    root,
-    manifest,
-    slice,
-    tuple,
-    authority,
-    worker,
-    cv,
-    commitSha: request.commitSha,
-    changedFiles,
-  };
+  return { root, manifest, slice, tuple, authority, worker, cv };
+}
+
+function policyFactsFromLoadedFacts(facts: LoadedCommitFacts): SliceCommitPolicyFacts {
+  return buildSliceCommitPolicyFacts(facts.root, facts.manifest, facts.tuple, facts.slice, facts.worker, facts.cv);
+}
+
+function validateFacts(
+  request: SliceCommitAdmissionRequest,
+  dependencies: VNextSliceCommitAdmissionDependencies,
+): ValidatedCommitFacts {
+  const loaded = loadCommitFacts(request, dependencies);
+  const changedFiles = assertCommittedChangedFiles(
+    loaded.root,
+    loaded.manifest,
+    loaded.tuple,
+    request.commitSha,
+    loaded.slice,
+    loaded.worker,
+    loaded.cv,
+  );
+  return { ...loaded, commitSha: request.commitSha, changedFiles };
 }
 
 function validateRequest(value: unknown): SliceCommitAdmissionRequest {
@@ -1746,6 +1733,20 @@ export function validateVNextSliceCommitRequest(value: unknown): SliceCommitAdmi
   }
 }
 
+export interface VNextSliceCommitPolicyInput {
+  readonly stageId: string;
+  readonly sliceId: string;
+  readonly cvReceiptDigest: string;
+}
+
+/** Load the same persisted Slice/CV/Worker facts used by Slice Commit admission. */
+export function loadVNextSliceCommitPolicyFacts(
+  input: VNextSliceCommitPolicyInput,
+  dependencies: VNextSliceCommitAdmissionDependencies,
+): SliceCommitPolicyFacts {
+  return policyFactsFromLoadedFacts(loadCommitFacts(input, dependencies));
+}
+
 /**
  * Admit one Slice Commit using only vNext persisted facts and the committed
  * Git boundary.  No legacy reconcile/reducer consumer is reachable here.
@@ -1824,15 +1825,14 @@ function gitChangedPaths(root: string): string[] {
   ]).map((value, index) => rootRelativePath(root, value, `Git changed path[${index}]`));
 }
 
-function gitTreeContains(root: string, commitSha: string, filePath: string): boolean {
-  try {
-    const listing = gitOutput(
-      root,
-      ['ls-tree', '-r', '--name-only', commitSha, '--'],
-      'Git HEAD tree listing',
-    );
-    return listing.split('\n').some((line) => line.trimEnd() === filePath);
-  } catch {
-    return false;
-  }
+function gitTreePaths(root: string, commitSha: string): string[] {
+  return gitOutput(
+    root,
+    ['ls-tree', '-r', '--name-only', commitSha, '--'],
+    'Git HEAD tree listing',
+  )
+    .split('\n')
+    .map((value) => value.trimEnd())
+    .filter((value) => value.length > 0)
+    .map((value, index) => rootRelativePath(root, value, `Git tree path[${index}]`));
 }

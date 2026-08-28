@@ -3,7 +3,7 @@
  *
  * Closed operation set（S10-B-T02）：
  *  - `context prepare` → 按角色投影 digest-bound Context（角色闭集：
- *    planning/spv/worker/cv/committer/stage-reviewer/project-reviewer）。
+ *    planning/spv/worker/cv/stage-reviewer/project-reviewer）。
  *    worker 角色复用 `projectVNextWorkerDispatch` + `persistVNextWorkerContext`
  *    （与 next 派发同一投影规则、同一 Runtime 写 seam，可校验一致）；
  *    其余角色走 `projectVNextRoleContext` 只读投影（ref+digest，不落盘）。
@@ -79,7 +79,7 @@ import {
 export interface ContextOperationParams {
   /** Target canonical Stage ID（`^S\d+$`）。 */
   readonly stage?: string;
-  /** Closed Context role（planning|spv|worker|cv|committer|stage-reviewer|project-reviewer）。 */
+  /** Closed Context role (planning|spv|worker|cv|stage-reviewer|project-reviewer). */
   readonly role?: string;
   /** Slice binding（Manifest-declared）。 */
   readonly slice?: string;
@@ -1082,7 +1082,6 @@ function validateRoleFields(
     planning: ['authority_refs', 'selected_work_item_refs'],
     spv: ['stage_goal_refs', 'authority_refs', 'evidence_paths'],
     cv: ['verification', 'evidence_read', 'goal_refs', 'task_refs', 'acceptance_refs', 'seam_refs', 'oracle_refs', 'risk_refs'],
-    committer: ['boundary', 'expected_head', 'receipt_refs', 'changed_files'],
     'stage-reviewer': ['review_scope', 'integrated_snapshot', 'acceptance_refs', 'seam_refs', 'oracle_refs', 'risk_refs'],
     'project-reviewer': ['review_scope', 'acceptance_refs', 'seam_refs', 'oracle_refs', 'risk_refs'],
     worker: [],
@@ -1268,68 +1267,6 @@ function receiptSemanticsOk(
   }
 }
 
-/** Persisted facts for the Committer role（round 2，contract 0.5）：
- * digest-addressed Receipt refs and the union of admitted Worker
- * changed-file sets of the bound Slice. */
-function readCommitterFacts(
-  root: string,
-  stageId: string,
-  sliceId: string | undefined,
-  manifestDigest: string,
-  planDigest: string,
-): { readonly receiptRefs: string[]; readonly changedFiles: string[] } {
-  if (sliceId === undefined) return { receiptRefs: [], changedFiles: [] };
-  const receiptRefs: string[] = [];
-  const changedFiles: string[] = [];
-  for (const category of ['tasks', 'cv', 'committer']) {
-    const directory = path.join(root, '.proofloop', 'receipts', category, stageId, sliceId);
-    let names: string[];
-    try {
-      names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
-    } catch {
-      continue;
-    }
-    const expectedTypes: Record<string, string> = {
-      tasks: 'TASK_COMPLETE',
-      cv: 'CV_PASS',
-      committer: 'SLICE_COMMIT',
-    };
-    for (const name of names) {
-      const file = path.join(directory, name);
-      const canonical = canonicalPathWithinRoot(root, file);
-      if (canonical === null) continue;
-      // Round 5/6: 真实 Receipt 语义 — content digest + schema + outer tuple +
-      // Manifest/Plan payload binding + 类型与目录类别匹配
-      if (!receiptSemanticsOk(root, canonical, stageId, sliceId, manifestDigest, planDigest)) continue;
-      const opened = openNoFollowRead(root, canonical);
-      if (!opened.ok) continue;
-      let raw: string;
-      try {
-        raw = fs.readFileSync(opened.fd, 'utf8');
-      } catch {
-        continue;
-      } finally {
-        fs.closeSync(opened.fd);
-      }
-      try {
-        const parsed = JSON.parse(raw) as { type?: unknown; payload?: { changed_files?: unknown } };
-        const type = typeof parsed.type === 'string' ? parsed.type : '';
-        if (type === expectedTypes[category] || (category === 'cv' && type === 'CV_REPAIR')) {
-          receiptRefs.push(`.proofloop/receipts/${category}/${stageId}/${sliceId}/${name}`);
-        }
-        const changed = parsed.payload?.changed_files;
-        if (Array.isArray(changed)) {
-          for (const entry of changed) {
-            if (typeof entry === 'string' && entry.length > 0) changedFiles.push(entry);
-          }
-        }
-      } catch {
-        // non-JSON receipt files are not Worker facts
-      }
-    }
-  }
-  return { receiptRefs: [...new Set(receiptRefs)], changedFiles: [...new Set(changedFiles)] };
-}
 
 /** Reviewer persisted facts（round 5）：real Receipt refs of the review scope
  * （stage-gate/review/integration for Stage Reviewer；project for Project
@@ -1495,9 +1432,7 @@ function revalidateRoleContext(
   return null;
 }
 
-/** Collect the persisted role facts for a projection（round 5）：
- * Committer receipts/changed files、CV repair history（含 recheck 语义）、
- * Reviewer real Receipt refs + E2E status。 */
+/** Collect persisted facts needed by the active role projections. */
 function collectRoleFacts(
   root: string,
   role: string,
@@ -1505,15 +1440,6 @@ function collectRoleFacts(
   sliceId: string | undefined,
   resolved: ResolvedManifestAuthority,
 ): Record<string, unknown> {
-  const committerFacts = role === 'committer'
-    ? readCommitterFacts(
-        root,
-        stage,
-        sliceId,
-        resolved.manifestDigest,
-        (resolved.manifest.plan as { plan_digest: string }).plan_digest,
-      )
-    : { receiptRefs: [], changedFiles: [] };
   const cvHistory = role === 'cv' && sliceId !== undefined
     ? readCvRepairHistory(
         root,
@@ -1535,11 +1461,8 @@ function collectRoleFacts(
       )
     : { receiptRefs: [], e2eStatus: null };
   return {
-    ...committerFacts,
     cvRepairHistory: role === 'cv' ? cvHistory : undefined,
-    receiptRefs: role === 'stage-reviewer' || role === 'project-reviewer'
-      ? reviewerFacts.receiptRefs
-      : committerFacts.receiptRefs,
+    receiptRefs: role === 'stage-reviewer' || role === 'project-reviewer' ? reviewerFacts.receiptRefs : [],
     e2eStatus: role === 'project-reviewer' ? reviewerFacts.e2eStatus : undefined,
   };
 }

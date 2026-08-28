@@ -2,43 +2,37 @@
 
 ## 1. 目的与边界
 
-本契约定义 Brain 如何使用 `herdr-link/1` 管理 ProofLoop Worker 的三个生命周期阶段：
+本契约定义 Brain 如何使用 `herdr-link` 管理 ProofLoop Worker 的三个生命周期阶段：
 
 ```text
 dispatch → continue → recall
 ```
 
-本契约不扩展 Herdr Link 协议，也不把 ProofLoop 的 `task`、`stage`、`Receipt`、`Evidence` 或 `WorkerResult` 字段加入 Link envelope。Herdr Link 的 `message` 仍是 opaque business payload；ProofLoop 只在 Brain/Runtime 层解释它。协议唯一规范是 `https://github.com/LZHcode1986/herdr-link/blob/master/PROTOCOL.md` 的 `herdr-link/1`。
+本契约不扩展 Herdr Link 协议，也不把 ProofLoop 的 `task`、`stage`、`Receipt`、`Evidence` 或 `WorkerResult` 字段加入 Link envelope。Herdr Link 的 `message` 仍是 opaque business payload；ProofLoop 只在 Brain/Runtime 层解释它。协议唯一规范是 `https://github.com/LZHcode1986/herdr-link/blob/master/PROTOCOL.md` 的 `herdr-link`。
 
-Herdr Link 是通信基础层，提供：
+`herdr-link` 是跨 Agent / 跨 pane 的 Task/Result 消息通道。Herdr Link 提供：
 
-- `herdr_link_peers`：按稳定 Agent Name 发现 live peer；
-- `herdr_link_send`：发送 `herdr-link/1` 消息；
-- `reply_to`：关联回复；
-- `herdr_link_close`：按 Agent Name 显式关闭 pane。
-- `herdr_link_peers` 返回当前 `self` 与稳定命名的 live `peers`，不承担 Worker 选择或排序；`herdr_link_send` 返回 `status: sent` 只证明投递，不等待或轮询；回复发送给原 `from` 并设置 `reply_to` 为原消息 `id`。
+- `herdr_link_peers`：按稳定 Agent Name 发现 live peer，返回当前 `self` 与稳定命名的 live `peers`；不承担 Worker 选择或排序。
+- `herdr_link_send`：发送 `herdr-link` 消息并关联其回复；`status: sent` 只证明投递，不等待或轮询；回复发送给原 `from`，关联由工具完成。
+- `herdr_link_close`：按 Agent Name 显式关闭已命名 Agent。
 - `SELF_UNNAMED`、`PEER_NOT_FOUND`、`SEND_FAILED`、`CLOSE_FAILED` 等 Link 工具错误必须保留为 typed blocker，不猜测目标或静默 fallback。
 
 Herdr Link 不创建、选择、调度、复用或回收 Worker，也不决定任务完成。Brain 保留这些生命周期决策。
 
-## 2. Herdr Skill/CLI 的保留范围
+## 2. Link 的职责边界
 
-Herdr Link 已取代普通 Agent-to-Agent 消息所需的 raw `herdr agent prompt`、`--wait`、`agent.read`、`pane.read`、`send-text` 和 `send-keys`。正常消息和 Worker Result 不得再通过这些命令传输。
+`herdr-link` 只承载消息：跨 Agent / 跨 pane 的 Task/Result 通信。Link 的 `message` 是 opaque payload，ProofLoop 只在 Brain/Runtime 层解释它。
 
-`.agents/skills/herdr/SKILL.md` 与 Herdr CLI 仍保留在控制面，原因是 Herdr Link V1 不提供：
+Link **不创建也不启动** pane 或 Agent。资源创建、Agent 启动、Session 建立和宿主生命周期由 Host/运行环境负责，不属于 ProofLoop 消息契约，也不属于 Herdr Link。不得把 pane/Agent 的创建、布局或启动能力归给 Link。
 
-- 创建或拆分 pane；
-- 启动 Agent harness；
-- 恢复/重建 Worker Session；
-- 读取底层 lifecycle/identity 以作资源决策；
-- 对没有 Link Adapter 的 Brain/Host 提供显式兼容路由。
+`transport` 必须在 Session 创建时固定：
 
-因此，Skill/CLI 只用于资源和生命周期控制；不得绕过 Link 发送普通业务消息。`transport` 必须在 Session 创建时固定：
 - `herdr-link`：已安装 Link Adapter 且当前 Agent 有稳定 Agent Name，普通消息和 Result 使用 Link；
-- `herdr-legacy`：Link 不可用时的显式 raw Herdr 兼容路线，仅为迁移/部署兼容，不能静默启用；
-- `subagent`：显式的 harness-native 兼容路线，必须产出同一 Worker Result Contract。
+- `subagent`：显式的同 harness 兼容路线，必须产出同一 Worker Result Contract，不是跨 pane 通信，也不是 Herdr 失败后的自动 fallback。
 
-Link 不可用且未明确选择 `herdr-legacy`/`subagent` 时，返回 typed blocker；不能假定 Link 已加载或混用多个 transport。
+`herdr-link` 是唯一跨 Agent / 跨 pane 的 Task/Result 消息通道；不存在自动/隐式的其他派发路线。Link 不可用且当前 Session 已选择 `herdr-link` 时不得切换 transport；只有明确创建新/recovery `subagent` Session 才能使用兼容路线。
+
+Link 不可用且未明确选择 `subagent` 时，返回 typed blocker；不能假定 Link 已加载或混用多个 transport。
 
 ## 3. Dispatch：何时派发
 
@@ -52,10 +46,10 @@ Link 不可用且未明确选择 `herdr-legacy`/`subagent` 时，返回 typed bl
 
 派发动作：
 
-1. 若需要创建/启动/恢复 pane，使用 Herdr 控制面完成资源操作；
+1. pane/Agent 创建与启动由 Host/运行环境负责；需要时先完成宿主侧资源操作，不通过 Link 创建；
 2. 通过 `herdr_link_send` 发送一个且仅一个当前 Task packet，不等待、不轮询；
 3. 将返回的 Link message `id` 与 Runtime `actionToken` 保存在 Brain 的临时调度状态中，不写入 Runtime-owned 制品；
-4. Worker 结果必须作为对该消息的 `reply_to` 回复返回；
+4. Worker 结果必须作为对该消息的 `herdr_link_send` 回复返回；
 5. 收到回复后，Brain 先解析并绑定 Result，再重读 Evidence、Context、Git/diff 和 Receipts，最后交给正确的 Runtime consumer。
 
 `herdr_link_send` 返回 `status: sent` 只证明消息已被 Herdr 接受，不证明 Worker 完成。
@@ -81,7 +75,7 @@ Brain 只有在以下条件全部成立时，才向原 Worker Session 发送下�
 - semantic input、Context 或 snapshot digest 改变；
 - pane/Agent 丢失、被替换或 identity 不一致；
 - 已有代码/Evidence/tasks projection 但原 Session 丢失；此时保留成果，改走 `recover-task`/`recheck`；
-- Result 缺失、截断、重复、错 `reply_to`、错 `actionToken` 或 schema 不合法；
+- Result 缺失、截断、重复、错消息关联、错 `actionToken` 或 schema 不合法；
 - 仅凭 `idle`、`done`、模型总结或 Git diff 推断 Task 已完成。
 
 ## 5. Recall：何时收回
@@ -98,7 +92,7 @@ Brain 只能在以下任一条件满足后回收 Worker：
 1. 没有未处理的 Link reply；
 2. 没有正在执行的 Runtime action；
 3. 未接纳成果已保留，可由 recovery route 继续；
-4. 关闭目标使用稳定 Agent Name，通过 `herdr_link_close` 或受控 Herdr 生命周期命令完成。
+4. 关闭目标使用稳定 Agent Name，通过 `herdr_link_close` 关闭已命名 Agent。
 
 以下状态不能触发自动回收：
 
@@ -111,7 +105,7 @@ Brain 只能在以下任一条件满足后回收 Worker：
 
 - Link 发送失败：不伪造 Result，不自动重发；返回 typed blocker。
 - Link reply 丢失：按 `actionToken`/message `id` 从持久化事实恢复；有成果时走 `recover-task`/`recheck`。
-- Agent 重启或 pane 替换：重新发现 peer 和 identity；不得使用旧 pane ID 直接续接。
+- Agent 重启或 pane 替换：重新发现 peer 和 identity；不得使用旧 pane ID 直接续接。资源重建由 Host/运行环境负责。
 - Herdr Link 不承载 Runtime admission；Worker Result 的闭集 schema、digest 和 changed-file 边界仍由 Runtime 验证。
 
 ## 7. 验收条件
@@ -119,7 +113,7 @@ Brain 只能在以下任一条件满足后回收 Worker：
 生命周期整改完成必须证明：
 
 1. Dispatch 只由 Runtime `DISPATCH_WORKER` 驱动；
-2. Link 消息和 `reply_to` 可把 Worker Result 绑定到当前 action；
+2. Link 消息和 `herdr_link_send` 可把 Worker Result 绑定到当前 action；
 3. 同 Slice 的合法 continuation 复用 Session，digest/identity 变化时 fail closed 或 recovery；
 4. 单 Task/idle/done 不会误触发 recall；
 5. canonical CV `PASS` 或明确暂停后才会回收；

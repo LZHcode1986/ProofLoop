@@ -116,7 +116,6 @@ export type RoleType =
   | 'stage-reviewer'
   | 'researcher'
   | 'prototype'
-  | 'committer'
   | 'general';
 
 // ============================================================

@@ -1975,7 +1975,7 @@ function readVNextCvReceiptFacts(
  * re-projected for Worker dispatch or CV; the next consumer advances past it
  * to the next dependency-ready Slice.
  *
- * The committer category chain is validated like the Worker chain: every
+ * The SLICE_COMMIT receipt chain is validated like the Worker chain: every
  * Receipt must be a closed vNext SLICE_COMMIT fact bound to the active
  * Manifest/Plan tuple and to the admission snapshot's Git chain. In addition
  * (S08-REVIEW-004) the Receipt's semantic bindings are revalidated against
@@ -1983,7 +1983,7 @@ function readVNextCvReceiptFacts(
  * execution chain, cv_receipt_digest equal to the Slice's latest CV_PASS tip,
  * changed_files agreeing with the Worker fact union (with the REPAIR-history
  * exemption), and receipt_chain_valid. A legacy, malformed, or semantically
- * incomplete committer fact fails closed instead of being guessed around.
+ * incomplete SLICE_COMMIT fact fails closed instead of being guessed around.
  */
 function readVNextCommittedSliceIds(
   root: string,
@@ -2042,7 +2042,7 @@ function readVNextCommittedSliceIds(
         if (receipt.type !== 'SLICE_COMMIT') {
           throw new VNextHandoffError(
             'admission-invalid',
-            `Receipt ${name} is not a SLICE_COMMIT fact in the committer category`,
+            `Receipt ${name} is not a SLICE_COMMIT fact in the SLICE_COMMIT category`,
           );
         }
         if (!verifyReceiptDigest(file)) {
@@ -4100,11 +4100,9 @@ export class VNextNextActionService {
 // projection result (ref + digest), keeping the Runtime-owned area behind the
 // Runtime seam.
 //
-// Role closure (Seam Role transfer): Planning/SPV/Worker/CV/Committer/Stage
-// Reviewer/Project Reviewer use distinct Contexts; `role` is part of the
-// Context content digest, so a Context projected for one role can never be
-// reused for another role (the role check fails closed on content digest or
-// explicit role mismatch).
+// Role closure (Seam Role transfer): all active roles use distinct Contexts;
+// `role` is part of the Context content digest, so a Context projected for one role can never
+// be reused for another role (the role check fails closed on content digest or explicit role mismatch).
 //
 // CV Evidence read gate: the initial CV Context carries
 // `evidence_read_gate { required: 'refutation-observation', satisfied: false }`.
@@ -4120,7 +4118,6 @@ export const VNEXT_CONTEXT_ROLES = [
   'spv',
   'worker',
   'cv',
-  'committer',
   'stage-reviewer',
   'project-reviewer',
 ] as const;
@@ -4143,7 +4140,7 @@ export interface VNextRoleContextProjectionInput {
   /** Optional Task binding; when present it must belong to the bound Slice. */
   readonly taskId?: string;
   readonly verifyReferenceBindings?: boolean;
-  /** Persisted role facts (Committer receipts/changed files). */
+  /** Persisted role facts used by the active role projections. */
   readonly roleFacts?: VNextRoleFacts;
 }
 
@@ -4197,8 +4194,7 @@ export interface VNextRoleContextProjection {
 /**
  * Minimum role-specific semantic fields per contract §0.5: every closed role
  * projection carries the role semantics its consumer needs (authority/goal/
- * proof refs, evidence-read binding for initial CV, boundary/receipt facts for
- * Committer, review scope + full review refs for Reviewers).  `role` AND
+ * proof refs, evidence-read binding for initial CV, review scope + full review refs for Reviewers).  `role` AND
  * `role_fields` are part of the Context digest, so cross-role reuse stays
  * impossible.
  */
@@ -4295,17 +4291,6 @@ function roleFieldsFor(
         risk_refs: slice.proof_index.risk_refs.map((risk) => risk.ref_id),
       };
     }
-    case 'committer':
-      // §0.5 Committer: accepted CV/Task Receipt refs, exact Git boundary,
-      // changed-file set, expected HEAD/index/worktree.
-      return {
-        boundary: 'slice-commit',
-        expected_head: snapshotDigest,
-        expected_index: roleFacts.gitState?.index ?? 'clean',
-        expected_worktree: roleFacts.gitState?.worktree ?? 'clean',
-        receipt_refs: [...(roleFacts.receiptRefs ?? [])],
-        changed_files: [...(roleFacts.changedFiles ?? [])],
-      };
     case 'stage-reviewer':
       // §0.5 Stage Reviewer: Stage goal, integrated snapshot, Stage
       // Gate/CV/Slice refs, unresolved findings, Authority refs + full
@@ -4337,10 +4322,8 @@ function roleFieldsFor(
 /** Persisted facts a role projection may bind (repair round 3/5). */
 export interface VNextRoleFacts {
   readonly sliceId?: string;
-  /** Digest-addressed Receipt refs of the bound Slice (tasks/cv/committer). */
+  /** Digest-addressed Receipt refs of the bound Slice (tasks/cv/SLICE_COMMIT). */
   readonly receiptRefs?: readonly string[];
-  /** Union of the admitted Worker changed-file sets of the bound Slice. */
-  readonly changedFiles?: readonly string[];
   /** CV history of the bound Slice (initial vs recheck verification). */
   readonly cvRepairHistory?: {
     readonly hasRepair: boolean;
@@ -4351,8 +4334,6 @@ export interface VNextRoleFacts {
     readonly counterexamples?: readonly string[];
     readonly requiredRecheckScope?: readonly string[];
   };
-  /** Git boundary state for the Committer role (index/worktree). */
-  readonly gitState?: { readonly index: string; readonly worktree: string };
   /** Project E2E status for the Project Reviewer role. */
   readonly e2eStatus?: string | null;
 }
@@ -4441,9 +4422,7 @@ export function projectVNextRoleContext(
     {
       sliceId: input.sliceId,
       receiptRefs: input.roleFacts?.receiptRefs ?? [],
-      changedFiles: input.roleFacts?.changedFiles ?? [],
       cvRepairHistory: input.roleFacts?.cvRepairHistory,
-      gitState: input.roleFacts?.gitState,
       e2eStatus: input.roleFacts?.e2eStatus,
     },
   );

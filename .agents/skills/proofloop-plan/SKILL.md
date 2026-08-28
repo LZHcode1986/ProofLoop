@@ -1,223 +1,116 @@
 ---
 name: proofloop-plan
-description: STAGE_PLANNING 阶段技能：ProofLoop active planning 指导：调用 `plan materialize` 生成或更新 candidate tasks.md、调度 stage-plan-verifier（SPV）、处理 PLAN_GAP 或 SPV finding、重启后恢复 planning 时使用。
+description: STAGE_PLANNING：Stage Goal/Work Items 已选定时生成 candidate Plan；在 PLAN_GAP、SPV finding 或重启恢复时重新核对规划绑定，直至 fresh SPV PLAN_READY 并完成 Runtime Stage Plan admission。
 ---
 
 # proofloop-plan
 
+本 Skill 只负责 STAGE_PLANNING 的判断和有序交接。Contract 定义语义、字段、状态和闭集输入/输出；
+Template 定义 dispatch packet/schema；Runtime 定义 Manifest、Evidence、Receipt、admission 和状态。
+
 ## Phase ownership
 
-- 阶段：STAGE_PLANNING（Brain + `proofloop-plan` + Runtime）
-- 进入条件：Stage Goal 与 Work Items 已选定（STAGE_GOAL_SELECTED）；Authority 就绪
-- 完成信号：candidate Plan/Evidence 最终 Git boundary、Validator PASS、fresh SPV `PLAN_READY`，随后 Runtime Stage Plan admission
-- 交接：admitted Manifest 交给 `proofloop-execute`（STAGE_EXECUTION）；阶段切换由 Runtime admission 驱动
-- 回退：用户要求修改计划时，Brain 重新加载本技能；Authority 变更则回到对应权威阶段技能
+- **进入**：Stage Goal、Architecture Work Items 和必要 Authority 已就绪。
+- **完成**：candidate Plan/Evidence skeleton 经过 stable Git boundary，Runtime compile/validate PASS，
+  fresh SPV 返回 `PLAN_READY`，随后 Runtime Stage Plan admission 成功。
+- **交接**：admitted Manifest、Plan digest 和 Context 交给 `proofloop-execute`；阶段切换由 Runtime 驱动。
+- **回退**：Authority 变化回对应 authority Skill；计划缺口继续留在本 Skill。
 
-本 Skill 是 Brain 的 active planning 方法。
+## 加载链与事实源
 
-## 加载与调用
+1. 本 Skill：规划步骤、分支和完成标准。
+2. `.agents/skills/proofloop-plan/references/plan-materializer-contract.md`：`plan materialize` 的
+   request/schema、candidate projection、输出和失败路由；调用前逐字段核对。
+3. `.agents/skills/proofloop-plan/references/stage-plan-verifier-template.md`：fresh SPV packet、
+   helper、验证顺序和结果 schema。
+4. Brain dispatch 指定的 active Contract/Authority：只读取稳定 ref，不复制正文。
 
-加载本 Skill 后，Brain 通过 Runtime public CLI 调用 `plan materialize` 完成
-Plan materialization；确切 operation/request 语法以
-`references/plan-materializer-contract.md` 和当前 CLI `--help` 为准。命令契约
-（确定性渲染；可选 `"check": true` 只读复核，不产生写入）和写入边界（candidate
-`delivery/stages/<stage-id>/tasks.md`，必要时同源 `candidate-input.json` 瞬态输入）
-见该 Contract。
+`plan materialize` 是 candidate `tasks.md` 的唯一写入者；Brain 不手写 candidate Plan。Candidate
+不授予执行权，`CANDIDATE_READY`、Validator PASS 和 SPV `PLAN_READY` 都不等于 admission。
 
-`plan materialize` 是 Runtime CLI 的确定性命令，无独立 agent owner，是 candidate
-Plan 的唯一写入者。
+## 责任分工
 
-candidate tasks.md 的唯一写入动作是 `plan materialize` 命令（确定性渲染，Brain
-不手写）；不能以叙事、手写隐式步骤或直接编辑替代该命令。
+- Brain：选择 dependency-ready AWI、确认 Authority readiness、调用 Runtime/本 Skill、接收结构化结果并路由。
+- 本 Skill：读取稳定 refs，构造最小闭合输入，调用 `plan materialize`，准备 fresh SPV。
+- Runtime：compile、validate、Evidence skeleton、stable-boundary 校验、SPV/admission Receipt 和执行授权。
+- SPV：只读反向验证；不编辑 Plan、Evidence、checkbox、Receipt 或 Git。
 
-## 职责
+## 有序规划循环
 
-Brain 负责：
+每次循环只处理当前 Stage，并在每步结束核对完成标准：
 
-- 选择 dependency-ready 的 Architecture Work Items（AWI）；
-- 判断是否满足 Authority Readiness；
-- 调用本 Skill；
-- 调用 `plan materialize` 并消费其结构化返回（CANDIDATE_READY / CANDIDATE_CHECKED）；
-- 接收结构化结果并进行全局路由。
+1. **REHYDRATE**：读取 Git、Authority、candidate Plan/input、Manifest、Evidence、Findings 和
+   `progress.md`。完成标准：当前 Stage、输入 digest、已有 admission/replan epoch 和待处理 finding 均可从持久化事实定位。
+2. **确认 readiness**：确认 Work Item 依赖、Hard Part 状态和 Authority refs 已满足；未满足时返回
+   `AUTHORITY_GAP`、`TECHNICAL_UNKNOWN` 或用户决定路由。完成标准：每个被使用的 authority/entity ref 都稳定、root-bound 且可解析。
+3. **核对代码 scope**：构造每个 Task 的结构化 `execution_scope` 前，读取关键模块/数据流；每个
+   `code_paths`/`test_paths` 均能定位实际文件或符号，且不从 goal、Markdown 或模糊搜索推断。完成标准：
+   每个 implementation Task 的 code/test scope 非空、root-bound、无 forbidden overlap。
+4. **Materialize candidate**：生成最小 Stage/Slice/Task、Dependencies、Required Skills、Proof Index
+   和稳定 refs，调用 `plan materialize`。完成标准：收到 canonical `CANDIDATE_READY`（或只读
+   `CANDIDATE_CHECKED`），candidate `tasks.md` 与同源 input 已落盘，且没有 Runtime-owned 写入。
+5. **准备 candidate artifacts**：按 Runtime Contract compile/validate 并初始化 Manifest-declared
+   Evidence skeleton；重新读取 Plan、input、Manifest 和 Evidence，核对 root、scope、digest、refs。
+   完成标准：Validator PASS、每个 declared Evidence path 可读且仍为 candidate skeleton，任何失败都保留
+   typed Runtime finding。
+6. **建立 stable Git boundary**：在 canonical root 按 `commit-boundary.md` 建立最终 candidate
+   Plan/Evidence boundary；worktree 必须 clean（正常 ignored `.proofloop` Runtime artifacts 除外）。
+   完成标准：Boundary CLI 返回成功且 Brain 重读 HEAD、index、status、Plan/input、Manifest 和 Evidence；
+   不直接运行 `git add`/`git commit`。
+7. **Dispatch fresh SPV**：使用 `stage-plan-verifier-template.md`，把当前 HEAD、Manifest/Plan/Reference/
+   Proof Index digest 和 helper command 完整绑定。SPV 先执行闭合 helper，再执行全部计划闭环检查。完成标准：
+   仅在 helper `valid: true` 且 SPV 返回 `PLAN_READY` 时继续；其他结果按下方路由处理。
+8. **Admission**：Brain 将 fresh SPV authority 交给 Runtime Stage Plan admission，再读取 admission Receipt。
+   完成标准：Receipt 绑定当前 Stage、Manifest、Plan、SPV 和 snapshot，且 admission 明确为 admitted；否则
+   返回 `RUNTIME_BLOCKER`/`EVIDENCE_GAP`，不派发 Worker。
+9. **Handoff**：admission 成功后调用 `proofloop stage next`，只把 Runtime 返回的 Context 和唯一
+   `Primary Next Action` 交给 `proofloop-execute`。完成标准：Stage action、Context digest 和
+   `Manifest.plan.ref` 可交叉核对，且没有从 tasks narrative 补全字段。
 
-本 Skill 负责：
+## SPV 与失败路由
 
-- 读取稳定的 AWI/entity refs 和 Authority refs；
-- 通过 `plan materialize` 生成或更新 candidate `tasks.md`；
-- 建立 Stage/Slice/Task、Proof Index、Dependencies 和 Required Skills 的引用闭环；
-- 准备 vNext SPV 的最小输入。
+- `PLAN_READY`：只允许 Runtime Stage Plan admission；不直接进入 Worker/CV/Boundary/Gate/Review。
+- `PLAN_DEFECT` / `PLAN_GAP`：读取 finding 的 concrete counterexample，修复 candidate/refs/scope 后从
+  第 3 步重新 compile/validate；不以局部文字掩盖上游 authority 不一致。
+- `AUTHORITY_GAP`：回对应 Authority Skill，并使真实下游 candidate/Manifest/Evidence 失效。
+- `TECHNICAL_UNKNOWN`：回 Researcher/Prototype；未经验证不改 Authority 或 Plan 语义。
+- `RUNTIME_BLOCKER`：保留 candidate 和 Git 事实，修复工具/权限后从持久化事实恢复。
+- 缺少 entity/ref、digest、Evidence 或输入不闭合：fail closed，不能由 progress、checkbox、Agent narrative 或旧缓存补齐。
 
-Runtime 负责：
+所有非成功结果都必须保留 Contract 规定的 `route_code`、`subtype`、`reason`、`affected_artifacts`、
+`suggested_owner`、`invalidation_scope` 和 `resume_target`。
 
-- 编译 candidate Manifest；
-- Mechanical Validator；
-- Evidence skeleton 初始化；
-- Stage Plan admission、Receipt 和执行授权。
+## Admission 后 replan
 
-本 Skill 不判断 Stage 完成。
+Stage Plan admission 后不重新运行 `plan materialize`，因为确定性渲染会重置已受理投影。确需 replan 时：
 
-## 输入
+- 保留/恢复已受理 Slice 的 checkbox/Worker Status projection，或走 Runtime 的 recover/re-admission 流程；
+- 新模式的 currentness 由 Receipt/binding 判定，不能用投影重置覆盖；
+- 任何 Plan、Goal、Proof Index、Acceptance/Oracle/Seam/Risk ref、Dependencies 或 scope 变化，都重新
+  compile/validate、恢复投影、fresh SPV 和 admission；
+- 不重开无关的已完成 Stage。
 
-Brain 调用 `plan materialize` 时提供最小且闭合的结构化输入；完整 schema 和
-不变式见 `references/plan-materializer-contract.md` 的必需输入 / 输入不变式，
-调用前必须逐条对照。Brain 不复制完整 PRD、Tech Spec、
-Hard Parts 或旧 Stage Packet；`plan materialize` 只消费计划结构和稳定引用。
+## 重启验证
 
-所有输入字段、禁止字段、scope/proof/ref 不变式、`binding_mode` 和输出边界均以
-`references/plan-materializer-contract.md` 为唯一事实源；调用前逐条加载并核对该
-Contract，Skill 不重复其底层 schema。
-
-Brain 仍必须在构造输入前完成代码级 scope 核查：Task 的结构化
-`execution_scope` 只能来自 Authority/Contract 的明确事实，不能从 goal、Markdown
-或代码搜索推断；`plan materialize` 只保留和验证 caller 已声明的 scope。
-
-## 调度与返回
-
-Brain 每次为一个 Stage 调用一次 `plan materialize`，并把整个结构化输入作为该次
-调用的语义输入。成功 envelope（`CANDIDATE_READY | CANDIDATE_CHECKED` 的完整
-字段定义；`CANDIDATE_CHECKED` 是只读 `--check` 复核结果，不产生写入）和
-失败时的结构化 route envelope（`route_code`/`subtype`/`reason`/
-`affected_artifacts`/`suggested_owner`/`invalidation_scope`/`resume_target`）均以
-contract 的输出契约 / 返回与路由 为准；失败或需要上游
-判断时，不能返回"看起来成功"的 Markdown。
-
-`CANDIDATE_READY` 只表示 candidate source 已落盘；它不表示 Validator、SPV、
-Manifest、Evidence 或 admission 成功。
-
-## 规划循环
-
-1. Rehydrate Git、Authority、已有 candidate Plan、candidate input、Manifest、Findings 和进度快照。
-2. 确认 selected AWI 的依赖已经满足，相关 Hard Parts 已 `VALIDATED` 或有明确延期决策。
-3. 生成最小 Stage/Slice/Task 结构化输入；不从 Authority 正文发明事实。构造 Task 的
-   `execution_scope` 前必须先做代码级数据流核查：读关键模块代码/数据流，确认
-   `code_paths`/`test_paths` 内路径可达且与实现一致；不得仅从目标文本推断 scope。
-   核查完成标准：每个声明的路径都能在代码中定位到实际文件或符号，scope 与实现
-   一致后才调用 `plan materialize`。
-4. 为每个 Stage/Slice/Task 保留稳定 entity refs、Dependencies 和 Required Skills。
-5. 建立 `goal_ref`、`task_refs`、`acceptance_refs`、`seam_refs`、`oracle_refs` 和 `risk_refs`。
-6. 调用 `plan materialize`，只生成或更新 candidate `tasks.md`。
-7. 重新读取 candidate Plan 和同源 candidate input，确认没有由 progress 或 Agent
-   narrative 补全的事实。`plan materialize` 仍只写 candidate Plan/input。
-8. 调用 Runtime 编译 candidate Manifest 并执行 Mechanical Validator；Validator PASS 前
-   不初始化 Evidence，不建立最终 Stage Plan boundary。
-9. Validator PASS 后，Runtime 根据 Manifest 声明 exclusive-create Evidence skeleton，
-   且必须在最终稳定 Git boundary 前完成；`plan materialize` 和 Brain 均不得手写或覆盖
-   非空 Evidence，initializer 对非空文件 fail closed/skip 的具体行为由 Runtime
-   Contract 决定。
-10. 重新读取 candidate Plan、candidate input、Manifest 和全部 Evidence skeleton，确认
-    digest/ref 绑定一致后，由 Committer 建立最终稳定 Git boundary：canonical project root
-    必须是 clean worktree。Git 的正常 `.gitignore` 规则继续生效，允许被忽略的
-    `.proofloop` Runtime artifacts；tracked 或未被忽略的 untracked 文件都必须先处理。
-11. 读取最终 boundary 的当前 Git HEAD 和已编译绑定，使用
-    `references/stage-plan-verifier-template.md` 新建 fresh SPV dispatch；SPV 必须先运行
-    template 声明的 `active-spv-boundary-check.mjs`，机械确认 clean Git boundary、HEAD 和
-    canonical digest，不能用 Brain narrative 代替。
-12. 修复 Plan 缺陷（SPV/CV finding）时必须联动检查：权威文件边界、验收定义、Evidence
-    绑定；发现上游不一致时同步更新（AGENTS.md「修改上游事实后，必须识别并报告受影响的
-    下游制品」的具体化），修复后重新编译 Manifest、重跑 Validator，并按需 fresh SPV；
-    不得用局部 patch 掩盖上游事实不一致。
-13. SPV `PLAN_READY` 后，Brain 才能调用 Runtime Stage Plan admission；admission 必须
-    再次确认 snapshot=HEAD 且 worktree clean。
-14. admission 成功后，调用 `proofloop_stage(next)` 生成唯一 next/context，再进入
-    `proofloop-execute` 派发 Worker。
-
-## Candidate Plan boundary
-
-`tasks.md` 与同源 `candidate-input.json` 是 admission 前的 candidate projection，
-不能授权执行，也不是第二事实源。允许内容是最小 Stage/Slice/Task 结构、稳定 refs、
-Dependencies、Required Skills 和明确的 `execution_scope`。
-
-`references/plan-materializer-contract.md` 是 candidate schema、entity markers、Proof
-Index、immutable/mutable projection、candidate-only/out_of_scope、禁止输入/输出和
-`plan materialize → Runtime` handoff 的唯一事实源；所有结构校验必须加载该 Contract。
-本 Skill 只保留规划判断和顺序，不复制底层字段、产品、架构、Hard Part 或 Runtime command
-正文。
-
-## plan materialize → Runtime 交接
-
-`plan materialize` 只渲染 candidate Plan 或执行只读 check；compile、validate、Evidence、
-最终 Git boundary、fresh SPV、Stage Plan admission、next/context 和执行 dispatch
-属于后续 Runtime/Skill owners。`CANDIDATE_READY`、Validator PASS 和 `PLAN_READY`
-都不单独授权执行；按 Contract 与规划循环步骤 8–14 继续交接。
-
-## Admission 后 Replan 纪律
-
-- Stage 已 admission 后禁止重跑 `plan materialize`：该命令按输入确定性渲染整个
-  candidate tasks.md，重跑会重置已受理任务的 checkbox/Worker Status 投影。
-- 确需 replan：必须保留或恢复已受理 Slice 的投影（checkbox/Worker Status 从 HEAD 恢复，只改目标任务区），或遵循 Runtime 的 recover/re-admission 流程（归档 receipts → 重受理）。禁止静默重置。
-- 新模式（slice-local）：已受理 Slice 状态由 Receipt 推导（currentness 经
-  binding-currentness 判定）；投影重置不影响 currentness——replan 后已受理 Slice
-  状态不丢。
-
-## SPV 调度
-
-SPV packet、验证顺序、digest 提取和结果路由以
-`references/stage-plan-verifier-template.md` 为准。调度前必须完成最终 Plan/Evidence
-stable Git boundary，canonical worktree clean，且 `snapshot_digest` 绑定当前 HEAD；
-Plan、Authority、Manifest binding 或 snapshot 变化时 fresh dispatch，未变化时不得重复
-SPV。progress、checkbox projection 和 Agent narrative 不构成 authority。
-
-## Gap 路由
-
-Gap subtype、route envelope 和 owner 由 `references/plan-materializer-contract.md`
-与 Brain Global Route Router 共同定义；非成功结果必须保留
-`route_code`、`subtype`、`reason`、`suggested_owner`、`invalidation_scope` 和
-`resume_target`，不得以 Markdown 成功叙述替代结构化 finding。
-
-## 恢复与失效
-
-- Skill 上下文丢失或 `plan materialize` 输出需要重跑时（仅限 admission 前），从
-  Git、Authority、candidate Plan、同源瞬态输入、Manifest、SPV Findings 和 progress
-  snapshot 重新运行；admission 前 `replan` 必须重新调用 `plan materialize`；Stage 已
-  admission 后的 replan 纪律见「Admission 后 Replan 纪律」。
-- Plan Goal、Proof Index、Acceptance/Oracle/Seam/Risk ref 或 Dependencies 变化时，使相关 candidate Manifest、Evidence 和验证结果失效。
-- 纯 checkbox/status 变化不使 immutable Plan 或 Authority Context 失效。
-- SPV_PASS 后的复用与 fresh 规则见 SPV 调度段。
-- 不因一个 Stage Plan 变化而重开无关的已完成 Stage。
-
-`plan materialize` 返回后，Brain 必须重新读取持久化事实。旧 candidate 不存在、输入
-digest 不一致、entity marker 缺失/重复、ref kind 不匹配或 output path 越界时，
-停止并返回结构化 finding；不得从 session memory、Agent narrative、checkbox
-或 progress snapshot 补全。
-
-## 重启与验证
-
-用户重启后，至少验证以下事实：
-
-1. `plan materialize` 命令可用（`node packages/runtime/dist/cli/proofloop.js plan
-   materialize --help` 返回用法）；
-2. Brain 加载 `.agents/skills/proofloop-plan/SKILL.md` 后能定位
-   `references/plan-materializer-contract.md`；
-3. `plan materialize` 的最小 fixture 只产生 candidate `tasks.md`（以及显式提供的
-   同源瞬态输入），不产生 Manifest、Evidence、Receipt 或执行 dispatch。
-
-仓库内可重复执行的验证命令：
+重启后从 Git、Authority、candidate input/Plan、Manifest、Evidence、Findings 和 Receipts 重新建立上下文，
+不依赖 session memory。至少验证：
 
 ```text
-npm exec -- vitest run test/proofloop-plan-process-consistency.spec.ts
-node packages/runtime/dist/cli/proofloop.js plan materialize --help
+npx tsc -b --force packages/kernel packages/runtime
+node packages/runtime/dist/cli/proofloop.js --help
+git diff --check
 ```
 
-适用范围注记：以上 `npm test`/vitest 命令仅存在于本实施仓库；Windows 模板仓库
-（远端 v2 分支）刻意不包含任何测试资产。同步流程文件到模板仓库时，不得假设
-模板可执行这些验证命令。
+验证事实以文件、Runtime canonical JSON、真实 exit code 和 Git 状态为准；使用项目若另有测试命令，按当前
+项目 Contract 执行，不在本 Skill 缓存不存在的测试工具。
 
-验证必须以文件和结构化输出为事实；重启本身不能替代上述 fixture test。
+## Runtime CLI 指针与硬边界
 
-## Runtime CLI pointer
-
-Planning steps use the single public Runtime CLI entry:
-`node packages/runtime/dist/cli/proofloop.js`。具体 domain/operation、closed request
-schema、exit code 和 root/path 约束由当前 CLI `--help` 与对应 Runtime Contract 提供；
-本 Skill 不缓存命令参数表。
-
-## 禁止事项
-
-- 不启动正式 Stage；
-- 不派发 Worker/CV/Committer；
-- 不执行 `proofloop_stage(next)`；
-- `plan materialize` 不生成/更新 Manifest、Evidence、Receipt 或 Runtime State；
-- 不写 Stage Plan admission、SPV、Task、CV、Gate 或 Review Receipt；
-- 不修改 Runtime/kernel 语义；
-- 不删除旧 Manifest、旧 Receipt 或旧 Stage 路径；
-- Stage 已 admission 后不重跑 `plan materialize`（见「Admission 后 Replan 纪律」）。
+所有 planning operation 使用 `node packages/runtime/dist/cli/proofloop.js`；精确 domain/operation、request
+字段、exit code 和 path 约束以对应 Contract 与当前 CLI 源码为准；涉及 Stage composition route 时还要核对
+`packages/runtime/src/cli/vnext-route-table.ts`。当前 `--help` 只返回全局 usage/domain 列表，不提供
+operation-specific 字段或 closed schema，不作为这些细节的权威来源。本 Skill：
+- 不启动正式 Stage，不派发 Worker/CV，不调用 `stage next` 之外的执行 action；
+- 不写 Manifest、Context、Evidence、Receipt、Gate/Review 状态，不修改 Runtime/kernel 语义；
+- 不删除旧制品，不把 candidate projection 当作 execution authority；
+- 不在 Stage admission 后重新 materialize；恢复和 replan 只走上述持久化路径。

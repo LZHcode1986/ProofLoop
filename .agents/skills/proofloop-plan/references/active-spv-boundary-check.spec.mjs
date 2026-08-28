@@ -193,7 +193,6 @@ test('parseArgs rejects a duplicate flag', () => {
     '--manifest', 'x.json', '--snapshot', 'a'.repeat(40),
     '--plan-digest', 'b'.repeat(64), '--manifest-digest', 'b'.repeat(64),
     '--reference-index-digest', 'b'.repeat(64), '--proof-index-digest', 'b'.repeat(64),
-    '--runtime-proof-digest', 'b'.repeat(64),
   ]);
   assert.equal(parsed.ok, false);
   assert.equal(parsed.error.code, 'ARG_DUPLICATE');
@@ -205,7 +204,6 @@ test('parseArgs rejects a relative project root', () => {
     '--manifest', 'x.json', '--snapshot', 'a'.repeat(40),
     '--plan-digest', 'b'.repeat(64), '--manifest-digest', 'b'.repeat(64),
     '--reference-index-digest', 'b'.repeat(64), '--proof-index-digest', 'b'.repeat(64),
-    '--runtime-proof-digest', 'b'.repeat(64),
   ]);
   assert.equal(parsed.ok, false);
   assert.equal(parsed.error.code, 'ARG_INVALID');
@@ -218,7 +216,6 @@ test('parseArgs rejects a non-hex / wrong-length / uppercase snapshot', () => {
     '--manifest', 'x.json',
     '--plan-digest', 'b'.repeat(64), '--manifest-digest', 'b'.repeat(64),
     '--reference-index-digest', 'b'.repeat(64), '--proof-index-digest', 'b'.repeat(64),
-    '--runtime-proof-digest', 'b'.repeat(64),
   ];
   for (const snapshot of ['not-hex', 'abcd', '1'.repeat(41), 'A'.repeat(40), 'ABCDEF0123'.repeat(4)]) {
     const parsed = parseArgs(['--snapshot', snapshot, ...base]);

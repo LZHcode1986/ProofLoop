@@ -1,266 +1,188 @@
-# Commit Boundary Dispatch Contract
+# Git Boundary CLI Contract
 
-This contract is self-contained.
+This contract is self-contained. It defines the request that Brain sends to the
+Runtime `proofloop boundary close` CLI and the facts that Brain must re-read
+around the call.
 
-Dispatch a Git boundary to Committer. The boundary type determines the commit scope and behavior.
+Brain owns the judgment that a boundary is ready and owns recovery decisions.
+Runtime owns the deterministic Git transaction and all Runtime Receipt
+admission. Brain and every Agent MUST NOT establish a write Git boundary by
+running `git add`, `git mv`, or `git commit` directly. The ONE explicit
+exception is `artifact-archive`: Brain pre-executes the exact `git mv` (the
+pure rename) so that the CLI only validates the already-staged rename and
+commits it; no other Agent may run any write Git command.
+
 
 ## Use when
 
-Any authoritative document change requires a Git boundary. The Committer creates the commit; Brain does not commit directly.
+Use this contract whenever an authorized change must become a Git commit:
 
-Conditional requirements per boundary type:
+- `baseline-authority` — seed authority documents;
+- `stage-plan` — close the candidate Plan/Evidence boundary before fresh SPV;
+- `artifact-archive` — preserve an exact invalidated planning artifact rename;
+- `authority-update` — commit an approved authority update;
+- `workflow-contract-update` — commit explicitly listed Skill/Contract/agent-config alignment;
+- `prototype-checkpoint` — commit an isolated Prototype checkpoint;
+- `stage-close` — close an accepted Stage;
+- `direct-fix` — commit a bounded General fix;
+- `runtime-repair` — commit an explicitly authorized Runtime/Host repair;
+- `slice-output` — close a CV-passed Slice boundary before Slice Commit admission.
 
-### stage-plan preconditions
+The Runtime `stage admit-slice-commit` consumer remains the sole writer of the
+`SLICE_COMMIT` Receipt. The compatibility directory
+`.proofloop/receipts/committer/` and its `committerReceiptDir()` name are not
+renamed by this contract.
 
-- Stage Validator PASS
-- Manifest compiled and stored at `.proofloop/manifests/<stage-id>.json`
-- Manifest-declared Slice Evidence skeletons are complete; manifest digest is consistent (SHA-256 of Manifest matches what is referenced in the boundary)
-- Every `implement-task` in the candidate Plan declares immutable, root-relative
-  `execution_scope` with non-empty `code_paths` and `test_paths`; no implement task relies
-  on an Evidence-only default.
-- Candidate Plan, candidate input and Evidence skeletons are in the final tracked Git boundary;
-  the canonical worktree is clean and the boundary HEAD is stable
-- **SPV PLAN_READY is not a precondition of this Git boundary**. Fresh SPV runs after this
-  commit against the resulting HEAD; Stage Plan admission remains Runtime-owned and follows SPV.
+## Boundary request
 
-### stage-close preconditions
+The request is a closed object sent to the public Runtime CLI:
 
-- Stage Gate PASS — verified Stage Gate Receipt exists and shows `verdict: PASS`
-- Stage Reviewer ACCEPTED — Stage Review Receipt exists and shows accepted status
-- Stage Gate Receipt path is valid and readable
-- Stage Review Receipt path is valid and readable
-- Integrated snapshot content matches receipts (receipt snapshot digest matches working tree state)
-- Manifest-declared Slice Evidence is finalised for all Slices
-
-### artifact-archive preconditions
-
-- The packet identifies an exact pre-admission planning artifact set invalidated by a
-  Validator/SPV finding; no admitted Stage Plan or execution Receipt may depend on it.
-- Every source is tracked, root-bound, content-complete and unchanged at the expected
-  HEAD. Evidence sources must be pristine skeletons (`Not yet captured`, CV `NOT_RUN`,
-  no Receipt) and the packet must state their old Manifest digest.
-- Source and destination are explicit paths inside the same Stage directory. The
-  destination is digest-qualified, absent, and must not be an active Manifest-declared
-  Evidence path.
-- The worktree is clean. Committer performs a Git-native rename only; it never edits,
-  copies, deletes or recreates artifact content and never calls Runtime initialization.
-
-## Boundary Type
-
-| Boundary Type | When | Commit scope |
-|---|---|---|
-| `baseline-authority` | Seed or reset authority documents | `CONTEXT.md`, `PRD.md`, `tech-spec/*` |
-| `stage-plan` | Final candidate Plan/Evidence Git boundary before fresh SPV | `delivery/stages/<stage>/*`; `.proofloop/manifests/<stage>.json` remains Runtime-owned and is not force-added when ignored |
-| `artifact-archive` | Preserve invalidated pristine pre-admission planning artifacts before Runtime regenerates canonical paths | Exact packet-declared source→digest-qualified destination paths inside `delivery/stages/<stage>/` |
-| `authority-update` | Brain updates authority after user decision, research or prototype | `tech-spec/*`, `CONTEXT.md`, `PRD.md`, `progress.md`, approved user-requirement reference documents explicitly listed in the dispatch packet |
-| `workflow-contract-update` | Brain aligns active Skills/Contracts and role-specific read-only verifier permissions with confirmed global route semantics | Explicit `.agents/skills/*`, `.agents/contracts/*` and `.opencode/agents/*` paths listed in the dispatch packet |
-| `prototype-checkpoint` | Prototype validation in isolated worktree | worktree-local — no production boundary |
-| `stage-close` | Stage Review accepted by Brain | `delivery/stages/<stage>/*` — close boundary, `progress.md` summary |
-| `direct-fix` | General direct fix complete | bounded scope per task |
-| `runtime-repair` | User-confirmed Runtime/Host repair under an explicit recovery Contract | exact Runtime/Host implementation and test paths only; no Stage Receipt or authority artifact |
-
-Note: `slice-output` is dispatched by Executor, not Brain, and is not part of this contract.
-
-## Boundary command workflows
-
-Committer must use these path-scoped commands in order. Replace placeholders with the
-exact paths in the dispatch packet; do not broaden them. The universal command rules
-and forbidden commands are defined by the Committer Agent. If an unrelated dirty file
-cannot be separated with the permitted commands, return `BLOCKED` instead of changing it.
-
-### Common preflight and postflight
-
-```text
-git status --short --untracked-files=all
-git diff --check
-git diff --name-status -- <allowed paths>
+```json
+{
+  "domain": "boundary",
+  "operation": "close",
+  "boundary_type": "<Boundary Type>",
+  "expected_head": "<40-char sha>",
+  "expected_branch": "<branch>",
+  "stage": "S<digits>",
+  "slice": "<slice-id>",
+  "manifest_digest": "<sha256>",
+  "cv_receipt_digest": "<sha256>",
+  "old_manifest_digest": "<sha256>",
+  "paths": ["<explicit root-relative paths>"],
+  "description": "<single-line description>"
+}
 ```
 
-After staging and after the commit:
+Only fields applicable to the selected boundary type are sent. The CLI rejects
+unknown fields, path escapes, protected `.git/**`/`.proofloop/**` paths, and an
+unexpected HEAD/branch. Ordinary boundaries also require an initially empty
+index; `artifact-archive` is the sole exception, allowing exactly one already
+staged exact pure rename (validated before commit).
 
-```text
-git diff --cached --name-only
-git diff --cached --check
-git status --short --untracked-files=all
-```
+For `slice-output`, Brain MUST send `stage`, `slice`, `cv_receipt_digest` and
+`expected_head` (the current HEAD is pinned so a mismatch fails before any Git
+write); `manifest_digest` is also sent when available. It does not supply a
+second scope authority through `paths`. Runtime loads the current Manifest,
+Stage Plan/SPV, Worker chain and CV chain, then derives the shared Slice Commit
+policy. The CLI validates the policy before and after the commit.
 
-When a complete, explicitly listed recovery file must be parked before a boundary:
+## Preconditions
 
-```text
-git stash push --include-untracked -m "recovery: <boundary>" -- <complete paths>
-git stash list
-git stash show --stat stash@{0}
-```
+Brain must re-read and establish, before invoking the CLI:
 
-Only a verified matching stash may later be restored:
+- canonical Trust Root and expected branch;
+- current HEAD and an empty index (except `artifact-archive`, where Brain has already staged the single exact rename);
+- the selected boundary's exact scope and no unresolved scope decision;
+- the applicable Manifest/Plan/Evidence/Receipt bindings;
+- for `slice-output`: admitted Worker completion facts, finalized Evidence,
+  latest CV PASS, matching `cv_receipt_digest`, and a current Runtime policy;
+- for `stage-close`: Stage Gate PASS and Stage Review ACCEPTED;
+- for `artifact-archive`: exactly one tracked source and one absent,
+  digest-qualified destination inside the same Stage directory.
 
-```text
-git stash apply stash@{0}
-```
+### Boundary-specific semantic preconditions
 
-Never stash a file containing mixed implementation and recovery hunks.
+- `stage-plan`: Validator PASS；Manifest 已由 Runtime 编译并存储，所有 Manifest-declared Slice Evidence skeleton 完整且 digest 一致；每个 `implement-task` 都有非空、不可变、root-relative `execution_scope.code_paths` 与 `test_paths`；candidate Plan、candidate input 和 Evidence skeleton 位于最终 tracked Git boundary。`manifest_digest` 必填且必须等于 Runtime 持久化 Manifest 的实际 digest（CLI 在写操作前校验）；SPV `PLAN_READY` 不属于本次提交前置条件，必须在 boundary 完成后对新 HEAD fresh 执行。
+- `stage-close`: Stage Gate PASS、Stage Reviewer ACCEPTED、对应 Receipt 路径可读且语义有效、integrated snapshot 与 Receipt 一致，并且所有 Manifest-declared Slice Evidence 已 finalized。CLI 在写操作前做强校验（只读，不写 Receipt）：Gate tip 为 GATE_PASS 且其 snapshot_digest 精确等于当前 integrated HEAD；Review tip 为 ACCEPTED 且其 snapshot_digest 精确等于当前 HEAD 并绑定当前 Gate tip digest；已 archived 的 Stage 一律 fail-closed 拒绝再次 close；每个 Manifest-declared Slice Evidence 通过 `isSliceEvidenceFinalized`（经 no-follow 打开 fd 读取内容）校验为非 skeleton/placeholder（`*None*` 占位行视为未 finalized 并拒绝）。
+- `artifact-archive`: packet 必须证明待归档 artifact 是 Validator/SPV 使其失效的、admission 前的 pristine planning artifact；没有 admitted Stage Plan 或执行 Receipt 依赖它；source 已 tracked 且在 expected HEAD 未改变，destination 缺失、带 old Manifest digest，且不是 active Manifest-declared Evidence path。
+- `authority-update` / `workflow-contract-update`: Brain 已取得相应批准，并提供完整、精确、无歧义的 root-relative path set；不得把边界 CLI 当作 authority 或 contract 语义判断者。
+- `prototype-checkpoint`: 使用指定 Prototype worktree 与 expected branch；no-push、no-merge 约束由 Brain 保持，CLI 只建立本地边界。
+- `runtime-repair`: packet 必须声明 governing recovery Contract、exact repair paths、pre-commit HEAD 和 test evidence；这是 Runtime/Host repair boundary，不是 Slice Commit，也不得包含 Stage、Receipt、Authority 或 Agent configuration。
 
-### baseline-authority
+Strict dirty gate: BEFORE any Git write (and before the CLI resolves the
+commit path set), every actual dirty/untracked path must belong to the
+selected boundary's tolerated scope. A scope-external dirty path — including
+an outside-only worktree where the declared/prefix scope has no hits — fails
+closed with `BOUNDARY.SCOPE_VIOLATION` (never mis-reported as `NO_CHANGES`)
+and leaves HEAD and the index unchanged; the CLI never resets, unstages, or
+stashes. For `slice-output`, the current Slice committable paths plus the
+other-Slice declared dirty files are tolerated in the worktree, but other-Slice
+files are NEVER committed by this boundary (they remain dirty and are reported
+through `dirty_after`).
 
-```text
-git add -- CONTEXT.md PRD.md progress.md tech-spec/
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "baseline-authority: initial authority documents"
-git status --short --untracked-files=all
-```
+## Scope table
 
-### stage-plan
-
-```text
-git add -- delivery/stages/<stage-id>/
-git diff --cached --name-only
-git diff --cached --check
-git commit -m "stage-plan: <stage-id>"
-git status --short --untracked-files=all
-```
-
-`.proofloop/manifests/<stage-id>.json` remains Runtime-owned unless the packet
-explicitly authorizes a tracked file at that path.
-
-### artifact-archive
-
-```text
-git mv -- <exact source path> <exact digest-qualified destination path>
-git diff --summary -- <source path> <destination path>
-git diff --check -- <source path> <destination path>
-git add -- <source path> <destination path>
-git diff --cached --summary
-git diff --cached --check
-git commit -m "artifact-archive: <stage-id> <old-manifest-digest>"
-git status --short --untracked-files=all
-```
-
-For a directory archive, source and destination parent paths must already satisfy the
-packet boundary; one exact `git mv` may rename the whole directory so no filesystem
-`mkdir`, copy, delete or content-edit command is needed. Cached diff must show only
-renames with unchanged blob identities; otherwise stop and return `BLOCKED`.
-
-### authority-update
-
-```text
-git add -- tech-spec/ CONTEXT.md PRD.md progress.md <explicit approved requirement-reference paths>
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "authority-update: <description>"
-git status --short --untracked-files=all
-```
-
-### workflow-contract-update
-
-```text
-git add -- <explicit active Skill/Contract/role-config paths>
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "workflow-contract-update: <description>"
-git status --short --untracked-files=all
-```
-
-### stage-close
-
-```text
-git add -- delivery/stages/<stage-id>/ progress.md
-git diff --cached --name-only
-git diff --cached --check
-git commit -m "stage-close: <stage-id>"
-git status --short --untracked-files=all
-```
-
-Runtime Receipt files are included only when the packet explicitly declares the
-canonical committed Receipt boundary; Committer never creates or edits them.
-
-### direct-fix
-
-```text
-git add -- <fix files>
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "direct-fix: <description>"
-git status --short --untracked-files=all
-```
-
-### runtime-repair
-
-```text
-git add -- <exact Runtime/Host repair files>
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "runtime-repair: <description>"
-git status --short --untracked-files=all
-```
-
-`runtime-repair` is allowed only when the dispatch packet names the governing recovery
-Contract, exact stage/recovery boundary, exact changed files, pre-commit HEAD and test
-evidence. Committer must not stage Stage Plan, tasks projection, Evidence, Manifest,
-Context, Receipt, authority or agent-configuration files. The commit is a Runtime/Host
-repair Git boundary, not a Slice Commit; Runtime must later require fresh SPV/Stage Plan
-admission after the HEAD change.
-
-### prototype-checkpoint
-
-```text
-git add -- <prototype files>
-git diff --cached --name-status
-git diff --cached --check
-git commit -m "prototype-checkpoint: <description>"
-git status --short --untracked-files=all
-```
-
-## Required fields
-
-- Boundary Type
-- Description
-- Changed Files
-
-## Conditional fields by boundary type
-
-| Boundary Type | Required additions |
+| Boundary Type | Scope rule |
 |---|---|
-| `prototype-checkpoint` | `prototype_id`, `worktree_path`, `expected_branch`, `no_push: true`, `no_merge: true` |
-| `stage-plan` | `stage_id`, `manifest_digest` |
-| `artifact-archive` | `stage_id`, `invalidation_finding`, `old_manifest_digest`, exact `source_paths`, exact `destination_paths`, `expected_head` |
-| `stage-close` | `stage_id`, `manifest_digest`, `stage_gate_receipt` (path), `stage_review_receipt` (path), `integrated_snapshot` (digest) |
-| `runtime-repair` | `stage_id`, `recovery_contract`, exact `changed_files`, `pre_commit_head`, `test_evidence` |
+| `baseline-authority` | `CONTEXT.md`, `PRD.md`, `tech-spec/*`, `progress.md` |
+| `stage-plan` | dirty paths under `delivery/stages/<stage-id>/` |
+| `artifact-archive` | exactly the two requested source/destination paths; Brain pre-executes the exact `git mv`; the CLI validates the already-staged pure rename and commits it |
+| `authority-update` | explicit paths under approved authority roots |
+| `workflow-contract-update` | explicit paths under `.agents/skills`, `.agents/contracts`, `.opencode/agents`, `.pi/brain-workflow.md` and active `.pi/agents` (no arbitrary `.pi` files) |
+| `prototype-checkpoint` | explicit Prototype worktree paths with an expected branch |
+| `stage-close` | dirty paths under `delivery/stages/<stage-id>/` and `progress.md` |
+| `direct-fix` | explicit task-bounded paths |
+| `runtime-repair` | explicit paths, excluding Stage/Receipt/Authority/agent configuration roots |
+| `slice-output` | Runtime-derived Slice policy: current Slice execution scope only (other-Slice declared dirty files are tolerated but NEVER committable); system-protected paths are always forbidden |
 
-## Expected results
+## CLI transaction
 
-Boundary closed with commit hash, or blocked with reason.
+Brain invokes the CLI through the single public entry, for example:
 
-`stage-plan` output includes the compiled Manifest alongside tasks.md and per-Slice Evidence declared in the Manifest.
-
-`artifact-archive` output includes the commit hash and exact rename/blob-identity facts;
-it never claims that replacement Evidence exists or that planning can advance.
-
-`stage-close` output includes final progress.md summary and confirmed receipt paths.
-
-## Return codes
-
-When blocked:
-
-```yaml
-route_code: RUNTIME_BLOCKER
-subtype: COMMIT_BOUNDARY_FAILED
-reason: <description>
-suggested_owner: Brain
-invalidation_scope: []
-resume_target:
-  owner: Committer
-  phase: <phase>
-  stage: <stage-id | none>
+```text
+node packages/runtime/dist/cli/proofloop.js boundary close --json '<closed request>'
 ```
 
-Precondition failure examples:
+The exact CLI argument encoding comes from this Contract and the current Runtime CLI
+source (dispatcher/parser and operation-handler validation; for vNext route mapping,
+also `packages/runtime/src/cli/vnext-route-table.ts`). The public `--help` currently
+exposes only global usage/domain-list output, not operation-specific fields or closed
+schemas, so it is not the operation-contract authority. Brain must not construct a
+parallel Git command sequence. The CLI performs, in one
+transaction:
 
-| Precondition failure | route_code | subtype |
-|---|---|---|
-| Validator not PASS | `PLAN_GAP` | `VALIDATION_INCOMPLETE` |
-| Manifest missing or digest mismatch | `PLAN_GAP` | `MANIFEST_MISMATCH` |
-| Stage Gate not PASS | `IMPLEMENTATION_DEFECT` | `STAGE_GATE_NOT_PASSED` |
-| Stage Review not ACCEPTED | `PLAN_GAP` | `STAGE_REVIEW_NOT_ACCEPTED` |
-| Receipt path invalid | `RUNTIME_BLOCKER` | `MISSING_RECEIPT` |
-| Snapshot mismatch | `EVIDENCE_GAP` | `SNAPSHOT_MISMATCH` |
+1. canonical root, HEAD, branch, index, status and request checks;
+2. boundary-specific scope derivation;
+3. `diff --check` and exact staging; for `artifact-archive`, validation of the Brain-staged exact rename (no `git mv` by the CLI);
+4. staged-set and cached-diff verification;
+5. the canonical Git commit message and `git commit`;
+6. post-commit HEAD and changed-file verification;
+7. a structured result containing `pre_commit_head`, `commit_sha`,
+   `commit_message`, `changed_files` and `dirty_after`.
+
+The CLI never stashes, resets, restores, rebases, merges, pushes, edits
+artifact content, or writes a Receipt. In particular, a hook/commit failure
+after staging does not trigger an implicit reset or unstage. Brain must
+re-read `git status`, `git diff`, `git diff --cached`, HEAD and the CLI result
+before choosing recovery.
+
+## Result handoff
+
+A successful boundary result is not itself Runtime admission. Brain must:
+
+1. verify the result against the freshly re-read Git facts;
+2. for `slice-output`, send only the structured `commit_sha`,
+   `cv_receipt_digest`, stage and slice tuple to
+   `proofloop stage admit-slice-commit`;
+3. wait for Runtime admission and re-read the persisted Receipt chain;
+4. continue to Integration/Gate/Review only from the new Runtime Primary Next
+   Action.
+
+Runtime Receipt paths, schemas and admission keys remain the authoritative
+facts. Progress snapshots, checkbox projections and Agent narratives cannot
+authorize a boundary or complete admission.
+
+## Recovery and return codes
+
+Boundary errors are fail-closed and carry a `BOUNDARY.*` code. Brain handles
+`HEAD_MISMATCH`, `INDEX_NOT_EMPTY`, `SCOPE_VIOLATION`, `DIFF_INVALID`,
+`COMMIT_FAILED`, `POST_COMMIT_INVALID` and policy failures by re-reading the
+current durable state and routing a recovery decision; it must not guess a
+rollback. A partially staged index is a fact to inspect, not an instruction to
+reset.
+
+After a pure Runtime interruption, the same request may be retried only when
+HEAD, index, worktree and changed-file set are byte-for-byte unchanged. Any
+other interruption or input change requires a fresh request and fresh Runtime
+facts.
+
+## Prohibited actions
+
+- Direct write Git commands from Worker, CV, Reviewer, Prototype or any Agent
+  other than the single `artifact-archive` exception where Brain pre-executes
+  the exact `git mv` rename;
+- `git add .`, broad staging, implicit path expansion or a second scope policy;
+- manual `SLICE_COMMIT`, Integration, Gate or Review Receipt creation;
+- replacing the compatibility Receipt category as part of this refactor;
+- treating `dirty_after`, checkbox state or progress text as admission.

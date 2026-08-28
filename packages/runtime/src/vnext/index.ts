@@ -267,6 +267,19 @@ export {
   validateVNextSliceCommitRequest,
 } from './commit-admission';
 export type { VNextSliceCommitAdmissionDependencies } from './commit-admission';
+export { loadVNextSliceCommitPolicyFacts } from './commit-admission';
+export type { VNextSliceCommitPolicyInput } from './commit-admission';
+export {
+  loadSliceCommitPolicy,
+  validateSliceCommitChangedFiles,
+  validateSliceCommitCvBinding,
+  SliceCommitPolicyError,
+} from './slice-commit-policy';
+export type {
+  SliceCommitPolicyFacts,
+  SliceCommitPolicy,
+  SliceCommitChangedFilesOptions,
+} from './slice-commit-policy';
 export {
   VNEXT_SLICE_COMMIT_SCHEMA_VERSION,
   VNEXT_SLICE_COMMIT_RESULT_TYPE,
