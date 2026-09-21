@@ -24,9 +24,12 @@ function requestFromCli(request: CliRequestInput): BoundaryCloseRequest {
     ...(request.expected_head !== undefined ? { expected_head: request.expected_head } : {}),
     ...(request.stage !== undefined ? { stage: request.stage } : {}),
     ...(request.slice !== undefined ? { slice: request.slice } : {}),
-    ...(request.manifest_digest !== undefined ? { manifest_digest: request.manifest_digest } : {}),
-    ...(request.cv_receipt_digest !== undefined ? { cv_receipt_digest: request.cv_receipt_digest } : {}),
-    ...(request.old_manifest_digest !== undefined ? { old_manifest_digest: request.old_manifest_digest } : {}),
+    ...(request.other_slice_declared_files !== undefined
+      ? { other_slice_declared_files: request.other_slice_declared_files }
+      : {}),
+    ...(request.tolerated_paths !== undefined
+      ? { tolerated_paths: request.tolerated_paths }
+      : {}),
     ...(request.paths !== undefined ? { paths: request.paths } : {}),
     ...(request.description !== undefined ? { description: request.description } : {}),
     ...(request.expected_branch !== undefined ? { expected_branch: request.expected_branch } : {}),

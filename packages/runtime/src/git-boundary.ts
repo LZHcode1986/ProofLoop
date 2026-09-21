@@ -9,34 +9,20 @@
  * stashes, resets, restores, rebases, merges, pushes, or edits artifacts.
  *
  * Worktree semantics: a STRICT dirty gate runs before any Git write — every
- * actual dirty/untracked path must belong to this boundary's tolerated scope,
- * otherwise the boundary fails closed with `BOUNDARY.SCOPE_VIOLATION` and
- * leaves HEAD and the index unchanged. The one deliberate tolerance is
- * `slice-output`: a parallel Slice's declared dirty output may remain in the
- * worktree (reported via `dirty_after`) but is NEVER staged or committed by
- * the current Slice boundary. Any dirty path that resolves to `.git/**` /
- * `.proofloop/**` or escapes the project root also fails closed before
- * staging (`BOUNDARY.SCOPE_VIOLATION`).
+ * actual dirty/untracked path must belong to this boundary's normal scope or be
+ * explicitly listed in `tolerated_paths`; otherwise the boundary fails closed with
+ * `BOUNDARY.SCOPE_VIOLATION` and leaves HEAD and the index unchanged. Explicit
+ * tolerated paths are exact files, must already be dirty, and are never staged or
+ * committed. `slice-output` keeps its separate typed other-Slice tolerance. Any
+ * dirty path that resolves to `.git/**` / `.proofloop/**` or escapes the project
+ * root also fails closed before staging (`BOUNDARY.SCOPE_VIOLATION`).
  */
 
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { computeDigest } from '@proofloop/kernel';
-import type { VNextManifest } from '@proofloop/kernel';
-import { canonicalPathWithinRoot, openNoFollowRead } from './path-guard';
-import { isSliceEvidenceFinalized, readGitHead, resolveGitRoot } from './git-source';
-import { stageGateReceiptDir, reviewReceiptDir } from './receipt-layout';
-import { loadVNextSliceCommitPolicyFacts } from './vnext/commit-admission';
-import { readVNextManifest } from './vnext/dispatch';
-import { readReceiptChain } from './vnext/integration-validation';
-import { readVNextStageReviewStatus } from './vnext/review-admission';
-import {
-  loadSliceCommitPolicy,
-  validateSliceCommitChangedFiles,
-  validateSliceCommitCvBinding,
-} from './vnext/slice-commit-policy';
-import type { SliceCommitPolicy } from './vnext/slice-commit-policy';
+import { canonicalPathWithinRoot } from './path-guard';
+import { readGitHead, resolveGitRoot } from './git-source';
 
 export const BOUNDARY_TYPES = [
   'baseline-authority',
@@ -58,9 +44,19 @@ export interface BoundaryCloseRequest {
   readonly expected_head?: string;
   readonly stage?: string;
   readonly slice?: string;
-  readonly manifest_digest?: string;
-  readonly cv_receipt_digest?: string;
-  readonly old_manifest_digest?: string;
+  /**
+   * Files declared dirty by OTHER Slices' persisted Worker facts (slice-output
+   * only). Tolerance scope ONLY: these paths may remain dirty in an
+   * interleaved worktree but are NEVER selected, staged or committed by this
+   * boundary.
+   */
+  /**
+   * Explicitly tolerated dirty files for this boundary. These are exact
+   * root-relative paths: they may remain dirty but are never selected, staged,
+   * or committed. Every listed path must be dirty at transaction start.
+   */
+  readonly tolerated_paths?: readonly string[];
+  readonly other_slice_declared_files?: readonly string[];
   readonly paths?: readonly string[];
   readonly description?: string;
   readonly expected_branch?: string;
@@ -73,7 +69,8 @@ export interface BoundaryCloseResult {
   readonly commit_message: string;
   readonly changed_files: readonly string[];
   readonly dirty_after: boolean;
-  readonly cv_receipt_digest?: string;
+  /** Dirty paths explicitly tolerated and left uncommitted. */
+  readonly tolerated_paths: readonly string[];
 }
 
 export type GitBoundaryErrorCode =
@@ -107,11 +104,22 @@ interface StatusEntry {
   readonly paths: readonly string[];
 }
 
-const SHA256_RE = /^[a-f0-9]{64}$/;
 const STAGE_RE = /^S\d+$/;
-const SLICE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/**
+ * Closed canonical Slice identity language (S08-B / PO-S08-B-01): stage-scoped
+ * `S<digits>-<UPPER>` / `S<digits>-<UPPER>-<UPPER>` (normal / maintenance) and their
+ * bare-token equivalents `UPPER` / `UPPER-UPPER`.  Anything else — empty or
+ * whitespace-only, lowercase or mixed case, embedded digits, `.`, `_`, `..`, `@{`,
+ * control characters, a stage-only value, three or more tokens, or a stage prefix
+ * that differs from the request stage — fails closed before any Git access.
+ */
+const STAGE_SCOPED_SLICE_RE = /^(S\d+)-([A-Z]+(?:-[A-Z]+)?)$/;
+const SLICE_TOKEN_RE = /^[A-Z]+(?:-[A-Z]+)?$/;
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/;
 
+const SHA_RE = /^[a-f0-9]{40}$/;
+const GIT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/@-]*$/;
+const CANDIDATE_REF_PREFIX = 'proofloop';
 /** Boundary types whose canonical commit message embeds ids/digests, not a free-form description. */
 const ID_MESSAGE_TYPES: ReadonlySet<BoundaryType> = new Set([
   'baseline-authority',
@@ -143,9 +151,6 @@ function fail(code: GitBoundaryErrorCode, message: string): never {
   throw new GitBoundaryError(code, message);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -163,6 +168,21 @@ function runGit(root: string, args: readonly string[], code: GitBoundaryErrorCod
     fail(code, `git ${args.join(' ')} failed: ${errorText(error)}`);
   }
 }
+
+/** Read a commit ref without turning a missing candidate into a subprocess error. */
+function optionalCommitRef(root: string, ref: string): string | undefined {
+  try {
+    const output = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return SHA_RE.test(output) ? output : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 
 function isProtectedPath(relative: string): boolean {
   return relative === '.git' || relative.startsWith('.git/') ||
@@ -194,17 +214,71 @@ function validateStage(value: string | undefined, required: boolean): string | u
   return value;
 }
 
-function validateSlice(value: string | undefined): void {
-  if (value !== undefined && !SLICE_RE.test(value)) {
-    fail('BOUNDARY.REQUEST_INVALID', `slice must be a canonical identifier, received "${value}"`);
+/**
+ * Pre-Git Slice identity validation for direct `closeGitBoundary` callers.
+ * The accepted language, the stage-equality rule and the derived candidate ref
+ * all come from the single canonical identity source below, so a `slice-output`
+ * request can never reach Git with an identity that no canonical ref could have
+ * been derived from.
+ */
+function validateSlice(stageId: string | undefined, value: string | undefined): void {
+  if (value === undefined) return;
+  if (stageId === undefined) {
+    fail('BOUNDARY.REQUEST_INVALID', `slice requires a canonical stage (S<digits>), received "${value}"`);
   }
+  canonicalSliceToken(stageId, value);
 }
 
-function validateDigest(value: string | undefined, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (!SHA256_RE.test(value)) fail('BOUNDARY.REQUEST_INVALID', `${label} must be a lowercase SHA-256 digest`);
-  return value;
+/**
+ * Resolve a Slice identity request input against the closed canonical language
+ * and return its token (stage prefix stripped).
+ *
+ * Accepted (exactly the closed set of the S08-B obligation):
+ *  - stage-scoped `S<digits>-<UPPER>` / `S<digits>-<UPPER>-<UPPER>`, whose
+ *    stage prefix MUST equal `stageId`;
+ *  - bare `UPPER` / `UPPER-UPPER`, which bind to `stageId`.
+ *
+ * Everything else fails closed with `BOUNDARY.REQUEST_INVALID`.  This is the
+ * single canonical identity source: it serves both the derived candidate ref
+ * and the pre-Git `slice-output` request validation.
+ */
+function canonicalSliceToken(stageId: string, sliceToken: string): string {
+  if (typeof sliceToken !== 'string' || sliceToken.length === 0) {
+    fail('BOUNDARY.REQUEST_INVALID', `slice must be a canonical Slice identity, received ${JSON.stringify(sliceToken)}`);
+  }
+  const scoped = STAGE_SCOPED_SLICE_RE.exec(sliceToken);
+  if (scoped !== null) {
+    if (scoped[1] !== stageId) {
+      fail(
+        'BOUNDARY.REQUEST_INVALID',
+        `slice stage prefix "${scoped[1]}" must equal the request stage "${stageId}", received "${sliceToken}"`
+      );
+    }
+    return scoped[2];
+  }
+  if (!SLICE_TOKEN_RE.test(sliceToken)) {
+    fail(
+      'BOUNDARY.REQUEST_INVALID',
+      `slice must be a canonical Slice identity (S<digits>-<UPPER>[-<UPPER>] or <UPPER>[-<UPPER>]), received "${sliceToken}"`
+    );
+  }
+  return sliceToken;
 }
+
+/**
+ * Canonical candidate ref for the Worktree → Integration edge.  A Slice id may
+ * be supplied as either its full `S03-A` form or its token `A`; the Stage prefix
+ * is emitted exactly once (`proofloop-s03-a`).
+ */
+export function canonicalCandidateRef(stageId: string, sliceToken: string): string {
+  if (!STAGE_RE.test(stageId)) {
+    fail('BOUNDARY.REQUEST_INVALID', `stage_id must match /^S\\d+$/, received "${stageId}"`);
+  }
+  const token = canonicalSliceToken(stageId, sliceToken);
+  return `${CANDIDATE_REF_PREFIX}-${stageId.toLowerCase()}-${token.toLowerCase()}`;
+}
+
+
 
 function validateExpectedHead(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -260,6 +334,44 @@ function pathWithin(relative: string, base: string): boolean {
   return relative === base || relative.startsWith(`${base.replace(/\/$/, '')}/`);
 }
 
+/**
+ * Slice-output Work Packet path policy (P0 interleaved isolation).
+ *
+ * Every committable path (`paths`) and every tolerated other-Slice path
+ * (`other_slice_declared_files`) is canonical, root-bound and never
+ * protected (via `relativePath`); each list is duplicate-free; and the two
+ * lists are mutually NON-OVERLAPPING — a prefix overlap would silently widen
+ * the tolerated scope into the committable scope, so it fails closed with
+ * `BOUNDARY.SLICE_POLICY_INVALID` before any Git write.
+ *
+ * `paths` is required for slice-output (`BOUNDARY.SLICE_POLICY_REQUIRED`).
+ */
+function assertSliceOutputPolicy(request: BoundaryCloseRequest, root: string): void {
+  if (request.paths === undefined || request.paths.length === 0) {
+    fail('BOUNDARY.SLICE_POLICY_REQUIRED', 'slice-output requires a declared Work Packet allowed scope (paths)');
+  }
+  const committable = request.paths.map((value, index) => relativePath(root, value, `paths[${index}]`));
+  if (new Set(committable).size !== committable.length) {
+    fail('BOUNDARY.SLICE_POLICY_INVALID', 'slice-output paths must be duplicate-free');
+  }
+  const tolerated = (request.other_slice_declared_files ?? []).map((value, index) =>
+    relativePath(root, value, `other_slice_declared_files[${index}]`),
+  );
+  if (new Set(tolerated).size !== tolerated.length) {
+    fail('BOUNDARY.SLICE_POLICY_INVALID', 'slice-output other_slice_declared_files must be duplicate-free');
+  }
+  for (const value of committable) {
+    for (const base of tolerated) {
+      if (pathWithin(value, base) || pathWithin(base, value)) {
+        fail(
+          'BOUNDARY.SLICE_POLICY_INVALID',
+          `slice-output committable path and other-Slice tolerated path must not overlap: ${value} vs ${base}`
+        );
+      }
+    }
+  }
+}
+
 function requirePaths(request: BoundaryCloseRequest, root: string): string[] {
   if (request.paths === undefined || request.paths.length === 0) {
     fail('BOUNDARY.REQUEST_INVALID', `${request.boundary_type} requires a non-empty paths array`);
@@ -269,8 +381,39 @@ function requirePaths(request: BoundaryCloseRequest, root: string): string[] {
   return values.sort();
 }
 
+/**
+ * Normalize the explicit dirty paths that this boundary must leave alone.
+ * Unlike slice-output's other-Slice list, these are exact files rather than
+ * prefixes, so a caller cannot hide an entire subtree from the strict gate.
+ */
+function requireToleratedPaths(request: BoundaryCloseRequest, root: string): string[] {
+  if (request.tolerated_paths === undefined) return [];
+  if (request.boundary_type === 'slice-output') {
+    fail(
+      'BOUNDARY.REQUEST_INVALID',
+      'tolerated_paths is not valid for slice-output; use other_slice_declared_files',
+    );
+  }
+  const values = request.tolerated_paths.map((value, index) =>
+    relativePath(root, value, `tolerated_paths[${index}]`),
+  );
+  if (new Set(values).size !== values.length) {
+    fail('BOUNDARY.REQUEST_INVALID', 'tolerated_paths contains duplicate entries');
+  }
+  if (EXACT_PATH_TYPES.has(request.boundary_type)) {
+    const committed = requirePaths(request, root);
+    if (values.some((value) => committed.includes(value))) {
+      fail('BOUNDARY.REQUEST_INVALID', 'tolerated_paths overlaps a committable path');
+    }
+  }
+  return values.sort();
+}
+
 /** Approved authority roots (commit-boundary.md authority-update scope). */
 const AUTHORITY_ROOTS: readonly string[] = ['CONTEXT.md', 'PRD.md', 'progress.md', 'tech-spec'];
+
+/** Canonical Project Stage Map path (commit-boundary.md stage-plan scope). */
+export const CANONICAL_STAGE_MAP_PATH = 'delivery/project-stage-map.md';
 
 /** runtime-repair forbidden roots: Stage artifacts, authority documents and agent configuration. */
 const RUNTIME_REPAIR_DENIED_ROOTS: readonly string[] = [
@@ -303,22 +446,21 @@ function assertExactTypeScope(request: BoundaryCloseRequest, declared: readonly 
       }
       return;
     case 'workflow-contract-update': {
-      // Pi is the active harness: the exact-path policy must cover the live
-      // `.pi/brain-workflow.md` workflow doc and the active `.pi/agents/*`
-      // alignment, alongside the Skill/Contract/opencode-agent paths. It must
-      // NOT expand to arbitrary `.pi` files (only the two approved roots).
+      // The exact-path policy covers active Skills, Contracts, the configured
+      // agent map, and active host surfaces. It must NOT expand to arbitrary
+      // files under .agents or .pi.
       const bases: readonly string[] = [
         '.agents/skills',
         '.agents/contracts',
+        '.agents/agent_config.json',
         '.opencode/agents',
-        '.pi/brain-workflow.md',
-        '.pi/agents',
+        '.pi/extensions',
       ];
       for (const value of declared) {
         if (!bases.some((base) => pathWithin(value, base))) {
           fail(
             'BOUNDARY.SCOPE_VIOLATION',
-            `workflow-contract-update paths are limited to active Skill/Contract/agent/pi-workflow paths (${bases.join(', ')}): ${value}`,
+            `workflow-contract-update paths are limited to active Skill/Contract/agent-config/host paths (${bases.join(', ')}): ${value}`,
           );
         }
       }
@@ -347,7 +489,7 @@ function prefixScope(request: BoundaryCloseRequest): readonly string[] {
     case 'baseline-authority':
       return ['CONTEXT.md', 'PRD.md', 'progress.md', 'tech-spec'];
     case 'stage-plan':
-      return [`delivery/stages/${stage as string}`];
+      return [`delivery/stages/${stage as string}`, CANONICAL_STAGE_MAP_PATH];
     case 'stage-close':
       return [`delivery/stages/${stage as string}`, 'progress.md'];
     default:
@@ -359,17 +501,17 @@ function prefixScope(request: BoundaryCloseRequest): readonly string[] {
  * Resolve the exact path set this boundary will commit:
  *  - exact-path types: the declared `paths`, each of which must actually be
  *    dirty (a declared-but-clean path is a request/state mismatch);
- *  - prefix types: every currently dirty path inside the fixed contract scope.
+ *  - prefix types: every currently dirty path inside the fixed contract scope,
+ *    after the caller's exact `tolerated_paths` have been excluded.
  *
  * The caller MUST run assertStrictBoundaryScope() BEFORE this function: the
  * strict dirty gate has already rejected any dirty/untracked path outside the
- * tolerated scope, so only in-scope dirty paths remain by the time this runs.
+ * allowed or explicitly tolerated scope.
  */
 function requestedPaths(
   request: BoundaryCloseRequest,
   root: string,
   actual: readonly string[],
-  slicePolicy?: SliceCommitPolicy,
 ): string[] {
   if (EXACT_PATH_TYPES.has(request.boundary_type)) {
     const declared = requirePaths(request, root);
@@ -386,10 +528,10 @@ function requestedPaths(
     return declared;
   }
   const allowed = request.boundary_type === 'slice-output'
-    ? slicePolicy?.allowedPaths ?? []
+    ? (request.paths ?? [])
     : prefixScope(request);
-  if (request.boundary_type === 'slice-output' && slicePolicy === undefined) {
-    fail('BOUNDARY.SLICE_POLICY_REQUIRED', 'slice-output requires the shared Runtime slice-commit policy');
+  if (request.boundary_type === 'slice-output' && (request.paths === undefined || request.paths.length === 0)) {
+    fail('BOUNDARY.SLICE_POLICY_REQUIRED', 'slice-output requires a declared Work Packet allowed scope (paths)');
   }
   const selected = actual.filter((value) => allowed.some((base) => pathWithin(value, base)));
   if (selected.length === 0) {
@@ -401,8 +543,40 @@ function requestedPaths(
   return selected;
 }
 
-function assertBranch(root: string, expected: string | undefined): void {
+/**
+ * Slice-output is the only boundary that may legitimately run inside a
+ * DETACHED Slice worktree: `createGitWorktree` creates detached worktrees
+ * (`git worktree add --detach`), so the canonical Slice transaction pins the
+ * detached identity with the `expected_branch: "HEAD"` sentinel.  The
+ * sentinel is VERIFIED, never assumed — the boundary accepts it only when
+ * HEAD is genuinely detached; every other boundary type/name keeps the
+ * strict symbolic-ref comparison unchanged.
+ */
+function assertBranch(root: string, expected: string | undefined, boundaryType: BoundaryType): void {
   if (expected === undefined) return;
+  if (boundaryType === 'slice-output' && expected === 'HEAD') {
+    // On a detached HEAD, `git symbolic-ref --quiet --short HEAD` exits
+    // non-zero (HEAD is not a symbolic ref).  readGitHead has already
+    // resolved HEAD successfully before this check, so a non-zero exit at
+    // this point can only mean genuinely detached — an unborn/broken
+    // repository never reaches this branch identity check.  A SUCCESSFUL
+    // symbolic-ref proves an attached branch: the caller claimed detached
+    // but HEAD sits on a real branch, so fail closed before any Git write.
+    let attached: string | undefined;
+    try {
+      attached = execFileSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      // Non-zero exit: HEAD is not a symbolic ref — genuinely detached.
+      // The detached commit identity is already pinned by the expected_head
+      // check that runs before this function.
+      return;
+    }
+    fail('BOUNDARY.BRANCH_MISMATCH', `expected detached HEAD, current branch is "${attached ?? '<unknown>'}"`);
+  }
   const current = runGit(root, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 'BOUNDARY.GIT_UNAVAILABLE').trim();
   if (current !== expected) fail('BOUNDARY.BRANCH_MISMATCH', `expected branch "${expected}", current branch is "${current}"`);
 }
@@ -439,14 +613,15 @@ function readIndexEntries(root: string, path: string): readonly string[] {
  * Brain (not this adapter) pre-executes the `git mv`; the adapter verifies that
  * the staged result covers precisely the declared source/destination paths
  * inside the same Stage directory, preserves the source blob/mode, and stages
- * no other path. This validator never changes the worktree or index.
+ * no other path. It understands only source/destination/path/stage/Git facts,
+ * never any Manifest credential or naming convention. This validator never
+ * changes the worktree or index.
  */
 function assertArtifactArchiveRename(
   root: string,
   request: BoundaryCloseRequest,
   before: readonly StatusEntry[],
   requested: readonly string[],
-  oldManifestDigest: string,
   preCommitHead: string,
 ): void {
   const stagedEntries = before.filter((entry) => entry.index !== ' ' && entry.index !== '?');
@@ -499,16 +674,6 @@ function assertArtifactArchiveRename(
       `artifact-archive source and destination must stay inside ${stageBase}/`,
     );
   }
-  // The digest-qualified side must be the mechanically identified
-  // DESTINATION itself — not merely "some path in the pair" whose name
-  // happens to contain the digest (a digest-bearing SOURCE name must not
-  // satisfy this policy).
-  if (!destination.includes(oldManifestDigest)) {
-    fail(
-      'BOUNDARY.RENAME_INVALID',
-      'artifact-archive destination must be digest-qualified with old_manifest_digest',
-    );
-  }
   // Blob identity: HEAD:<source> vs the staged destination index entry.
   const headLines = runGit(root, ['ls-tree', preCommitHead, '--', source], 'BOUNDARY.RENAME_INVALID')
     .trim()
@@ -553,7 +718,7 @@ function assertArtifactArchiveRename(
  * description; the rest require a single-line description and emit
  * `<type>: <description>`. No silent dropping of caller input.
  */
-function commitMessage(request: BoundaryCloseRequest, oldManifestDigest: string | undefined): string {
+function commitMessage(request: BoundaryCloseRequest): string {
   const type = request.boundary_type;
   if (ID_MESSAGE_TYPES.has(type)) {
     if (request.description !== undefined) {
@@ -569,7 +734,7 @@ function commitMessage(request: BoundaryCloseRequest, oldManifestDigest: string 
       case 'stage-close':
         return `${type}: ${request.stage as string}`;
       case 'artifact-archive':
-        return `artifact-archive: ${request.stage as string} ${oldManifestDigest as string}`;
+        return `artifact-archive: ${request.stage as string}`;
       case 'slice-output':
         return `slice-output: ${request.stage as string}-${request.slice as string}`;
     }
@@ -580,8 +745,128 @@ function commitMessage(request: BoundaryCloseRequest, oldManifestDigest: string 
   return `${type}: ${validateDescriptionFormat(request.description, type)}`;
 }
 
+/** Result of the internal candidate-ref establishment/recovery seam. */
+export interface CandidateRefResult {
+  readonly candidate_ref: string;
+  readonly candidate_base_ref: string;
+  readonly commit_sha: string;
+  readonly created: boolean;
+}
+
+function validateCandidateRefInput(stageId: string, sliceToken: string, commitSha: string, baseRef: string): void {
+  if (!STAGE_RE.test(stageId)) {
+    fail('BOUNDARY.REQUEST_INVALID', `stage_id must match /^S\\d+$/, received "${stageId}"`);
+  }
+  // canonicalCandidateRef performs the closed Slice-token validation.
+  canonicalCandidateRef(stageId, sliceToken);
+  if (!SHA_RE.test(commitSha)) {
+    fail('BOUNDARY.POST_COMMIT_INVALID', `candidate commit_sha is not a 40-char lowercase Git SHA: ${commitSha}`);
+  }
+  if (typeof baseRef !== 'string' || baseRef.length === 0 || CONTROL_CHARS_RE.test(baseRef) || !GIT_REF_RE.test(baseRef) || baseRef.includes('..') || baseRef.includes('@{')) {
+    fail('BOUNDARY.POST_COMMIT_INVALID', `candidate base_ref is not a safe Git ref: ${baseRef}`);
+  }
+}
+
+function resolveRequiredCommit(root: string, ref: string, label: string): string {
+  const resolved = optionalCommitRef(root, ref);
+  if (resolved === undefined) {
+    fail('BOUNDARY.POST_COMMIT_INVALID', `cannot resolve ${label} as a commit: ${ref}`);
+  }
+  return resolved;
+}
+
 /**
- * Narrow post-stage guard: every path this boundary committed to must be
+ * Establish or recover the canonical candidate ref after a slice-output commit.
+ * This is intentionally ref-only: it never calls boundary close, does not pin an
+ * expected HEAD, and never resets/unstages the worktree.  Existing refs are
+ * idempotent only when they already point to the same commit.
+ */
+export function ensureCandidateRef(
+  root: string,
+  stage_id: string,
+  slice_token: string,
+  commit_sha: string,
+  base_ref: string,
+ ): CandidateRefResult {
+  validateCandidateRefInput(stage_id, slice_token, commit_sha, base_ref);
+  const gitRoot = (() => {
+    try {
+      return resolveGitRoot(root);
+    } catch (error) {
+      fail('BOUNDARY.POST_COMMIT_INVALID', `canonical Git project root is unavailable: ${errorText(error)}`);
+    }
+  })();
+  const baseSha = resolveRequiredCommit(gitRoot, base_ref, 'candidate base_ref');
+  if (!isAncestorCommit(gitRoot, baseSha, commit_sha)) {
+    fail('BOUNDARY.POST_COMMIT_INVALID', `candidate base_ref ${base_ref} is not an ancestor of candidate commit ${commit_sha}`);
+  }
+  const candidate_ref = `refs/heads/${canonicalCandidateRef(stage_id, slice_token)}`;
+  const existing = optionalCommitRef(gitRoot, candidate_ref);
+  if (existing !== undefined) {
+    if (existing !== commit_sha) {
+      fail(
+        'BOUNDARY.POST_COMMIT_INVALID',
+        `candidate ref ${candidate_ref} already points to ${existing}, not ${commit_sha}; refusing to overwrite`,
+      );
+    }
+    return {
+      candidate_ref: candidate_ref.slice('refs/heads/'.length),
+      candidate_base_ref: base_ref,
+      commit_sha,
+      created: false,
+    };
+  }
+  try {
+    // Supplying the zero old-value makes creation fail closed if a concurrent
+    // writer establishes the ref between the read and this update.  We never
+    // overwrite an existing candidate ref.
+    runGit(
+      gitRoot,
+      ['update-ref', candidate_ref, commit_sha, '0000000000000000000000000000000000000000'],
+      'BOUNDARY.POST_COMMIT_INVALID',
+    );
+  } catch (error) {
+    if (error instanceof GitBoundaryError && error.code === 'BOUNDARY.POST_COMMIT_INVALID') {
+      const now = optionalCommitRef(gitRoot, candidate_ref);
+      if (now === commit_sha) {
+        return {
+          candidate_ref: candidate_ref.slice('refs/heads/'.length),
+          candidate_base_ref: base_ref,
+          commit_sha,
+          created: false,
+        };
+      }
+      throw error;
+    }
+    fail('BOUNDARY.POST_COMMIT_INVALID', `candidate ref write failed: ${errorText(error)}`);
+  }
+  const written = optionalCommitRef(gitRoot, candidate_ref);
+  if (written !== commit_sha) {
+    fail('BOUNDARY.POST_COMMIT_INVALID', `candidate ref ${candidate_ref} did not resolve to ${commit_sha} after write`);
+  }
+  return {
+    candidate_ref: candidate_ref.slice('refs/heads/'.length),
+    candidate_base_ref: base_ref,
+    commit_sha,
+    created: true,
+  };
+}
+
+/** True when `ancestor` is an ancestor of `commit` (or equal). */
+function isAncestorCommit(root: string, ancestor: string, commit: string): boolean {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestor, commit], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Narrow post-stage guard: every path this boundary committed to must be
  * fully staged (no worktree drift between status snapshot and add). Dirty
  * paths OUTSIDE the boundary scope are irrelevant and never block here.
  */
@@ -622,17 +907,6 @@ function assertStagedSet(root: string, expected: readonly string[]): void {
   }
 }
 
-function readTreePaths(root: string, commitSha: string): string[] {
-  return runGit(
-    root,
-    ['ls-tree', '-r', '--name-only', commitSha, '--'],
-    'BOUNDARY.GIT_UNAVAILABLE',
-  )
-    .split('\n')
-    .map((value) => value.trimEnd())
-    .filter((value) => value.length > 0)
-    .map((value, index) => relativePath(root, value, `Git tree path[${index}]`));
-}
 
 function readCommittedPaths(root: string, commitSha: string): string[] {
   // Plumbing diff-tree has no rename detection by default; --no-renames makes
@@ -642,179 +916,54 @@ function readCommittedPaths(root: string, commitSha: string): string[] {
 }
 
 /**
- * stage-plan machine preflight: the request MUST declare manifest_digest and it
- * MUST equal the digest of the current Runtime-persisted vNext Manifest. This
- * reuses the canonical manifest reader + kernel digest validator; it adds no
- * state. A wrong or missing digest fails before any Git write.
+ * Derive this boundary's tolerated scope without inspecting the dirty set or
+ * selected commit paths. Explicit `tolerated_paths` are exact files that stay
+ * dirty but are never selected, staged, or committed by this transaction.
  */
-function assertStagePlanManifestPreflight(root: string, stage: string, manifestDigest: string | undefined): void {
-  if (manifestDigest === undefined) {
-    fail('BOUNDARY.REQUEST_INVALID', 'stage-plan requires manifest_digest matching the persisted vNext Manifest');
+function toleratedBoundaryScope(
+  request: BoundaryCloseRequest,
+  root: string,
+  explicitTolerated: readonly string[],
+ ): readonly string[] {
+  if (request.boundary_type === 'slice-output') {
+    // slice-output has its own typed other-Slice tolerance field.
+    return [...(request.paths ?? []), ...(request.other_slice_declared_files ?? [])];
   }
-  const manifestPath = path.join(root, '.proofloop', 'manifests', `${stage}.json`);
-  let persisted: unknown;
-  try {
-    persisted = readVNextManifest(root, manifestPath);
-  } catch (error) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `stage-plan cannot read the persisted vNext Manifest: ${errorText(error)}`);
+  if (EXACT_PATH_TYPES.has(request.boundary_type)) {
+    const declared = requirePaths(request, root);
+    assertExactTypeScope(request, declared);
+    return [...declared, ...explicitTolerated];
   }
-  const actualDigest = computeDigest(persisted);
-  if (actualDigest !== manifestDigest) {
+  return [...prefixScope(request), ...explicitTolerated];
+}
+
+function assertToleratedPathsAreDirty(
+  tolerated: readonly string[],
+  actual: readonly string[],
+ ): void {
+  const actualSet = new Set(actual);
+  const missing = tolerated.filter((value) => !actualSet.has(value));
+  if (missing.length > 0) {
     fail(
       'BOUNDARY.SCOPE_VIOLATION',
-      `stage-plan manifest_digest does not match the persisted vNext Manifest: ${manifestDigest} != ${actualDigest}`,
+      `tolerated_paths are not dirty at transaction start: ${missing.join(', ')}`,
     );
   }
 }
 
 /**
- * Pure, testable gate/review tip-binding check for the stage-close preflight.
- * Enforces (fail-closed):
- *  - the Stage Gate tip is a GATE_PASS bound EXACTLY to the integrated HEAD;
- *  - the Stage Review tip is an ACCEPTED STAGE_REVIEW_PASS whose snapshot EXACTLY
- *    equals the integrated HEAD and which binds the current Stage Gate tip digest.
- * `label` prefixes the error message; throws GitBoundaryError(SLICE_POLICY_INVALID).
- */
-export function assertStageCloseTipBindings(
-  gateTip: { readonly type: string; readonly digest: string; readonly payload: unknown } | null,
-  reviewTip: { readonly type: string; readonly digest: string; readonly payload: unknown } | null,
-  integratedHead: string,
-  label: string,
-): void {
-  if (gateTip === null || !isRecord(gateTip.payload)) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} requires a persisted Stage Gate fact`);
-  }
-  const gatePayload = gateTip.payload as Record<string, unknown>;
-  if (gateTip.type !== 'GATE_PASS' || gatePayload.verdict !== 'PASS') {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} requires the current Stage Gate tip to be PASS`);
-  }
-  if (typeof gatePayload.snapshot_digest !== 'string' || gatePayload.snapshot_digest !== integratedHead) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} Gate tip snapshot does not match the current integrated HEAD (fresh Gate required)`);
-  }
-  if (reviewTip === null || !isRecord(reviewTip.payload)) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} requires a persisted Stage Review fact`);
-  }
-  const reviewPayload = reviewTip.payload as Record<string, unknown>;
-  if (reviewTip.type !== 'STAGE_REVIEW_PASS' || reviewPayload.verdict !== 'ACCEPTED') {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} requires the current Stage Review tip to be ACCEPTED`);
-  }
-  if (typeof reviewPayload.stage_gate_receipt_digest !== 'string' || reviewPayload.stage_gate_receipt_digest !== gateTip.digest) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} Review tip does not bind the current Stage Gate tip`);
-  }
-  if (typeof reviewPayload.snapshot_digest !== 'string' || reviewPayload.snapshot_digest !== integratedHead) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `${label} Review tip snapshot does not match the current integrated HEAD`);
-  }
-}
-
-/**
- * stage-close machine preflight (strong, fail-closed): before any Git write,
- * revalidate that the Stage is genuinely closable:
- *  1. the Stage is NOT already archived (stage-close is write-once);
- *  2. the current Stage Gate tip is a GATE_PASS whose snapshot EXACTLY equals
- *     the current integrated Git HEAD;
- *  3. the current Stage Review tip is an ACCEPTED STAGE_REVIEW_PASS whose
- *     snapshot EXACTLY equals the current integrated Git HEAD and which binds
- *     the current Stage Gate tip digest;
- *  4. every Manifest-declared Slice Evidence is finalized (present, root-bound).
- * Uses only read-only Runtime validators; never writes a Receipt.
- */
-function assertStageClosePreflight(root: string, stage: string): void {
-  let status: ReturnType<typeof readVNextStageReviewStatus>;
-  try {
-    status = readVNextStageReviewStatus(root, stage);
-  } catch (error) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `stage-close preflight could not read the Stage Gate/Review status: ${errorText(error)}`);
-  }
-  if (status.archived === true) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', 'stage-close preflight refuses an already-archived Stage');
-  }
-  let integratedHead: string;
-  try {
-    integratedHead = readGitHead(resolveGitRoot(root));
-  } catch (error) {
-    fail('BOUNDARY.GIT_UNAVAILABLE', `stage-close preflight cannot resolve the integrated Git HEAD: ${errorText(error)}`);
-  }
-
-  const gateChain = readReceiptChain(root, stageGateReceiptDir(root, stage), 'stage-gate chain');
-  const gateTip = gateChain.receipts.length > 0 ? gateChain.receipts[gateChain.receipts.length - 1] : null;
-  const reviewChain = readReceiptChain(root, reviewReceiptDir(root, stage), 'stage review chain');
-  const reviewTip = reviewChain.receipts.length > 0 ? reviewChain.receipts[reviewChain.receipts.length - 1] : null;
-  assertStageCloseTipBindings(gateTip, reviewTip, integratedHead, 'stage-close');
-
-  // Every Manifest-declared Slice Evidence must be finalized: present, root-bound
-  // (no-follow open) AND structured (non-skeleton) via the canonical
-  // isSliceEvidenceFinalized content check. A skeleton/placeholder Evidence is
-  // rejected, exactly matching the "all Manifest-declared Slice Evidence
-  // finalized" stage-close precondition.
-  const manifestPath = path.join(root, '.proofloop', 'manifests', `${stage}.json`);
-  let manifest: VNextManifest;
-  try {
-    manifest = readVNextManifest(root, manifestPath);
-  } catch (error) {
-    fail('BOUNDARY.SLICE_POLICY_INVALID', `stage-close preflight could not read the persisted vNext Manifest: ${errorText(error)}`);
-  }
-  for (const slice of manifest.slices) {
-    const opened = openNoFollowRead(root, path.resolve(root, slice.evidence_path));
-    if (!opened.ok) {
-      fail(
-        'BOUNDARY.SLICE_POLICY_INVALID',
-        `stage-close requires Manifest Slice Evidence finalized: ${slice.evidence_path} is missing or not a root-bound file`,
-      );
-    }
-    let content: string;
-    try {
-      content = fs.readFileSync(opened.fd, 'utf8');
-    } finally {
-      fs.closeSync(opened.fd);
-    }
-    if (!isSliceEvidenceFinalized(content)) {
-      fail(
-        'BOUNDARY.SLICE_POLICY_INVALID',
-        `stage-close requires Manifest Slice Evidence finalized (skeleton/placeholder Evidence): ${slice.evidence_path}`,
-      );
-    }
-  }
-}
-
-/**
- * Derive this boundary's TOLERATED scope WITHOUT inspecting the dirty set or
- * the selected commit paths. This is the set of paths that may legitimately be
- * dirty/untracked before any Git write:
- *  - exact-path types: the declared `paths` (the commit scope);
- *  - prefix types: the fixed contract prefix scope;
- *  - slice-output: the current Slice committable paths PLUS the other-Slice
- *    declared dirty files (dirty-eligible but never committable — P0 isolation).
- */
-function toleratedBoundaryScope(
-  request: BoundaryCloseRequest,
-  root: string,
-  slicePolicy: SliceCommitPolicy | undefined,
-): readonly string[] {
-  if (request.boundary_type === 'slice-output') {
-    return [...(slicePolicy?.allowedPaths ?? []), ...(slicePolicy?.otherSliceDeclaredFiles ?? [])];
-  }
-  if (EXACT_PATH_TYPES.has(request.boundary_type)) {
-    const declared = requirePaths(request, root);
-    assertExactTypeScope(request, declared);
-    return declared;
-  }
-  return prefixScope(request);
-}
-
-/**
  * Strict dirty gate (blueprint): runs BEFORE any Git write AND before
- * requestedPaths() so that an outside-only dirty worktree returns
- * BOUNDARY.SCOPE_VIOLATION (never mis-reported as NO_CHANGES). Every actual
- * dirty/untracked path must be inside this boundary's tolerated scope; on
- * failure HEAD and the index are left unchanged.
+ * requestedPaths(). Every actual dirty/untracked path must belong to the
+ * boundary prefix/exact scope or be explicitly listed as tolerated; tolerated
+ * files remain in the worktree and are never staged by requestedPaths().
  */
 function assertStrictBoundaryScope(
   request: BoundaryCloseRequest,
   root: string,
   actual: readonly string[],
-  slicePolicy: SliceCommitPolicy | undefined,
-): void {
-  const tolerated = toleratedBoundaryScope(request, root, slicePolicy);
+  explicitTolerated: readonly string[],
+ ): void {
+  const tolerated = toleratedBoundaryScope(request, root, explicitTolerated);
   const outside = actual.filter((value) => !tolerated.some((base) => pathWithin(value, base)));
   if (outside.length > 0) {
     fail(
@@ -840,10 +989,7 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   // shape (exact-path types never reach prefixScope()).
   validateStage(request.stage, STAGE_REQUIRED_TYPES.has(request.boundary_type));
   const expectedHead = validateExpectedHead(request.expected_head);
-  validateDigest(request.manifest_digest, 'manifest_digest');
-  const cvReceiptDigest = validateDigest(request.cv_receipt_digest, 'cv_receipt_digest');
-  const oldManifestDigest = validateDigest(request.old_manifest_digest, 'old_manifest_digest');
-  validateSlice(request.slice);
+  validateSlice(request.stage, request.slice);
   if (request.expected_branch !== undefined && request.expected_branch.length === 0) {
     fail('BOUNDARY.REQUEST_INVALID', 'expected_branch must be a non-empty branch name');
   }
@@ -852,21 +998,33 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   }
   if (request.boundary_type === 'slice-output') {
     // expected_head is REQUIRED for slice-output: the current HEAD must be
-    // pinned so that a HEAD mismatch fails before any Git write.
+    // pinned so that a HEAD mismatch fails before any Git write. The Work
+    // Packet declares the allowed scope via `paths` (no receipt/manifest
+    // binding).
     if (
       request.stage === undefined ||
       request.slice === undefined ||
-      cvReceiptDigest === undefined ||
       expectedHead === undefined
     ) {
       fail(
         'BOUNDARY.REQUEST_INVALID',
-        'slice-output requires stage, slice, cv_receipt_digest, and expected_head',
+        'slice-output requires stage, slice, and expected_head',
       );
     }
   }
-  if (request.boundary_type === 'artifact-archive' && oldManifestDigest === undefined) {
-    fail('BOUNDARY.REQUEST_INVALID', 'artifact-archive requires old_manifest_digest');
+  // other_slice_declared_files is slice-output ONLY: the tolerance-scope
+  // separation is a Slice boundary policy, never an exact/prefix-type field.
+  if (request.boundary_type !== 'slice-output' && request.other_slice_declared_files !== undefined) {
+    fail(
+      'BOUNDARY.REQUEST_INVALID',
+      `other_slice_declared_files is only valid for slice-output, not ${request.boundary_type}`
+    );
+  }
+  if (request.boundary_type === 'slice-output' && request.tolerated_paths !== undefined) {
+    fail(
+      'BOUNDARY.REQUEST_INVALID',
+      'tolerated_paths is not valid for slice-output; use other_slice_declared_files',
+    );
   }
 
   // ---- Canonical Git facts ----
@@ -887,8 +1045,15 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   if (expectedHead !== undefined && expectedHead !== preCommitHead) {
     fail('BOUNDARY.HEAD_MISMATCH', `expected_head "${expectedHead}" does not match current HEAD "${preCommitHead}"`);
   }
-  assertBranch(gitRoot, request.expected_branch);
-
+  assertBranch(gitRoot, request.expected_branch, request.boundary_type);
+  // Slice-output Work Packet path policy (canonical/root-bound/protected,
+  // duplicate-free, mutually non-overlapping) runs BEFORE any status parse or
+  // strict dirty gate: a malformed policy fails closed without any Git
+  // inspection, and the tolerated-scope derivation below can trust the
+  // already-validated lists.
+  if (request.boundary_type === 'slice-output') {
+    assertSliceOutputPolicy(request, gitRoot);
+  }
 
   const before = parseStatus(runGit(gitRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], 'BOUNDARY.GIT_UNAVAILABLE'));
   // Ordinary boundaries require an initially empty Git index. artifact-archive
@@ -903,69 +1068,26 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   // broken repository state that Brain must recover — never silently commit
   // around it.
   const actual = statusPaths(before).map((value, index) => relativePath(gitRoot, value, `Git changed path[${index}]`));
-  let slicePolicy: SliceCommitPolicy | undefined;
-  if (request.boundary_type === 'slice-output') {
-    try {
-      const facts = loadVNextSliceCommitPolicyFacts(
-        {
-          stageId: request.stage as string,
-          sliceId: request.slice as string,
-          cvReceiptDigest: cvReceiptDigest as string,
-        },
-        { projectRoot: gitRoot },
-      );
-      slicePolicy = loadSliceCommitPolicy(facts);
-      validateSliceCommitCvBinding(slicePolicy, cvReceiptDigest as string);
-      if (request.manifest_digest !== undefined && request.manifest_digest !== slicePolicy.manifestDigest) {
-        fail(
-          'BOUNDARY.SCOPE_VIOLATION',
-          `manifest_digest does not match the active vNext Manifest: ${request.manifest_digest} != ${slicePolicy.manifestDigest}`,
-        );
-      }
-    } catch (error) {
-      if (error instanceof GitBoundaryError) throw error;
-      fail('BOUNDARY.SLICE_POLICY_INVALID', `vNext Slice Commit policy is unavailable: ${errorText(error)}`);
-    }
-  }
+  const toleratedPaths = requireToleratedPaths(request, gitRoot);
+  assertToleratedPathsAreDirty(toleratedPaths, actual);
+  // Strict dirty gate runs before staging: listed tolerated files are allowed
+  // to remain dirty, but the candidate selection below excludes them exactly.
+  assertStrictBoundaryScope(request, gitRoot, actual, toleratedPaths);
+  const selectionActual = actual.filter((value) => !toleratedPaths.includes(value));
+  const requested = requestedPaths(request, gitRoot, selectionActual);
 
-  // Boundary-specific machine preflight (read-only; runs before any Git write).
-  if (request.boundary_type === 'stage-plan') {
-    assertStagePlanManifestPreflight(gitRoot, request.stage as string, request.manifest_digest);
-  } else if (request.boundary_type === 'stage-close') {
-    assertStageClosePreflight(gitRoot, request.stage as string);
-  }
-
-  // Strict dirty gate FIRST (before any Git write and before requestedPaths):
-  // every dirty/untracked path must be inside this boundary's tolerated scope,
-  // so an outside-only dirty worktree returns SCOPE_VIOLATION (never
-  // NO_CHANGES) and HEAD and the index are left unchanged on failure.
-  assertStrictBoundaryScope(request, gitRoot, actual, slicePolicy);
-
-  const requested = requestedPaths(request, gitRoot, actual, slicePolicy);
-
-  if (slicePolicy !== undefined) {
-    try {
-      validateSliceCommitChangedFiles(slicePolicy, requested, {
-        treePaths: readTreePaths(gitRoot, preCommitHead),
-        phase: 'pre-commit',
-      });
-    } catch (error) {
-      if (error instanceof GitBoundaryError) throw error;
-      fail('BOUNDARY.SLICE_POLICY_INVALID', `slice-output changed-file policy rejected the boundary: ${errorText(error)}`);
-    }
-  }
   let pureArchiveRename = false;
   if (request.boundary_type === 'artifact-archive') {
     // Artifact-archive responsibility: Brain pre-executes the exact `git mv`
     // and leaves the rename staged. This adapter NEVER runs `git mv`; it only
     // validates the already-staged exact pure rename and commits it. All
-    // source/destination, same-stage, HEAD tracked/absent, digest-qualified
-    // destination and blob/mode checks complete against the CURRENT status
-    // before commit; a validation failure must not change worktree or index.
-    assertArtifactArchiveRename(gitRoot, request, before, requested, oldManifestDigest as string, preCommitHead);
+    // source/destination, same-stage, HEAD tracked/absent and blob/mode checks
+    // complete against the CURRENT status before commit; a validation failure
+    // must not change worktree or index.
+    assertArtifactArchiveRename(gitRoot, request, before, requested, preCommitHead);
     pureArchiveRename = true;
   }
-  const message = commitMessage(request, oldManifestDigest);
+  const message = commitMessage(request);
 
   // ---- Stage exactly the validated set ----
   if (pureArchiveRename) {
@@ -986,6 +1108,14 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
   } catch (error) {
     fail('BOUNDARY.POST_COMMIT_INVALID', `committed HEAD is unavailable: ${errorText(error)}`);
   }
+
+  // A slice-output commit is also the candidate-ref establishment boundary.
+  // The public BoundaryCloseResult remains unchanged; the ref is an internal
+  // traceability fact and is never deleted here.  If this post-commit write
+  // fails, the commit remains durable and POST_COMMIT_INVALID is returned.
+  if (request.boundary_type === 'slice-output') {
+    ensureCandidateRef(gitRoot, request.stage as string, request.slice as string, commitSha, preCommitHead);
+  }
   const committed = readCommittedPaths(gitRoot, commitSha);
   if (committed.length === 0 || committed.some(isProtectedPath)) {
     fail('BOUNDARY.POST_COMMIT_INVALID', 'commit changed-file set is empty or contains a protected path');
@@ -999,18 +1129,6 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
       `committed changed-file set drifted from the validated boundary (expected=${requested.join(',')} actual=${committed.join(',')})`,
     );
   }
-  if (slicePolicy !== undefined) {
-    try {
-      validateSliceCommitCvBinding(slicePolicy, cvReceiptDigest as string);
-      validateSliceCommitChangedFiles(slicePolicy, committed, {
-        treePaths: readTreePaths(gitRoot, commitSha),
-        phase: 'post-commit',
-      });
-    } catch (error) {
-      if (error instanceof GitBoundaryError) throw error;
-      fail('BOUNDARY.POST_COMMIT_INVALID', `slice-output post-commit policy validation failed: ${errorText(error)}`);
-    }
-  }
   const dirtyAfter = runGit(gitRoot, ['status', '--porcelain=v1', '--untracked-files=all'], 'BOUNDARY.POST_COMMIT_INVALID').trim().length > 0;
   return {
     boundary_type: request.boundary_type,
@@ -1019,6 +1137,6 @@ export function closeGitBoundary(root: string, request: BoundaryCloseRequest): B
     commit_message: message,
     changed_files: committed,
     dirty_after: dirtyAfter,
-    ...(cvReceiptDigest !== undefined ? { cv_receipt_digest: cvReceiptDigest } : {}),
+    tolerated_paths: toleratedPaths,
   };
 }

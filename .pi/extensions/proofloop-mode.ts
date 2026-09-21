@@ -1,66 +1,93 @@
 /**
- * Proofloop v2 Mode Extension — Brain / Standard 模式切换
+ * Proofloop v2 Mode Extension — Brain / Standard 模式切换（Pi thin host adapter）
  *
  * /brain     → 切换到 Brain orchestration mode
  * /standard  → 切换回 Standard coding mode
  *
- * Brain 模式下，在每次 agent_start 时注入 Brain 工作流指令到 system prompt。
- * 标准模式下，主会话保持完整的 coding agent 能力。
- *
- * 子 agent（pi-subagents）不加载此 extension，不会受到 Brain 指令影响。
+ * 本 extension 是 thin host adapter：只负责 mode persistence、session restore，
+ * 以及 Brain mode 下向 system prompt 追加一段短固定 Brain pointer。
+ * 它不读取、不注入任何 Brain workflow 正文；route / dispatch / recovery /
+ * arbitration 语义由 canonical Brain Workflow Contract
+ * （.agents/contracts/brain/workflow.md）定义，不在本 extension 中复制。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readFile, access } from "node:fs/promises";
-import { join } from "node:path";
 
 const MODE_ENTRY_TYPE = "proofloop:brain_mode";
-const BRAIN_WORKFLOW_FILE = ".pi/brain-workflow.md";
+
+// Canonical Brain 事实来源路径（仅作 prompt pointer 引用，不读取文件内容）。
+const BRAIN_WORKFLOW_CONTRACT = ".agents/contracts/brain/workflow.md";
 
 interface ModeState {
 	enabled: boolean;
-	instructions?: string;
 }
 
+interface PersistedModeState {
+	enabled: boolean;
+}
+
+// Brain mode 下追加的短固定提示：只引用 canonical workflow 路径，
+// 不包含 workflow body、transition table、reasoning sequence 或 reread loop。
+// 末尾的 `<!-- magic-context: skip -->` 是 Magic Context 官方 per-agent opt-out marker：
+// 只跳过注入 Brain system prompt 的 Magic Context primary guidance；Magic Context 的上下文管理、
+// M0/M1 历史注入与 `ctx_reduce` / `ctx_search` / `ctx_note` 工具保持可用。
+const BRAIN_MODE_PROMPT = `You are the Proofloop Brain. Follow the canonical Brain workflow at \`${BRAIN_WORKFLOW_CONTRACT}\`.
+
+<!-- magic-context: skip -->`;
 export default function (pi: ExtensionAPI): void {
 	let state: ModeState = { enabled: false };
 
-	// ─── 工具函数 ──────────────────────────────────────
-
-	async function loadBrainInstructions(ctx: ExtensionContext): Promise<string | null> {
-		const filePath = join(ctx.cwd, BRAIN_WORKFLOW_FILE);
-		try {
-			await access(filePath);
-			const content = await readFile(filePath, "utf-8");
-			return content;
-		} catch {
-			return null;
-		}
-	}
+	// ─── UI / 状态 ──────────────────────────────────────
 
 	function updateStatus(ctx: ExtensionContext): void {
 		if (state.enabled) {
-			ctx.ui.setStatus(
-				"proofloop-mode",
-				ctx.ui.theme.fg("warning", "🧠 Brain Mode"),
-			);
+			ctx.ui.setStatus("proofloop-mode", ctx.ui.theme.fg("warning", "🧠 Brain Mode"));
 		} else {
 			ctx.ui.setStatus("proofloop-mode", undefined);
 		}
 	}
 
-	// ─── Session 恢复 ──────────────────────────────────
+	// ─── Session 持久化 / 恢复 ──────────────────────────
+
+	function readPersistedMode(entry: unknown): boolean | undefined {
+		if (!entry || typeof entry !== "object") return undefined;
+
+		const candidate = entry as {
+			type?: unknown;
+			customType?: unknown;
+			data?: unknown;
+		};
+		if (candidate.type !== "custom") return undefined;
+
+		if (candidate.customType === MODE_ENTRY_TYPE) {
+			if (!candidate.data || typeof candidate.data !== "object") return undefined;
+			const data = candidate.data as Partial<PersistedModeState>;
+			return typeof data.enabled === "boolean" ? data.enabled : undefined;
+		}
+
+		// legacy 兼容：旧 entry 以 { customType: { customType, content: "active"|"inactive" } } 存储。
+		if (candidate.customType && typeof candidate.customType === "object") {
+			const legacy = candidate.customType as {
+				customType?: unknown;
+				content?: unknown;
+			};
+			if (legacy.customType !== MODE_ENTRY_TYPE) return undefined;
+			if (legacy.content === "active") return true;
+			if (legacy.content === "inactive") return false;
+		}
+
+		return undefined;
+	}
 
 	pi.on("session_start", async (_event, ctx) => {
-		// 从 session 历史中恢复 mode 状态
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (
-				entry.type === "message" &&
-				(entry as any).customType === MODE_ENTRY_TYPE
-			) {
-				state.enabled = (entry as any).content === "active";
-				break;
-			}
+		// 从当前 branch 的最新 mode entry 恢复状态。
+		state.enabled = false;
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i -= 1) {
+			const enabled = readPersistedMode(branch[i]);
+			if (enabled === undefined) continue;
+			state.enabled = enabled;
+			break;
 		}
 		updateStatus(ctx);
 	});
@@ -68,25 +95,12 @@ export default function (pi: ExtensionAPI): void {
 	// ─── 命令注册 ──────────────────────────────────────
 
 	pi.registerCommand("brain", {
-		description: "Switch to Brain orchestration mode — inject Proofloop v2 workflow into system prompt",
+		description: "Switch to Brain orchestration mode — append canonical Brain pointer to system prompt",
 		handler: async (_args, ctx) => {
 			state.enabled = true;
 
-			// 检查 brain-workflow.md 是否存在
-			const exists = await loadBrainInstructions(ctx);
-			if (!exists) {
-				ctx.ui.notify(
-					`⚠️  ${BRAIN_WORKFLOW_FILE} not found. Brain mode enabled without workflow instructions.`,
-					"warning",
-				);
-			}
-
 			// 持久化模式状态到 session
-			pi.appendEntry({
-				customType: MODE_ENTRY_TYPE,
-				content: "active",
-				display: false,
-			});
+			pi.appendEntry(MODE_ENTRY_TYPE, { enabled: true } satisfies PersistedModeState);
 
 			ctx.ui.notify("🧠 Brain orchestration mode activated", "info");
 			updateStatus(ctx);
@@ -99,34 +113,20 @@ export default function (pi: ExtensionAPI): void {
 			state.enabled = false;
 
 			// 持久化模式状态到 session
-			pi.appendEntry({
-				customType: MODE_ENTRY_TYPE,
-				content: "inactive",
-				display: false,
-			});
+			pi.appendEntry(MODE_ENTRY_TYPE, { enabled: false } satisfies PersistedModeState);
 
 			ctx.ui.notify("💻 Standard coding mode restored", "info");
 			updateStatus(ctx);
 		},
 	});
 
-	// ─── System Prompt 注入 ────────────────────────────
+	// ─── System Prompt 注入（仅 Brain mode；只追加短固定 pointer）─────────
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	pi.on("before_agent_start", async (event, _ctx) => {
 		if (!state.enabled) return;
 
-		const instructions = await loadBrainInstructions(ctx);
-		if (!instructions) return;
-
 		return {
-			systemPrompt:
-				event.systemPrompt +
-				"\n\n---\n" +
-				instructions +
-				"\n\n---\n**Important**: You are currently in **Brain Orchestration Mode**. " +
-				"Follow the Pi runtime adaptation above: dispatch the listed specialist roles with Pi Agent(...). " +
-				"Use this session directly only for DIRECT_BOUNDED_TASK or authority work with loaded skills. " +
-				"Do not implement production code yourself — that is the Worker's job.",
+			systemPrompt: event.systemPrompt + "\n\n---\n" + BRAIN_MODE_PROMPT,
 		};
 	});
 }

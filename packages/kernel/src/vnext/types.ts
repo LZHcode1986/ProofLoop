@@ -1,15 +1,16 @@
 /**
- * @proofloop/kernel — vNext Contract Foundation Types (S0-A bootstrap)
+ * @proofloop/kernel — vNext Contract Foundation Types.
  *
- * Closed, versioned vNext contract types for:
+ * Closed, versioned vNext contract types for the neutral machine surface:
  * - Canonical Plan (immutable projection vs execution projection)
  * - Reference Index (ReferenceDescriptor keyed by ref_id)
  * - Proof Index (goal/task/acceptance/seam/oracle/risk refs + risk bindings)
- * - vNext Manifest (version discriminator `version: 2`)
+ * - Execution Scope (root-relative, task-anchored code/test/forbidden paths)
  *
- * These types are ADDITIVE. v1 contracts (contracts.ts / types.ts) are
- * unchanged and remain the canonical v1 surface. Old v1 artifacts must never
- * be silently interpreted as vNext facts.
+ * Manifest / Receipt / admission / binding credential families were removed
+ * with the old business stack — this file holds only the mechanical schema /
+ * digest types consumed by canonical Plan, Reference, Proof and Work Packet
+ * execution-scope validation.
  */
 
 // ============================================================
@@ -18,9 +19,9 @@
 
 /**
  * vNext schema version constant. Any vNext artifact must carry
- * `version: 2` (Manifest) or `schema_version: 2` (Plan / Manifest plan
- * section). Old v1 Manifest artifacts carry no `version` field (or `1`) and
- * are rejected instead of being silently interpreted as vNext.
+ * `version: 2` (or `schema_version: 2` where the artifact uses that field).
+ * Old v1 artifacts carry no `version` field (or `1`) and are rejected
+ * instead of being silently interpreted as vNext.
  */
 export const VNEXT_SCHEMA_VERSION = 2 as const;
 
@@ -69,8 +70,7 @@ export interface VNextReferenceDescriptor {
  * Reference Index: object keyed by `ref_id` → descriptor.
  *
  * Keys must be non-empty, unique, and every descriptor must be a valid
- * VNextReferenceDescriptor. An empty index is rejected (the Manifest must
- * not hold only "empty references").
+ * VNextReferenceDescriptor. An empty index is rejected.
  */
 export type VNextReferenceIndex = Record<string, VNextReferenceDescriptor>;
 
@@ -95,7 +95,7 @@ export interface VNextRiskBinding {
 /**
  * Per-slice Proof Index — the single machine schema for proof references.
  *
- * All refs are stable `ref_id`s registered in the Manifest `reference_index`.
+ * All refs are stable `ref_id`s registered in the reference index.
  * No string refs, digest objects, or "equivalent index" forms are accepted.
  */
 export interface VNextProofIndex {
@@ -106,133 +106,6 @@ export interface VNextProofIndex {
   seam_refs: string[];
   oracle_refs: string[];
   risk_refs: VNextRiskBinding[];
-}
-
-// ============================================================
-// Binding contract (three-level binding fingerprints, S12-B)
-// ============================================================
-
-/**
- * Binding schema version constant. The only admitted value is `1`
- * (§8.1/§8.2 contract-state-matrix.md). Unknown versions fail closed.
- */
-export const VNEXT_BINDING_SCHEMA_VERSION = 1 as const;
-
-export type VNextBindingSchemaVersion = typeof VNEXT_BINDING_SCHEMA_VERSION;
-
-/**
- * Closed set of binding modes. The only admitted mode is `slice-local`;
- * a stage-wide mode does not exist in the binding contract (§8.1).
- */
-export const VNEXT_BINDING_MODES = ['slice-local'] as const;
-
-export type VNextBindingMode = (typeof VNEXT_BINDING_MODES)[number];
-
-/**
- * Optional Manifest `binding` section (§8.1). Absent = legacy stage-wide
- * mode (behavior unchanged). When present it must satisfy the closed schema:
- * version 1, mode `slice-local`, and a 64-hex `stage_contract_digest`.
- */
-export interface VNextManifestBinding {
-  version: VNextBindingSchemaVersion;
-  mode: VNextBindingMode;
-  stage_contract_digest: string;
-}
-
-/**
- * One resolved reference binding inside a contract projection.
- *
- * `ref_id` is the reference_index key; `kind`, `file_digest` and
- * `section_digest` come from the registered descriptor. Used by
- * `stage_reference_bindings` and `reference_bindings` (§8.2).
- */
-export interface VNextReferenceBinding {
-  kind: VNextReferenceKind;
-  ref_id: string;
-  file_digest: string;
-  section_digest: string;
-}
-
-/**
- * One dependency integration fact consumed by an execution binding
- * (§8.2 `dependency_bindings`). In Phase 1 serial execution this is
- * usually empty or a single element.
- */
-export interface VNextDependencyBinding {
-  slice_id: string;
-  slice_contract_digest: string;
-  integration_receipt_digest: string;
-  integration_head_sha: string;
-}
-
-/**
- * Closed input of `computeExecutionBindingDigest` (§8.2).
- *
- * `stage_id` / `slice_id` come from the Manifest; the three digests and the
- * dependency bindings are the execution-time facts consumed by the binding.
- */
-export interface VNextExecutionBindingInput {
-  stage_id: string;
-  slice_id: string;
-  stage_contract_digest: string;
-  slice_contract_digest: string;
-  dependency_bindings: VNextDependencyBinding[];
-  base_snapshot_digest: string;
-}
-
-/**
- * Immutable projection of a Plan stage node — the exact stage-contract
- * input (`stage_node` in §8.2). Never includes mutable execution fields.
- */
-export interface VNextStageNodeProjection {
-  id: string;
-  kind: VNextPlanKind;
-  goal: string;
-  refs: string[];
-  dependencies: string[];
-  required_skills: string[];
-}
-
-/**
- * Closed stage contract projection (§8.2). The digest is computed OVER this
- * object and never included in it.
- */
-export interface VNextStageContractProjection {
-  binding_schema_version: VNextBindingSchemaVersion;
-  stage_id: string;
-  stage_node: VNextStageNodeProjection;
-  stage_reference_bindings: VNextReferenceBinding[];
-}
-
-/**
- * Closed slice contract projection (§8.2). `task_scopes` holds ONLY the
- * entries bound by this slice's `proof_index.task_refs`; `reference_bindings`
- * is the resolved closure of this slice's Proof Index refs.
- */
-export interface VNextSliceContractProjection {
-  binding_schema_version: VNextBindingSchemaVersion;
-  stage_id: string;
-  slice_id: string;
-  proof_index: VNextProofIndex;
-  required_skills: string[];
-  depends_on: string[];
-  evidence_path: string;
-  task_scopes: Record<string, VNextTaskScope>;
-  reference_bindings: VNextReferenceBinding[];
-}
-
-/**
- * Closed execution binding projection (§8.2). The digest is computed OVER
- * this object and never included in it.
- */
-export interface VNextExecutionBindingProjection {
-  binding_schema_version: VNextBindingSchemaVersion;
-  stage_id: string;
-  slice_id: string;
-  stage_contract_digest: string;
-  slice_contract_digest: string;
-  dependency_bindings: VNextDependencyBinding[];
-  base_snapshot_digest: string;
 }
 
 // ============================================================
@@ -265,7 +138,10 @@ export interface VNextExecutionScope {
   forbidden_paths: string[];
 }
 
-/** Manifest binding for a task id and its canonical task entity reference. */
+/**
+ * Work Packet binding for a task id and its canonical task entity reference.
+ * The Work Packet carries the task's immutable execution scope to the Worker.
+ */
 export interface VNextTaskScope {
   task_ref: string;
   execution_scope: VNextExecutionScope;
@@ -324,98 +200,4 @@ export interface VNextPlanProjection {
     required_skills: string[];
     execution_scope?: VNextExecutionScope;
   }>;
-}
-
-// ============================================================
-// vNext Manifest
-// ============================================================
-
-/**
- * Runtime Proof section of the vNext Manifest (optional, data-contract level).
- *
- * Deep Runtime Proof semantics are S0-B scope; the kernel only checks the
- * closed field shape when present.
- */
-export interface VNextRuntimeProofSection {
-  spec_refs: string[];
-  resolved_steps: unknown[];
-  proof_digest: string;
-}
-
-// ============================================================
-// vNext admission authority
-// ============================================================
-
-/** The only SPV verdict which can authorize a vNext Stage Plan. */
-export interface VNextSpvPassReceipt {
-  version: VNextSchemaVersion;
-  schema_version: VNextSchemaVersion;
-  type: 'SPV_PASS';
-  stage_id: string;
-  manifest_digest: string;
-  plan_digest: string;
-  snapshot_digest: string;
-  digest: string;
-}
-
-/**
- * A vNext Stage Plan admission fact.  This is a consumer-side schema only;
- * S04 does not create or admit this artifact.
- */
-export interface VNextStagePlanReceipt {
-  version: VNextSchemaVersion;
-  schema_version: VNextSchemaVersion;
-  type: 'STAGE_PLAN';
-  stage_id: string;
-  manifest_digest: string;
-  plan_digest: string;
-  snapshot_digest: string;
-  spv_receipt_digest: string;
-  digest: string;
-}
-
-/**
- * A slice entry inside the vNext Manifest.
- */
-export interface VNextManifestSlice {
-  slice_id: string;
-  proof_index: VNextProofIndex;
-  required_skills: string[];
-  depends_on: string[];
-  evidence_path: string;
-  /**
-   * Static slice contract fingerprint (§8.1). Required in slice-local
-   * binding mode; optional (ignored) for legacy manifests.
-   */
-  slice_contract_digest?: string;
-}
-
-/**
- * vNext Manifest (schema `version: 2`).
- *
- * Distinct from the v1 Manifest: it carries an explicit `version: 2`
- * discriminator, a normalized plan reference + plan_digest, and a
- * `reference_index` + per-slice `proof_index` closed reference surface.
- * See §9 Manifest vNext of the pluginv2 plan.
- */
-export interface VNextManifest {
-  version: VNextSchemaVersion;
-  stage_id: string;
-  plan: {
-    ref: string;
-    plan_digest: string;
-    schema_version: VNextSchemaVersion;
-  };
-  reference_index: VNextReferenceIndex;
-  authority_ref_ids?: string[];
-  /**
-   * Optional binding section (§8.1). Absent = legacy stage-wide mode with
-   * zero behavior change; present = slice-local mode, closed schema.
-   */
-  binding?: VNextManifestBinding;
-  /** Immutable per-task scope bindings consumed by Runtime dispatch. */
-  task_scopes: Record<string, VNextTaskScope>;
-  slices: VNextManifestSlice[];
-  runtime_proof?: VNextRuntimeProofSection;
-  compiled_by?: string;
 }

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * proofloop.ts — S10-A-T01: public proofloop CLI dispatcher (seam base).
+ * proofloop.ts — public proofloop CLI dispatcher (seam base).
  *
  *   proofloop <domain> <operation> [--request <root-relative-json>]
  *            [--json <closed-json>] [--project-root <path>]
  *
- * Contract (tech-spec §0.1/§0.2/§0.3, Acceptance A):
+ * Contract:
  *  - stdout carries exactly ONE canonical JSON envelope; no natural-language
  *    prefix on success or refusal;
  *  - exit: 0 = completed/read-ready, 1 = usage/schema/runtime failure,
  *    2 = structured blocked/refused/no-write;
- *  - domain/operation come from the closed §0.3 registry; unknown domain or
+ *  - domain/operation come from the closed registry; unknown domain or
  *    operation fails closed (RUNTIME.SCHEMA_MISMATCH, exit 2) BEFORE any
  *    filesystem write and BEFORE any request input read;
  *  - the canonical trust root is asserted before any artifact path is used;
@@ -18,22 +18,29 @@
  *  - the CLI never imports a harness SDK and never writes Receipts/Manifest/
  *    Context/Evidence directly.
  *
- * S10-A-T01 delivered the base: registry + envelope + exit contract + root
- * assertion + request-input base parsing.  S10-A-T02 registers the doctor
- * domain handler and completes the request-file/JSON closed input; later
- * Slices register the remaining domains.
+ * CLI cutover (bootstrap unlock): every legacy business-control domain
+ * (authority/plan/context/stage/review/project/doctor/gate/recovery/cutover)
+ * and its handlers/routes were removed — no fallback/compatibility alias
+ * remains.  The two active mechanical routes are the deterministic Git
+ * boundary adapter (`boundary close`) and the dedicated mechanical
+ * Integration adapter (`integration apply`).
  */
 
-import { runDoctor, runDoctorStatus } from './proofloop-doctor';
-import { collectPlanParams, runAuthorityCheck, runPlan } from './proofloop-plan';
-import { collectContextParams, runContext } from './proofloop-context';
-import { collectStageParams, runStage } from './proofloop-stage';
-import { collectGateParams, runGateDomain } from './proofloop-gate';
-import { collectReviewParams, runReview } from './proofloop-review';
-import { collectProjectParams, runProjectDomain } from './proofloop-project';
-import { collectRecoveryParams, runRecoveryDomain } from './proofloop-recovery';
-import { runCutoverDomain } from './proofloop-cutover';
 import { runBoundaryDomain } from './proofloop-boundary';
+import { runIntegrationDomain } from './proofloop-integration';
+import { readMesSeedRecord, isMesSeeded, readMesSnapshotFacts } from '../mes/bootstrap';
+import type { MesStatusTuple } from '../mes/bootstrap';
+import {
+  projectSparseStatus,
+  projectDetailStatus,
+  formatSparseStatus,
+  formatDetailStatus,
+  projectCycleFilteredStatus,
+  projectCycleFilteredDetail,
+  projectTerminalAdjunct,
+  formatProjectTerminalAdjunct,
+  MesStatusError,
+} from '../mes/status';
 import {
   CANONICAL_DOMAINS,
   CLI_EXIT,
@@ -59,6 +66,16 @@ export interface ProofloopCliOptions {
   readonly env?: Record<string, string | undefined>;
 }
 
+/**
+ * Options of the read-only `proofloop status` observation entry.
+ */
+export interface StatusCliOptions {
+  /** Bounded L2 detail projection requests (`proofloop status --detail`). */
+  readonly detail: boolean;
+  /** Structured JSON projection (`proofloop status --json`); false = human-readable. */
+  readonly jsonOutput: boolean;
+}
+
 /** Structured blocked error carrying its canonical finding code. */
 export class CliBlockedError extends Error {
   readonly code: string;
@@ -79,6 +96,219 @@ function blockedCodeOf(error: unknown): string {
   return 'RUNTIME.BLOCKED';
 }
 
+/**
+ * Read-only `proofloop status` observation entry (S01-C-T02).
+ *
+ * Projects the durable bootstrap seed facts through the pure status/detail
+ * projections (mes.md status L1/L2, contracts.md §2.3 / §2.4):
+ *   - `status` / `status --detail`      — deterministic human-readable view;
+ *   - `status --json` / `status --json --detail` — same facts, structured.
+ *
+ * It NEVER writes facts, is NOT part of DOMAIN_REGISTRY / CANONICAL_DOMAINS
+ * (no business-control/legacy domain is added — ADR-009/010, STATIC-05/14)
+ * and fails closed (exit 2, structured finding) on a missing, corrupt,
+ * not-fully-seeded or unknown root-bound store input without mutating
+ * anything. Output never contains next_action / route / reasoning.
+ */
+export function runStatusDomain(root: string, options: StatusCliOptions): CliEnvelope {
+  const command: CliCommand = { domain: 'status', operation: null };
+  let record: ReturnType<typeof readMesSeedRecord>;
+  try {
+    record = readMesSeedRecord(root);
+  } catch (error) {
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES status: ${errorMessage(error)}`);
+  }
+  // (EC-1 / CV S05-C-cv-1) isMesSeeded re-reads the snapshot store and can
+  // fail closed on a corrupt/unreadable snapshot (MesSnapshotStoreError) —
+  // the public entry must catch it and return ONE structured
+  // RUNTIME.BLOCKED envelope, never throw.
+  let seeded = false;
+  if (record !== null) {
+    try {
+      seeded = isMesSeeded(root);
+    } catch (error) {
+      return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES status: ${errorMessage(error)}`);
+    }
+  }
+  if (!seeded) {
+    // (S05-C-T02 / PO-S05-C-03) Post-recovery reachability: when the one-time
+    // seed record / seed-owned facts are unavailable after a LEGAL recovery
+    // baseline, the public status entry derives the cycle-filtered current
+    // status from the DURABLE facts alone — it never backfills missing
+    // seed-owned facts and never revives PRE_MES_BOOTSTRAP. Without a
+    // recovery context the existing fail-closed refusal is preserved.
+    return statusFromDurableFacts(
+      root,
+      command,
+      options,
+      record === null
+        ? 'MES status requires a seeded store (seedMesBootstrap first) or a legal recovery baseline'
+        : 'MES store is not fully seeded (seed record / snapshot facts mismatch)',
+    );
+  }
+  // (PO-S05-C-03) A SEEDED store may ALSO carry a newer legal NORMAL cycle
+  // in its durable facts (a unique same-cycle in-flight candidate/accepted
+  // planning binding — e.g. after a legal recovery baseline, the fresh
+  // NORMAL cycle's PVR/PA). The public status must then project the CURRENT
+  // durable cycle-filtered status instead of the stale seed tuple; the
+  // seeded legacy projection below stays only when the durable facts carry
+  // no newer current cycle. Typed AUTHORITY_GAP / RUNTIME.BLOCKED envelopes
+  // are preserved and nothing is written or backfilled.
+  const currentCycleEnvelope = seededStatusFromDurableFacts(root, command, options);
+  if (currentCycleEnvelope !== null) {
+    return currentCycleEnvelope;
+  }
+  // After the early returns above, `record` is a non-null seed record and
+  // the durable facts carry no newer current NORMAL cycle — seeded legacy
+  // projection of the seed tuple.
+  const seedRecord: NonNullable<typeof record> = record as NonNullable<typeof record>;
+  try {
+    // (repair CV S06-B-restart-cv-1 / contracts 2.3.1) The seeded legacy
+    // projection stays primary, but when the DURABLE facts also carry a legal
+    // terminal observation (a retained no-cycle legacy PROJECT_READY →
+    // HISTORICAL_PROJECT_READY; a legal chain tip → CURRENT_PROJECT_READY; a
+    // unique open cycle → PRE_TERMINAL), the public status exposes the
+    // projection-only `project_terminal` adjunct in every form — never
+    // invented, no write/backfill, same S06-A seam. Broken / ambiguous
+    // terminal relations fail closed typed (STATIC-30/31).
+    const durableFacts = readMesSnapshotFacts(root);
+    const adjunct = projectTerminalAdjunct(durableFacts);
+    const sparseBase = projectSparseStatus(seedRecord.status);
+    const detailBase = projectDetailStatus(seedRecord);
+    const result = options.detail
+      ? options.jsonOutput
+        ? adjunct !== undefined
+          ? { ...detailBase, project_terminal: adjunct }
+          : detailBase
+        : formatDetailStatus(
+            adjunct !== undefined ? { ...detailBase, project_terminal: adjunct } : detailBase,
+          )
+      : options.jsonOutput
+        ? adjunct !== undefined
+          ? { ...sparseBase, project_terminal: adjunct }
+          : sparseBase
+        : formatSparseStatus(sparseBase) +
+          (adjunct !== undefined ? `\n${formatProjectTerminalAdjunct(adjunct)}` : '');
+    return okEnvelope(command, result);
+  } catch (error) {
+    if (error instanceof MesStatusError && error.code === 'authority-gap') {
+      return errorEnvelope(command, 'AUTHORITY_GAP', `cannot project seeded MES status: ${errorMessage(error)}`);
+    }
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot project MES status: ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * (S05-C-T02 / PO-S05-C-03) Post-recovery cycle-filtered status observation
+ * path: reads the durable snapshot facts and — only when the store carries a
+ * legal recovery baseline — projects the current NORMAL cycle status
+ * (cycle-filtered, evaluated from the durable facts' unique same-cycle
+ * in-flight binding). The read NEVER writes: no missing seed-owned facts are
+ * backfilled and PRE_MES_BOOTSTRAP stays permanently closed. When the
+ * current-cycle observation path cannot be proven from the Authority, the
+ * entry stops with a typed AUTHORITY_GAP refusal instead of inventing
+ * semantics.
+ */
+function statusFromDurableFacts(
+  root: string,
+  command: CliCommand,
+  options: StatusCliOptions,
+  missingMessage: string,
+): CliEnvelope {
+  let facts: ReturnType<typeof readMesSnapshotFacts>;
+  try {
+    facts = readMesSnapshotFacts(root);
+  } catch (error) {
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES snapshot facts: ${errorMessage(error)}`);
+  }
+  if (!facts.some((fact) => fact.fact_kind === 'recovery_baseline')) {
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', missingMessage);
+  }
+  return projectCurrentCycleEnvelope(command, options, facts);
+}
+
+/**
+ * (PO-S05-C-03) Seeded-store current-cycle observation: when a seeded store
+ * ALSO contains a newer legal NORMAL cycle — its durable facts carry at least
+ * one cycle-bearing in-flight candidate/accepted planning binding (PVR/PA
+ * with a non-empty `plan_binding.delivery_cycle_id`) — the public status
+ * projects the CURRENT durable cycle-filtered status instead of the stale
+ * seed tuple.
+ *
+ * Returns `null` when the durable facts carry NO current-cycle planning
+ * binding (a purely legacy seeded store — the caller keeps the seeded legacy
+ * projection of the seed tuple). A present but ambiguous / unprovable current
+ * cycle fails closed with the typed envelope — the stale seed tuple is never
+ * returned and nothing is written or backfilled.
+ */
+function seededStatusFromDurableFacts(
+  root: string,
+  command: CliCommand,
+  options: StatusCliOptions,
+): CliEnvelope | null {
+  let facts: ReturnType<typeof readMesSnapshotFacts>;
+  try {
+    facts = readMesSnapshotFacts(root);
+  } catch (error) {
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES snapshot facts: ${errorMessage(error)}`);
+  }
+  const hasCurrentCycleBinding = facts.some(
+    (fact) =>
+      (fact.fact_kind === 'planning_verification_result' || fact.fact_kind === 'plan_acceptance') &&
+      fact.plan_binding !== undefined &&
+      fact.plan_binding.delivery_cycle_id !== undefined &&
+      fact.plan_binding.delivery_cycle_id.length > 0,
+  );
+  if (!hasCurrentCycleBinding) {
+    return null;
+  }
+  return projectCurrentCycleEnvelope(command, options, facts);
+}
+
+/**
+ * Shared current-cycle projection envelope: cycle-filtered status (and, for
+ * `--detail`, the bounded binding detail) projected from the durable facts.
+ * Failures map to the typed envelopes: `AUTHORITY_GAP` when the current-cycle
+ * observation path cannot be proven from the Authority, `RUNTIME.BLOCKED`
+ * otherwise. Read-only: never writes, never backfills, emits no route / next
+ * action / reasoning (HP-001 / HP-007 / STATIC-05).
+ */
+function projectCurrentCycleEnvelope(
+  command: CliCommand,
+  options: StatusCliOptions,
+  facts: ReturnType<typeof readMesSnapshotFacts>,
+): CliEnvelope {
+  try {
+    const current = projectCycleFilteredStatus(facts);
+    const tuple: MesStatusTuple = { scope: current.scope, phase: current.phase, required_skill: current.required_skill };
+    // (PO-S06-B-01) The projection-only `project_terminal` adjunct (contracts
+    // 2.3.1) is exposed by the PUBLIC status surface in BOTH sparse forms
+    // (human + JSON) when a current cycle/terminal observation is provable —
+    // not only in `--detail` (which already carries it through
+    // projectCycleFilteredDetail / formatDetailStatus). Reuses the S06-A
+    // projection seam (projectTerminalAdjunct); nothing is written, no
+    // second store/pointer, no route/next-action (STATIC-14/30/31).
+    const adjunct = projectTerminalAdjunct(facts);
+    const result = options.detail
+      ? options.jsonOutput
+        ? projectCycleFilteredDetail(facts)
+        : formatDetailStatus(projectCycleFilteredDetail(facts))
+      : options.jsonOutput
+        ? {
+            ...projectSparseStatus(tuple),
+            ...(adjunct !== undefined ? { project_terminal: adjunct } : {}),
+          }
+        : formatSparseStatus(projectSparseStatus(tuple)) +
+          (adjunct !== undefined ? `\n${formatProjectTerminalAdjunct(adjunct)}` : '');
+    return okEnvelope(command, result);
+  } catch (error) {
+    if (error instanceof MesStatusError && error.code === 'authority-gap') {
+      return errorEnvelope(command, 'AUTHORITY_GAP', `cannot project cycle-filtered MES status: ${errorMessage(error)}`);
+    }
+    return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot project MES status: ${errorMessage(error)}`);
+  }
+}
+
 function usageText(): string {
   return (
     'proofloop <domain> <operation> [--request <root-relative-json>] ' +
@@ -97,22 +327,11 @@ function usageEnvelope(message: string): CliEnvelope {
 /**
  * Run the proofloop CLI for the given argv and return the exit code.
  * Prints exactly one canonical JSON envelope to stdout in every path.
- *
- * Overload note: the public signature stays `number` (the in-process seam
- * contract consumed by the CLI specs).  The implementation may return
- * `Promise<number>` for the gate domain, whose handler is async (real
- * canonical proof step execution + CLI→Runtime GATE_PASS admission); the
- * built-process main entry awaits the result so the exit code always follows
- * `envelope.ok` (0) / blocked (2).
  */
 export function proofloopCli(
   argv: readonly string[],
-  options?: ProofloopCliOptions,
-): number;
-export function proofloopCli(
-  argv: readonly string[],
   options: ProofloopCliOptions = {},
-): number | Promise<number> {
+): number {
   const env = options.env ?? process.env;
   const cwd = options.cwd ?? process.cwd();
 
@@ -139,6 +358,57 @@ export function proofloopCli(
     emitEnvelope(okEnvelope(command, { version: PROOFLOOP_RUNTIME_VERSION }));
     return CLI_EXIT.OK;
   }
+
+  // status: the ONLY read-only top-level observation entry. It is handled
+  // BEFORE the closed-registry checks, never enters DOMAIN_REGISTRY /
+  // CANONICAL_DOMAINS, accepts no request input, and never writes facts.
+  if (parsed.positionals[0] === 'status') {
+    const statusCommand: CliCommand = { domain: 'status', operation: null };
+    if (parsed.positionals.length !== 1) {
+      emitEnvelope(
+        errorEnvelope(
+          statusCommand,
+          'RUNTIME.SCHEMA_MISMATCH',
+          `status is a top-level read-only entry and takes no <operation> (received: ${parsed.positionals.slice(1).join(' ')})`,
+        ),
+      );
+      return CLI_EXIT.BLOCKED;
+    }
+    if (parsed.stage !== undefined) {
+      emitEnvelope(
+        errorEnvelope(
+          statusCommand,
+          'RUNTIME.INPUT_INVALID',
+          'status accepts no --stage scope selector; read the seeded status without a stage filter',
+        ),
+      );
+      return CLI_EXIT.BLOCKED;
+    }
+    if (parsed.requestPath !== undefined || parsed.jsonInput !== undefined) {
+      emitEnvelope(
+        errorEnvelope(
+          statusCommand,
+          'RUNTIME.INPUT_INVALID',
+          'status accepts no request input; use a bare --json for structured output',
+        ),
+      );
+      return CLI_EXIT.BLOCKED;
+    }
+    let statusRoot: string;
+    try {
+      const explicitRoot = parsed.projectRoot ?? env[PROOFLOOP_ROOT_ENV];
+      statusRoot = resolveTrustRoot({ explicitRoot, cwd }).root;
+    } catch (error) {
+      emitEnvelope(errorEnvelope(statusCommand, blockedCodeOf(error), errorMessage(error)));
+      return CLI_EXIT.BLOCKED;
+    }
+    const statusEnvelope = runStatusDomain(statusRoot, {
+      detail: parsed.detail ?? false,
+      jsonOutput: parsed.jsonOutput ?? false,
+    });
+    emitEnvelope(statusEnvelope);
+    return statusEnvelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
+  }
   if (parsed.positionals.length < 2) {
     emitEnvelope(
       usageEnvelope(
@@ -149,9 +419,9 @@ export function proofloopCli(
     );
     return CLI_EXIT.USAGE;
   }
-  // CV repair: closed positional count — exactly <domain> <operation>; any
-  // extra positional fails closed (exit 2) BEFORE the root assertion, the
-  // request input read or any handler runs.
+  // Closed positional count — exactly <domain> <operation>; any extra
+  // positional fails closed (exit 2) BEFORE the root assertion, the request
+  // input read or any handler runs.
   if (parsed.positionals.length > 2) {
     emitEnvelope(
       errorEnvelope(
@@ -165,12 +435,10 @@ export function proofloopCli(
 
   // Canonical trust root assertion — before any artifact path/domain handling.
   let root: string;
-  let rootSource: 'explicit' | 'auto';
   try {
     const explicitRoot = parsed.projectRoot ?? env[PROOFLOOP_ROOT_ENV];
     const resolution = resolveTrustRoot({ explicitRoot, cwd });
     root = resolution.root;
-    rootSource = resolution.source;
   } catch (error) {
     emitEnvelope(
       errorEnvelope(command, blockedCodeOf(error), errorMessage(error)),
@@ -179,7 +447,7 @@ export function proofloopCli(
   }
 
   // Closed domain/operation check: fail closed BEFORE any write and BEFORE
-  // any request input read (§0.3).
+  // any request input read.
   const domain = command.domain as string;
   const operation = command.operation as string;
   if (!isCanonicalDomain(domain)) {
@@ -203,118 +471,16 @@ export function proofloopCli(
     return CLI_EXIT.BLOCKED;
   }
 
-  // Closed request input (S10-A-T02): root-bound/no-follow `--request` file
-  // or inline `--json`; unknown fields / conflicts fail closed BEFORE any
-  // handler runs (dispatcher maps every failure to exit 2, no write).
+  // Closed request input: root-bound/no-follow `--request` file or inline
+  // `--json`; unknown fields / conflicts fail closed BEFORE any handler runs
+  // (dispatcher maps every failure to exit 2, no write).
   const requestValidation = resolveRequestInput(root, command, parsed);
   if (!requestValidation.ok) {
     emitEnvelope(errorEnvelope(command, requestValidation.code, requestValidation.message));
     return CLI_EXIT.BLOCKED;
   }
 
-  // Domain handler dispatch (S10-A-T02 registers doctor; S10-B-T01 registers
-  // the plan/authority domains; S10-C-T01 registers the stage domain; later
-  // Slices register the remaining closed domains).
-  if (domain === 'doctor' && operation === 'run') {
-    emitEnvelope(runDoctor(root, rootSource, command));
-    return CLI_EXIT.OK;
-  }
-
-  // S10-D-T03: doctor status — 只读状态报告（Git/capabilities/版本/schema +
-  // receipts 类别摘要）；非 git 仓库降级报告（git.available: false）exit 0，
-  // 零写入。
-  if (domain === 'doctor' && operation === 'status') {
-    emitEnvelope(runDoctorStatus(root, rootSource, command));
-    return CLI_EXIT.OK;
-  }
-
-  if (domain === 'plan') {
-    const envelope = runPlan(root, rootSource, command, collectPlanParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  if (domain === 'authority' && operation === 'check') {
-    const envelope = runAuthorityCheck(root, rootSource, command, collectPlanParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  if (domain === 'context') {
-    const envelope = runContext(root, rootSource, command, collectContextParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  if (domain === 'stage') {
-    const envelope = runStage(root, rootSource, command, collectStageParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  // S10-C-T02: gate domain — the handler is async (real canonical proof step
-  // execution + CLI→Runtime GATE_PASS admission), so this branch returns a
-  // promise; the envelope is emitted after the handler resolves.
-  if (domain === 'gate') {
-    return runGateDomain(
-      root,
-      rootSource,
-      command,
-      collectGateParams(parsed, requestValidation.request),
-    ).then((envelope) => {
-      emitEnvelope(envelope);
-      return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-    });
-  }
-
-  // S10-D-T01: review domain — status/prepare-stage 只读投影，finalize-stage
-  // CLI→Runtime review admission（verdict + summary）。成功 exit 0；所有
-  // structured failure（含 finalize 拒绝与 Receipt 链破坏）exit 2。
-  if (domain === 'review') {
-    const envelope = runReview(root, rootSource, command, collectReviewParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  // S10-D-T02: project domain — status/compile-acceptance/run-e2e/
-  // prepare-review/finalize-review（project 域全局，无 --stage）。run-e2e 是
-  // 异步操作（真实 E2E step 执行 + seam 写 Project E2E Gate Receipt），故
-  // 本分支与 gate 域同构返回 promise；envelope 在 handler resolve 后 emit。
-  // 成功 exit 0；所有 structured failure（含 E2E FAIL、finalize 拒绝与
-  // Receipt 链破坏）exit 2。
-  if (domain === 'project') {
-    return runProjectDomain(
-      root,
-      rootSource,
-      command,
-      collectProjectParams(parsed, requestValidation.request),
-    ).then((envelope) => {
-      emitEnvelope(envelope);
-      return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-    });
-  }
-
-  // S10-D-T03: recovery domain — check/preflight 只读恢复状态报告与预检，
-  // restart 复用 vNext restart/recovery seam（只从本地持久事实重新投影派发
-  // 状态，Context 由 Runtime next seam 落盘，不重放 Worker 实现），doctor
-  // 转发 doctor 域能力。成功 exit 0；所有 structured failure（含 VALIDATE
-  // 前置、Manifest/authority 缺失与事实破坏）exit 2。
-  if (domain === 'recovery') {
-    const envelope = runRecoveryDomain(root, rootSource, command, collectRecoveryParams(parsed, requestValidation.request));
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-
-  // S10-E-T02 repair: cutover domain — status 只读 legacy scan（cutover
-  // matrix）；execute 带 irreversible 保护语义（confirmed + 精确
-  // delete_list 绑定 + Acceptance A–E 事实验证 + 原子预检），未授权 fail
-  // closed（exit 2，零删除）。与 S10-C/D 各域同构的 public 域。
-  if (domain === 'cutover') {
-    const envelope = runCutoverDomain(root, command, requestValidation.request);
-    emitEnvelope(envelope);
-    return envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
-  }
-  // S11: boundary is the public deterministic Git adapter. It owns only
+  // boundary: the mechanical deterministic Git adapter. It owns only
   // mechanical status/index/stage/commit/post-commit checks; Brain still owns
   // boundary selection and all recovery decisions.
   if (domain === 'boundary') {
@@ -325,12 +491,24 @@ export function proofloopCli(
       : envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
   }
 
-  // The closed operation is known but has no handler yet (later Slices).
+  // integration: the dedicated mechanical Integration adapter. It is NOT a
+  // `boundary close` boundary type; it owns only the deterministic Git
+  // transaction (prechecks / candidate shape / stale-base / scope / conflict
+  // precheck / staged apply / commit / post-commit). Brain still owns the
+  // ready (CV PASS + durable candidate ref) and all recovery decisions.
+  if (domain === 'integration') {
+    const envelope = runIntegrationDomain(root, command, requestValidation.request);
+    emitEnvelope(envelope);
+    return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
+      ? CLI_EXIT.USAGE
+      : envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
+  }
+  // The closed operation is known but has no handler yet.
   emitEnvelope(
     errorEnvelope(
       command,
       'RUNTIME.NOT_IMPLEMENTED',
-      `operation "${domain} ${operation}" is a closed command without a handler yet (S10-A-T03+)`,
+      `operation "${domain} ${operation}" is a closed command without a handler yet`,
     ),
   );
   return CLI_EXIT.BLOCKED;

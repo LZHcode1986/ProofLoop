@@ -1,23 +1,36 @@
 /**
- * Shared vNext Slice Commit policy.
+ * Neutral Work Packet path policy (shared slice-commit scope policy).
  *
- * The policy is deliberately independent from the Git transaction and from
- * Receipt persistence.  `commit-admission.ts` loads the current Runtime facts;
- * `git-boundary.ts` applies the resulting policy before creating a commit; the
- * admission consumer applies the same checks again to the committed boundary.
+ * The policy is deliberately independent from the Git transaction, from the
+ * plan projection and from Receipt persistence.  It validates a changed-file
+ * set against the Work Packet execution scope:
+ *   - `allowedPaths`      — the current Slice committable scope only; never
+ *                           includes another Slice's declared files;
+ *   - `otherSliceDeclaredFiles` — files declared by OTHER Slices' persisted
+ *                           Worker facts; dirty-eligible (tolerated in an
+ *                           interleaved worktree) but NEVER committable by
+ *                           the current Slice boundary;
+ *   - `forbiddenPaths`    — system-protected paths and any other policy-level
+ *                           forbidden roots;
+ *   - `workerChangedFiles` — every file the Worker declared as changed must
+ *                           appear in the committed changed-file set;
+ *   - `hasRepairHistory`  — REPAIR permits repair-only files, but still
+ *                           requires every Worker fact file in the boundary.
+ *
+ * No root/stage/slice identity, Manifest/Plan/snapshot digest or CV Receipt
+ * binding remains: those were retired with the business-collector consumers.
+ *
+ * Malformed facts fail closed at load time with the mechanical
+ * `RUNTIME.SCHEMA_MISMATCH` code: every list must be a duplicate-free array of
+ * canonical root-relative strings, committable/tolerated scopes must be
+ * disjoint, protected/forbidden roots are unreachable, and every Worker fact
+ * must stay inside the admitted committable scope. No entry is ever silently
+ * deduplicated.
  */
 
-const SHA256_RE = /^[a-f0-9]{64}$/;
 const CONTROLLED_PATH_RE = /^[^\u0000-\u001f\u007f\\]+$/;
 
 export interface SliceCommitPolicyFacts {
-  readonly root: string;
-  readonly stageId: string;
-  readonly sliceId: string;
-  readonly manifestDigest: string;
-  readonly planDigest: string;
-  readonly snapshotDigest: string;
-  readonly cvReceiptDigest: string;
   /**
    * Current Slice committable scope only — never includes another Slice's
    * declared files. A parallel Slice's dirty output is tolerated in the
@@ -27,7 +40,7 @@ export interface SliceCommitPolicyFacts {
   readonly allowedPaths: readonly string[];
 
   /**
-   * Files declared by OTHER Manifest Slices' persisted Worker facts. These are
+   * Files declared by OTHER Slices' persisted Worker facts. These are
    * dirty-eligible (tolerated in an interleaved worktree) but NEVER committable by
    * the current Slice boundary; they remain outside the staging scope.
    */
@@ -44,13 +57,6 @@ export interface SliceCommitPolicyFacts {
 }
 
 export interface SliceCommitPolicy {
-  readonly root: string;
-  readonly stageId: string;
-  readonly sliceId: string;
-  readonly manifestDigest: string;
-  readonly planDigest: string;
-  readonly snapshotDigest: string;
-  readonly cvReceiptDigest: string;
   readonly allowedPaths: readonly string[];
   /** Dirty-eligible but never committable: other Slices' declared worker outputs. */
   readonly otherSliceDeclaredFiles: readonly string[];
@@ -66,7 +72,7 @@ export interface SliceCommitChangedFilesOptions {
 }
 
 export class SliceCommitPolicyError extends Error {
-  readonly code: 'RUNTIME.SCHEMA_MISMATCH' | 'DOMAIN.INVALID_TRANSITION';
+  readonly code: 'RUNTIME.SCHEMA_MISMATCH';
 
   constructor(code: SliceCommitPolicyError['code'], message: string) {
     super(message);
@@ -79,8 +85,42 @@ function fail(code: SliceCommitPolicyError['code'], message: string): never {
   throw new SliceCommitPolicyError(code, message);
 }
 
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values)];
+function requireList(values: unknown, label: string): asserts values is readonly string[] {
+  if (!Array.isArray(values)) {
+    fail('RUNTIME.SCHEMA_MISMATCH', `${label} must be an array of canonical root-relative strings`);
+  }
+}
+
+function assertUnique(values: readonly string[], label: string): void {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) {
+      fail('RUNTIME.SCHEMA_MISMATCH', `${label} contains a duplicate entry: ${value}`);
+    }
+    seen.add(value);
+  }
+}
+
+const PROTECTED_ROOTS: readonly string[] = ['.git', '.proofloop'];
+
+function assertNoProtectedRoot(values: readonly string[], label: string): void {
+  for (const value of values) {
+    for (const root of PROTECTED_ROOTS) {
+      if (pathWithin(value, root)) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${label} must not equal or descend from a protected root ${root}: ${value}`);
+      }
+    }
+  }
+}
+
+function assertDisjoint(values: readonly string[], bases: readonly string[], label: string, baseLabel: string): void {
+  for (const value of values) {
+    for (const base of bases) {
+      if (pathWithin(value, base) || pathWithin(base, value)) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `${label} overlaps ${baseLabel} ${base}: ${value}`);
+      }
+    }
+  }
 }
 
 function pathWithin(value: string, base: string): boolean {
@@ -101,49 +141,65 @@ function canonicalPath(value: string, label: string): string {
   return value;
 }
 
-function assertDigest(value: string, label: string): void {
-  if (!SHA256_RE.test(value)) {
-    fail('RUNTIME.SCHEMA_MISMATCH', `${label} must be a lowercase SHA-256 digest`);
-  }
-}
-
-/** Build one immutable policy from Runtime-loaded facts. */
+/** Build one immutable policy from the supplied Work Packet path facts. */
 export function loadSliceCommitPolicy(facts: SliceCommitPolicyFacts): SliceCommitPolicy {
-  if (typeof facts.root !== 'string' || facts.root.length === 0) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy root is required');
+  if (typeof facts !== 'object' || facts === null || Array.isArray(facts)) {
+    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy facts must be an object of path facts');
   }
-  if (typeof facts.stageId !== 'string' || facts.stageId.length === 0) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy stageId is required');
+  requireList(facts.allowedPaths, 'Slice Commit allowedPaths');
+  requireList(facts.otherSliceDeclaredFiles, 'Slice Commit otherSliceDeclaredFiles');
+  requireList(facts.forbiddenPaths, 'Slice Commit forbiddenPaths');
+  requireList(facts.workerChangedFiles, 'Slice Commit workerChangedFiles');
+  if (typeof facts.hasRepairHistory !== 'boolean') {
+    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit hasRepairHistory must be a boolean');
   }
-  if (typeof facts.sliceId !== 'string' || facts.sliceId.length === 0) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy sliceId is required');
-  }
-  assertDigest(facts.manifestDigest, 'Slice Commit policy manifestDigest');
-  assertDigest(facts.planDigest, 'Slice Commit policy planDigest');
-  if (!/^[a-f0-9]{40}$/.test(facts.snapshotDigest)) {
-    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy snapshotDigest must be a Git commit SHA');
-  }
-  assertDigest(facts.cvReceiptDigest, 'Slice Commit policy cvReceiptDigest');
 
-  const allowedPaths = unique(facts.allowedPaths.map((value, index) => canonicalPath(value, `Slice Commit allowed path[${index}]`)));
-  const forbiddenPaths = unique(facts.forbiddenPaths.map((value, index) => canonicalPath(value, `Slice Commit forbidden path[${index}]`)));
-  const workerChangedFiles = unique(
-    facts.workerChangedFiles.map((value, index) => canonicalPath(value, `Slice Commit Worker file[${index}]`)),
+  const allowedPaths = facts.allowedPaths.map((value, index) => canonicalPath(value, `Slice Commit allowed path[${index}]`));
+  const otherSliceDeclaredFiles = facts.otherSliceDeclaredFiles.map((value, index) =>
+    canonicalPath(value, `Slice Commit other-Slice declared file[${index}]`),
   );
-  const otherSliceDeclaredFiles = unique(
-    facts.otherSliceDeclaredFiles.map((value, index) => canonicalPath(value, `Slice Commit other-Slice declared file[${index}]`)),
+  const forbiddenPaths = facts.forbiddenPaths.map((value, index) => canonicalPath(value, `Slice Commit forbidden path[${index}]`));
+  const workerChangedFiles = facts.workerChangedFiles.map((value, index) =>
+    canonicalPath(value, `Slice Commit Worker file[${index}]`),
   );
+
+  // Every list must be duplicate-free: duplicates are malformed facts and are
+  // rejected, never silently deduplicated.
+  assertUnique(allowedPaths, 'Slice Commit allowedPaths');
+  assertUnique(otherSliceDeclaredFiles, 'Slice Commit otherSliceDeclaredFiles');
+  assertUnique(forbiddenPaths, 'Slice Commit forbiddenPaths');
+  assertUnique(workerChangedFiles, 'Slice Commit workerChangedFiles');
+
   if (allowedPaths.length === 0) {
     fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit policy must contain a non-empty allowed scope');
   }
+
+  // The committable and tolerated scopes are mechanically disjoint in both
+  // prefix directions: one Slice can never claim or mask another Slice's paths.
+  for (const allowed of allowedPaths) {
+    for (const other of otherSliceDeclaredFiles) {
+      if (pathWithin(allowed, other) || pathWithin(other, allowed)) {
+        fail('RUNTIME.SCHEMA_MISMATCH', `Slice Commit allowedPaths and otherSliceDeclaredFiles overlap: ${allowed} / ${other}`);
+      }
+    }
+  }
+
+  assertNoProtectedRoot(allowedPaths, 'Slice Commit allowedPaths');
+  assertNoProtectedRoot(otherSliceDeclaredFiles, 'Slice Commit otherSliceDeclaredFiles');
+  assertNoProtectedRoot(workerChangedFiles, 'Slice Commit workerChangedFiles');
+
+  assertDisjoint(allowedPaths, forbiddenPaths, 'Slice Commit allowedPaths', 'a forbidden path');
+  assertDisjoint(otherSliceDeclaredFiles, forbiddenPaths, 'Slice Commit otherSliceDeclaredFiles', 'a forbidden path');
+  assertDisjoint(workerChangedFiles, forbiddenPaths, 'Slice Commit workerChangedFiles', 'a forbidden path');
+
+  // Every persisted Worker fact must lie inside the admitted committable scope.
+  for (const workerFile of workerChangedFiles) {
+    if (!allowedPaths.some((allowed) => pathWithin(workerFile, allowed))) {
+      fail('RUNTIME.SCHEMA_MISMATCH', `Slice Commit Worker file expands beyond the admitted execution scope: ${workerFile}`);
+    }
+  }
+
   return {
-    root: facts.root,
-    stageId: facts.stageId,
-    sliceId: facts.sliceId,
-    manifestDigest: facts.manifestDigest,
-    planDigest: facts.planDigest,
-    snapshotDigest: facts.snapshotDigest,
-    cvReceiptDigest: facts.cvReceiptDigest,
     allowedPaths,
     otherSliceDeclaredFiles,
     forbiddenPaths,
@@ -152,22 +208,8 @@ export function loadSliceCommitPolicy(facts: SliceCommitPolicyFacts): SliceCommi
   };
 }
 
-/** Validate the CV binding used by both pre-commit and post-commit consumers. */
-export function validateSliceCommitCvBinding(
-  policy: SliceCommitPolicy,
-  cvReceiptDigest: string,
-): void {
-  assertDigest(cvReceiptDigest, 'cv_receipt_digest');
-  if (cvReceiptDigest !== policy.cvReceiptDigest) {
-    fail(
-      'DOMAIN.INVALID_TRANSITION',
-      `cv_receipt_digest does not match the latest vNext CV_PASS Receipt: ${cvReceiptDigest} != ${policy.cvReceiptDigest}`,
-    );
-  }
-}
-
 /**
- * Validate a real changed-file set against the loaded Runtime policy.
+ * Validate a real changed-file set against the loaded Work Packet policy.
  *
  * `treePaths` lets a multi-Slice chain retain the existing rule that a Worker
  * declaration is satisfied when the file was already present in the current
@@ -179,11 +221,10 @@ export function validateSliceCommitChangedFiles(
   changedFiles: readonly string[],
   options: SliceCommitChangedFilesOptions = {},
 ): string[] {
-  const changed = unique(
-    changedFiles.map((value, index) => canonicalPath(value, `Slice Commit changed path[${index}]`)),
-  ).sort();
+  const changed = changedFiles.map((value, index) => canonicalPath(value, `Slice Commit changed path[${index}]`)).sort();
+  assertUnique(changed, 'Slice Commit changed files');
   if (changed.length === 0) {
-    fail('DOMAIN.INVALID_TRANSITION', 'Slice Commit requires a non-empty changed-file boundary');
+    fail('RUNTIME.SCHEMA_MISMATCH', 'Slice Commit requires a non-empty changed-file boundary');
   }
 
   for (const value of changed) {

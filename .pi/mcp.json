@@ -9,8 +9,8 @@
         "."
       ],
       "cwd": ".",
-      "lifecycle": "keep-alive",
-      "directTools": true
+      "lifecycle": "lazy",
+      "directTools": false
     }
   }
 }

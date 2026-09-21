@@ -7,3 +7,7 @@ dist/
 .proofloop/
 .pi/npm/
 packages/runtime/test-dist/
+
+# Preserved historical S06 recovery-plan artifact (tolerated, never committed).
+/delivery/stages/S06/recovery-plan-r11.md
+.agents/agent_config.json

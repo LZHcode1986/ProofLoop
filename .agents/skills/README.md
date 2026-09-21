@@ -1,41 +1,88 @@
-# Skills Guide
+# Skills Policy
 
-Skills are reusable procedures shared across multiple agents or owned by the
-Brain's active phase loop. Agent-specific implementation behavior still belongs
-in `.opencode/agents/*.md`; phase guidance may live in a named Skill when the
-Brain must reuse the same protocol across planning, execution, and recovery.
+`.agents/skills/` holds reusable procedures in three categories. This file is
+the policy index for that directory: it says which category a skill belongs to
+and where each kind of fact lives. It is not a process source — role procedure,
+orchestration flow, agent lifecycle, and runtime/model/placement configuration each have
+one authoritative home, pointed to below.
 
-## ProofLoop 2.0 skill policy
+## Role Skill
 
-- Create a skill only when: reusable, used by multiple agents, not part of a single agent's role flow, and reduces catalog noise.
-- Skills are loaded by agents on demand. Agents do not copy skill content into their own files.
-- Agent role files under `.opencode/agents/` define host responsibilities and entry points; Contracts define semantics, fields, and states; Skills define steps, branches, and completion criteria; Templates define packets and schemas; Runtime defines mechanical state, admission, and Receipts.
+- Path: `.agents/skills/<role-name>/SKILL.md`.
+- Seven canonical roles: `general`, `worker`, `researcher`, `prototype`,
+  `code-verifier`, `stage-plan-verifier`, `stage-reviewer`.
+- One Role Skill is the single source for its role's goal, entry conditions,
+  procedure, modes/branches, mutation boundary, forbidden actions, capability
+  skills, and completion criteria. A single-role Role Skill is the norm: one per
+  canonical role.
+- Runtime-neutral: the same canonical Role Skill is shared by Pi and AGY; it is
+  selected by Brain and consumed by the Herdr-created role instance.
+- Role Agent instances are not defined under `.opencode/` or `.pi/`; the only
+  OpenCode host primary is `.opencode/agents/brain.md`, while Pi uses its thin
+  host entry (`.pi/extensions/proofloop-mode.ts`). Both host entries point at
+  the canonical shared workflow Contract `.agents/contracts/brain/workflow.md`.
+- The Brain selects the Flow at the Routing Boundary per
+  `.agents/contracts/brain/workflow.md`, loads the selected Skill's JIT
+  Read Set, and initiates dispatch via Herdr Link configured start.
+- Carries no model, runtime, or lifecycle definition — runtime and model configuration
+  live in `.agents/agent_config.json` (where dispatch identity maps 1:1 to config key),
+  mechanical dispatch order is owned by `.agents/contracts/brain/workflow.md`, and
+  ProofLoop lifecycle is owned by `.agents/contracts/brain/agent-lifecycle.md` (see Pointers).
 
-## Canonical skills
+## Capability Skill
 
-| Skill | Used by | Purpose |
-|---|---|---|
-| `ai-structured-prd` | Brain | Converts product intent into structured PRD |
-| `prd-to-tech-design-prep` | Brain | Post-PRD technical clarification and handoff |
-| `prd-to-ai-architecture` | Brain | Generates architecture package under `tech-spec/` |
-| `proofloop-plan` | Brain | Planning guidance, candidate `tasks.md`, and vNext SPV dispatch |
-| `proofloop-execute` | Brain | Stage delivery guidance and role dispatch templates |
-| `test-driven-development` | Worker | RED/GREEN/REFACTOR TDD loop, proof profiles |
-| `diagnose` | Worker | Disciplined debugging loop for hard bugs |
-| `codebase-design` | Brain | Deep module principles, seam identification |
-| `code-review-and-quality` | Stage Reviewer, General | Multi-axis code review |
-| `security-and-hardening` | All (cross-role) | Security-first development practices |
+Reusable techniques any role may invoke on demand. A Capability Skill owns its
+own procedure and completion criteria; roles reach for it, they do not copy it.
 
-## ProofLoop 2.0 responsibility model
+| Skill | Purpose |
+|---|---|
+| `test-driven-development` | RED/GREEN/REFACTOR loop and proof profiles |
+| `diagnose` | Disciplined debugging loop for reproducible defects |
+| `security-and-hardening` | Trust-boundary, input, and secrets review |
+| `codebase-design` | Deep module principles and seam identification |
+| `writing-for-agents` | Writing documents an agent consumes |
+| `handoff` | Compact a conversation into a handoff document |
 
-1. Brain owns user intent, domain context, PRD, Tech Spec, progress, and global routing.
-2. Direct bounded task goes to `general`.
-3. Active vNext Stage planning loads `proofloop-plan`; its Stage Plan Verifier dispatch uses the Skill reference template.
-4. Active vNext Stage execution loads `proofloop-execute`, which selects the Brain-owned role dispatch template for `worker` or `code-verifier`; Git boundaries use Runtime `boundary close`.
-5. Technical unknowns go to `researcher` / `prototype`; only validated conclusions enter Tech Spec.
-6. Stage review goes to `stage-reviewer`; all findings return to Brain.
-7. Git boundaries are owned by the Runtime `boundary close` CLI; for `artifact-archive` only, Brain pre-executes the exact `git mv` rename, while no Agent performs other write Git commands or commits directly.
-8. Skills are loaded by agents on demand; agent files do not duplicate skill content.
-9. Active Skill reference templates define complete vNext dispatch packets and allowed returns; they do not authorize Runtime state transitions.
-10. Templates are selected by the active Skill and contain no authority claim beyond their declared dispatch scope.
-11. Validators check mechanical facts; they do not judge semantics.
+## Phase / Orchestration Skill
+
+Brain-owned procedures for a process phase — product definition, architecture,
+stage planning, stage execution, and large-effort wayfinding. The Brain loads
+them for the active phase; they define that phase's steps and completion, not any
+single role's behavior.
+
+| Skill | Phase |
+|---|---|
+| `ai-structured-prd` | Product intent → structured PRD |
+| `prd-to-tech-design-prep` | Post-PRD technical clarification |
+| `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
+| `proofloop-plan` | Candidate Plan, SPV dispatch, Plan acceptance into MES |
+| `proofloop-execute` | Stage/Slice lane management and role dispatch |
+| `wayfinder` | Chart and work a shared map for an oversized effort |
+
+`proofloop-plan` also serves as the Planning dispatch skill / runtime Planner input: a
+PLANNING dispatch uses `dispatch_skill=proofloop-plan` (runtime label `planner`) and loads
+`.agents/skills/proofloop-plan/SKILL.md`; it is not an eighth Role Skill. All seven canonical
+Role Skills keep their fixed role bindings. The dispatch key for planning is `proofloop-plan`,
+matching its key in `.agents/agent_config.json` (`role_skill == config_agent`).
+## Where each fact lives
+
+| Layer | Owns |
+|---|---|
+| Contract | Semantics, fields, states, error codes |
+| Skill | Steps, branches, completion criteria |
+| Template | Dispatch packets and schemas |
+| Runtime | Mechanical Git boundary close (`proofloop boundary close`) + MES operational facts; no Receipt/admission/Gate/status CLI |
+| Brain host entries (`.opencode/agents/brain.md`; `.pi/extensions/proofloop-mode.ts`) | Thin harness loading/routing adaptation only; point at `.agents/contracts/brain/workflow.md`; no Role Agent definitions |
+
+## Pointers, not copies
+
+- Agent lifecycle (`one-shot` / `continuation` / `review-loop` / `recovery` /
+  `recall` / `reset`): `.agents/contracts/brain/agent-lifecycle.md`.
+- Brain routing workflow (Routing Boundary + Trigger → Flow → Exit) and mechanical dispatch order:
+  `.agents/contracts/brain/workflow.md`.
+- Herdr Link configured-start configuration (dispatch identity maps 1:1 to config key):
+  `.agents/agent_config.json`.
+
+Brain/host entry loads a skill on demand; no `.opencode/` or `.pi/` role file
+restates role procedure. Keep each meaning in one place: change a role's procedure in
+its Role Skill, a runtime/model/placement configuration in `.agents/agent_config.json`, a dispatch rule in `.agents/contracts/brain/workflow.md`, and a lifecycle rule in `.agents/contracts/brain/agent-lifecycle.md`.

@@ -1,117 +1,119 @@
 # Code Verifier 派发模板
 
-本模板供 `proofloop-execute` 由 Brain 直接调度 Code Verifier 使用。
+本模板供 `proofloop-execute` 由 Brain 直接调度 Slice-level Code Verifier（CV）使用。CV 是只读的独立反驳者，验证 Worker 形成的 `SLICE_CANDIDATE_READY` 是否真实满足 Slice Goal。它不做 Task-level review，不调用任何旧 CLI，不写 Receipt/Manifest/Evidence/Context。本模型无 Context Evidence gate、无 admission、无 digest 链；finding 只是 evidence，route 由 Brain 决定。`MES_MAINTENANCE` 下 CV 仍只读验证 recovery candidate/Git evidence，不写 MES。
 
 ## 派发数据包
 
 ```yaml
+execution_mode: NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE
 target_agent: code-verifier
 caller: brain
 skill: proofloop-execute
-contract_mode: vnext-template
 verification_type: initial | recheck
 stage_id: <stage-id>
 slice_id: <slice-id>
-task_id: <task-id>
 project_root: <canonical-trust-root>
-manifest_path: .proofloop/manifests/<stage-id>.json
-manifest_digest: <sha256>
-plan_digest: <sha256>
-proof_index_digest: <sha256>
-context_ref: .proofloop/context/<context-digest>.json
-context_digest: <sha256>
-worker_receipt_digest: <sha256-of-current-worker-chain-tip>
-snapshot_digest: <sha256>
-pre_refutation_context_ref: .proofloop/context/<pre-refutation-digest>.json
-evidence_ref: delivery/stages/<stage-id>/evidence/<slice-id>.md
-evidence_read: false
-goal_ref: <ref-id>
+thin_plan_ref: <NORMAL=root-relative-accepted-thin-plan; PRE_MES_BOOTSTRAP=root-relative-candidate-or-accepted-Git-Plan-ref; MES_MAINTENANCE=root-relative-recovery-candidate-Thin-Plan-ref>
+slice_goal_ref: <ref-id>
+authority_refs: []        # Technical Authority: Architecture / Contracts / Acceptance 稳定 ref（CV 不读 PRD）
 acceptance_refs: []
-seam_refs: []
-oracle_refs: []
-risk_refs: []
-changed_files: []
-diff_ref: <ref>
+maintenance_binding:  # MES_MAINTENANCE only; omitted for NORMAL/PRE_MES_BOOTSTRAP
+  frozen_snapshot_ref: <root-relative-frozen-MES-snapshot>
+  frozen_snapshot_sha256: <exact-source-sha256>
+  frozen_fact_count: <exact-source-fact-count>
+  forensic_ref: <root-relative-immutable-incident-ref>
+  forensic_sha256: <exact-incident-sha256>
+  audit_ref: <root-relative-read-only-audit-ref>
+  audit_sha256: <exact-audit-sha256>
+actionToken: <current-dispatch-token>
+git_basis:
+  candidate_ref: <NORMAL=live Slice worktree branch/ref — pre-CV 验证 basis，非 durable canonical proofloop-<stage>-<slice> ref; PRE_MES_BOOTSTRAP=candidate/accepted Git Plan ref; MES_MAINTENANCE=live maintenance Slice worktree branch/ref — pre-CV 验证 basis>
+  diff_ref: <root-relative-diff-or-patch-ref — NORMAL/MES_MAINTENANCE=当前待验证 worktree diff; PRE_MES_BOOTSTRAP=baseline/current Git basis diff>
+  head: <NORMAL/MES_MAINTENANCE=live worktree 当前 HEAD; PRE_MES_BOOTSTRAP=baseline-Git-HEAD>
 tests_ref: <ref>
-previous_failure_signature: null
-repair_diff_digest: null
-required_recheck_scope: []
+worker_result_refs: []    # NORMAL=Worker Result refs; PRE_MES_BOOTSTRAP/MES_MAINTENANCE=Worker Link evidence refs; 仅 supporting evidence，不作为 primary
 forbidden_scope:
   - source edits
   - test edits
-  - tasks.md edits
+  - plan edits
   - Evidence edits
   - Receipt writes
   - commits
-expected_results:
-  - PASS
-  - REPAIR
-  - REPLAN
-  - BLOCKED
-  - ESCALATION_REQUIRED
+expected_result: PASS | FINDINGS | BLOCKED
 ```
 
+## 必需输入
 
-## 当前 Evidence gate 状态（未闭合）
+- Slice Goal、Technical Authority/Acceptance 稳定 ref（tech-spec-only，不包含 PRD）、对应模式的 Plan binding、candidate Git ref/diff、real code/tests；`MES_MAINTENANCE` 另需完整 frozen/forensic/audit binding 与 physical quarantine 证据。
+- `NORMAL` 使用 accepted Thin Plan 与 MES work identity/resultRef；`PRE_MES_BOOTSTRAP` 仅对首个 MES-persistence Stage 合法，使用 candidate/accepted Git Plan（绑定 canonical Technical Authority refs、baseline/current Git basis、Worker Link evidence 与 actionToken），不要求 MES status、MES work identity 或 MES `resultRef`；`MES_MAINTENANCE` 使用 recovery candidate Thin Plan + current Technical Authority + live maintenance Git basis + exact frozen/forensic/audit tuple + Brain bounded dispatch authorization，不要求或产生 MES identity/resultRef；CV packet 必须能支撑对应 Worker→CV→Integration 链路。
+- Worker Result refs / Worker Link evidence 仅作 supporting evidence，不替代独立验证；
+- 验证 basis 按 mode 显式：`NORMAL` 是 live Slice worktree basis（`candidate_ref` 指向当前 live worktree branch/ref，`head` 绑定该 worktree 当前 HEAD，`diff_ref` 绑定当前待验证 worktree diff）；这不是 durable canonical `proofloop-<stage>-<slice>` candidate ref（后者只在 post-PASS `slice-output` 建立，作为 Integration 输入）；`PRE_MES_BOOTSTRAP` 使用 candidate/accepted Git Plan ref + baseline/current Git basis + Worker Link evidence；`MES_MAINTENANCE` 使用 recovery candidate Plan ref + live maintenance worktree basis + frozen/forensic/audit binding；后两种 mode 不在 PASS 前发明 durable MES result 或第二 candidate store。
+- read-only 约束与 expected result；`MES_MAINTENANCE` 下 CV 可只读核对 frozen snapshot exact digest/count、forensic/audit refs、quarantine 与 isolated fixture 结果，但不得写真实 project MES。
+- S06 integrity hard-freeze 时，public `status` 的 `EXECUTE`/`proofloop-execute` 仅是 observation；CV 不接受 NORMAL dispatch/recheck。只有 maintenance packet 的 entry tuple fresh-valid 且 `execution_mode: MES_MAINTENANCE` 时执行 evidence-only CV；否则返回 typed blocker/recovery evidence，不触碰真实 project MES。
+- Result binding 按 mode 显式：`NORMAL` 是正式 CV verdict input，由 Brain 接纳/授权后交 MES operational transaction layer materialize；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 是结构化 Link evidence（binding = execution_mode + authority_refs + candidate/accepted 或 recovery candidate Plan ref + git_basis + maintenance_binding（MES_MAINTENANCE）+ actionToken），不写 MES、不指向 MES resultRef。三种 mode 下 CV 都全程 read-only、独立反驳。
 
-Runtime 的真实 CV Evidence gate 是两步、且依赖持久化事实：
+本模型无 Manifest/Evidence skeleton/Receipt/admission/Context gate；CV 输入不需要任何 digest helper 或
+Runtime admission。缺任一输入、ref 无法解析或 scope 不闭合时返回 `BLOCKED`，不降级为猜测。
 
-```text
-node packages/runtime/dist/cli/proofloop.js context prepare --role cv --stage <stage-id> --slice <slice-id> --task <task-id>
-node packages/runtime/dist/cli/proofloop.js context admit-refutation-observation --role cv --stage <stage-id> --slice <slice-id> --task <task-id> --observation "<text>"
-node packages/runtime/dist/cli/proofloop.js context show --role cv --stage <stage-id> --slice <slice-id> --task <task-id> --ref <pre-refutation-context-ref> --observation-ref <observation-ref>
-```
+## vNext 验证规则（只读、独立、Slice-level）
 
-`prepare` 必须先由 Brain 使用已验证的 task anchor 调用并落盘 CV Context；`context admit-refutation-observation` 是 CV-only Runtime operation，CV 在独立反驳完成且尚未读取 Evidence 时，使用 packet 的同一 `task_id` 调用；随后 CV 用 `context show --role cv --stage <stage-id> --slice <slice-id> --task <task-id> --ref <pre-refutation-context-ref> --observation-ref <observation-ref>` 读回持久化 pre-refutation Context，并以 `--observation-ref` 验证 `gate.satisfied: true`，仅此后读取 Evidence。CV 只允许这两个 Context gate operation，不调用 `stage admit-*`、Boundary 或手写 Receipt。`pre_refutation_context_ref` 与 `evidence_read: false` 只是 packet 描述，不能替代持久化 Context/observation。
-当前 `RUN_CV` output 没有 `task_id`、CV Context ref 或 `worker_receipt_digest`；packet 必须显式携带可验证的 `task_id` 和当前 Worker chain tip digest，不能由 CV 猜测。closed `CV_RESULT` 没有 `task_id`/observation handoff，且 `stage admit-cv`/`admitVNextCVResult` 不读取 observation 或 `context show` 的 gate；即使 Context CLI 成功，结果也不能证明 Runtime admission 执行了该 gate。
-因此当前 route 仍未闭合：缺少已验证 task/Context/observation 或 result-to-observation binding 时，CV 在读取 Evidence 前必须返回非 admission 的 `BLOCKED`，Brain 将其路由为既有 `RUNTIME_BLOCKER`（保留完整 blocker envelope），不得猜字段、继续 `stage admit-cv`，或把 direct fixture 当作 gate coverage。只有 Runtime consumer 明确绑定 observation 后，才能开放 `PASS`/`REPAIR`。
-## vNext 验证规则
-
-- 不使用 `cv_level`、CV Profile 或 Proof Profile；
-- Initial CV 必须 fresh；
-- 必须先读取 Authority/Proof Index、代码、测试、diff 和 snapshot；
-- 在独立反驳观察固定前，`evidence_read` 必须保持 `false`；
-- 只有反驳完成后才允许读取 Worker Evidence；
-- `REPAIR` 必须带失败标准、failure signature 和 bounded recheck scope；
-- `REPLAN`、`BLOCKED`、`ESCALATION_REQUIRED` 返回 Brain，不直接 admission；
-- CV 是只读的，不修改任何项目文件。
+被验证的 Slice basis 按 `execution_mode`：`NORMAL` 使用 accepted Thin Plan + candidate Git ref/diff + MES work identity；`PRE_MES_BOOTSTRAP` 使用 candidate/accepted Git Plan + canonical Technical Authority refs + baseline/current Git basis + Worker Link evidence；`MES_MAINTENANCE` 使用 recovery candidate Plan + canonical Technical Authority refs + live maintenance Git basis + frozen/forensic/audit binding（不读取、不声称 normal MES status/work identity/resultRef）。三种 mode 都在独立反驳完成前不读 Worker Evidence，且全程 read-only。
+- 不使用旧 cv_level 或遗留验证分级机制；runtime launch configuration belongs to Herdr Link `.agents/agent_config.json`; this Skill does not define it.
+- `verification_type: initial`：独立初审必须 fresh CV，完整执行独立反驳。
+- `verification_type: recheck`：默认用同一 CV continuation 做 bounded incremental 复查（只覆盖前次 failed
+  criterion、concrete counterexample、repair diff 与 `required_recheck_scope`）；仅 target/basis 重大变化、
+  session/identity 丢失、CV 写 artifact 或 binding/Result 无法重读时返回 `REVIEW_RESET_REQUIRED` 并
+  fresh full initial。
+- 独立反驳完成前不读 Worker Evidence；先读 Slice Goal、Technical Authority/Acceptance（Architecture / Contracts / Acceptance；不读 PRD）、Plan、code/tests/diff/snapshot；CV 不消费 Brain-projected Slice semantics，自读 Plan 与 tech-spec。
+- 对每个 PO 与高风险路径设计并执行 concrete refutation：PO coverage、test/seam/oracle validity、forbidden
+  mocks、scope side effects、regression risk 与真实 call path。
+- 反驳固定后才允许读取 Worker Evidence，对照独立观察检查 declared proof 是否真的支撑 Slice Goal。
+- CV 是只读的，不修改任何项目文件，不派发 Worker，不直接 route Repair/Replan。
 
 ## 允许的结果
 
 ```yaml
-schema_version: 2 | 3
-type: CV_RESULT
+execution_mode: NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE
+actionToken: <current-dispatch-token>
+verdict: PASS | FINDINGS | BLOCKED
 stage_id: <stage-id>
 slice_id: <slice-id>
-worker_receipt_digest: <sha256-of-current-worker-chain-tip>
-manifest_digest: <sha256>
-plan_digest: <sha256>
-proof_index_digest: <sha256>
-context_ref: .proofloop/context/<worker-context-digest>.json
-context_digest: <sha256>
-snapshot_digest: <sha256>
 verification_type: initial | recheck
-verdict: PASS | REPAIR
+planRef: <NORMAL=accepted Thin Plan; PRE_MES_BOOTSTRAP=candidate/accepted Git Plan ref; MES_MAINTENANCE=recovery candidate Thin Plan ref>
+authorityRefs: [<canonical-tech-spec-ref>, ...]
+maintenanceBinding:  # MES_MAINTENANCE only; omitted for NORMAL/PRE_MES_BOOTSTRAP
+  frozenSnapshotRef: <root-relative-frozen-MES-snapshot>
+  frozenSnapshotSha256: <exact-source-sha256>
+  frozenFactCount: <exact-source-fact-count>
+  forensicRef: <root-relative-immutable-incident-ref>
+  forensicSha256: <exact-incident-sha256>
+  auditRef: <root-relative-read-only-audit-ref>
+  auditSha256: <exact-audit-sha256>
+gitBasis:
+  head: <NORMAL/MES_MAINTENANCE=current live-Git-HEAD; PRE_MES_BOOTSTRAP=baseline-Git-HEAD>
+  candidateRef: <candidate Git ref>
+  diffRef: <root-relative-diff-or-patch-ref>
+resultRef: <NORMAL=root-relative-MES-result-ref; PRE_MES_BOOTSTRAP/MES_MAINTENANCE=omitted>
 summary: <non-empty-summary>
 acceptance_refs_checked: [<all-bound-acceptance-ref-ids>]
-seam_refs_checked: [<all-bound-seam-ref-ids>]
-oracle_refs_checked: [<all-bound-oracle-ref-ids>]
-risk_refs_considered:
-  - ref_id: <risk-ref-id>
-    applicability: APPLICABLE | NOT_APPLICABLE
-    reason: <non-empty-reason>
 failed_acceptance_refs: []
 invalid_tests: []
 counterexamples: []
 scope_violations: []
 forbidden_substitutions: []
 regression_failures: []
-# REPAIR only: failed_criterion, failure_signature and required_recheck_scope are required.
-# RECHECK only: previous_failure_signature and repair_diff_digest are required.
-# schema_version 3 only: include the three slice-local binding digest fields.
+claimed_route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | TECHNICAL_UNKNOWN | RUNTIME_BLOCKER | USER_DECISION_REQUIRED | EVIDENCE_GAP | null
+# FINDINGS only: failed_criterion, failure_signature and required_recheck_scope are required.
+# RECHECK only: previous_failure_signature and repair_diff_basis are required.
 ```
 
-`BLOCKED`、`REPLAN` 和 `ESCALATION_REQUIRED` 是返回 Brain 的非 admission 结果，不是可提交给 `stage admit-cv` 的 `CV_RESULT`；当前 Evidence gate 缺少真实 handoff 时必须停在该非 admission 路由。
-`task_id`、CV Context ref 和 observation ref 是独立 Context gate 事实，不是 `CV_RESULT` 字段；不要为了补 handoff 向 closed result 加未知字段。
+- `PASS`：无 concrete counterexample 且反驳完成；`NORMAL` 返回 Brain/MES transaction flow，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 返回 evidence-only freeze-and-boundary flow。三种 mode 下只有 PASS 且 durable canonical candidate ref 已建立才允许进入对应 Integration；`MES_MAINTENANCE` 的 Integration 只形成 Git evidence，不形成 MES `INTEGRATED`。
+- `FINDINGS`：带 failed criterion、failure signature 与 bounded recheck scope；由 Brain 决定 owner/route
+  （典型为 bounded Worker repair 后同一 CV recheck）。
+- `BLOCKED`：无法验证或超出 CV 权限，带结构化 blocker 回 Brain。
+- `REVIEW_RESET_REQUIRED`：只用于要求 fresh full initial 的 lifecycle 信号，不是可替代 `PASS` 的结果。
 
-Brain 只能将 `PASS` 或 `REPAIR` 交给 Runtime admission；不得将其他结果改写为通过。
+非成功结果必须包含 `claimed_route_code`、`subtype`、`reason`、`invalidation_scope` 与 `resume_target`；`claimed_route_code` 仅为 CV evidence。CV 不读 PRD，不判断 Product→Technical 权责，claimed_route_code 不包含 `AUTHORITY_GAP`（下游合法问题分类仅限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`）。Finding 仅回 Brain；`NORMAL` 下如适用由 Brain 发起 `FINDING_DISPOSITION` semantic event，经 MES transaction layer materialize，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 下只保留结构化 evidence，不写 MES，不能直接 repair/replan。
+Brain 只能把 `PASS` 且 durable canonical candidate ref 已建立的 candidate 交给对应 Integration；`FINDINGS`/`BLOCKED` 先由 Brain 重读 Authority/Plan/scope/code reality；`NORMAL` 按现有 MES disposition，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 保持 evidence-only，不得把 `claimed_route_code` 直接当作 route 或把 finding 改写成通过。
+
+Result binding 按 `execution_mode` 显式：`NORMAL` 是正式 CV verdict input，由 Brain 接纳/授权后经 MES transaction layer materialize（绑定 MES work identity/resultRef）；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 是结构化 Link evidence（binding = execution_mode + authority_refs + candidate/accepted 或 recovery candidate Plan ref + git_basis + maintenance_binding（MES_MAINTENANCE）+ actionToken），不写 MES、不指向 MES resultRef；三种 mode 下 reply 只出现一次、完整且关联当前 packet。

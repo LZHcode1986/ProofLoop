@@ -1,6 +1,6 @@
 # AI Coding Architecture Template
 
-Use this file when creating `ai-coding-architecture.md`.
+Use this file when creating `tech-spec/architecture.md`.
 
 ## 1. Metadata
 
@@ -100,4 +100,4 @@ For each key flow:
 - [ ] Components have clear owners and boundaries.
 - [ ] APIs/events/files/data/state are represented in the contract matrix.
 - [ ] Hard parts are registered.
-- [ ] Tasks have acceptance checks.
+- [ ] Every PRD must-implement item maps to an acceptance check.

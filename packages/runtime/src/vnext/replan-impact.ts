@@ -1,7 +1,7 @@
 /**
  * S14-A-T01 — Runtime replan impact classifier.
  *
- * Mechanical before/after Manifest/Task contract + dependency closure
+ * Mechanical before/after accepted Thin Plan snapshot + dependency closure
  * classification over the CLOSED four-state impact scope (整改方案 §8.1):
  *
  *   - task-local      changed Task + same-slice successors + downstream
@@ -19,8 +19,15 @@
  * The classifier derives every derived set itself
  * (changed/carry_forward/invalidated) — caller-supplied derived facts are
  * structurally impossible (HP-021 forbidden shortcut). See
- * tech-spec/ai-coding-architecture.md §10.10 and
- * tech-spec/contract-state-matrix.md §8.8.
+ * tech-spec/architecture.md §7 Hard Parts and Risk Register
+ * (HP-002 Replan impact / three-layer binding) and
+ * tech-spec/contracts.md §4 Thin Plan / JIT Work Packet plus §5 state model.
+ *
+ * Inputs are pure operational facts: an accepted Thin Plan snapshot (stage_id,
+ * plan_ref, plan_digest, stage_contract_digest, Git-basis snapshot_digest,
+ * authority refs, reference index, Slices, Tasks) plus `completed_task_ids`
+ * as MES operational facts supplied to this classifier. The classifier is a
+ * pure function: it does not read or write MES and never decides routing.
  */
 import { computeDigest } from '@proofloop/kernel';
 import type { VNextExecutionScope } from '@proofloop/kernel';
@@ -59,13 +66,37 @@ export interface ReplanTaskContractInput {
   readonly dependencies: readonly string[];
   readonly required_skills: readonly string[];
   readonly execution_scope: ReplanExecutionScopeInput;
+  /**
+   * Task-LEVEL proof-boundary digest (S03-F-T01/cv-1-recheck-1):
+   * SHA-256(SPN(...)) over the task's proof-boundary fields that are NOT part
+   * of the ordinary task contract digest — {semantic_scope,
+   * proof_obligation_ids(顺序), code_anchors(canonical 顺序),
+   * verification_refs(canonical 顺序)}. Optional for engine-fixture backward
+   * compatibility (absent on both sides → no task-proof-boundary signal); the
+   * adapter REQUIRED-fills it. The engine compares it per task per slice
+   * UNCONDITIONALLY (before the changedSlices mask) so a completed
+   * predecessor's task-level proof-boundary change forces slice-wide
+   * invalidation even when another same-slice task has an ordinary change.
+   */
+  readonly task_proof_digest?: string;
 }
 
 export interface ReplanSliceContractInput {
   readonly slice_id: string;
-  /** Static Slice contract fingerprint bound from the compiled Manifest
+  /** Static Slice contract fingerprint bound at Plan acceptance
    *  (§8.1 slice_contract_digest). */
   readonly slice_contract_digest: string;
+  /**
+   * Slice-LEVEL proof-boundary digest (S03-F-T01/cv-1): SHA-256(SPN(fields))
+   * over the slice's OWN contract fields WITHOUT task blocks
+   * ({slice_id, goal, depends_on(顺序), authority_refs(顺序)}). The engine
+   * compares it UNCONDITIONALLY (before any changedSlices masking) so a
+   * slice-level proof-boundary change forces slice-wide invalidation even
+   * when a same-slice task goal/contract also changed (§8.1). Optional for
+   * engine-fixture backward compatibility: when absent on both sides the
+   * legacy `!changedSlices` slice_contract_digest rule keeps working.
+   */
+  readonly slice_level_digest?: string;
   readonly depends_on: readonly string[];
   readonly required_skills: readonly string[];
   readonly evidence_path: string;
@@ -82,49 +113,76 @@ export interface ReplanReferenceDescriptorInput {
 }
 
 /**
- * Closed plan contract facts of ONE epoch side. Digests are opaque plan
- * facts (bound from the compiled Manifest); the classifier never accepts a
- * derived disposition set.
+ * Closed plan contract facts of ONE snapshot side (previous or candidate).
+ * Digests are opaque accepted-Plan / Git-basis facts (plan_digest,
+ * stage_contract_digest, slice_contract_digest, Git-basis snapshot_digest);
+ * the classifier never accepts a derived disposition set.
  */
 export interface ReplanPlanSnapshotInput {
   readonly stage_id: string;
+  /** Accepted Thin Plan ref (stable ref of the accepted Plan). */
+  readonly plan_ref: string;
   readonly plan_digest: string;
-  readonly manifest_digest: string;
   readonly stage_contract_digest: string;
+  /** Git basis: digest of the Git snapshot the Plan is evaluated against. */
   readonly snapshot_digest: string;
   readonly authority_ref_ids: readonly string[];
   readonly reference_index: Readonly<Record<string, ReplanReferenceDescriptorInput>>;
   readonly slices: readonly ReplanSliceContractInput[];
   readonly tasks: readonly ReplanTaskContractInput[];
+  /**
+   * Closed execution binding expressed mechanically (S03-F-T01 seam):
+   * accepted Plan ref + MES work identity + full Git basis. The raw engine
+   * treats this as an OPTIONAL closed field (fixture regression preserved);
+   * the slice-proof adapter REQUIRED-fills it and enforces exact equality
+   * with the caller-provided binding (RESULT_BINDING_MISMATCH otherwise).
+   */
+  readonly execution_binding?: ReplanExecutionBindingInput;
+}
+
+export interface ReplanExecutionBindingGitBasis {
+  readonly head: string;
+  readonly branch: string;
+  readonly worktree: string;
+}
+
+export interface ReplanExecutionBindingInput {
+  readonly plan_ref: string;
+  readonly work_id: string;
+  readonly git_basis: ReplanExecutionBindingGitBasis;
 }
 
 export interface ClassifyReplanImpactInput {
   readonly previous: ReplanPlanSnapshotInput;
   readonly candidate: ReplanPlanSnapshotInput;
-  readonly parent_epoch_digest: string;
+  /** MES operational facts supplied to this pure classifier: task ids already
+   *  recorded as completed by MES. The classifier treats them as facts; it
+   *  does not read/write MES and does not decide routing. */
   readonly completed_task_ids: readonly string[];
 }
 
 /** Closed unresolved reasons (REPLAN.IMPACT_UNRESOLVED fail-closed cases). */
 export const REPLAN_IMPACT_UNRESOLVED_REASONS = [
   'STAGE_MISMATCH',
-  'PARENT_EPOCH_MISSING',
-  'PARENT_EPOCH_INVALID',
   'CLOSURE_UNPROVABLE',
 ] as const;
 export type ReplanImpactUnresolvedReason = (typeof REPLAN_IMPACT_UNRESOLVED_REASONS)[number];
 
-/** Disposition schema per contract §8.8 (schema_version 1). */
+/**
+ * Disposition schema per contract §8.8 (schema_version 2 = accepted-Plan +
+ * MES-facts + Git-basis binding cutover; no credential fields remain).
+ * Binds previous_plan_ref/plan_ref, previous_plan_digest/plan_digest and the
+ * candidate Git-basis snapshot_digest.
+ */
 export interface ReplanImpactDisposition {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly stage_id: string;
-  readonly parent_epoch_digest: string;
   readonly impact_scope: ReplanImpactScope;
   readonly changed_task_ids: readonly string[];
   readonly carry_forward_task_ids: readonly string[];
   readonly invalidated_task_ids: readonly string[];
-  readonly previous_manifest_digest: string;
-  readonly manifest_digest: string;
+  readonly previous_plan_ref: string;
+  readonly plan_ref: string;
   readonly previous_plan_digest: string;
   readonly plan_digest: string;
   readonly snapshot_digest: string;
@@ -178,6 +236,51 @@ function assertRecord(value: unknown, name: string): asserts value is Record<str
   }
 }
 
+/**
+ * Closed-field validation: an object in the input may only carry the
+ * documented keys. Any unknown key — including legacy credential fields such
+ * as a compiled-plan digest or a parent-snapshot digest — fails closed here
+ * and is never silently ignored.
+ */
+function assertClosedKeys(value: Record<string, unknown>, allowed: readonly string[], name: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw new ReplanImpactError(`${name} contains unknown field ${key}`);
+    }
+  }
+}
+
+const ROOT_KEYS = ['previous', 'candidate', 'completed_task_ids'];
+const SNAPSHOT_KEYS = [
+  'stage_id',
+  'plan_ref',
+  'plan_digest',
+  'stage_contract_digest',
+  'snapshot_digest',
+  'authority_ref_ids',
+  'reference_index',
+  'slices',
+  'tasks',
+  'execution_binding',
+];
+const SLICE_KEYS = [
+  'slice_id',
+  'slice_contract_digest',
+  'depends_on',
+  'required_skills',
+  'evidence_path',
+  'proof_index',
+  'task_ids',
+  'slice_level_digest',
+];
+const PROOF_INDEX_KEYS = ['slice_id', 'goal_ref', 'task_refs', 'acceptance_refs', 'seam_refs', 'oracle_refs', 'risk_refs'];
+const RISK_BINDING_KEYS = ['ref_id', 'applies_to_acceptance_refs', 'applies_to_seam_refs'];
+const TASK_KEYS = ['task_id', 'slice_id', 'goal', 'refs', 'dependencies', 'required_skills', 'execution_scope', 'task_proof_digest'];
+const EXECUTION_SCOPE_KEYS = ['kind', 'code_paths', 'test_paths', 'forbidden_paths'];
+const REFERENCE_DESCRIPTOR_KEYS = ['kind', 'ref', 'file_digest', 'section_digest'];
+const EXECUTION_BINDING_KEYS = ['plan_ref', 'work_id', 'git_basis'];
+const EXECUTION_BINDING_GIT_KEYS = ['head', 'branch', 'worktree'];
+const GIT_HEAD_HEX_RE = /^[a-f0-9]{40}$/;
 function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
 }
@@ -230,6 +333,7 @@ function assertHexDigest(value: unknown, name: string, re: RegExp): asserts valu
  *  classified — they throw instead of producing a disposition. */
 function validateInput(input: ClassifyReplanImpactInput): void {
   assertRecord(input, 'input');
+  assertClosedKeys(input, ROOT_KEYS, 'input');
   assertRecord(input.previous, 'input.previous');
   assertRecord(input.candidate, 'input.candidate');
 
@@ -237,15 +341,40 @@ function validateInput(input: ClassifyReplanImpactInput): void {
     ['input.previous', input.previous],
     ['input.candidate', input.candidate],
   ] as const) {
+    assertClosedKeys(snap, SNAPSHOT_KEYS, name);
     if (typeof snap.stage_id !== 'string' || snap.stage_id.length === 0) {
       throw new ReplanImpactError(`${name}.stage_id must be a non-empty string`);
     }
+    if (typeof snap.plan_ref !== 'string' || snap.plan_ref.length === 0) {
+      throw new ReplanImpactError(`${name}.plan_ref must be a non-empty string`);
+    }
     assertHexDigest(snap.plan_digest, `${name}.plan_digest`, SHA256_HEX_RE);
-    assertHexDigest(snap.manifest_digest, `${name}.manifest_digest`, SHA256_HEX_RE);
     assertHexDigest(snap.stage_contract_digest, `${name}.stage_contract_digest`, SHA256_HEX_RE);
     assertHexDigest(snap.snapshot_digest, `${name}.snapshot_digest`, SNAPSHOT_HEX_RE);
     assertStringArray(snap.authority_ref_ids, `${name}.authority_ref_ids`);
     assertRecord(snap.reference_index, `${name}.reference_index`);
+    if (snap.execution_binding !== undefined) {
+      assertRecord(snap.execution_binding, `${name}.execution_binding`);
+      assertClosedKeys(snap.execution_binding, EXECUTION_BINDING_KEYS, `${name}.execution_binding`);
+      const eb = snap.execution_binding;
+      if (typeof eb.plan_ref !== 'string' || eb.plan_ref.length === 0) {
+        throw new ReplanImpactError(`${name}.execution_binding.plan_ref must be a non-empty string`);
+      }
+      if (typeof eb.work_id !== 'string' || eb.work_id.length === 0) {
+        throw new ReplanImpactError(`${name}.execution_binding.work_id must be a non-empty string`);
+      }
+      assertRecord(eb.git_basis, `${name}.execution_binding.git_basis`);
+      assertClosedKeys(eb.git_basis, EXECUTION_BINDING_GIT_KEYS, `${name}.execution_binding.git_basis`);
+      if (typeof eb.git_basis.head !== 'string' || !GIT_HEAD_HEX_RE.test(eb.git_basis.head)) {
+        throw new ReplanImpactError(`${name}.execution_binding.git_basis.head must be a 40-hex git head`);
+      }
+      if (typeof eb.git_basis.branch !== 'string' || eb.git_basis.branch.length === 0) {
+        throw new ReplanImpactError(`${name}.execution_binding.git_basis.branch must be a non-empty string`);
+      }
+      if (typeof eb.git_basis.worktree !== 'string' || eb.git_basis.worktree.length === 0) {
+        throw new ReplanImpactError(`${name}.execution_binding.git_basis.worktree must be a non-empty string`);
+      }
+    }
 
     if (!Array.isArray(snap.slices) || snap.slices.length === 0) {
       throw new ReplanImpactError(`${name}.slices must be a non-empty array`);
@@ -260,18 +389,23 @@ function validateInput(input: ClassifyReplanImpactInput): void {
 
     for (const s of snap.slices) {
       assertRecord(s, `${name}.slices[]`);
+      assertClosedKeys(s, SLICE_KEYS, `${name}.slices[]`);
       if (typeof s.slice_id !== 'string' || s.slice_id.length === 0) {
         throw new ReplanImpactError(`${name}.slices[].slice_id must be a non-empty string`);
       }
       if (sliceIds.has(s.slice_id)) throw new ReplanImpactError(`${name}.slices has duplicate slice_id ${s.slice_id}`);
       sliceIds.add(s.slice_id);
       assertHexDigest(s.slice_contract_digest, `${name}.slices[].slice_contract_digest`, SHA256_HEX_RE);
+      if (s.slice_level_digest !== undefined) {
+        assertHexDigest(s.slice_level_digest, `${name}.slices[].slice_level_digest`, SHA256_HEX_RE);
+      }
       assertStringArray(s.depends_on, `${name}.slices[].depends_on`);
       assertStringArray(s.required_skills, `${name}.slices[].required_skills`);
       if (typeof s.evidence_path !== 'string' || s.evidence_path.length === 0) {
         throw new ReplanImpactError(`${name}.slices[].evidence_path must be a non-empty string`);
       }
       assertRecord(s.proof_index, `${name}.slices[].proof_index`);
+      assertClosedKeys(s.proof_index, PROOF_INDEX_KEYS, `${name}.slices[].proof_index`);
       const pi = s.proof_index;
       if (typeof pi.goal_ref !== 'string' || pi.goal_ref.length === 0) {
         throw new ReplanImpactError(`${name}.slices[].proof_index.goal_ref must be a non-empty string`);
@@ -283,6 +417,7 @@ function validateInput(input: ClassifyReplanImpactInput): void {
       if (!Array.isArray(pi.risk_refs)) throw new ReplanImpactError(`${name}.slices[].proof_index.risk_refs must be an array`);
       for (const r of pi.risk_refs) {
         assertRecord(r, `${name}.slices[].proof_index.risk_refs[]`);
+        assertClosedKeys(r, RISK_BINDING_KEYS, `${name}.slices[].proof_index.risk_refs[]`);
         if (typeof r.ref_id !== 'string' || r.ref_id.length === 0) {
           throw new ReplanImpactError(`${name}.slices[].proof_index.risk_refs[].ref_id must be a non-empty string`);
         }
@@ -318,6 +453,7 @@ function validateInput(input: ClassifyReplanImpactInput): void {
 
     for (const t of snap.tasks) {
       assertRecord(t, `${name}.tasks[]`);
+      assertClosedKeys(t, TASK_KEYS, `${name}.tasks[]`);
       if (typeof t.task_id !== 'string' || t.task_id.length === 0) {
         throw new ReplanImpactError(`${name}.tasks[].task_id must be a non-empty string`);
       }
@@ -333,9 +469,13 @@ function validateInput(input: ClassifyReplanImpactInput): void {
         throw new ReplanImpactError(`${name}.tasks[].goal must be a non-empty string`);
       }
       assertStringArray(t.refs, `${name}.tasks[].refs`);
+      if (t.task_proof_digest !== undefined) {
+        assertHexDigest(t.task_proof_digest, `${name}.tasks[].task_proof_digest`, SHA256_HEX_RE);
+      }
       assertStringArray(t.dependencies, `${name}.tasks[].dependencies`);
       assertStringArray(t.required_skills, `${name}.tasks[].required_skills`);
       assertRecord(t.execution_scope, `${name}.tasks[].execution_scope`);
+      assertClosedKeys(t.execution_scope, EXECUTION_SCOPE_KEYS, `${name}.tasks[].execution_scope`);
       const scope = t.execution_scope;
       if (typeof scope.kind !== 'string' || !EXECUTION_SCOPE_KINDS.has(scope.kind)) {
         throw new ReplanImpactError(`${name}.tasks[].execution_scope.kind must be implementation or evidence-only`);
@@ -371,6 +511,7 @@ function validateInput(input: ClassifyReplanImpactInput): void {
       const desc = snap.reference_index[refId];
       if (desc === undefined) throw new ReplanImpactError(`${name}.reference_index is missing ref ${refId}`);
       assertRecord(desc, `${name}.reference_index[${refId}]`);
+      assertClosedKeys(desc, REFERENCE_DESCRIPTOR_KEYS, `${name}.reference_index[${refId}]`);
       if (typeof desc.kind !== 'string' || desc.kind.length === 0) {
         throw new ReplanImpactError(`${name}.reference_index[${refId}].kind must be a non-empty string`);
       }
@@ -383,9 +524,6 @@ function validateInput(input: ClassifyReplanImpactInput): void {
   }
 
   assertStringArray(input.completed_task_ids, 'input.completed_task_ids');
-  if (typeof input.parent_epoch_digest !== 'string') {
-    throw new ReplanImpactError('input.parent_epoch_digest must be a string');
-  }
 }
 
 /** Reference binding digest of one ref descriptor. */
@@ -458,15 +596,14 @@ function buildDisposition(
   unresolvedReason?: ReplanImpactUnresolvedReason,
 ): ReplanImpactDisposition {
   return {
-    schema_version: 1,
+    schema_version: 2,
     stage_id: input.candidate.stage_id,
-    parent_epoch_digest: input.parent_epoch_digest,
     impact_scope: impactScope,
     changed_task_ids: [...changedTaskIds],
     carry_forward_task_ids: [...carryForwardTaskIds],
     invalidated_task_ids: [...invalidatedTaskIds],
-    previous_manifest_digest: input.previous.manifest_digest,
-    manifest_digest: input.candidate.manifest_digest,
+    previous_plan_ref: input.previous.plan_ref,
+    plan_ref: input.candidate.plan_ref,
     previous_plan_digest: input.previous.plan_digest,
     plan_digest: input.candidate.plan_digest,
     snapshot_digest: input.candidate.snapshot_digest,
@@ -715,8 +852,32 @@ function computeCarryForwardOutsideInvalidated(
   return carry;
 }
 
+/**
+ * Plan-internal derived descriptor shape (S03-F-T01 locality): a descriptor
+ * generated from the Thin Plan itself — `<plan-ref>#slice-<slice-id>` (goal
+ * refs) or `<plan-ref>#<task-id>` (task refs) — is recognized by its
+ * descriptor.ref shape relative to THIS snapshot's plan_ref. Such
+ * plan-internal derived refs are EXCLUDED from Authority content delta
+ * (bindingDelta) and from owner attribution (buildRefOwnerSlices), so a
+ * Plan-file edit (Case 4 metadata change) never leaks stage-wide through
+ * the derived descriptors' file_digest. External canonical Authority refs
+ * keep their normal indexed/attributed semantics (Case 5).
+ */
+function isPlanInternalDerivedRef(snapshot: ReplanPlanSnapshotInput, refId: string): boolean {
+  const desc = snapshot.reference_index[refId];
+  if (desc === undefined) return false;
+  const prefix = `${snapshot.plan_ref}#`;
+  if (!desc.ref.startsWith(prefix)) return false;
+  const fragment = desc.ref.slice(prefix.length);
+  if (fragment.startsWith('slice-')) return fragment.length > 'slice-'.length;
+  return /^S\d+-[A-Z]+-T\d+$/.test(fragment);
+}
+
 /** ref id → set of Slices that reference it (proof index or Task refs)
- *  across both snapshots — the attribution basis for authority changes. */
+ *  across both snapshots — the attribution basis for authority changes.
+ *  Plan-internal derived refs (goal/task descriptors generated from the
+ *  Thin Plan) are skipped: they never own a Slice (locality, no stage-wide
+ *  leak via plan file digest). */
 function buildRefOwnerSlices(
   previous: ReplanPlanSnapshotInput,
   candidate: ReplanPlanSnapshotInput,
@@ -726,9 +887,13 @@ function buildRefOwnerSlices(
     if (!owners.has(refId)) owners.set(refId, new Set());
     owners.get(refId)!.add(sliceId);
   };
+  const addIfExternal = (snap: ReplanPlanSnapshotInput, refId: string, sliceId: string): void => {
+    if (isPlanInternalDerivedRef(snap, refId)) return;
+    add(refId, sliceId);
+  };
   for (const snap of [previous, candidate]) {
     for (const s of snap.slices) {
-      add(s.proof_index.goal_ref, s.slice_id);
+      addIfExternal(snap, s.proof_index.goal_ref, s.slice_id);
       for (const ref of [
         ...s.proof_index.task_refs,
         ...s.proof_index.acceptance_refs,
@@ -736,11 +901,11 @@ function buildRefOwnerSlices(
         ...s.proof_index.oracle_refs,
         ...s.proof_index.risk_refs.map((r: ReplanRiskBindingInput) => r.ref_id),
       ]) {
-        add(ref, s.slice_id);
+        addIfExternal(snap, ref, s.slice_id);
       }
     }
     for (const t of snap.tasks) {
-      for (const ref of t.refs) add(ref, t.slice_id);
+      for (const ref of t.refs) addIfExternal(snap, ref, t.slice_id);
     }
   }
   return owners;
@@ -752,14 +917,6 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
   const { previous: prev, candidate: cand } = input;
 
   // Fail-closed unresolved cases (§10.10 / §8.8: REPLAN.IMPACT_UNRESOLVED).
-  // A parent epoch digest is mandatory for every replan classification; an
-  // empty or malformed one can never authorize inheritance.
-  if (input.parent_epoch_digest === '') {
-    return buildDisposition(input, 'unresolved', [], [], [], 'PARENT_EPOCH_MISSING');
-  }
-  if (!SHA256_HEX_RE.test(input.parent_epoch_digest)) {
-    return buildDisposition(input, 'unresolved', [], [], [], 'PARENT_EPOCH_INVALID');
-  }
   if (prev.stage_id !== cand.stage_id) {
     return buildDisposition(input, 'unresolved', [], [], [], 'STAGE_MISMATCH');
   }
@@ -859,12 +1016,34 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
   }
   const prevSliceById = new Map(prev.slices.map((s) => [s.slice_id, s]));
   const candSliceById = new Map(cand.slices.map((s) => [s.slice_id, s]));
+  const prevTaskById = new Map(prev.tasks.map((t) => [t.task_id, t]));
+  const candTaskById = new Map(cand.tasks.map((t) => [t.task_id, t]));
   for (const sliceId of candSliceIds) {
     if (!prevSliceIds.has(sliceId)) continue; // handled by the set identity rule
     const ps = prevSliceById.get(sliceId)!;
     const cs = candSliceById.get(sliceId)!;
-    if (proofIndexDigest(ps.proof_index) !== proofIndexDigest(cs.proof_index)) boundaryTargets.add(sliceId);
+    // Slice-LEVEL proof-boundary comparison (cv-1 repair): the slice's own
+    // contract digest (goal/depends_on/authority refs, WITHOUT task blocks)
+    // is compared UNCONDITIONALLY — a slice-level boundary change forces
+    // slice-wide invalidation even when a same-slice task goal/contract also
+    // changed (which previously masked it via changedSlices).
+    if (ps.slice_level_digest !== cs.slice_level_digest) boundaryTargets.add(sliceId);
+    else if (proofIndexDigest(ps.proof_index) !== proofIndexDigest(cs.proof_index)) boundaryTargets.add(sliceId);
     else if (sliceStructuralDigest(ps) !== sliceStructuralDigest(cs)) boundaryTargets.add(sliceId);
+    // TASK-LEVEL proof-boundary comparison (cv-1-recheck-1): a task's
+    // proof-boundary digest (semantic_scope / proof_obligation_ids /
+    // code_anchors / verification_refs) is compared per task UNCONDITIONALLY
+    // — the completed predecessor's boundary change must not be masked by
+    // another same-slice task's ordinary goal change. Absent on both sides
+    // (raw engine fixtures) → no signal.
+    else if (
+      ps.task_ids.some(
+        (taskId) =>
+          (prevTaskById.get(taskId)?.task_proof_digest ?? undefined) !==
+          (candTaskById.get(taskId)?.task_proof_digest ?? undefined),
+      )
+    )
+      boundaryTargets.add(sliceId);
     else if (!changedSlices.has(sliceId) && ps.slice_contract_digest !== cs.slice_contract_digest) boundaryTargets.add(sliceId);
   }
 
@@ -879,8 +1058,18 @@ export function classifyReplanImpact(input: ClassifyReplanImpactInput): ReplanIm
   const candBindings = new Map(
     Object.entries(cand.reference_index).map(([refId, desc]) => [refId, referenceBindingDigest(desc)] as const),
   );
+  // Plan-internal derived descriptors (goal/task refs generated from the
+  // Thin Plan) never participate in the Authority content delta — their
+  // file/section digests track plan-file/block edits, which are plan
+  // metadata travelling through execution_binding / plan_digest instead
+  // (S03-F-T01 locality; Case 4 metadata-only change stays task-local).
   const bindingDelta = new Set<string>([
-    ...[...prevBindings.keys(), ...candBindings.keys()].filter((refId) => prevBindings.get(refId) !== candBindings.get(refId)),
+    ...[...prevBindings.keys(), ...candBindings.keys()].filter(
+      (refId) =>
+        !isPlanInternalDerivedRef(prev, refId) &&
+        !isPlanInternalDerivedRef(cand, refId) &&
+        prevBindings.get(refId) !== candBindings.get(refId),
+    ),
   ]);
   if (bindingDelta.size > 0) {
     const ownedByChanged = new Set<string>();
