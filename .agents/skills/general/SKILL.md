@@ -1,6 +1,7 @@
 ---
 name: general
 description: General Role Skill — 执行一个 Brain 直接派发、无 specialist owner 的有界任务；可承载 Brain 已判断并明确授权的 bounded repair（含 Active Stage 实现修复），one-shot 经 Herdr Link，返回一个结构化 Result。
+disable-model-invocation: true
 ---
 
 # general

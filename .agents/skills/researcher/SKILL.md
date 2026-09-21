@@ -1,6 +1,7 @@
 ---
 name: researcher
 description: Researcher Role Skill — evaluates external technical facts for one bounded Hard Part question; one-shot via Herdr Link, returns one sourced Result; also the temporary collaborator on Prototype RESEARCH_REQUIRED.
+disable-model-invocation: true
 ---
 
 # researcher

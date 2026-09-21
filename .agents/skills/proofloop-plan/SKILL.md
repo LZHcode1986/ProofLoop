@@ -1,6 +1,7 @@
 ---
 name: proofloop-plan
 description: STAGE_PLANNING：唯一 Planning 方法来源；读取四类 canonical Authority 与 current code reality，维护公共 Project Stage Map 并产出 candidate Thin Plan（fresh SPV PLAN_READY 后由 Brain 接纳为 accepted）；提供 Execute 投影所需 planning facts，不拥有 JIT Work Packet schema/projection；SPV 只读 falsify 后收敛为 PLAN_READY|FINDINGS|BLOCKED；Replan 按 carry_forward|invalidated|new/changed 推进。
+disable-model-invocation: true
 ---
 
 # proofloop-plan

@@ -1,6 +1,7 @@
 ---
 name: ai-structured-prd
 description: Propose 阶段内 PRD 贡献（不拥有独立 phase）：use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD contribution; the unified Propose ends with PROPOSE_READY, not a separate PRD gate.
+disable-model-invocation: true
 ---
 
 # ai-structured-prd

@@ -1,6 +1,7 @@
 ---
 name: security-and-hardening
 description: Review trust boundaries, permissions, inputs, secrets, and security failure modes.
+disable-model-invocation: true
 ---
 
 # Security and Hardening

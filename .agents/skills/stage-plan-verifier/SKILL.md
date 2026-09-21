@@ -1,6 +1,7 @@
 ---
 name: stage-plan-verifier
 description: Stage Plan Verifier 行为：当 Herdr Link dispatch 指定 stage-plan-verifier，或收到 review-loop SPV 回调（Plan revision 后要求重新建立的 fresh 验证）时，按只读 structural closure + 高风险 counterexample 验证顺序与固定 Herdr Link transport，对 pre-accept candidate Thin Plan 与引用的 Project Stage Map entry 返回 PLAN_READY|FINDINGS|BLOCKED。
+disable-model-invocation: true
 ---
 
 # stage-plan-verifier

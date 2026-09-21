@@ -1,6 +1,7 @@
 ---
 name: diagnose
 description: Find the root cause of a reproducible defect or performance regression and produce a verified fix.
+disable-model-invocation: true
 ---
 
 # Diagnose

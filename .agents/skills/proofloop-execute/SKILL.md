@@ -1,6 +1,7 @@
 ---
 name: proofloop-execute
 description: STAGE_EXECUTION：以 Vertical Slice Execution Lane 为自治单元，管理 dependency-ready Slice lane、Worker lifecycle、Slice-level CV、candidate Git ref、Integration 与 cleanup；Worker 执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task 后返回 SLICE_CANDIDATE_READY，CV PASS 后先为 PASS_PENDING_CANDIDATE_REF，slice-output 建立 durable canonical candidate ref 后才 READY_TO_INTEGRATE，全部 Slice INTEGRATED 后 EXECUTION_READY_FOR_REVIEW；S06 integrity hard-freeze 时不得从 public Execute projection 继续运行，已闭合的 `MES_MAINTENANCE` branch 使用 evidence-only lane。
+disable-model-invocation: true
 ---
 
 # proofloop-execute

@@ -1,6 +1,7 @@
 ---
 name: code-verifier
 description: Code Verifier 行为：当 Herdr Link dispatch 指定 code-verifier，或收到 review-loop CV 回调/recheck 时，按 Slice-level 只读独立反驳顺序与固定 Herdr Link transport，对 normal 或 `MES_MAINTENANCE` candidate Slice 返回 PASS|FINDINGS|BLOCKED。
+disable-model-invocation: true
 ---
 
 # code-verifier

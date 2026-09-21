@@ -1,6 +1,7 @@
 ---
 name: prototype
 description: Prototype Role Skill — validates one bounded Hard Part question in an isolated worktree; continuation via Herdr Link, returns `TECHNICAL_RESULT_READY` or `RESEARCH_REQUIRED` triggering a one-shot Researcher.
+disable-model-invocation: true
 ---
 
 # prototype

@@ -1,6 +1,7 @@
 ---
 name: worker
 description: Worker Role Skill — 在 Brain 启动的 Slice lane 内执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task 并逐个交付 Result；每 Task fresh-read 该 Task 的 JIT Read Set 与 binding；`NORMAL` Task Result 由 MES operational transaction layer materialize；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 返回 Git-bound 结构化 Link evidence；S06 integrity hard-freeze 时拒绝 NORMAL continuation；Slice 全部 Task 完成且 self-check 后返回 SLICE_CANDIDATE_READY；经 Herdr Link continuation 交付。
+disable-model-invocation: true
 ---
 
 # worker

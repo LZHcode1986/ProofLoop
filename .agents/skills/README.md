@@ -6,6 +6,15 @@ and where each kind of fact lives. It is not a process source — role procedure
 orchestration flow, agent lifecycle, and runtime/model/placement configuration each have
 one authoritative home, pointed to below.
 
+## Invocation policy
+
+Set `disable-model-invocation: true` when invocation is already owned by Brain routing,
+Herdr dispatch, a packet `required_skills` list, an explicit path pointer, or a human
+command. These Skills are loaded explicitly and do not spend always-on description
+context. Keep model invocation enabled only while autonomous Skill discovery is the
+actual entry mechanism; once an explicit routing pointer exists, remove that duplicate
+discovery path.
+
 ## Role Skill
 
 - Path: `.agents/skills/<role-name>/SKILL.md`.
@@ -42,6 +51,8 @@ own procedure and completion criteria; roles reach for it, they do not copy it.
 | `codebase-design` | Deep module principles and seam identification |
 | `writing-for-agents` | Writing documents an agent consumes |
 | `handoff` | Compact a conversation into a handoff document |
+| `frontend-execute` | Frontend handoff → self-verified production UI implementation |
+| `frontend-review` | Independent read-only frontend quality review against handoff and runtime evidence |
 
 ## Phase / Orchestration Skill
 
@@ -55,6 +66,7 @@ single role's behavior.
 | `ai-structured-prd` | Product intent → structured PRD |
 | `prd-to-tech-design-prep` | Post-PRD technical clarification |
 | `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
+| `frontend-tech` | Conditional frontend technical handoff → `tech-spec/frontend.md` |
 | `proofloop-plan` | Candidate Plan, SPV dispatch, Plan acceptance into MES |
 | `proofloop-execute` | Stage/Slice lane management and role dispatch |
 | `wayfinder` | Chart and work a shared map for an oversized effort |

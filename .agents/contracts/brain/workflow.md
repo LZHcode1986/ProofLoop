@@ -42,7 +42,7 @@ Contract 继续处理。Agent `idle`/`done`、Link `sent`、checkbox 或模型�
 
 | Trigger | Flow / owner entry | Exit / next boundary |
 |---|---|---|
-| 新产品范围、行为或验收需要建立/修改（含历史 `PROJECT_READY` 后的新实质工作 / 新 delivery cycle） | Propose：`ai-structured-prd`；按需 `prd-to-tech-design-prep`；`prd-to-ai-architecture` | `PROPOSE_READY` → 进入该 delivery cycle 的 Planning；post-ready 新实质工作不得绕过 Propose |
+| 新产品范围、行为或验收需要建立/修改（含历史 `PROJECT_READY` 后的新实质工作 / 新 delivery cycle） | Propose：`ai-structured-prd`；按需 `prd-to-tech-design-prep`；`prd-to-ai-architecture`；若其判定存在 frontend scope，则在同一 Propose 内显式加载 `frontend-tech` 完成 `tech-spec/frontend.md` handoff closure | `PROPOSE_READY` → 进入该 delivery cycle 的 Planning；post-ready 新实质工作不得绕过 Propose |
 | `PROPOSE_READY`、上一 Delivery Stage 的 `STAGE_ACCEPTED` 或 Replan 请求 | Planning：`proofloop-plan`；SPV 使用独立的 `stage-plan-verifier` review-loop Role | fresh SPV `PLAN_READY` 被接纳 → Execute |
 | accepted Plan 就绪且存在 dependency-ready Slice | Execute：`proofloop-execute` / Worker lane | Slice candidate → CV；全部 Slice `INTEGRATED` → Stage Review |
 | recovery candidate + fresh SPV `PLAN_READY` + exact frozen/forensic/audit tuple + quarantine + Brain bounded authorization | `MES_MAINTENANCE` Execute/Worker lane | evidence-only Slice candidate → CV PASS → Git candidate/integration/cleanup evidence → maintenance Review；不写 MES、不进入 normal Stage/terminal acceptance |
@@ -80,8 +80,7 @@ Brain arbitration 直接驱动迁移。
 
 ## 4. Cross-Flow transitions and completion
 
-- Propose 只以四类 canonical Authority 与统一的 `PROPOSE_READY` 结束，不增加
-  Propose 内部 Gate。
+- Propose 的 core canonical Authority 始终是四类（`PRD.md`、Architecture、Contracts、Acceptance）；存在 frontend scope 时，同一 Propose 还必须完成条件性的 `tech-spec/frontend.md` handoff closure 后才能返回统一的 `PROPOSE_READY`。该 handoff 不成为第五类 core Authority，也不增加 Propose 内部 Gate 或新的完成状态。
 - Planning 只有在 fresh SPV 返回 `PLAN_READY` 且 Brain 完成 Plan acceptance 后才
   允许 Execute；candidate Plan 不自动成为 accepted Plan。
 - Execute 只有在全部计划内 Slice 通过独立 CV、完成 Integration 并达到

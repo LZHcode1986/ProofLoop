@@ -1,6 +1,7 @@
 ---
 name: prd-to-tech-design-prep
 description: Propose 内按需澄清方法（不拥有独立 phase/Gate）：use only when the PRD contribution is ready and product-level technical questions block the architecture step; produce plain-language clarification questions and a technical design input brief that feed the same Propose.
+disable-model-invocation: true
 ---
 
 # prd-to-tech-design-prep

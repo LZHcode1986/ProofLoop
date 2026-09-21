@@ -1,6 +1,7 @@
 ---
 name: stage-reviewer
 description: Stage Reviewer 行为：当 Herdr Link dispatch 指定 stage-reviewer，或收到 review-loop Review 回调/recheck 时，按 goal-first 三轴独立审查（Outcome → Composition → Authority）与固定 Herdr Link transport，对 normal integrated Stage 返回 PASS|FINDINGS|BLOCKED；对 `MES_MAINTENANCE` evidence-only branch 返回 maintenance PASS|FINDINGS|BLOCKED。
+disable-model-invocation: true
 ---
 
 # stage-reviewer
