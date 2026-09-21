@@ -1,61 +1,44 @@
 # MIGRATION.md — 迁移到新项目指南
 
-把本模板仓库迁移到一个新业务项目，按以下三步操作。
+将本模板复制到新业务项目后，保留 Runtime/MES 语义，按以下边界改写。
 
-## 第一步：复制（直接复制，不改内容）
+## 复制
 
 | 路径 | 说明 |
 |---|---|
-| `packages/kernel/`、`packages/runtime/` | 校验核心 + public CLI 源码；复制后执行 `npm run build` 生成 dist |
-| `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces 与 TypeScript 项目引用） |
-| `.agents/contracts/brain/` | Brain 角色契约（按目录中的当前文件复制） |
-| `.agents/skills/` | 流程技能（按目录中的当前技能复制） |
-| 角色定义（二选一或都带） | Pi：`.pi/agents/`（7 个）+ `.pi/brain-workflow.md` + `.pi/extensions/proofloop-mode.ts`；OpenCode：`.opencode/agents/`（8 个） |
-| `AGENTS.md` | 项目规则（流程纪律、职责边界） |
-| `opencode.json`、`.pi/subagents.json` | harness 配置（按需） |
+| `packages/kernel/`、`packages/runtime/` | 校验核心、MES、Task Result/CV/Finding/Integration 与 public CLI |
+| `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置 |
+| `.agents/contracts/brain/` | 共享 Contract：MES、Result、Finding、生命周期、Integration、Recovery |
+| `.agents/skills/proofloop-plan/references/` | Planning/SPV packet 和 schema references |
+| `.agents/skills/proofloop-execute/` | Execute lane、Work Packet 与 CV templates |
+| `.opencode/agents/*.md` | OpenCode 独立的 Brain/Role 文档；包含流程、边界和 native permission |
+| `.pi/agents/*.md`、`.pi/brain-workflow.md` | Pi 独立的 Role/Brain 文档；包含流程、边界和 Host 配置 |
+| `.pi/extensions/proofloop-mode.ts` | Pi mode/session 入口 |
+| `AGENTS.md`、`opencode.json`、`.opencode/tui.json` | 项目规则和 harness 配置 |
 
-## 第二步：改写（复制后修改内容，保留结构）
+Pi 与 OpenCode 都必须从各自 Agent 文档加载 Role 工作流程；不要再建立共享 Role 流程文件或第二套 Host controller。共享 Contract/template 只拥有字段、binding、MES transaction 和 Result 语义。
 
-| 文件 | 改什么 |
-|---|---|
-| `CONTEXT.md`、`PRD.md` | 换成新项目的需求与上下文（保留章节结构） |
-| `tech-spec/`（5 个文件） | 换成新项目的架构/合同/难点/验收矩阵（保留结构；按 `prd-to-ai-architecture` 技能生成） |
+## 改写
 
-## 第三步：初始化（新项目从零生成，不要复制）
+- `CONTEXT.md`：新项目 Working Memory，不作为 Authority。
+- `PRD.md`：产品目标、用户场景、Scope、FR 和验收约束。
+- `tech-spec/`：Architecture、Contracts、Acceptance 和 process discipline。
+- 每个 Host 的 Agent 文档：按项目调整 model、variant、工具权限和 scope 说明；不得改变 `role_skill == subagent_type`、Result binding、fallback/retry 或 recovery 规则。
 
-| 项 | 做法 |
-|---|---|
-| `.proofloop/` | 新项目首次运行自动/手工创建；`runtime.lock` 见下 |
-| `delivery/stages/` | 从第一个 Stage 的规划开始生成（`plan materialize`） |
-| `progress.md` | 新项目自己的进度快照 |
+主流程保持：Propose → Planning → Execute → Review → `PROJECT_READY`。Planning 由 Planner/SPV 完成，Execute 使用 JIT Work Packet、Worker、CV 和 Integration，Review 使用 Outcome → Composition → Authority 三轴。
 
-### runtime.lock 初始化
+## 初始化与验证
 
-新项目需创建 `.proofloop/runtime.lock`（示例；`host_adapter` 填调用 harness/CLI 标识，不代表 Plugin）：
-
-```json
-{
-  "runtime_version": "0.1.0",
-  "domain_schema_version": 1,
-  "risk_policy_version": 1,
-  "capability_policy_version": 1,
-  "host_adapter": "opencode",
-  "extension_package": "@proofloop/runtime",
-  "extension_version": "0.1.0"
-}
-```
-
-## 验证模板可用
+新项目首次运行时创建 `.proofloop/`、Stage Map、Plan、MES facts 和 progress snapshot；不要复制历史 delivery 或旧 Receipt/Manifest/Context 数据。
 
 ```bash
 npm install
 npm run build
-node packages/runtime/dist/cli/proofloop.js doctor run --json   # 应 exit 0
-node packages/runtime/dist/cli/proofloop.js doctor status --json   # 应返回结构化状态
+node packages/runtime/dist/cli/proofloop.js boundary close --json
+node packages/runtime/dist/cli/proofloop.js integration apply --json
+node packages/runtime/dist/cli/proofloop.js status --json
 ```
 
-## 注意
+## 历史路径
 
-- **不要复制历史 Stage 数据**（`delivery/`、`.proofloop/receipts|manifests`）——它们绑定本项目的事实与摘要。
-- 角色 harness 二选一：Pi 用 `.pi/agents/`，OpenCode 用 `.opencode/agents/`；不要混用两套定义。
-- 流程第一步：`ai-structured-prd`（产品定义）→ `prd-to-ai-architecture`（架构）→ `proofloop-plan`（规划）。
+Admission、Receipt、Manifest、Context Gate、Stage Gate、`stage next`、`run-gate`、`review finalize-stage`、`project finalize-review` 和 `stage close` 已退役，不提供迁移路径，也不作为当前 route。
