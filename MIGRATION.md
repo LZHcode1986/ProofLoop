@@ -10,7 +10,6 @@
 | `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置（workspaces 与 TypeScript 项目引用） |
 | `.agents/contracts/brain/` | Brain 角色契约（按目录中的当前文件复制；含 `mes.md` MES Contract） |
 | `.agents/skills/` | Pi/AGY 共用的 Role、Capability 和 Phase/Orchestration Skills（按当前目录复制） |
-| `.agents/agent_config.json` | Herdr Link configured-start config；dispatch identity 与 config key 一一对应，`.agents/contracts/brain/workflow.md` 拥有机械 dispatch 顺序，`.agents/contracts/brain/agent-lifecycle.md` 拥有 ProofLoop lifecycle |
 | `.opencode/agents/brain.md` | OpenCode 唯一 Brain host primary（thin host）；只保留 Brain identity、必要权限与 canonical workflow pointer（`.agents/contracts/brain/workflow.md`） |
 | `.pi/extensions/proofloop-mode.ts` | Pi Brain host entry（thin host）；只保留 mode 切换、持久化与同一 canonical workflow pointer（`.agents/contracts/brain/workflow.md`） |
 | `AGENTS.md` | 项目规则（流程纪律、职责边界） |
@@ -22,7 +21,7 @@
 |---|---|
 | `CONTEXT.md` | 换成新项目的当前执行上下文（Working Memory；不是 Authority） |
 | `PRD.md` | 换成新项目的产品权威（目标、用户场景、验收约束、FR、Scope、Decision ledger） |
-| `tech-spec/`（5 个文件） | 换成新项目的架构/合同/难点/验收矩阵（保留结构；语义收敛到四类 canonical Authority：Architecture / Contracts / Acceptance；按 `prd-to-ai-architecture` 技能生成） |
+| `tech-spec/`（4 个文件） | 换成新项目的架构/合同/难点/验收矩阵（保留结构；语义收敛到四类 canonical Authority：Architecture / Contracts / Acceptance；按 `prd-to-ai-architecture` 技能生成） |
 
 四阶段主流程（Propose → Planning → Execute → Review → PROJECT_READY）、MES/status、
 Brain Routing Boundary / 单一 workflow（`.agents/contracts/brain/workflow.md`）、Thin Plan / JIT Work Packet、Slice lane / CV / Integration、
@@ -53,6 +52,15 @@ Brain Routing Boundary / 单一 workflow（`.agents/contracts/brain/workflow.md`
 }
 ```
 
+## 环境依赖
+
+- **Node.js + npm**：构建并运行 public CLI（见下）。
+- **Herdr**（https://herdr.dev/）：Agent runtime，必要环境之一。Brain 经 Herdr Link 启动并调度各 Role Agent
+  （`herdr_link_start` / `herdr_link_send` / `herdr_link_close`），Agent 常驻独立 tab / isolated worktree 中运行。
+- **Herdr Link** 插件：可替代旧 herdr skill 的跨 Agent dispatch / transport 插件；用户可选 herdr skill 或
+  Herdr Link（不做强制要求），**推荐优先使用 Herdr Link**。dispatch 机械细节见
+  `.agents/contracts/brain/workflow.md` §5 与 `.agents/contracts/brain/agent-lifecycle.md`。
+
 ## 验证模板可用
 
 ```bash
@@ -63,9 +71,10 @@ node packages/runtime/dist/cli/proofloop.js integration apply --json # 机械 In
 node packages/runtime/dist/cli/proofloop.js status --json            # 只读 MES observation
 ```
 
-> S01 Runtime 已交付 root-bound MES snapshot/seed、fact/binding validation 与只读 `proofloop status`
-> observation seam；Brain operational write-back / rich aggregation / 完整 cross-runtime E2E 仍为 follow-up。
-> MES/status 语义见 `.agents/contracts/brain/mes.md`。
+> Runtime 已交付 root-bound MES snapshot/seed、fact/binding validation、MES operational transaction layer
+> （S06-R-A-T01，唯一 normal durable mutator，`packages/runtime/src/mes/transaction.ts`）与只读
+> `proofloop status` observation seam；Brain host 接线（经 transaction layer 的 operational write-back）、
+> rich aggregation / 完整 cross-runtime E2E 仍为 follow-up。MES/status 语义见 `.agents/contracts/brain/mes.md`。
 
 ## 注意
 
@@ -76,8 +85,7 @@ node packages/runtime/dist/cli/proofloop.js status --json            # 只读 ME
   entry（thin host）。唯一 canonical Brain routing workflow 是
   `.agents/contracts/brain/workflow.md`：OpenCode 与 Pi 仅按该路径加载路由入口，
   不复制其流程正文，也不建立第二个 durable workflow/controller state；角色实例由
-  Brain 根据 MES status + Skill 经 Herdr Link configured start 启动（dispatch identity 与
-  `.agents/agent_config.json` key 一一对应，`.agents/contracts/brain/workflow.md` 拥有机械 dispatch 顺序，
+  Brain 根据 MES status + Skill 经 Herdr 启动（`.agents/contracts/brain/workflow.md` 拥有机械 dispatch 顺序，
   `.agents/contracts/brain/agent-lifecycle.md` 拥有 ProofLoop lifecycle）。跨 runtime 共用 Role Skill、
   Contract 和 Template 语义。
 - 流程入口：`ai-structured-prd`（Propose）→ `prd-to-ai-architecture`（Authority）→

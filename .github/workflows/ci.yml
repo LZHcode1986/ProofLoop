@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [v2-herdr, v2]
+  pull_request:
+
+jobs:
+  build:
+    name: Build & test-compile & CLI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build kernel + runtime (tsc)
+        run: npm run build
+
+      - name: Compile runtime tests (tsc -p)
+        run: npx tsc -p packages/runtime/test/tsconfig.json
+
+      - name: CLI smoke — proofloop status (canonical envelope)
+        run: node packages/runtime/dist/cli/proofloop.js status --json
+
+      - name: CLI smoke — closed schema rejects unknown operation (exit 2)
+        run: |
+          set +e
+          out=$(node packages/runtime/dist/cli/proofloop.js boundary no-such-op 2>&1)
+          code=$?
+          echo "$out"
+          [ "$code" -eq 2 ] || { echo "expected exit 2, got $code"; exit 1; }
