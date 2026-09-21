@@ -1,41 +1,55 @@
-# Skills Guide
+# Skills Policy
 
-Skills are reusable procedures shared across multiple agents or owned by the
-Brain's active phase loop. Agent-specific implementation behavior still belongs
-in `.opencode/agents/*.md`; phase guidance may live in a named Skill when the
-Brain must reuse the same protocol across planning, execution, and recovery.
+`.agents/skills/` 只保留可复用的 capability 与 phase/orchestration references；Pi/OpenCode 的 Role 工作流程由各自 Host Agent 文档独立拥有。
 
-## ProofLoop 2.0 skill policy
+## Host-owned Role procedures
 
-- Create a skill only when: reusable, used by multiple agents, not part of a single agent's role flow, and reduces catalog noise.
-- Skills are loaded by agents on demand. Agents do not copy skill content into their own files.
-- Agent role files under `.opencode/agents/` define host responsibilities and entry points; Contracts define semantics, fields, and states; Skills define steps, branches, and completion criteria; Templates define packets and schemas; Runtime defines mechanical state, admission, and Receipts.
+Role procedure、entry、mode、mutation boundary、forbidden actions、completion 和 transport 纪律分别内嵌在：
 
-## Canonical skills
+- OpenCode：`.opencode/agents/<role>.md`
+- Pi：`.pi/agents/<role>.md`
 
-| Skill | Used by | Purpose |
-|---|---|---|
-| `ai-structured-prd` | Brain | Converts product intent into structured PRD |
-| `prd-to-tech-design-prep` | Brain | Post-PRD technical clarification and handoff |
-| `prd-to-ai-architecture` | Brain | Generates architecture package under `tech-spec/` |
-| `proofloop-plan` | Brain | Planning guidance, candidate `tasks.md`, and vNext SPV dispatch |
-| `proofloop-execute` | Brain | Stage delivery guidance and role dispatch templates |
-| `test-driven-development` | Worker | RED/GREEN/REFACTOR TDD loop, proof profiles |
-| `diagnose` | Worker | Disciplined debugging loop for hard bugs |
-| `codebase-design` | Brain | Deep module principles, seam identification |
-| `code-review-and-quality` | Stage Reviewer, General | Multi-axis code review |
-| `security-and-hardening` | All (cross-role) | Security-first development practices |
+两个 Host 都必须保持 `role_skill == subagent_type`，但各自独立加载自己的 Agent 文档。不要新增共享 Role Skill、第二个 Role controller 或跨 Host workflow pointer。MES、Result、Finding、lifecycle 和 packet 字段仍由 `.agents/contracts/brain/` 与 templates 定义。
 
-## ProofLoop 2.0 responsibility model
+角色包括 `general`、`worker`、`researcher`、`prototype`、`code-verifier`、`stage-plan-verifier` 和 `stage-reviewer`；`proofloop-plan` 是 Planning dispatch label，不是共享 Role Skill。
 
-1. Brain owns user intent, domain context, PRD, Tech Spec, progress, and global routing.
-2. Direct bounded task goes to `general`.
-3. Active vNext Stage planning loads `proofloop-plan`; its Stage Plan Verifier dispatch uses the Skill reference template.
-4. Active vNext Stage execution loads `proofloop-execute`, which selects the Brain-owned role dispatch template for `worker` or `code-verifier`; Git boundaries use Runtime `boundary close`.
-5. Technical unknowns go to `researcher` / `prototype`; only validated conclusions enter Tech Spec.
-6. Stage review goes to `stage-reviewer`; all findings return to Brain.
-7. Git boundaries are owned by the Runtime `boundary close` CLI; for `artifact-archive` only, Brain pre-executes the exact `git mv` rename, while no Agent performs other write Git commands or commits directly.
-8. Skills are loaded by agents on demand; agent files do not duplicate skill content.
-9. Active Skill reference templates define complete vNext dispatch packets and allowed returns; they do not authorize Runtime state transitions.
-10. Templates are selected by the active Skill and contain no authority claim beyond their declared dispatch scope.
-11. Validators check mechanical facts; they do not judge semantics.
+## Capability Skill
+
+Capability 是角色按 packet/Contract 按需加载的技术方法，不拥有 Role、Brain route 或业务状态：
+
+| Skill | Purpose |
+|---|---|
+| `test-driven-development` | RED/GREEN/REFACTOR loop and proof profiles |
+| `diagnose` | Reproducible defect diagnosis |
+| `security-and-hardening` | Trust boundary, input, and secrets review |
+| `codebase-design` | Module principles and seam identification |
+| `writing-for-agents` | Writing documents an agent consumes |
+| `handoff` | Conversation handoff |
+
+
+## Phase / Orchestration references
+
+`proofloop-execute` 仍是 Execute 的 capability/orchestration method source；`proofloop-plan` 仅保留 Planning packet/schema 与 SPV references，Planning procedure 由两个 Host Planner system prompt 直接拥有：
+
+| Skill | Phase |
+|---|---|
+| `ai-structured-prd` | Product intent → structured PRD |
+| `prd-to-tech-design-prep` | Post-PRD technical clarification |
+| `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
+| `proofloop-plan` | Planning packet/schema 与 SPV references（dispatch label；Planning method 在 Host Planner 文档） |
+| `proofloop-execute` | Stage/Slice lane management and Work Packet projection |
+| `wayfinder` | Oversized-effort map |
+
+`proofloop-plan` 的 packet/schema 与 SPV references 保留在 `references/`；Planner 工作步骤只在 `.pi/agents/proofloop-plan.md` 与 `.opencode/agents/proofloop-plan.md`。
+
+## Fact ownership
+
+| Layer | Owns |
+|---|---|
+| Host Agent | Role/Brain workflow, native permission, transport and host entry |
+| Contract | Semantics, fields, states, error codes and lifecycle bindings |
+| Template | Dispatch packet and Result schema |
+| Runtime | Mechanical Git boundary, Integration and MES operational facts |
+| Capability Skill | Reusable technical method |
+
+Pi Brain 的完整流程在 `.pi/brain-workflow.md`；OpenCode Brain 的完整流程在 `.opencode/agents/brain.md`。两者各自加载，不存在第三份 canonical workflow 文件。

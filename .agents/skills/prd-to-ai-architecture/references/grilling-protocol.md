@@ -16,14 +16,13 @@ Load this file ONLY when grilling mode engages (see Step 2 entry criteria in the
 
 ## Question type follows the artifact being produced
 
-- Architecture brief (`ai-coding-architecture.md`): module boundaries, responsibilities vs non-responsibilities, runtime flows, technical context.
-- Contract/state matrix (`contract-state-matrix.md`): API routes, event streams, file paths, database/JSON schema, task states, ports, error behavior.
-- Hard-parts register (`hard-parts-register.md`): which parts are genuinely hard, forbidden shortcuts, minimum acceptable implementation.
-- Architecture Work Items (`task-acceptance-matrix.md`): dependency ordering, definitions of done, acceptance evidence, affected files/modules.
+- Architecture brief (`tech-spec/architecture.md`): module boundaries, responsibilities vs non-responsibilities, runtime flows, technical context, hard parts.
+- Contract/state matrix (`tech-spec/contracts.md`): API routes, event streams, file paths, database/JSON schema, task states, ports, error behavior.
+- Acceptance mapping (`tech-spec/acceptance.md`): acceptance criteria/evidence for every PRD must-implement item; non-goals and forbidden shortcuts.
 
 ## Decision log
 
-- Record hard-to-reverse, surprising, or trade-off-heavy decisions in the decision log of `tech-spec/ai-coding-architecture.md` as they are made.
+- Record hard-to-reverse, surprising, or trade-off-heavy decisions in the decision log of `tech-spec/architecture.md` as they are made.
 
 ## Exit
 

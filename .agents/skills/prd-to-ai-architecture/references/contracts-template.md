@@ -1,6 +1,6 @@
 # Contract and State Matrix Template
 
-Use this file when creating `contract-state-matrix.md`.
+Use this file when creating `tech-spec/contracts.md`.
 
 ## 1. HTTP/API Contracts
 

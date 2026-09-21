@@ -1,23 +1,23 @@
 ---
 name: prd-to-tech-design-prep
-description: CONDITIONAL_TECHNICAL_CLARIFICATION phase skill (conditional)：use only when the PRD is confirmed and product-level technical questions block architecture; produce plain-language clarification questions and a technical design input brief (TECHNICAL_CLARIFICATION_READY).
+description: Propose 内按需澄清方法（不拥有独立 phase/Gate）：use only when the PRD contribution is ready and product-level technical questions block the architecture step; produce plain-language clarification questions and a technical design input brief that feed the same Propose.
 ---
 
 # prd-to-tech-design-prep
 
-## Phase ownership
+## Method ownership
 
-- Phase: CONDITIONAL_TECHNICAL_CLARIFICATION (conditional — runs only when required)
-- Prerequisite: PRD confirmed by the user (`PRD_CONFIRMED`) and product-level technical questions blocking architecture
-- Completion: clarification ready and confirmed by the user (`TECHNICAL_CLARIFICATION_READY`)
-- Handoff: the clarification brief goes to `prd-to-ai-architecture`; Brain loads the next skill only after user confirmation
-- Rollback: if the user later requests clarification changes, Brain reloads this skill; if the PRD itself must change, Brain reloads `ai-structured-prd`
+- 定位: 统一 Propose 内按需加载的澄清方法（不拥有独立 phase，不做独立 phase checkpoint，不发独立完成 Gate）
+- Prerequisite: PRD contribution 就绪，且存在阻塞 Propose 架构步骤的产品级技术问题
+- Completion: 澄清结果并入同一 Propose；最终完成信号仍是 `PROPOSE_READY`
+- Handoff: 澄清产物直接作为 `prd-to-ai-architecture` 的输入；用户确认不是本方法的前置
+- Rollback: 澄清结果需要修改时继续本方法；PRD 本身需要修改时回到 `ai-structured-prd`
 
-Prepare the transition from a confirmed PRD to technical design without forcing non-technical users to write architecture. Convert product facts into plain-language technical clarification questions, glossary explanations, and a clean handoff brief for a later technical design workflow.
+Prepare the transition from a PRD contribution that is ready to technical design without forcing non-technical users to write architecture. Convert product facts into plain-language technical clarification questions, glossary explanations, and a clean handoff brief for a later technical design workflow.
 
-## Use after PRD confirmation
+## Use after PRD contribution is ready
 
-This skill assumes a PRD or PRD Context already exists. If the user still has only a rough idea or an unreviewed PRD, use a PRD-building/review workflow first.
+This method assumes the PRD contribution or PRD Context already exists inside the current Propose. If the user still has only a rough idea or an unreviewed PRD, use the PRD-building/review workflow first (`ai-structured-prd`).
 
 ## Core boundaries
 
@@ -73,10 +73,10 @@ Do not:
    - Summarize decisions, open questions, accepted defaults, constraints, risks, and non-goals.
    - This is not an architecture document; it is input for one.
 
-7. **Phase checkpoint**
-   - Show the user: what this phase produced (2-3 plain-language sentences), where the artifacts live, and the key decisions made.
-   - Preview the next phase: `prd-to-ai-architecture` will be loaded to produce the architecture package under `tech-spec/`.
-   - Wait for the user's explicit confirmation before loading the next phase's skill. If the user asks for changes, continue in this phase, or return to the upstream phase's skill as directed.
+7. **Propose 内交接**
+   - 澄清产物并入同一 Propose，直接作为 `prd-to-ai-architecture` 的输入；不产生独立 phase checkpoint，也不需要用户为澄清单独确认。
+   - 用户要求修改澄清结果时继续本方法；PRD 需要修改时回到 `ai-structured-prd`。
+   - 本方法不发独立完成信号；Propose 的最终完成信号是 `PROPOSE_READY`。
 
 ## Output options
 
@@ -95,7 +95,7 @@ Output:
 2. Glossary and term conflicts.
 3. Scenario pressure tests used.
 4. Technical Design Input Brief.
-5. Recommended next step: produce technical design, split stages, or return to PRD review.
+5. Recommended next step: continue in the same Propose (prd-to-ai-architecture produces the tech-spec package), or return to PRD review (ai-structured-prd).
 
 ## Question format
 

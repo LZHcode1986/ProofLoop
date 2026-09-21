@@ -81,18 +81,7 @@ Do not specify the technical solution. Explain the product fact.
 ### Later versions
 - [future idea]
 
-## 11. Optional: Product Stage Candidates
-
-Use this section only after the PRD is mostly ready or confirmed.
-
-These are product-delivery slices for Brain dispatch, not technical implementation tasks.
-
-| Candidate | User-visible objective | Product boundary | Out of scope | Acceptance criteria refs |
-|---|---|---|---|---|
-| 1 | [what user value this stage delivers] | [what product scope is included] | [what remains excluded] | [AC refs] |
-| 2 | [what user value this stage delivers] | [what product scope is included] | [what remains excluded] | [AC refs] |
-
-## 12. Risks and edge cases
+## 11. Risks and edge cases
 - If [edge case], the expected behavior is [handling].
 - Risk: [risk]. Mitigation or decision needed: [what to clarify].
 
@@ -102,12 +91,12 @@ These are product-delivery slices for Brain dispatch, not technical implementati
 ## Legal / Privacy / Security
 - [any privacy, legal, compliance, or security requirements]
 
-## 13. Glossary
+## 12. Glossary
 | Term | Simple explanation |
 |---|---|
 | [term] | [plain explanation] |
 
-## 14. Decision ledger
+## 13. Decision ledger
 
 ### Confirmed
 - [decision]
@@ -124,9 +113,9 @@ These are product-delivery slices for Brain dispatch, not technical implementati
 ### Optional / Non-blocking
 - [optional item]
 
-## 15. Readiness for next step
+## 14. Readiness for next step
 Ready / Mostly ready / Needs revision / Blocked
 
 Recommended next step:
-[confirm PRD / answer one question / dispatch brain/technical-handoff.md]
+[review or update the PRD contribution / answer one question / continue in the same Propose with prd-to-ai-architecture for the tech-spec package]
 ```

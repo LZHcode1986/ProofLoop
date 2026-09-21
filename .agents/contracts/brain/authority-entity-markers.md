@@ -1,10 +1,10 @@
 # Authority Entity Marker Contract
 
-为会被 Manifest 或 Plan 引用的 PRD/Tech Spec 实体提供稳定、可解析的引用边界。
+为会被下游 Authority ref / accepted Plan / Work Packet 引用的 PRD/Tech Spec 实体提供稳定、可解析的引用边界。
 
 ## Use when
 
-产出或修改 PRD、Tech Spec，且其中的实体可能被下游 Manifest/Plan 引用时，产出 Skill 必须加载本 Contract。
+产出或修改 PRD、Tech Spec，且其中的实体可能被下游 Authority ref / accepted Plan / Work Packet 引用时，产出 Skill 必须加载本 Contract。
 
 ## Marker
 
@@ -23,7 +23,7 @@
 
 - 下游只引用 `<root-relative-path>#/entities/<entity-id>`；
 - 产出方不得在 candidate Plan 中复制或伪造外部 Authority marker；
-- 缺失、重复、非法或 kind/id 不一致的 marker 必须在 Manifest/Plan 消费前 fail closed；
+- 缺失、重复、非法或 kind/id 不一致的 marker 必须在稳定下游 Authority ref / accepted Plan / Work Packet 消费前 fail closed；
 - marker 是上游产出义务，不是 Materializer 或 Runtime 补写 Authority 的修复机制。
 
 ## Completion criterion

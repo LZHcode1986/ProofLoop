@@ -75,8 +75,8 @@ The answer isn't part of the body — it's recorded on resolution (see [Work thr
 Every ticket is either **HITL** — human in the loop, worked *with* a human who speaks for themselves — or **AFK**, driven by the agent alone. A HITL ticket only resolves through that live exchange; the agent never stands in for the human's side of it (a grilling agent that answers its own questions has broken this).
 
 - **Research** (AFK): Reading documentation, third-party APIs, or local resources like knowledge bases. Creates a markdown summary as a linked asset. Use when knowledge outside the current working directory is required.
-- **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to — an outline, a rough take, a stub, or UI/logic code via the prototype agent. Links the prototype as an asset. Use when "how should it look" or "how should it behave" is the key question.
-- **Grilling** (HITL): Conversation with the human, one question at a time, using the interview discipline in `prd-to-ai-architecture/references/grilling-protocol.md`. Resolve domain terms into `CONTEXT.md` as they settle; record hard-to-reverse decisions in the decision log of `tech-spec/ai-coding-architecture.md`. The default case.
+- **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to — an outline, a rough take, a stub, or UI/logic code via the prototype agent. Subagent transports the prototype as an asset. Use when "how should it look" or "how should it behave" is the key question.
+- **Grilling** (HITL): Conversation with the human, one question at a time, using the interview discipline in `prd-to-ai-architecture/references/grilling-protocol.md`. Resolve domain terms and record hard-to-reverse decisions as the effort's Notes specify（ProofLoop 项目例外：见 `## ProofLoop decisions`）。The default case.
 - **Task** (HITL or AFK): Manual work that must happen before a *decision* can be made — nothing to decide, prototype, or research, but the discussion is blocked until it's done. Signing up for a service so its API can be judged, provisioning access, moving data so its shape can be seen. This is the one type that *does* rather than decides — and it earns its place by unblocking a decision, not by delivering the destination. The agent drives it alone where it can (AFK); otherwise it hands the human a precise checklist (HITL). Resolved when the work is done; the answer records what was done and any resulting facts (credentials location, new URLs, row counts) later tickets depend on.
 
 ## Fog of war
@@ -100,6 +100,14 @@ Out-of-scope work never graduates — the frontier stops at the destination — 
 
 Ruling something out of scope is a scoping act, not a step on the route. When a ticket that already exists turns out to sit past the destination — mis-scoped in while charting, or exposed by a resolution — **close it** (a closed ticket is unambiguously off the frontier) and leave one line in the **Out of scope** section: the gist plus why it's out of scope, linking the closed ticket. It stays out of **Decisions so far**, which records the route actually walked — a scope boundary isn't a step on it.
 
+## ProofLoop decisions
+
+在 ProofLoop 项目中使用本 skill 时，决策与 domain term 的归档位置以 Brain/packet 指定的当前 canonical Authority owner 为准：
+
+- domain terms 不写入 root `CONTEXT.md`（CONTEXT 已降级为 Working Memory，不是 downstream Authority）；decision log 只写入当前 canonical `tech-spec/architecture.md`。
+- ProofLoop 决策按归属写入 `PRD.md` / `tech-spec/architecture.md` / `tech-spec/contracts.md` / `tech-spec/acceptance.md`：product 决策 → `PRD.md`；architecture 决策/decision log → `tech-spec/architecture.md`；contract/state 决策 → `tech-spec/contracts.md`；acceptance 决策 → `tech-spec/acceptance.md`。
+- 非 ProofLoop map 不受影响：仍以 tracker（issue 上的 resolution comment + map 的 Decisions-so-far）为唯一 decision source。
+
 ## Invocation
 
 Two modes. Either way, **never resolve more than one ticket per session.**
@@ -108,7 +116,7 @@ Two modes. Either way, **never resolve more than one ticket per session.**
 
 User invokes with a loose idea.
 
-1. **Name the destination.** Interview the user one question at a time (discipline: `prd-to-ai-architecture/references/grilling-protocol.md`) to pin down what this map is finding its way to — the spec, decision, or change. Resolve domain terms into `CONTEXT.md` as they settle. The destination fixes the scope, so it's settled first.
+1. **Name the destination.** Interview the user one question at a time (discipline: `prd-to-ai-architecture/references/grilling-protocol.md`) to pin down what this map is finding its way to — the spec, decision, or change. Resolve domain terms as they settle（ProofLoop 项目例外：见 `## ProofLoop decisions`；不写入 root `CONTEXT.md`）。The destination fixes the scope, so it's settled first.
 2. **Map the frontier.** Grill again, **breadth-first** this time: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the way to the destination is already clear, the whole journey small enough for one session — you don't need a map. Stop and ask the user how they'd like to proceed.
 3. **Create the map** (label `wayfinder:map`): Destination and Notes filled in, Decisions-so-far empty, the fog sketched into **Not yet specified**.
 4. **Create the tickets you can specify now** as child issues of the map — then wire blocking edges in a **second pass** (issues need ids before they can reference each other). Wiring sorts them into the frontier and the blocked; everything you can't yet specify stays in the fog — the **Not yet specified** section.

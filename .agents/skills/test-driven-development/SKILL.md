@@ -7,7 +7,7 @@ description: Test-driven development. Use when the user wants to build features 
 
 TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle — consult them before and during the loop, not after.
 
-When exploring the codebase, read `CONTEXT.md` (if it exists) so test names and interface vocabulary match the project's domain language, and respect ADRs in the area you're touching.
+When exploring the codebase, read root `CONTEXT.md` (if it exists) so test names, interface vocabulary, domain terminology, and naming consistency match the project's domain language, and respect ADRs in the area being touched. In a ProofLoop Worker lane, this vocabulary read is retained for naming and interface consistency, while the current Work Packet / JIT Read Set and bound normative refs govern the implementation context and boundaries; `CONTEXT.md` remains non-normative Working Memory and does not become an Authority.
 
 ## What a good test is
 
@@ -37,7 +37,7 @@ A **seam** is the public boundary you test at: the interface where you observe b
 When used within the ProofLoop pipeline and the Worker Packet contains a **Seam Status**:
 
 - **PRE_AGREED** — The Seam has already been confirmed by Planner and SPV. The Worker must **not** re-negotiate or ask the user for confirmation. Write tests at the agreed seam.
-- **TO_CONFIRM** — The Seam is proposed but not yet confirmed. Confirm with the user before proceeding.
+- **TO_CONFIRM** — The Seam is proposed but not yet agreed. ProofLoop Workers do NOT ask the user: stop the current TDD loop and return the unresolved seam to the Worker. Do not ask the user to bypass the ProofLoop AFK flow, do not classify ProofLoop routing taxonomies (such as `PLAN_GAP` or `AUTHORITY_GAP`), and do not expand Worker scope or binding. ProofLoop routing and gap classification remain the responsibility of Worker and Execute contracts.
 
 If Seam Status is present in the Worker Packet, that status governs seam selection.
 
@@ -47,9 +47,9 @@ When using the TDD Skill independently — without a ProofLoop Worker Packet or 
 
 Ask: "What's the public interface, and which seams should we test?"
 
-## RED Receipt
+## RED Evidence
 
-Every RED step (failing test before implementation) must produce a minimal receipt:
+Every RED step (failing test before implementation) must produce a minimal evidence record:
 
 ```text
 - test identifier: <test file + test name>
@@ -59,11 +59,11 @@ Every RED step (failing test before implementation) must produce a minimal recei
 - source snapshot: <the test code or key excerpt>
 ```
 
-The RED Receipt proves that the test was written first and correctly detects the absence of the behavior. It is recorded in the Evidence section's Proof Obligation Coverage table.
+The RED Evidence proves that the test was written first and correctly detects the absence of the behavior. It is recorded in the Evidence section's Proof Obligation Coverage table.
 
-## GREEN Receipt
+## GREEN Evidence
 
-Every GREEN step (passing test after implementation) must produce a minimal receipt:
+Every GREEN step (passing test after implementation) must produce a minimal evidence record:
 
 ```text
 - same PO: <PO ID(s) this test covers>
@@ -72,7 +72,7 @@ Every GREEN step (passing test after implementation) must produce a minimal rece
 - implementation snapshot: <the implementation code or key excerpt>
 ```
 
-The GREEN Receipt proves that the implementation satisfies the PO. It is recorded alongside the RED Receipt in the Evidence section.
+The GREEN Evidence proves that the implementation satisfies the PO. It is recorded alongside the RED Evidence in the Evidence section.
 
 ## Anti-patterns
 
@@ -89,6 +89,4 @@ The GREEN Receipt proves that the implementation satisfies the PO. It is recorde
 ## Refactoring
 
 - **Minor internal cleanup** (rename local variable, extract small helper, inline dead code) may be performed during the loop as long as behavior does not change and all existing tests stay green.
-- **Structural refactoring** (rename public API, extract module, change type signatures, migrate callers) is **not** part of the TDD loop. It belongs to:
-  - A code review pass (see `code-review` skill), or
-  - A separate Task/Slice dedicated to the refactor.
+- **Structural refactoring** (rename public API, extract module, change type signatures, migrate callers) is **not** part of the TDD loop. It belongs to a separate explicit Task/Slice dedicated to the refactor — or to an explicit plan that Planner/Architecture forms after loading `codebase-design` on demand. There is no dedicated review-skill route for it.

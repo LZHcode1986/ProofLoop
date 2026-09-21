@@ -1,16 +1,16 @@
 ---
 name: ai-structured-prd
-description: PRODUCT_DEFINITION phase skill：use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD and wait for user confirmation (PRD_CONFIRMED).
+description: Propose 阶段内 PRD 贡献（不拥有独立 phase）：use when the user has a rough idea or an existing PRD to review; build PRD Context first, then produce a structured PRD contribution; the unified Propose ends with PROPOSE_READY, not a separate PRD gate.
 ---
 
 # ai-structured-prd
 
-## Phase ownership
+## Propose contribution 定位
 
-- Phase: PRODUCT_DEFINITION
+- 定位: 统一 Propose 的 PRD 贡献部分；PRD contribution 与后续 tech-spec 包在同一 Propose 内完成，只有一个最终完成信号 `PROPOSE_READY`
 - Prerequisite: user has a rough idea, or an existing PRD to review
-- Completion: PRD confirmed by the user (`PRD_CONFIRMED`)
-- Handoff: confirmed PRD goes to `prd-to-tech-design-prep` (only when technical clarification is needed) or `prd-to-ai-architecture`; Brain loads the next skill only after user confirmation
+- Completion: PRD contribution 并入同一 Propose（不由本 Skill 单独确认）
+- Handoff: 同一 Propose 内继续——需要产品级技术澄清时按需加载 `prd-to-tech-design-prep`；架构/合同/验收包由 `prd-to-ai-architecture` 产出
 - Rollback: if the user later requests PRD changes, Brain reloads this skill
 
 Create and maintain a structured product requirements document for AI-assisted development. Optimize for non-technical users, but do not make the PRD shallow: capture all product facts that affect implementation, using plain language and short explanations for necessary terms.
@@ -47,7 +47,7 @@ Use the smallest mode that fits the request:
 - Include product facts that affect implementation, such as login, data persistence, roles, permissions, uploads, integrations, mobile use, privacy, payment, content safety, and admin needs.
 - Do not choose frameworks, databases, API design, schema, architecture, deployment, or task breakdown inside the PRD.
 - When the user is missing a product decision that blocks progress, return `USER_DECISION_REQUIRED`.
-- When a product authority gap is identified (e.g., scope, behavior, or acceptance criteria is unclear), return `AUTHORITY_GAP` with a descriptive subtype.
+- When a product authority gap is identified (e.g., scope, behavior, permission, or acceptance criteria is unclear), return `AUTHORITY_GAP` with a descriptive subtype. Do not turn a purely technical Authority invalidation or implementation defect into a product question; ordinary Technical Authority repair is handled by the current Propose owner and Brain acceptance.
 
 ## Standard workflow
 
@@ -75,20 +75,10 @@ Use the smallest mode that fits the request:
    - Output readiness: `ready`, `mostly ready`, `needs revision`, or `blocked`.
    - If blocked, ask only the highest-leverage clarification question.
 
-6. **Prepare stage candidates only after PRD readiness**
-   - Stage candidates are product-delivery slices for Brain dispatch, not technical tasks.
-   - Each candidate must map to user-visible value or a coherent product capability.
-   - Each candidate must preserve PRD acceptance criteria, scope, and non-goals.
-   - Do not include file scopes, implementation order, framework choices, database choices, API design, schema, or task breakdown.
-   - Output stage candidates only after PRD review is `ready` or `mostly ready`, or when Brain explicitly needs dispatch preparation.
-   - Optional reference: `references/prd-template.md` section "Optional: Product Stage Candidates".
-
-7. **Phase checkpoint**
-   - Show the user: what this phase produced (2-3 plain-language sentences), where the artifacts live, and the key decisions made.
-   - Preview the next phase: which skill will be loaded (`prd-to-tech-design-prep` only when technical clarification is needed, otherwise `prd-to-ai-architecture`) and what it will produce.
-   - Wait for the user's explicit confirmation before loading the next phase's skill. If the user asks for changes, continue in this phase or return to an upstream phase as directed.
-   - If the PRD is confirmed, it is ready for downstream dispatch (technical handoff, stage candidates, or Propose).
-
+6. **Propose 内交接**
+   - PRD contribution（PRD.md）就绪后，同一 Propose 内继续：产品级技术问题阻塞架构步骤时按需加载 `prd-to-tech-design-prep`；最终 canonical 包（tech-spec/architecture.md、tech-spec/contracts.md、tech-spec/acceptance.md）由 `prd-to-ai-architecture` 产出。
+   - 本 Skill 不输出 Stage Candidates 或 Stage decomposition；Stage/Slice/Task 分解由 `proofloop-plan` 负责。
+   - 用户要求修改 PRD 时继续在本 Skill；Propose 的最终完成信号是 `PROPOSE_READY`（由收尾 Skill 给出），不是本 Skill 单独确认。
 ## Clarification question format
 
 ```md
@@ -122,11 +112,6 @@ Output:
 1. `PRD Context Snapshot` summary.
 2. Full PRD using `references/prd-template.md`.
 3. Remaining open questions, separated into critical and optional.
-4. Optional `Product Stage Candidates` only when:
-   - the PRD is mostly ready or ready;
-   - Brain needs dispatch preparation;
-   - the candidates can be expressed as product value boundaries, not technical work packages.
-
 ### Review mode
 
 Output:
@@ -138,7 +123,8 @@ Output:
 
 ## Downstream entity markers
 
-When a PRD entity will be referenced by a Manifest or Plan, load and apply
+When a PRD entity will be referenced by a downstream Authority ref, an accepted
+Plan, or a Work Packet, load and apply
 `.agents/contracts/brain/authority-entity-markers.md`. The Contract is the single
 source for marker syntax, allowed kinds, canonical refs, and completion checks;
 this Skill owns when the rule applies to PRD output.
