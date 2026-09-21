@@ -26,8 +26,14 @@ jobs:
       - name: Compile runtime tests (tsc -p)
         run: npx tsc -p packages/runtime/test/tsconfig.json
 
-      - name: CLI smoke — proofloop status (canonical envelope)
-        run: node packages/runtime/dist/cli/proofloop.js status --json
+      - name: CLI smoke — proofloop status fails closed on unseeded template (exit 2 + RUNTIME.BLOCKED)
+        run: |
+          set +e
+          out=$(node packages/runtime/dist/cli/proofloop.js status --json 2>&1)
+          code=$?
+          echo "$out"
+          [ "$code" -eq 2 ] || { echo "expected exit 2 (unseeded template fails closed), got $code"; exit 1; }
+          echo "$out" | grep -q '"code":"RUNTIME.BLOCKED"' || { echo "expected RUNTIME.BLOCKED finding"; exit 1; }
 
       - name: CLI smoke — closed schema rejects unknown operation (exit 2)
         run: |
