@@ -261,15 +261,15 @@ export function validateProofIndexInto(
     }
   }
 
-  // slice_id consistency with the owning slice is a Manifest-level invariant
-  // (checked in manifest.ts).
+  // slice_id consistency with the owning slice is a slice-level invariant,
+  // enforced by the consuming Slice/Work Packet flow.
   return obj as unknown as VNextProofIndex;
 }
 
 /**
  * Fail-closed validation of a Proof Index against a resolved reference index.
  *
- * @param registered — ref_id → kind map from the Manifest reference_index.
+ * @param registered — ref_id → kind map from the registered reference index.
  * @throws {SchemaValidationError} on any violation.
  */
 export function validateVNextProofIndex(

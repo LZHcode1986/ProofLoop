@@ -447,7 +447,7 @@ export async function spawnService(options: SpawnOptions): Promise<ServiceHandle
 
 /**
  * Register a running service under a logical name (typically the step id
- * from the manifest — the service_start/service_stop wiring of run-gate).
+ * from the Work Packet — the service_start/service_stop wiring).
  */
 export function registerService(name: string, handle: ServiceHandle): void {
   serviceRegistry.set(name, handle);

@@ -1,104 +1,39 @@
 /**
- * @proofloop/kernel — Domain types, state machines, and contracts.
+ * @proofloop/kernel — Neutral schema / digest core.
  *
- * This package has zero workspace dependencies and provides the foundational
- * type definitions and state machine logic consumed by @proofloop/runtime
- * and downstream host-adapter packages.
+ * This package has zero workspace dependencies. After the neutral cutover it
+ * provides only the mechanical contract surface still consumed by
+ * @proofloop/runtime and downstream host-adapter packages:
+ * - the RuntimeLock artifact contract (`.proofloop/runtime.lock`);
+ * - the shared SchemaValidationError and canonical Stage ID guard;
+ * - the single canonicalJson / digest utilities;
+ * - the neutral vNext Plan / Reference / Proof / ExecutionScope contracts.
+ *
+ * The old Receipt / Manifest / Finding / RuntimeProof / NextAction and
+ * Stage-Slice-CV-Project state machine surface was removed with the
+ * business stack.
  */
 
-// Canonical type surface (§5 Canonical Type Registry) — non-contract types
-export type {
-  StageID,
-  SliceID,
-  NextAction,
-  RoleType,
-} from './types';
+// RuntimeLock artifact contract (§4 File / Artifact Contracts)
+export type { RuntimeLock } from './contracts';
+
+// Shared validation machinery: SchemaValidationError, RuntimeLock
+// validator, and the canonical Stage ID guard (S09-C-T03).
 export {
-  StageState,
-  SliceState,
-  CVStatus,
-  ProjectState,
-} from './types';
-export type {
-  StageEvent,
-  SliceEvent,
-  CvEvent,
-  ProjectEvent,
-} from './types';
-
-// Contract artifact types (§4 File / Artifact Contracts)
-export type {
-  FindingCode,
-  Finding,
-  ReceiptType,
-  Receipt,
-  ManifestSlice,
-  Manifest,
-  RuntimeLock,
-  ProofObligation,
-  RuntimeProofStep,
-} from './contracts';
-
-// Domain errors (§7 Error Contracts)
-export { InvalidTransitionError, ReceiptChainError } from './errors';
-
-// State machine transition functions (§6 State Machines)
-export {
-  transitionStage,
-  transitionSlice,
-  transitionCv,
-  transitionProject,
-} from './transitions';
-
-// Contract validators (§4 File / Artifact Contracts, §7 Error Contracts)
-export {
-  validateReceipt,
-  validateManifest,
-  validateRuntimeLock,
-  validateFinding,
   SchemaValidationError,
+  validateRuntimeLock,
 } from './validators';
-export type {
-  ValidatedReceipt,
-  ValidatedManifest,
-  ValidatedRuntimeLock,
-  ValidatedFinding,
-} from './validators';
+export type { ValidatedRuntimeLock } from './validators';
 
-// Canonical Stage ID guard (S09-C-T03) — the SINGLE shared `^S\d+$` rule for
-// candidate parser, compiler, Mechanical Validator, plan/stage/review status
-// and every admission seam. Legacy S08B0/S08B labels fail closed.
+// Canonical Stage ID guard (S09-C-T03) — the SINGLE shared `^S\d+$` rule.
+// The retired candidate parser / compiler / admission consumers are gone;
+// the guard now serves the surviving neutral vNext surfaces.
 export {
   CANONICAL_STAGE_ID_RE,
   isCanonicalStageId,
   assertCanonicalStageId,
 } from './validators';
-export type { CanonicalStageId } from './contracts';
-
-// ReceiptWriter — digest & chain verification (§4 File / Artifact Contracts).
-// `writeReceipt` remains the v1 compatibility API; future Runtime admission
-// must use the additive root-bound `writeReceiptBounded` seam instead.
-export {
-  computeReceiptDigest,
-  verifyReceiptDigest,
-  verifyReceiptChain,
-  writeReceipt,
-  writeReceiptBounded,
-  ensureBoundedReceiptDirectory,
-  assertValidReceiptChain,
-  DEFAULT_LOCK_TIMEOUT_MS,
-} from './receipt-writer';
-export type {
-  ReceiptWriterOptions,
-  BoundedReceiptWriterOptions,
-  EnsureBoundedReceiptDirectoryOptions,
-  ReceiptDirectoryBinding,
-  ReceiptFileBinding,
-  BoundedWriteReceiptResult,
-  WriteReceiptResult,
-  VerifyReceiptChainOptions,
-  ChainVerificationResult,
-} from './receipt-writer';
+export type { CanonicalStageId } from './validators';
 
 /** Minimal type for workspace import chain demonstration. */
 export type PackageName = string;
@@ -107,9 +42,9 @@ export type PackageName = string;
 export const KERNEL_NAME: PackageName = '@proofloop/kernel';
 
 // ============================================================
-// vNext Contract Foundation (S0-A bootstrap) — ADDITIVE surface.
+// vNext Contract Foundation — neutral machine surface.
 // Closed, versioned contracts for Canonical Plan, Reference Index,
-// Proof Index, and the vNext Manifest. v1 contracts above are unchanged.
+// Proof Index, and canonicalization / digest utilities.
 // ============================================================
 
 // vNext constants
@@ -136,11 +71,6 @@ export type {
   VNextPlanNode,
   VNextCanonicalPlan,
   VNextPlanProjection,
-  VNextRuntimeProofSection,
-  VNextManifestSlice,
-  VNextManifest,
-  VNextSpvPassReceipt,
-  VNextStagePlanReceipt,
 } from './vnext';
 
 // vNext canonicalization / digest utilities
@@ -148,30 +78,22 @@ export {
   canonicalJson,
   sha256Hex,
   computeDigest,
+  SHA256_HEX_RE,
   isSha256Hex,
 } from './vnext';
 
-// vNext Canonical Plan model (Slice 0.1)
+// vNext Canonical Plan model
 export {
   canonicalizePlanProjection,
   computePlanDigest,
   validateVNextPlan,
 } from './vnext';
 
-// vNext Reference Index (Slice 0.2)
+// vNext Reference Index
 export {
   validateVNextReferenceDescriptor,
   validateVNextReferenceIndex,
 } from './vnext';
 
-// vNext Proof Index (Slice 0.2)
+// vNext Proof Index
 export { validateVNextProofIndex } from './vnext';
-
-// vNext Manifest (Schema Cutover)
-export { validateVNextManifest } from './vnext';
-export {
-  validateVNextSpvPassReceipt,
-  validateVNextStagePlanReceipt,
-  computeVNextSpvPassReceiptDigest,
-  computeVNextStagePlanReceiptDigest,
-} from './vnext';

@@ -417,3 +417,129 @@ export function openNoFollowRead(
   }
   return { ok: true, fd, filePath: openTarget };
 }
+
+// ============================================================
+// Root-bound, TOCTOU-safe file read (extracted mechanical primitive)
+// ============================================================
+
+/** Structured root-bound read failure. */
+export class PathReadError extends Error {
+  public readonly code:
+    | 'escape'
+    | 'unreadable'
+    | 'not-regular-file'
+    | 'toctou-change'
+    | 'invalid-utf8';
+
+  constructor(code: PathReadError['code'], message: string) {
+    super(message);
+    this.name = 'PathReadError';
+    this.code = code;
+  }
+}
+
+function readFail(code: PathReadError['code'], message: string): never {
+  throw new PathReadError(code, message);
+}
+
+export interface ReadRootBoundResult {
+  readonly content: string;
+  readonly filePath: string;
+}
+
+/**
+ * Re-check that the canonical path still references the SAME inode with the
+ * SAME metadata that was read from the fd. A replacement / metadata change
+ * between the read and the re-check fails closed as `toctou-change`.
+ */
+export function assertFileUnchanged(
+  filePath: string,
+  fdStats: fs.Stats,
+  statFn: (p: string) => fs.Stats = (p) => fs.statSync(p),
+): void {
+  let finalStats: fs.Stats;
+  try {
+    finalStats = statFn(filePath);
+  } catch {
+    readFail('toctou-change', `Path "${filePath}" disappeared between read and re-check`);
+  }
+  if (
+    finalStats.dev !== fdStats.dev ||
+    finalStats.ino !== fdStats.ino ||
+    finalStats.mtimeMs !== fdStats.mtimeMs ||
+    finalStats.size !== fdStats.size
+  ) {
+    readFail(
+      'toctou-change',
+      `Path "${filePath}" changed identity/metadata between the read and the re-check (TOCTOU)`
+    );
+  }
+}
+
+/**
+ * Read a root-relative file with the atomic no-follow boundary and a
+ * pre-read + post-read identity/metadata re-check.
+ */
+export function readRootBoundFile(root: string, pathPart: string): ReadRootBoundResult {
+  if (typeof root !== 'string' || root.length === 0 || typeof pathPart !== 'string' || pathPart.length === 0) {
+    readFail('escape', 'Root and path must be non-empty strings');
+  }
+
+  const opened = openNoFollowRead(root, pathPart);
+  if (!opened.ok) {
+    switch (opened.reason) {
+      case 'escape':
+        readFail(
+          'escape',
+          `Path "${pathPart}" escapes the project root trust boundary (absolute path, ".." traversal or symlink escape)`
+        );
+      case 'not-regular-file':
+        readFail('not-regular-file', `Path "${pathPart}" is not a regular file`);
+      case 'inode-mismatch':
+        readFail(
+          'toctou-change',
+          `Path "${pathPart}" identity changed between the pre-open check and the atomic open (TOCTOU)`
+        );
+      default:
+        readFail('unreadable', `Path "${pathPart}" is missing or unreadable`);
+    }
+  }
+
+  const fd = opened.fd;
+  let content: string;
+  try {
+    const buf = fs.readFileSync(fd);
+    content = new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch (err) {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore close failure */
+    }
+    const isInvalidUtf8 = err instanceof TypeError && /utf-8|decode|invalid/i.test(String(err.message));
+    if (isInvalidUtf8) {
+      readFail('invalid-utf8', `Path "${pathPart}" is not valid UTF-8`);
+    }
+    readFail('unreadable', `Path "${pathPart}" could not be read from the opened fd`);
+  }
+
+  let fdStats: fs.Stats;
+  try {
+    fdStats = fs.fstatSync(fd);
+  } catch {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    readFail('toctou-change', `Path "${pathPart}" fd could not be re-stat'ed after read`);
+  }
+  try {
+    fs.closeSync(fd);
+  } catch {
+    /* ignore */
+  }
+
+  assertFileUnchanged(opened.filePath, fdStats);
+  return { content, filePath: opened.filePath };
+}

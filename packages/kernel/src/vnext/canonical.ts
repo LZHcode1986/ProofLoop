@@ -1,17 +1,66 @@
 /**
- * @proofloop/kernel — vNext canonicalization & digest utilities (S0-A).
+ * @proofloop/kernel — canonicalization & digest utilities.
  *
  * Deterministic UTF-8 / canonical-JSON hashing for vNext digests.
- * Reuses the kernel's existing canonical JSON serializer (receipt-writer)
- * so v1 and vNext share ONE canonicalization rule (§8 plan_digest:
- * "由规范化 Plan AST 计算，而不是对完整 Markdown 字节计算").
+ * `canonicalJson` is the SINGLE canonicalization rule used by every kernel
+ * digest: v1 Receipt digests and vNext digests always shared one
+ * canonicalization rule (§8 plan_digest: "由规范化 Plan AST 计算，而不是对
+ * 完整 Markdown 字节计算"), and after the neutral cutover that rule lives
+ * here, exactly once.
  */
-
 import { createHash } from 'node:crypto';
-import { canonicalJson } from '../receipt-writer';
 
-/** Re-export the shared canonical JSON serializer. */
-export { canonicalJson };
+/**
+ * Serializes a value to canonical JSON with deterministically sorted keys.
+ *
+ * Uses a recursive approach: objects are serialized with their keys sorted
+ * lexicographically so the same logical data always produces the same string
+ * representation. This is essential for content-addressed digests.
+ *
+ * @param value - The value to serialize.
+ * @returns Canonical JSON string.
+ *
+ * @throws {TypeError} if the value contains non-JSON types (symbol, bigint,
+ *   function) or non-finite numbers — fail closed, never hash ambiguous data.
+ */
+export function canonicalJson(value: unknown): string {
+  if (value === null || value === undefined) {
+    return 'null';
+  }
+
+  if (typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+
+  if (typeof value === 'number') {
+    // NaN and Infinity are not valid JSON values — reject them early
+    if (!Number.isFinite(value)) {
+      throw new TypeError(
+        `Cannot canonicalize non-finite number: ${value}`,
+      );
+    }
+    return String(value);
+  }
+
+  if (typeof value === 'boolean') {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    const items = value.map((item) => canonicalJson(item));
+    return `[${items.join(',')}]`;
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+    const pairs = keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(obj[key])}`);
+    return `{${pairs.join(',')}}`;
+  }
+
+  // Fallback for any other type (symbol, bigint, function, etc.)
+  throw new TypeError(`Cannot canonicalize value of type ${typeof value}`);
+}
 
 /**
  * SHA-256 over UTF-8 bytes, lowercase hex (64 chars).

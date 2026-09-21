@@ -1,22 +1,24 @@
 /**
- * proofloop-common.ts — S10-A-T01: shared helpers for the public proofloop CLI
- * seam base.
+ * proofloop-common.ts — shared helpers for the public proofloop CLI seam.
  *
- * Provides the closed domain/operation registry (§0.3), the canonical JSON
- * result envelope (§0.2), the exit contract (§0.1) and the canonical trust
- * root assertion.  This module never writes Receipts/Manifest/Context/
- * Evidence and never imports a harness SDK (OpenCode/Pi/Claude); it only
- * consumes Node built-ins and the runtime's own root-bound helpers.
+ * Provides the closed domain/operation registry, the canonical JSON result
+ * envelope, the exit contract and the canonical trust root assertion.  This
+ * module never writes Receipts/Manifest/Context/Evidence and never imports a
+ * harness SDK (OpenCode/Pi/Claude); it only consumes Node built-ins and the
+ * runtime's own root-bound helpers.
  *
- * S10-A-T02 registers the doctor domain handlers; later Slices register the
- * authority/plan/context/stage/review/project handlers through the
- * same closed registry.  The registry is the single closed command matrix —
- * unknown domain/operation must fail closed before any write or input read.
+ * CLI cutover (bootstrap unlock): every legacy business-control domain
+ * (authority/plan/context/stage/review/project/doctor/gate/recovery/cutover)
+ * and its handlers/routes were removed — no fallback/compatibility alias
+ * remains.  Only the mechanical public plumbing lives here (root/assertion,
+ * canonical envelope, closed argv/request base parsing) and the mechanical
+ * deterministic Git boundary adapter (`boundary`).  The registry is still the
+ * single closed command matrix — unknown domain/operation must fail closed
+ * before any write or input read.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { resolveProjectRoot } from './vnext-cli-support-vnext';
 import { canonicalPathWithinRoot } from '../path-guard';
 import { readRootBoundFile } from '../vnext';
 import { BOUNDARY_TYPES } from '../git-boundary';
@@ -29,8 +31,7 @@ export const PROOFLOOP_CLI_SCHEMA_VERSION = 2;
 
 /**
  * Runtime package version, read from `packages/runtime/package.json` so the
- * built dist CLI and the source tests report the same value (source/dist
- * 同构, §0.2 runtime.version).
+ * built dist CLI and the source tests report the same value.
  */
 function readRuntimeVersion(): string {
   try {
@@ -48,7 +49,7 @@ export const PROOFLOOP_RUNTIME_VERSION: string = readRuntimeVersion();
 export const PROOFLOOP_ROOT_ENV = 'PROOFLOOP_ROOT';
 
 // ============================================================
-// Exit contract (§0.1 + S10-A-T01 design)
+// Exit contract
 // ============================================================
 
 export const CLI_EXIT = {
@@ -61,22 +62,14 @@ export const CLI_EXIT = {
 } as const;
 
 // ============================================================
-// Closed domain/operation registry (§0.3 closed command matrix)
+// Closed domain/operation registry (closed command matrix)
 // ============================================================
 
 export const CANONICAL_DOMAINS = [
-  'authority',
-  'plan',
-  'context',
-  'stage',
-  'review',
-  'project',
-  'doctor',
-  'gate',
-  'recovery',
-  // S10-E-T02 repair: cutover 域接入唯一 public seam（CLI Contract §0.3）。
-  'cutover',
+  // CLI cutover: the only remaining domains are the mechanical deterministic
+  // Git boundary adapter and the dedicated mechanical Integration adapter.
   'boundary',
+  'integration',
 ] as const;
 
 export type CanonicalDomain = (typeof CANONICAL_DOMAINS)[number];
@@ -87,63 +80,8 @@ export interface DomainRegistryEntry {
 }
 
 export const DOMAIN_REGISTRY: Readonly<Record<CanonicalDomain, DomainRegistryEntry>> = {
-  authority: { domain: 'authority', operations: ['check'] },
-  plan: {
-    domain: 'plan',
-    operations: [
-      'materialize',
-      'compile',
-      'validate',
-      'initialize-evidence',
-      'refresh-evidence',
-      'status',
-      'admit-spv',
-      'admit-stage-plan',
-    ],
-  },
-  context: {
-    domain: 'context',
-    operations: ['prepare', 'show', 'admit-refutation-observation'],
-  },
-  stage: {
-    domain: 'stage',
-    operations: [
-      'status',
-      'next',
-      'admit-worker',
-      'admit-cv',
-      'admit-slice-commit',
-      'admit-integration',
-      'run-gate',
-      // P-11: vNext Stage Close admission 的 public CLI 入口（write-once
-      // STAGE_CLOSE_PASS receipt）。
-      'close',
-    ],
-  },
-  review: { domain: 'review', operations: ['status', 'prepare-stage', 'finalize-stage'] },
-  project: {
-    domain: 'project',
-    operations: [
-      'status',
-      'compile-acceptance',
-      'run-e2e',
-      'prepare-review',
-      'finalize-review',
-    ],
-  },
-  // S10-D-T03: doctor 域补 run/status 闭集完整语义（status 只读状态报告 +
-  // receipts 类别摘要）。
-  doctor: { domain: 'doctor', operations: ['run', 'status'] },
-  gate: { domain: 'gate', operations: ['run', 'status'] },
-  // S10-D-T03: recovery 域 closed 操作集（check/preflight/restart/doctor）。
-  recovery: {
-    domain: 'recovery',
-    operations: ['check', 'preflight', 'restart', 'doctor'],
-  },
-  // S10-E-T02 repair: cutover 域 closed 操作集（status 只读 legacy scan；
-  // execute 带 irreversible 保护语义的删除执行）。
-  cutover: { domain: 'cutover', operations: ['status', 'execute'] },
   boundary: { domain: 'boundary', operations: ['close'] },
+  integration: { domain: 'integration', operations: ['apply'] },
 };
 
 export function isCanonicalDomain(value: string): value is CanonicalDomain {
@@ -155,7 +93,7 @@ export function isCanonicalOperation(domain: CanonicalDomain, operation: string)
 }
 
 // ============================================================
-// Canonical CLI result envelope (§0.2)
+// Canonical CLI result envelope
 // ============================================================
 
 export interface CliCommand {
@@ -166,13 +104,6 @@ export interface CliCommand {
 export interface CliFinding {
   readonly code: string;
   readonly message: string;
-  /**
-   * S13-S17 remediation Phase 4 (CV repair #6): present only on
-   * STAGE_COMPOSITION_GAP findings — the full structured §9.5 Stage
-   * Composition Closure Audit finding, carried 1:1 from the mechanical
-   * validator through the public `proofloop plan validate` envelope.
-   */
-  readonly stage_composition?: import('../vnext/stage-composition-audit').VNextCompositionGapFinding;
 }
 
 export interface CliRef {
@@ -209,15 +140,6 @@ export function okEnvelope(command: CliCommand, result: unknown): CliEnvelope {
   return { ...baseEnvelope(command), ok: true, result, findings: [] };
 }
 
-/** S10-B-T01: ok envelope carrying operation ref+digest bindings (e.g. a written Manifest). */
-export function okEnvelopeWithRefs(
-  command: CliCommand,
-  result: unknown,
-  refs: readonly CliRef[],
-): CliEnvelope {
-  return { ...baseEnvelope(command), ok: true, result, findings: [], refs: [...refs] };
-}
-
 export function errorEnvelope(command: CliCommand, code: string, message: string): CliEnvelope {
   return {
     ...baseEnvelope(command),
@@ -227,17 +149,9 @@ export function errorEnvelope(command: CliCommand, code: string, message: string
   };
 }
 
-/** S10-B-T01: blocked envelope carrying every structured finding from a seam result. */
-export function failureEnvelope(
-  command: CliCommand,
-  findings: readonly CliFinding[],
-): CliEnvelope {
-  return { ...baseEnvelope(command), ok: false, result: null, findings: [...findings] };
-}
-
 /**
- * Canonical JSON serialization (CV repair): recursively sorts object keys so
- * that logically equal envelopes produce byte-identical stdout regardless of
+ * Canonical JSON serialization: recursively sorts object keys so that
+ * logically equal envelopes produce byte-identical stdout regardless of
  * property insertion order; arrays keep element order; `undefined` values are
  * dropped (JSON semantics).  Output is a single line of canonical JSON.
  */
@@ -260,7 +174,7 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
-/** stdout must carry exactly one canonical JSON envelope line (§0.1). */
+/** stdout must carry exactly one canonical JSON envelope line. */
 export function emitEnvelope(envelope: CliEnvelope): void {
   console.log(canonicalStringify(envelope));
 }
@@ -319,12 +233,38 @@ function findProjectRootUpward(start: string): string | null {
 }
 
 /**
+ * Resolve a project root to its physical directory.  A root that is not an
+ * existing directory is never accepted as a trust boundary.
+ * (Inlined from the removed vnext-cli-support-vnext: mechanical root
+ * assertion plumbing.)
+ */
+function resolveProjectRoot(projectRoot?: string): string {
+  if (projectRoot !== undefined && (typeof projectRoot !== 'string' || projectRoot.length === 0)) {
+    throw new Error('project-root must be a non-empty path');
+  }
+  const lexical = path.resolve(projectRoot ?? process.cwd());
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(lexical);
+  } catch (error) {
+    throw new Error(
+      `project root is not readable: ${lexical} (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`project root is not a directory: ${lexical}`);
+  }
+  const canonical = fs.realpathSync(lexical);
+  return canonical;
+}
+
+/**
  * Resolve the canonical trust root:
  *  - explicit root (`--project-root` / `--root` flag or `PROOFLOOP_ROOT`
  *    env): must be an existing directory (realpath-canonicalized); when the
  *    cwd also auto-resolves to a different root, the explicit root fails
- *    closed (§0.1: caller-provided project_root is a consistency assertion,
- *    never an override of the canonical root).
+ *    closed (caller-provided project_root is a consistency assertion, never
+ *    an override of the canonical root).
  *  - otherwise: nearest ancestor of cwd carrying `.proofloop` or `.git`.
  *  - no root resolvable → `TrustRootError` (fail closed; cwd alone is never
  *    an artifact trust root).
@@ -369,53 +309,39 @@ export interface ParsedCliArgs {
   readonly positionals: readonly string[];
   readonly help: boolean;
   readonly version: boolean;
-  /** `--project-root` (canonical, §0.1) or `--root` (S10-A-T01 alias). */
+  /** `--project-root` (canonical) or `--root` alias. */
   readonly projectRoot: string | undefined;
-  /** `--request <root-relative-json>` — root-bound/no-follow request file (S10-A-T02). */
+  /** `--request <root-relative-json>` — root-bound/no-follow request file. */
   readonly requestPath: string | undefined;
   /**
-   * `--json` (S10-A-T02): optional-value flag — `--json <closed-json>` is the
-   * inline closed input; a bare `--json` (no value) is the JSON output mode
+   * `--json`: optional-value flag — `--json <closed-json>` is the inline
+   * closed input; a bare `--json` (no value) is the JSON output mode
    * declaration and leaves `jsonInput` undefined.
    */
   readonly jsonInput: string | undefined;
   /**
-   * `--stage <stage-id>` (S10-B-T01): target Stage ID for the plan/authority
-   * domain operations (`plan validate --json --stage S10`).  A canonical
-   * Stage ID (`^S\d+$`) is enforced by the domain handler; the flag itself is
-   * closed but generic so the dispatcher can surface it to any domain.
+   * `--stage <stage-id>`: target Stage ID for the boundary request
+   * consistency check.  A canonical Stage ID (`^S\d+$`) is enforced by the
+   * boundary handler; the flag itself is closed but generic so the
+   * dispatcher can surface it to any domain.
    */
   readonly stage: string | undefined;
   /**
-   * S10-B-T02 context-domain flags: `--role <role>` (closed Context role
-   * set), `--slice <slice-id>` / `--task <task-id>` (Context tuple bindings),
-   * `--observation <text>` (admit-refutation-observation input),
-   * `--observation-ref <root-relative-ref>` (show gate verification: the
-   * digest-addressed persisted observation record) and `--ref
-   * <root-relative-context-ref>` (show read-back mode).  All are closed
-   * generic value flags; only the context handler consumes them.
+   * `--detail`: boolean flag of the read-only `proofloop status` entry —
+   * requested the bounded L2 detail projection.  Closed but unused by the
+   * mechanical boundary/integration domains.
    */
-  readonly role: string | undefined;
-  readonly slice: string | undefined;
-  readonly task: string | undefined;
-  readonly observation: string | undefined;
-  readonly observationRef: string | undefined;
-  readonly ref: string | undefined;
+  readonly detail?: boolean;
+  /**
+   * `true` when a BARE `--json` (no value) declared structured JSON output
+   * mode.  `--json <closed-json>` / `--json=<closed-json>` remain inline
+   * request input mode and leave this false.
+   */
+  readonly jsonOutput?: boolean;
 }
 
-const VALUE_FLAGS = new Set([
-  '--project-root',
-  '--root',
-  '--request',
-  '--stage',
-  '--role',
-  '--slice',
-  '--task',
-  '--observation',
-  '--observation-ref',
-  '--ref',
-]);
-const BOOLEAN_FLAGS = new Set(['--help', '--version']);
+const VALUE_FLAGS = new Set(['--project-root', '--root', '--request', '--stage']);
+const BOOLEAN_FLAGS = new Set(['--help', '--version', '--detail']);
 
 /**
  * Parse the closed flag set only.  Unknown flags / missing values throw; the
@@ -429,12 +355,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
   let requestPath: string | undefined;
   let jsonInput: string | undefined;
   let stage: string | undefined;
-  let role: string | undefined;
-  let slice: string | undefined;
-  let task: string | undefined;
-  let observation: string | undefined;
-  let observationRef: string | undefined;
-  let ref: string | undefined;
+  let detail = false;
+  let jsonOutput = false;
 
   let index = 0;
   while (index < argv.length) {
@@ -448,6 +370,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
         }
         if (flag === '--help') help = true;
         if (flag === '--version') version = true;
+        if (flag === '--detail') detail = true;
         index += 1;
         continue;
       }
@@ -466,16 +389,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
         if (flag === '--project-root' || flag === '--root') projectRoot = value;
         if (flag === '--request') requestPath = value;
         if (flag === '--stage') stage = value;
-        if (flag === '--role') role = value;
-        if (flag === '--slice') slice = value;
-        if (flag === '--task') task = value;
-        if (flag === '--observation') observation = value;
-        if (flag === '--observation-ref') observationRef = value;
-        if (flag === '--ref') ref = value;
         continue;
       }
       if (flag === '--json') {
-        // Optional-value flag (§0.1): `--json <closed-json>` inline input, or
+        // Optional-value flag: `--json <closed-json>` inline input, or
         // a bare `--json` declaring JSON output mode (no input value).
         if (equals !== -1) {
           jsonInput = token.slice(equals + 1);
@@ -486,6 +403,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
             jsonInput = next;
             index += 2;
           } else {
+            jsonOutput = true;
             index += 1;
           }
         }
@@ -505,216 +423,140 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
     requestPath,
     jsonInput,
     stage,
-    role,
-    slice,
-    task,
-    observation,
-    observationRef,
-    ref,
+    detail,
+    jsonOutput,
   };
 }
 
 // ============================================================
-// Closed request input (§0.1: closed JSON object, unknown field fail
+// Closed request input (closed JSON object, unknown field fail
 // closed; `--request` must be root-bound/no-follow)
 // ============================================================
 
 /**
- * Closed request schema fields (S10-A-T02): domain/operation consistency.
- * S10-B-T01 extends the schema per domain so plan/authority operations can
- * carry their bounded parameters through the same unified request contract
- * (`--request` file or `--json` inline).  Unknown fields still fail closed.
+ * Closed request schema fields.  After the CLI cutover both active domains
+ * register fields: `boundary` registers the mechanical Git-boundary close
+ * parameters and `integration` registers the dedicated mechanical
+ * Integration apply parameters (candidate refs / base / declared changed
+ * paths).  Unknown fields still fail closed.
  */
 export interface CliRequestInput {
   readonly domain: string | undefined;
   readonly operation: string | undefined;
-  /** S10-B-T01: target canonical Stage ID (`^S\d+$`) for plan/authority ops. */
-  readonly stage: string | undefined;
-  /** S10-B-T01: root-relative vNext Manifest path (default `.proofloop/manifests/<stage>.json`). */
-  readonly manifest: string | undefined;
-  /** S10-B-T01: previous Manifest digest for `plan refresh-evidence`. */
-  readonly previous_manifest_digest: string | undefined;
-  /** S10-B-T01: explicit evidence directory (default derived from the Manifest). */
-  readonly evidence_dir: string | undefined;
-  /** S10-B-T01: refresh transaction mode (refresh | recover | rollback). */
-  readonly mode: string | undefined;
-  /**
-   * S15-A-T02 (optional superset, same precedent as the project-domain
-   * fields): mode=replan — root-relative, digest-addressed Runtime
-   * preparation disposition fact ref (`.proofloop/runtime/replan/**`),
-   * its content digest and the rotation transaction phase
-   * (rotate | recover | rollback).  Optional so existing `CliRequestInput`
-   * literals outside the plan domain stay valid; the closed schema
-   * validation below enforces the mode=replan tuple.
-   */
-  readonly disposition_ref?: string | undefined;
-  readonly disposition_digest?: string | undefined;
-  readonly replan_phase?: string | undefined;
-  /** S10-B-T01: root-relative candidate input path for `plan compile`. */
-  readonly input_path: string | undefined;
-  /** S10-B-T01: root-relative Manifest output path for `plan compile`. */
-  readonly output_path: string | undefined;
-  /**
-   * S10-B-T02 context-domain fields: closed Context role (`prepare`/`show`),
-   * slice/task tuple bindings, `admit-refutation-observation` text and the
-   * show-mode `observation_ref` / `ref` inputs.
-   */
-  readonly role: string | undefined;
-  readonly slice: string | undefined;
-  readonly task: string | undefined;
-  readonly observation: string | undefined;
-  readonly observation_ref: string | undefined;
-  readonly ref: string | undefined;
-  /**
-   * S10-D-T02 project-domain fields: root-relative manifest path
-   * (`run-e2e`/`prepare-review`/`finalize-review`), root-relative Project E2E
-   * Gate Receipt path (`prepare-review`/`finalize-review`), root-relative AI
-   * Project Reviewer result file path (`finalize-review`) and the optional
-   * root-relative Receipt output directory (`run-e2e`/`finalize-review`;
-   * default canonical `project/` category).  Optional so existing
-   * `CliRequestInput` literals outside the project domain stay valid.
-   */
-  readonly manifest_path?: string | undefined;
-  readonly e2e_receipt_path?: string | undefined;
-  readonly reviewer_result_path?: string | undefined;
-  readonly output_dir?: string | undefined;
   /** Boundary close request fields (public deterministic Git adapter). */
   readonly boundary_type?: string | undefined;
   readonly expected_head?: string | undefined;
-  readonly manifest_digest?: string | undefined;
-  readonly cv_receipt_digest?: string | undefined;
-  readonly old_manifest_digest?: string | undefined;
+  readonly stage?: string | undefined;
+  readonly slice?: string | undefined;
+  /**
+   * slice-output only: other-Slice declared dirty files. Tolerance scope
+   * ONLY — never selected/staged/committed by this boundary.
+   */
+  readonly other_slice_declared_files?: readonly string[] | undefined;
+  /**
+   * Explicit exact dirty files tolerated by the boundary; never staged or
+   * committed. This is separate from slice-output's other-Slice field.
+   */
+  readonly tolerated_paths?: readonly string[] | undefined;
   readonly paths?: readonly string[] | undefined;
   readonly description?: string | undefined;
   readonly expected_branch?: string | undefined;
+  /**
+   * Integration apply fields (dedicated mechanical Integration transaction):
+   * candidate_ref / candidate_base_ref are the Git refs of the CV `PASS`
+   * candidate and its patch base (e.g. `proofloop-s01-a` and its base).
+   */
+  readonly candidate_ref?: string | undefined;
+  readonly candidate_base_ref?: string | undefined;
+  /** Integration Contract (D.1) closed fields. */
+  readonly execution_mode?:
+    | 'NORMAL'
+    | 'PRE_MES_BOOTSTRAP'
+    | 'MES_MAINTENANCE'
+    | undefined;
+  readonly expected_worktree?: string | undefined;
+  readonly maintenance_binding?: Record<string, unknown> | undefined;
 }
 
 /**
- * S10-C-T01 stage-domain extension of the closed request contract（超集，
- * 不修改既有 CliRequestInput，避免波及 scope 外构造点）：
- * `envelope` 携带 closed vNext structured-result 对象（Worker v2 envelope /
- * CV_RESULT envelope）；`verdict` / `snapshot_digest` / `summary` 是 legacy CV
- * scalars（vNext CLI 拒绝，cross-version fail closed）；`commit_sha` /
- * `cv_receipt_digest` 绑定 Slice Commit。
+ * NOTE (boundary closed schema): retired digest request fields are rejected;
+ * `other_slice_declared_files` remains slice-output-only and `tolerated_paths`
+ * is the explicit exact-file tolerance for ordinary boundaries.
  */
-export interface StageCliRequestInput extends CliRequestInput {
-  readonly envelope: unknown;
-  readonly verdict: string | undefined;
-  readonly snapshot_digest: string | undefined;
-  readonly summary: string | undefined;
-  readonly commit_sha: string | undefined;
-  readonly cv_receipt_digest: string | undefined;
-  /** P-11 stage close: closed close_type（full | restricted）。 */
-  readonly close_type: string | undefined;
-  /** P-11 stage close: 非空 close reason（fail-closed）。 */
-  readonly reason: string | undefined;
-  /** P-11 stage close: Manifest digest（sha256；seam 重验与 persisted Manifest 一致）。 */
-  readonly manifest_digest: string | undefined;
-}
 
 export type CliRequestValidation =
-  | { readonly ok: true; readonly request: StageCliRequestInput }
+  | { readonly ok: true; readonly request: CliRequestInput }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Closed request field set per domain (S10-B-T01); other domains stay closed to {domain, operation}. */
+/** Closed request field set per domain; other domains stay closed to {domain, operation}. */
 const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string>>> = {
-  authority: new Set(['domain', 'operation', 'stage', 'manifest']),
-  // A1 step 5: plan 域 closed request 字段 — materialize 追加 check
-  // （boolean，只复核不写 → CANDIDATE_CHECKED）。check 的类型特例见
-  // parseClosedRequestObject。未知字段仍 fail closed。
-  plan: new Set([
-    'domain',
-    'operation',
-    'stage',
-    'manifest',
-    'previous_manifest_digest',
-    'evidence_dir',
-    'mode',
-    'disposition_ref',
-    'disposition_digest',
-    'replan_phase',
-    'input_path',
-    'output_path',
-    'check',
-  ]),
-  context: new Set([
-    'domain',
-    'operation',
-    'stage',
-    'role',
-    'slice',
-    'task',
-    'observation',
-    'observation_ref',
-    'ref',
-  ]),
-  stage: new Set([
-    'domain',
-    'operation',
-    'stage',
-    'slice',
-    'envelope',
-    'verdict',
-    'snapshot_digest',
-    'summary',
-    'commit_sha',
-    'cv_receipt_digest',
-    // P-11: stage close closed 字段 — close_type（full|restricted）、非空
-    // reason 与 manifest_digest（sha256，admit seam 重验）。plan_digest /
-    // stage_plan_receipt_digest / spv_receipt_digest 由 seam 从 root-bound
-    // authority 重读派生，caller 不可注入（未登记 → 未知字段 fail closed）。
-    'close_type',
-    'reason',
-    'manifest_digest',
-  ]),
-  // S10-D-T01: review 域 closed request 字段 — status/prepare-stage 只需
-  // `stage`；finalize-stage 追加 closed verdict（ACCEPTED|REPAIR）与非空
-  // summary（与 Host proofloop_review 对齐）。未知字段仍 fail closed。
-  review: new Set(['domain', 'operation', 'stage', 'verdict', 'summary']),
-  // S10-D-T02: project 域 closed request 字段 — status 只需 domain/operation
-  // （project 域全局，无 --stage）；compile-acceptance 用 input_path +
-  // output_path；run-e2e/prepare-review/finalize-review 用 manifest_path；
-  // prepare-review/finalize-review 追加 e2e_receipt_path；finalize-review
-  // 追加 reviewer_result_path + closed verdict（PROJECT_ACCEPTED|
-  // PROJECT_REJECTED|PROJECT_BLOCKED）+ 非空 summary；run-e2e/finalize-review
-  // 可选 output_dir。未知字段仍 fail closed。
-  project: new Set([
-    'domain',
-    'operation',
-    'input_path',
-    'output_path',
-    'manifest_path',
-    'e2e_receipt_path',
-    'reviewer_result_path',
-    'output_dir',
-    'verdict',
-    'summary',
-  ]),
-  // S10-SR-001 repair: gate 域 closed request 字段 — run/status 需要 canonical
-  // stage；run 可选 verification_source（dual-path SG 的显式验证路径声明：
-  // receipts 默认 | git_facts 显式兜底，非法值在 parseClosedRequestObject
-  // fail-closed）。P-09：run 可选 re_gate（boolean，REPAIR 驱动重跑声明）。
-  // 未知字段仍 fail closed。
-  gate: new Set(['domain', 'operation', 'stage', 'verification_source', 're_gate']),
-  // S10-D-T03: recovery 域 closed request 字段 — check/preflight/restart
-  // 需要 canonical stage（--stage 或 request stage，一致性由
-  // resolveRequestInput 保证）；doctor 转发 doctor 域无需额外字段。
-  // 未知字段仍 fail closed。
-  recovery: new Set(['domain', 'operation', 'stage']),
-  // S10-E-T02 repair: cutover 域 closed request 字段 — status 只读无需额外
-  // 字段；execute 需要 canonical stage（Acceptance A–E 事实验证目标）、
-  // confirmed（boolean，irreversible 确认）与 delete_list（string[]，
-  // 必须与 cutover status 检测出的 legacy 删除目标完全一致）。未知字段
-  // 仍 fail closed。confirmed/delete_list 的类型特例见 parseClosedRequestObject。
-  cutover: new Set(['domain', 'operation', 'stage', 'confirmed', 'delete_list']),
   boundary: new Set([
-    'domain', 'operation', 'boundary_type', 'expected_head', 'stage', 'slice',
-    'manifest_digest', 'cv_receipt_digest', 'old_manifest_digest', 'paths',
-    'description', 'expected_branch',
+    'domain',
+    'operation',
+    'boundary_type',
+    'expected_head',
+    'stage',
+    'slice',
+    'other_slice_declared_files',
+    'tolerated_paths',
+    'paths',
+    'description',
+    'expected_branch',
+  ]),
+  // Integration apply (dedicated mechanical Integration transaction):
+  // candidate_ref / candidate_base_ref are Git refs of the CV `PASS`
+  // candidate and its patch base; `paths` is the declared exact changed set.
+  integration: new Set([
+    'domain',
+    'operation',
+    'expected_head',
+    'expected_branch',
+    'stage',
+    'slice',
+    'candidate_ref',
+    'candidate_base_ref',
+    'paths',
+    'execution_mode',
+    'expected_worktree',
+    'maintenance_binding',
   ]),
 };
 
 const REQUEST_BASE_FIELDS = new Set(['domain', 'operation']);
+
+/** Closed Integration execution modes (integration.md D.1). */
+export const INTEGRATION_EXECUTION_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE'] as const;
+
+/** Lexical root-relative path check for integration worktree identities. */
+function isCanonicalRootRelativeRequestPath(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  if (value.startsWith('/') || value.startsWith('//') || value.includes('\\') || /^[A-Za-z]:/.test(value)) return false;
+  const parts = value.split('/');
+  return parts.every((part) => part.length > 0 && part !== '..');
+}
+
+/** Closed shape of the Integration MES_MAINTENANCE binding tuple. */
+function validateMaintenanceBindingShape(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'must be a closed object';
+  const known = new Set([
+    'frozen_snapshot_ref', 'frozen_snapshot_sha256', 'frozen_fact_count',
+    'forensic_ref', 'forensic_sha256', 'audit_ref', 'audit_sha256',
+  ]);
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (!known.has(key)) return `unknown field "${key}"`;
+  }
+  for (const field of ['frozen_snapshot_ref', 'forensic_ref', 'audit_ref'] as const) {
+    if (!isCanonicalRootRelativeRequestPath(record[field])) return `${field} must be a canonical root-relative ref`;
+  }
+  for (const field of ['frozen_snapshot_sha256', 'forensic_sha256', 'audit_sha256'] as const) {
+    const digest = record[field];
+    if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) return `${field} must be a 64-char lowercase hex sha256`;
+  }
+  const count = record.frozen_fact_count;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) return 'frozen_fact_count must be a positive integer';
+  return undefined;
+}
 
 function parseClosedRequestObject(value: unknown, domain: string): CliRequestValidation {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -736,52 +578,12 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
   }
   for (const key of Object.keys(record)) {
     if (record[key] === undefined) continue;
-    // S10-C-T01: the stage-domain `envelope` is the closed structured-result
-    // object (vNext Worker envelope / CV_RESULT envelope); every other field
-    // stays a string.
-    if (key === 'envelope') {
-      if (typeof record[key] !== 'object' || record[key] === null || Array.isArray(record[key])) {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "envelope" must be a JSON object (closed structured result)',
-        };
-      }
-      continue;
-    }
-    // S10-E-T02 repair: the cutover-domain `confirmed` is the irreversible
-    // acknowledgement boolean and `delete_list` is the closed string-array of
-    // legacy delete targets.  Only the cutover domain registers these keys
-    // (unknown-field rejection above keeps them out of every other domain).
-    if (key === 'confirmed') {
-      if (typeof record[key] !== 'boolean') {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "confirmed" must be a boolean (irreversible cutover acknowledgement)',
-        };
-      }
-      continue;
-    }
-    if (key === 'delete_list') {
-      if (
-        !Array.isArray(record[key]) ||
-        record[key].some((entry) => typeof entry !== 'string' || entry.length === 0)
-      ) {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "delete_list" must be an array of non-empty root-relative path strings',
-        };
-      }
-      continue;
-    }
-    if (key === 'paths') {
+    if (key === 'paths' || key === 'other_slice_declared_files' || key === 'tolerated_paths') {
       if (!Array.isArray(record[key]) || record[key].some((entry) => typeof entry !== 'string' || entry.length === 0)) {
         return {
           ok: false,
           code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "paths" must be an array of non-empty root-relative path strings',
+          message: `request field "${key}" must be an array of non-empty root-relative path strings`,
         };
       }
       continue;
@@ -796,73 +598,23 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
       }
       continue;
     }
-    // S10-SR-001 repair: the gate-domain `verification_source` is the closed
-    // enum declaring the explicit dual-path Gate verification path
-    // (`receipts` normal path | `git_facts` explicit fallback).  Only the
-    // gate domain registers this key (unknown-field rejection above keeps it
-    // out of every other domain); an illegal value fails closed before any
-    // handler runs.
-    if (key === 'verification_source') {
-      if (record[key] !== 'receipts' && record[key] !== 'git_facts') {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: `request field "verification_source" must be "receipts" or "git_facts", received "${String(record[key])}"`,
-        };
+    // Integration Contract (D.1): execution_mode is a closed enum.
+    if (key === 'execution_mode') {
+      if (typeof record[key] !== 'string' || !(INTEGRATION_EXECUTION_MODES as readonly string[]).includes(record[key] as string)) {
+        return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'request field "execution_mode" must be one of NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE' };
       }
       continue;
     }
-    // P-09: the gate-domain `re_gate` is the explicit REPAIR-driven re-run
-    // declaration (boolean).  Only the gate domain registers this key; a
-    // non-boolean value fails closed before any handler runs.
-    if (key === 're_gate') {
-      if (typeof record[key] !== 'boolean') {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "re_gate" must be a boolean (explicit REPAIR-driven re-gate declaration)',
-        };
+    if (key === 'expected_worktree') {
+      if (!isCanonicalRootRelativeRequestPath(record[key])) {
+        return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'request field "expected_worktree" must be a canonical root-relative path' };
       }
       continue;
     }
-    // A1 step 5: the plan-domain `check` is the read-only materialize recheck
-    // declaration (boolean → CANDIDATE_CHECKED, zero writes).  Only the plan
-    // domain registers this key (unknown-field rejection above keeps it out
-    // of every other domain); a non-boolean value fails closed before any
-    // handler runs.
-    if (key === 'check') {
-      if (typeof record[key] !== 'boolean') {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "check" must be a boolean (read-only materialize recheck declaration)',
-        };
-      }
-      continue;
-    }
-    // S15-A-T02: the plan-domain `disposition_digest` is the content digest
-    // of the Runtime preparation disposition fact (mode=replan); a malformed
-    // digest fails closed before any handler runs.  The `replan_phase` field
-    // is the closed rotation phase enum (rotate | recover | rollback) and is
-    // only legal together with mode=replan; mode=replan itself requires the
-    // disposition ref/digest.  Only the plan domain registers these keys.
-    if (key === 'disposition_digest') {
-      if (typeof record[key] !== 'string' || !/^[a-f0-9]{64}$/.test(record[key] as string)) {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'request field "disposition_digest" must be a lowercase SHA-256 (64 hex) digest of the Runtime preparation disposition fact',
-        };
-      }
-      continue;
-    }
-    if (key === 'replan_phase') {
-      if (record[key] !== 'rotate' && record[key] !== 'recover' && record[key] !== 'rollback') {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: `request field "replan_phase" must be one of rotate|recover|rollback, received "${String(record[key])}"`,
-        };
+    if (key === 'maintenance_binding') {
+      const bindingError = validateMaintenanceBindingShape(record[key]);
+      if (bindingError !== undefined) {
+        return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: `request field "maintenance_binding" is not a closed maintenance tuple: ${bindingError}` };
       }
       continue;
     }
@@ -874,91 +626,43 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
       };
     }
   }
-  const request: StageCliRequestInput = {
+  // Integration Contract (D.1): mode-specific fields are required/forbidden as a closed set.
+  if (domain === 'integration') {
+    const mode = record.execution_mode as string | undefined;
+    const hasBinding = record.maintenance_binding !== undefined;
+    if (mode === undefined) return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'integration request requires "execution_mode"' };
+    if (record.expected_worktree === undefined) return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'integration request requires "expected_worktree"' };
+    if (mode === 'MES_MAINTENANCE' && !hasBinding) return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'MES_MAINTENANCE integration request requires "maintenance_binding"' };
+    if (mode !== 'MES_MAINTENANCE' && hasBinding) return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: '"maintenance_binding" is only valid under execution_mode MES_MAINTENANCE' };
+  }
+  const request: CliRequestInput = {
     domain: record.domain as string | undefined,
     operation: record.operation as string | undefined,
-    stage: record.stage as string | undefined,
-    manifest: record.manifest as string | undefined,
-    previous_manifest_digest: record.previous_manifest_digest as string | undefined,
-    evidence_dir: record.evidence_dir as string | undefined,
-    mode: record.mode as string | undefined,
-    disposition_ref: record.disposition_ref as string | undefined,
-    disposition_digest: record.disposition_digest as string | undefined,
-    replan_phase: record.replan_phase as string | undefined,
-    input_path: record.input_path as string | undefined,
-    output_path: record.output_path as string | undefined,
-    role: record.role as string | undefined,
-    slice: record.slice as string | undefined,
-    task: record.task as string | undefined,
-    observation: record.observation as string | undefined,
-    observation_ref: record.observation_ref as string | undefined,
-    ref: record.ref as string | undefined,
-    envelope: record.envelope,
-    verdict: record.verdict as string | undefined,
-    snapshot_digest: record.snapshot_digest as string | undefined,
-    summary: record.summary as string | undefined,
-    commit_sha: record.commit_sha as string | undefined,
-    cv_receipt_digest: record.cv_receipt_digest as string | undefined,
-    close_type: record.close_type as string | undefined,
-    reason: record.reason as string | undefined,
-    manifest_digest: record.manifest_digest as string | undefined,
-    manifest_path: record.manifest_path as string | undefined,
-    e2e_receipt_path: record.e2e_receipt_path as string | undefined,
-    reviewer_result_path: record.reviewer_result_path as string | undefined,
-    output_dir: record.output_dir as string | undefined,
     boundary_type: record.boundary_type as string | undefined,
     expected_head: record.expected_head as string | undefined,
-    old_manifest_digest: record.old_manifest_digest as string | undefined,
+    stage: record.stage as string | undefined,
+    slice: record.slice as string | undefined,
     paths: Array.isArray(record.paths) ? record.paths as string[] : undefined,
+    other_slice_declared_files: Array.isArray(record.other_slice_declared_files)
+      ? record.other_slice_declared_files as string[]
+      : undefined,
+    tolerated_paths: Array.isArray(record.tolerated_paths)
+      ? record.tolerated_paths as string[]
+      : undefined,
     description: record.description as string | undefined,
     expected_branch: record.expected_branch as string | undefined,
+    candidate_ref: record.candidate_ref as string | undefined,
+    candidate_base_ref: record.candidate_base_ref as string | undefined,
+    execution_mode: record.execution_mode as
+      | 'NORMAL'
+      | 'PRE_MES_BOOTSTRAP'
+      | 'MES_MAINTENANCE'
+      | undefined,
+    expected_worktree: record.expected_worktree as string | undefined,
+    maintenance_binding: record.maintenance_binding === undefined
+      ? undefined
+      : record.maintenance_binding as Record<string, unknown>,
   };
-  if (request.mode !== undefined && !['refresh', 'recover', 'rollback', 'replan'].includes(request.mode)) {
-    return {
-      ok: false,
-      code: 'RUNTIME.INPUT_INVALID',
-      message: `request field "mode" must be one of refresh|recover|rollback|replan, received "${request.mode}"`,
-    };
-  }
-  // S15-A-T02: the replan fields are a closed tuple — `replan_phase` is only
-  // legal with mode=replan, and mode=replan requires the Runtime preparation
-  // disposition ref + digest (derived sets are never request fields, §8.8).
-  if (request.replan_phase !== undefined && request.mode !== 'replan') {
-    return {
-      ok: false,
-      code: 'RUNTIME.INPUT_INVALID',
-      message: 'request field "replan_phase" is only legal with mode=replan',
-    };
-  }
-  if (request.mode === 'replan') {
-    if (request.disposition_ref !== undefined && request.disposition_ref.length > 0) {
-      if (request.disposition_digest === undefined) {
-        return {
-          ok: false,
-          code: 'RUNTIME.INPUT_INVALID',
-          message: 'mode=replan requires the preparation disposition digest when disposition_ref is provided (request field "disposition_digest")',
-        };
-      }
-    }
-  }
-  // S10-E-T02 repair: cutover 域 closed 字段（confirmed/delete_list）经超集
-  // cast 附着到 request（与 S10-D project 域先例一致 —— 不动
-  // CliRequestInput 接口，只由 cutover handler 消费）。
-  const extended = request as unknown as Record<string, unknown>;
-  if (record.confirmed !== undefined) extended['confirmed'] = record.confirmed;
-  if (record.delete_list !== undefined) extended['delete_list'] = record.delete_list;
-  // S10-SR-001 repair: the gate-domain `verification_source` is carried to
-  // the gate handler through the same superset cast precedent (the closed
-  // enum check above runs before this attachment).
-  if (record.verification_source !== undefined) extended['verification_source'] = record.verification_source;
-  // P-09: the gate-domain `re_gate` boolean is carried through the same
-  // superset cast precedent (the boolean check above runs before this
-  // attachment).
-  if (record.re_gate !== undefined) extended['re_gate'] = record.re_gate;
-  // A1 step 5: the plan-domain `check` boolean is carried through the same
-  // superset cast precedent (the boolean check above runs before this
-  // attachment; collectPlanParams reads it back into PlanOperationParams).
-  if (record.check !== undefined) extended['check'] = record.check;
   return { ok: true, request };
 }
 
@@ -989,8 +693,8 @@ export function resolveRequestInput(
 
   let raw: string | undefined;
   if (parsed.requestPath !== undefined) {
-    // CV repair: the invocation contract requires a ROOT-RELATIVE request
-    // path — an absolute path is refused even when it lies inside the root.
+    // The invocation contract requires a ROOT-RELATIVE request path — an
+    // absolute path is refused even when it lies inside the root.
     if (path.isAbsolute(parsed.requestPath)) {
       return {
         ok: false,
@@ -1022,35 +726,6 @@ export function resolveRequestInput(
       request: {
         domain: undefined,
         operation: undefined,
-        stage: undefined,
-        manifest: undefined,
-        previous_manifest_digest: undefined,
-        evidence_dir: undefined,
-        mode: undefined,
-        disposition_ref: undefined,
-        disposition_digest: undefined,
-        replan_phase: undefined,
-        input_path: undefined,
-        output_path: undefined,
-        role: undefined,
-        slice: undefined,
-        task: undefined,
-        observation: undefined,
-        observation_ref: undefined,
-        ref: undefined,
-        envelope: undefined,
-        verdict: undefined,
-        snapshot_digest: undefined,
-        summary: undefined,
-        commit_sha: undefined,
-        cv_receipt_digest: undefined,
-        close_type: undefined,
-        reason: undefined,
-        manifest_digest: undefined,
-        manifest_path: undefined,
-        e2e_receipt_path: undefined,
-        reviewer_result_path: undefined,
-        output_dir: undefined,
       },
     };
   }
@@ -1086,8 +761,8 @@ export function resolveRequestInput(
       message: `request operation "${parsedRequest.request.operation}" does not match command operation "${command.operation}"`,
     };
   }
-  // S10-B-T01: `--stage` flag and an inline/file request `stage` must agree
-  // when both are present (same consistency rule as domain/operation).
+  // `--stage` flag and an inline/file request `stage` must agree when both
+  // are present (same consistency rule as domain/operation).
   if (
     parsed.stage !== undefined &&
     parsedRequest.request.stage !== undefined &&

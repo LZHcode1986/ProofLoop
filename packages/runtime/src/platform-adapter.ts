@@ -20,7 +20,7 @@
  *     falling back to `lsof` when `ss` is unavailable.
  *
  * The module is exported through the package index so host adapters and the
- * run-gate (B1b) can reuse the same platform semantics.
+ * mechanical Boundary/Runtime services can reuse the same platform semantics.
  */
 
 import { execSync } from 'node:child_process';

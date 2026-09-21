@@ -1,16 +1,11 @@
-/** Neutral vNext fail-closed error shared by validation seams. */
+/** Neutral vNext fail-closed error shared by validation seams.
+ *
+ * The legacy v1 / Manifest / admission / task-anchor / reference / snapshot
+ * codes were retired with their business consumers; only the two protected-path
+ * codes used by protected-paths remain.
+ */
 export class VNextHandoffError extends Error {
-  public readonly code:
-    | 'v1-input'
-    | 'manifest-invalid'
-    | 'manifest-binding'
-    | 'admission-missing'
-    | 'admission-invalid'
-    | 'task-anchor-gap'
-    | 'execution-scope-gap'
-    | 'path-escape'
-    | 'reference-digest-mismatch'
-    | 'snapshot-binding';
+  public readonly code: 'execution-scope-gap' | 'path-escape';
 
   constructor(code: VNextHandoffError['code'], message: string) {
     super(message);
