@@ -9,7 +9,7 @@
         "."
       ],
       "cwd": ".",
-      "lifecycle": "keep-alive",
+      "lifecycle": "lazy",
       "directTools": true
     }
   }
