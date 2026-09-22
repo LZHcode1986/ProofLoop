@@ -7,7 +7,7 @@
  * Brain 模式下，在每次 agent_start 时注入 Brain 工作流指令到 system prompt。
  * 标准模式下，主会话保持完整的 coding agent 能力。
  *
- * 子 agent（pi-subagents）不加载此 extension，不会受到 Brain 指令影响。
+ * Pi Brain workflow 由 .pi/brain-workflow.md 提供；本 extension 只负责加载与注入。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -20,6 +20,10 @@ const BRAIN_WORKFLOW_FILE = ".pi/brain-workflow.md";
 interface ModeState {
 	enabled: boolean;
 	instructions?: string;
+}
+
+interface PersistedModeState {
+	enabled: boolean;
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -49,18 +53,46 @@ export default function (pi: ExtensionAPI): void {
 		}
 	}
 
+	function readPersistedMode(entry: unknown): boolean | undefined {
+		if (!entry || typeof entry !== "object") return undefined;
+
+		const candidate = entry as {
+			type?: unknown;
+			customType?: unknown;
+			data?: unknown;
+		};
+		if (candidate.type !== "custom") return undefined;
+
+		if (candidate.customType === MODE_ENTRY_TYPE) {
+			if (!candidate.data || typeof candidate.data !== "object") return undefined;
+			const data = candidate.data as Partial<PersistedModeState>;
+			return typeof data.enabled === "boolean" ? data.enabled : undefined;
+		}
+
+		if (candidate.customType && typeof candidate.customType === "object") {
+			const legacy = candidate.customType as {
+				customType?: unknown;
+				content?: unknown;
+			};
+			if (legacy.customType !== MODE_ENTRY_TYPE) return undefined;
+			if (legacy.content === "active") return true;
+			if (legacy.content === "inactive") return false;
+		}
+
+		return undefined;
+	}
+
 	// ─── Session 恢复 ──────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
-		// 从 session 历史中恢复 mode 状态
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (
-				entry.type === "message" &&
-				(entry as any).customType === MODE_ENTRY_TYPE
-			) {
-				state.enabled = (entry as any).content === "active";
-				break;
-			}
+		// 从当前 branch 的最新 mode entry 恢复状态。
+		state.enabled = false;
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i -= 1) {
+			const enabled = readPersistedMode(branch[i]);
+			if (enabled === undefined) continue;
+			state.enabled = enabled;
+			break;
 		}
 		updateStatus(ctx);
 	});
@@ -82,11 +114,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			// 持久化模式状态到 session
-			pi.appendEntry({
-				customType: MODE_ENTRY_TYPE,
-				content: "active",
-				display: false,
-			});
+			pi.appendEntry(MODE_ENTRY_TYPE, { enabled: true } satisfies PersistedModeState);
 
 			ctx.ui.notify("🧠 Brain orchestration mode activated", "info");
 			updateStatus(ctx);
@@ -99,11 +127,7 @@ export default function (pi: ExtensionAPI): void {
 			state.enabled = false;
 
 			// 持久化模式状态到 session
-			pi.appendEntry({
-				customType: MODE_ENTRY_TYPE,
-				content: "inactive",
-				display: false,
-			});
+			pi.appendEntry(MODE_ENTRY_TYPE, { enabled: false } satisfies PersistedModeState);
 
 			ctx.ui.notify("💻 Standard coding mode restored", "info");
 			updateStatus(ctx);
@@ -124,7 +148,7 @@ export default function (pi: ExtensionAPI): void {
 				"\n\n---\n" +
 				instructions +
 				"\n\n---\n**Important**: You are currently in **Brain Orchestration Mode**. " +
-				"Follow the Pi runtime adaptation above: dispatch the listed specialist roles with Pi Agent(...). " +
+				"Use the Pi Brain workflow above: for each cross-Agent dispatch, select the role-specific `.pi/agents/<role>.md` configuration, send the bounded packet through native `Agent`, use `resume` only for the same logical Worker while its durable binding remains current, and read structured output with `get_subagent_result`; failures return a typed blocker, and after each Result Brain re-reads durable facts before the next action. " +
 				"Use this session directly only for DIRECT_BOUNDED_TASK or authority work with loaded skills. " +
 				"Do not implement production code yourself — that is the Worker's job.",
 		};
