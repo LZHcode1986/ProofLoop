@@ -1,6 +1,7 @@
 ---
 name: codebase-design
 description: 按需 capability（capability-only、无 workflow status）：use when deep module principles, seam identification, or domain modeling is needed to inform Stage/Slice decomposition.
+disable-model-invocation: true
 ---
 
 # Codebase Design Skill

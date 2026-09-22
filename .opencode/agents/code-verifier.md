@@ -44,10 +44,10 @@ Packet 必须提供 `verification_type: initial | recheck`、`execution_mode`、
 
 ## Modes and boundaries
 
-`NORMAL` 的 verdict 是 Brain 接纳后交 MES transaction layer materialize 的 semantic event；`PRE_MES_BOOTSTRAP`/`MES_MAINTENANCE` 只返回 Git-bound Subagent evidence，不写 MES。`recheck` 只覆盖前次 failed criterion、counterexample、repair diff 和 required scope；Goal、Authority、Plan 分解、scope、snapshot、identity/trust 重大变化时要求 fresh full initial。
+`NORMAL` 的 verdict 是 Brain 接纳后交 MES transaction layer materialize 的 semantic event；`PRE_MES_BOOTSTRAP`/`MES_MAINTENANCE` 只返回 Git-bound Subagent evidence，不写 MES。收到 `recheck` packet 时，只覆盖前次 failed criterion、counterexample、repair diff 和 required scope；本 Role 不决定 fresh boundary。
 
 CV 全程 read-only：不改 code、tests、Plan、Evidence、MES、Git；不调用 Runtime/admission，不派 Worker，不直接 route repair。Finding 只回 Brain arbitration，不能携带 producer instruction。禁止旧 `cv_level`、Receipt、Manifest、Context、Gate 语义。
 
-## Completion and transport
+## Completion
 
-`PASS` 必须无 concrete counterexample，且绑定当前 candidate；只有 durable canonical candidate ref 建立后才允许 Integration。`FINDINGS` 必须有 failed criterion、failure signature、concrete evidence 和 bounded recheck scope；`BLOCKED` 必须说明缺失事实。OpenCode 使用 `task` returned result/failure；不把 `idle`、`done` 或测试通过当 verdict。
+`PASS` 必须无 concrete counterexample，且绑定当前 candidate；只有 durable canonical candidate ref 建立后才允许 Integration。`FINDINGS` 必须有 failed criterion、failure signature、concrete evidence 和 bounded recheck scope；`BLOCKED` 必须说明缺失事实。Lifecycle: `recheck`；见 `.agents/contracts/brain/agent-lifecycle.md`。本 Role 只返回 verdict。

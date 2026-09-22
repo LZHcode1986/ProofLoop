@@ -59,11 +59,9 @@ Runtime admission。缺任一输入、ref 无法解析或 scope 不闭合时返�
 
 被验证的 Slice basis 按 `execution_mode`：`NORMAL` 使用 accepted Thin Plan + candidate Git ref/diff + MES work identity；`PRE_MES_BOOTSTRAP` 使用 candidate/accepted Git Plan + canonical Technical Authority refs + baseline/current Git basis + Worker Subagent transport evidence；`MES_MAINTENANCE` 使用 recovery candidate Plan + canonical Technical Authority refs + live maintenance Git basis + frozen/forensic/audit binding（不读取、不声称 normal MES status/work identity/resultRef）。三种 mode 都在独立反驳完成前不读 Worker Evidence，且全程 read-only。
 - 不使用旧 cv_level 或遗留验证分级机制；runtime launch configuration belongs to the selected Host adapter (Pi `.pi/agents/*.md + .pi/subagents.json` or OpenCode `.opencode/agents/*.md`); this Skill does not define it.
-- `verification_type: initial`：独立初审必须 fresh CV，完整执行独立反驳。
-- `verification_type: recheck`：默认用同一 CV continuation 做 bounded incremental 复查（只覆盖前次 failed
-  criterion、concrete counterexample、repair diff 与 `required_recheck_scope`）；仅 target/basis 重大变化、
-  session/identity 丢失、CV 写 artifact 或 binding/Result 无法重读时返回 `REVIEW_RESET_REQUIRED` 并
-  fresh full initial。
+- `verification_type: initial`：执行完整、独立的 Slice 反驳顺序。
+- `verification_type: recheck`：只覆盖前次 failed criterion、concrete counterexample、repair diff 与 `required_recheck_scope`。
+- `initial`/`recheck` action 的 fresh-required、currentness 与 recovery 由 `.agents/contracts/brain/agent-lifecycle.md` 决定；本模板不决定何时 fresh。
 - 独立反驳完成前不读 Worker Evidence；先读 Slice Goal、Technical Authority/Acceptance（Architecture / Contracts / Acceptance；不读 PRD）、Plan、code/tests/diff/snapshot；CV 不消费 Brain-projected Slice semantics，自读 Plan 与 tech-spec。
 - 对每个 PO 与高风险路径设计并执行 concrete refutation：PO coverage、test/seam/oracle validity、forbidden
   mocks、scope side effects、regression risk 与真实 call path。
@@ -109,7 +107,7 @@ claimed_route_code: IMPLEMENTATION_DEFECT | PLAN_GAP | TECHNICAL_UNKNOWN | RUNTI
 
 - `PASS`：无 concrete counterexample 且反驳完成；`NORMAL` 返回 Brain/MES transaction flow，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 返回 evidence-only freeze-and-boundary flow。三种 mode 下只有 PASS 且 durable canonical candidate ref 已建立才允许进入对应 Integration；`MES_MAINTENANCE` 的 Integration 只形成 Git evidence，不形成 MES `INTEGRATED`。
 - `FINDINGS`：带 failed criterion、failure signature 与 bounded recheck scope；由 Brain 决定 owner/route
-  （典型为 bounded Worker repair 后同一 CV recheck）。
+  （典型为 bounded Worker repair 后交给下一次 CV review action）。
 - `BLOCKED`：无法验证或超出 CV 权限，带结构化 blocker 回 Brain。
 - `REVIEW_RESET_REQUIRED`：只用于要求 fresh full initial 的 lifecycle 信号，不是可替代 `PASS` 的结果。
 

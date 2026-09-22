@@ -18,14 +18,17 @@ Pi Brain 是用户入口、路由器和 durable-fact 解释者。本文件同时
 
 ### Propose / Authority
 
-产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受 PRD、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、Receipt/Manifest/Context 制品或临时缓存补全 Authority。
+产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受四类 core Authority：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、Receipt/Manifest/Context 制品或临时缓存补全 Authority。
+Propose 在四类 core Authority 建立或更新后判断当前 must-implement outcome 是否存在 user-visible frontend scope：至少一个 outcome 要求用户通过 user-visible software interface 查看信息或执行交互。
+有 frontend scope 时，Brain 显式读取并加载 `.agents/skills/frontend-tech/SKILL.md`，生成或更新 `tech-spec/frontend.md`；blocking frontend handoff gap 必须回真正的 PRD、Architecture、Contracts 或 Acceptance owner 修复。handoff current 且无 blocking gap 后，才返回统一的 `PROPOSE_READY`。
+无 frontend scope 时，按原有四类 core Authority 完成 Propose 并返回 `PROPOSE_READY`。`tech-spec/frontend.md` 是 conditional frontend handoff，不是第五类 core Authority，也不产生 frontend phase、Gate 或 status。
 
 ### Planning
 
 1. 读取当前 Authority、Project Stage Map、code reality、Git basis 和 planning Contract。
 2. 按 `.pi/agents/proofloop-plan.md` 的内嵌规划流程生成或修订 candidate Thin Plan；Planner 只负责 WHAT、WHEN、BOUNDARY，不生成 JIT Work Packet。
 3. 建立 stable Git boundary，fresh dispatch `stage-plan-verifier`。
-4. 只有 SPV `PLAN_READY` 且 Brain 接纳、MES materialize `PLAN_ACCEPTANCE` 后，Plan 才能驱动 Execute。
+4. 只有 SPV `PLAN_READY` 且 Brain 接纳、MES materialize `PLAN_ACCEPTANCE` 后，Core Delivery Plan 才能驱动 Execute。
 5. Plan/Map/Authority/semantic basis 变化时重新建立 fresh SPV；不复用旧 verdict。
 
 ### Execute
@@ -37,6 +40,13 @@ Pi Brain 是用户入口、路由器和 durable-fact 解释者。本文件同时
 5. CV `FINDINGS` 先由 Brain 做 finding disposition，再派 bounded repair 和同一 basis 下的 recheck；重大 basis/identity/trust 变化则 fresh initial。
 6. CV `PASS` 后先建立 durable canonical candidate ref，再进入 `READY_TO_INTEGRATE` 和 Integration；没有 candidate ref 不得声称已集成。
 7. 所有 planned Slice `INTEGRATED` 后才进入 Stage Review。
+
+### Frontend parallel route
+
+- frontend scope 不进入 `proofloop-plan → Worker → CV → Integration → Stage Reviewer` Core Delivery lane。Brain 使用不属于 Core Delivery Work Packet 的 bounded frontend request，独立 dispatch `frontend-execute` 或 `frontend-review`。
+- frontend flow sequencing 固定为：current `tech-spec/frontend.md` → Brain dispatch `frontend-execute` → Brain accepts implementation evidence → fresh `frontend-review` `INITIAL_REVIEW`。
+- `frontend-review` `PASS` → 当前 bounded frontend scope 完成。`FINDINGS` → Brain arbitration → fresh bounded `frontend-execute` repair request → Brain accepts repair evidence → 当 review basis 仍 current 时由原 Reviewer 做 bounded recheck；basis 变化则 fresh `INITIAL_REVIEW`。
+- `frontend-review` `BLOCKED` → Brain 分类并路由到 frontend handoff、Authority、dependency 或 recovery route。Reviewer 不直接派 repair；两类 frontend Agent 都不直接写 MES、Plan、Authority、Core Result/Finding 或 Git boundary。
 
 ### Review / Terminal
 
@@ -51,17 +61,19 @@ Pi Brain 是用户入口、路由器和 durable-fact 解释者。本文件同时
 - 本地可行性问题派 `prototype`，绑定隔离 worktree、Hard Part、success criteria；Prototype 返回 `RESEARCH_REQUIRED` 时派 one-shot Researcher，事实验证后按原 binding continuation。
 - 未验证的 unknown 不写入 Authority、Plan、MES 或代码决策。
 
-## Subagent dispatch 与生命周期
+## Subagent dispatch 与 Host transport
 
-- `subagent_type` 必须等于 `.pi/agents/` 文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`general`、`researcher`、`prototype`。
-- Pi 使用 `Agent` 创建、`get_subagent_result` 读取结构化 Result；`resume` 只用于已被 Brain 判定合法的 retained-owner post-result continuation。
-- Worker successor、bounded repair、CV/Stage Reviewer same-basis recheck 和 Prototype research return 都必须先通过 Result/Finding 接纳、binding/currentness 与 ACK/barrier 校验，再向同一 owner 发送 bounded packet。
-- running Role 的 live relay 使用 `steer_subagent`，只允许 bounded correction/claim clarification；不得发送 successor Task、repair authorization 或未接纳的新业务工作。completed Role 的 clarification 使用 `resume`；clarification 不得变成 implementation design 对话。
-- CV 与 Stage Reviewer 的 initial review 使用 fresh Agent；target/basis/identity/trust/clean-room 未变化时，finding 后的 bounded recheck 使用同一 Reviewer continuation；变化、trust 丢失或 Result 无法重读时 fresh。
-- SPV 在 Plan/Map material revision 或 candidate Plan、referenced Map entry、Authority、exact Git tuple 任一变化后，始终 fresh full initial；不得以 `resume` 复用旧 verdict。
-- 缺失/截断/重复/错误绑定的 Result、角色配置缺失、权限拒绝或 Agent 创建失败：保留磁盘事实，返回 `RUNTIME_BLOCKER`/对应 typed blocker；不 fallback、不换 role、不伪造 Result。
-- `agent_id`、`session_id`、transcript、model、message id、`idle`、`done` 和 transport 状态不写入 MES、Plan、Authority 或 Result binding。
+Brain 先从 `.agents/contracts/brain/agent-lifecycle.md` 和当前 durable facts 判定 mode，再执行本节 Pi mapping。本节不创建 MES identity，也不把 Host session 当作 currentness。
 
+- `subagent_type` 必须等于 `.pi/agents/` 文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`frontend-execute`、`frontend-review`、`general`、`researcher`、`prototype`。
+- `one-shot` → 每个 bounded request 使用 fresh `Agent`；用 `get_subagent_result` 读取一次结构化 Result，Result 接纳后 action 结束。`frontend-execute` 的 repair 仍是新的 fresh request。
+- `continuation` → 只有 lifecycle Contract 已授权同一 logical owner continuation，且 current Plan/Authority/Git/scope、Result/ACK barrier 和新 bounded packet 均可重读时，才使用 Pi `resume`；session/agent handle 存在本身不构成授权。
+- `recheck` → `code-verifier`、`stage-reviewer`、`frontend-review` 的 `INITIAL_REVIEW` 使用 fresh `Agent`；只有同一 reviewer basis/currentness 仍成立且 Brain 已授权 bounded `RECHECK` 时，才对同一 reviewer 使用 `resume`；basis/trust 变化则 fresh initial。
+- `reverify` → `stage-plan-verifier` 的每个 exact candidate tuple 都使用 fresh `Agent` 并从 full initial verification 开始；不得用 `resume` 携带旧 verdict、finding 或验证上下文。
+- Worker successor、Planner revision、Prototype research return、Reviewer repair/recheck 都必须先经过 Result/Finding 接纳和 lifecycle authorization，再发送 bounded packet；Role 不自行选择 successor。
+- running Agent 的 `steer_subagent` 只允许 Brain 授权的 bounded correction/claim clarification，不授予 successor Task、repair authorization 或未接纳的新业务工作。
+- `agent_id`、`session_id`、transcript、model、message id、`idle`、`done` 和 transport 状态只作 ephemeral transport metadata，不写入 MES、Plan、Authority 或 Result binding。
+- Agent 创建、resume、Result 缺失或权限失败时保留磁盘事实，返回既有 `RUNTIME_BLOCKER`/typed blocker；不得 fallback、换 role 或伪造 Result。
 ## Recovery / Finding
 
 先重新读取 durable MES、Plan、Git、Evidence、Result/Finding 和当前 Host session identity，再判断 continuation、fresh、repair、replan 或用户决定。不得盲目重放旧 packet；不得把缺失事实用 progress、checkbox、摘要或测试通过补齐。S06 integrity hard-freeze 下拒绝 NORMAL continuation，只有合法 `MES_MAINTENANCE` evidence-only branch 才能继续。

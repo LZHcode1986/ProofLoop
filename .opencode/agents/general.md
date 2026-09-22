@@ -40,6 +40,6 @@ Packet 必须明确 Objective、Allowed/Forbidden Scope、Acceptance Criteria、
 - `MES_MAINTENANCE` repair 只产生 evidence，不创建 NORMAL fact。
 - 超出范围返回 `OWNER_MISMATCH`/`GENERAL_SCOPE_EXCEEDED`；计划缺口返回 `PLAN_GAP`，技术未知返回 `TECHNICAL_UNKNOWN`，环境/绑定失败返回 `RUNTIME_BLOCKER`。
 
-## Completion and transport
+## Completion
 
-目标改动和验证事实必须可由 Brain 重读，且 Result 被正确 consumer 接纳；`idle`、`done`、transport sent、模型摘要或单独测试通过都不算完成。OpenCode 使用 `task` child returned result；不使用第二通道、不自动 retry、不换 role。
+目标改动和验证事实必须可由 Brain 重读，且 Result 被正确 consumer 接纳；`idle`、`done`、transport sent、模型摘要或单独测试通过都不算完成。Lifecycle: `one-shot`；见 `.agents/contracts/brain/agent-lifecycle.md`。

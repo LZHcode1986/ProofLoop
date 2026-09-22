@@ -50,6 +50,6 @@ Packet 必须明确 `review_scope: stage | maintenance`、匹配的 `execution_m
 
 ## Modes and boundaries
 
-`review_scope: stage` 只接受 `NORMAL`；`maintenance` 只接受 `MES_MAINTENANCE`。目标、Authority、Plan decomposition、scope、snapshot、review scope、maintenance tuple 或 reviewer trust 重大变化时 fresh full review；其他 bounded repair 可在 current basis 下 recheck。Reviewer 不改 code、Plan、Evidence、MES、Git，不调用 Runtime/admission，不派 Worker，不直接 route repair，不输出 mandatory implementation HOW。Finding 只交 Brain arbitration。
+`review_scope: stage` 只接受 `NORMAL`；`maintenance` 只接受 `MES_MAINTENANCE`。按 packet 指定的 initial review 或 bounded recheck 执行三轴审查；Reviewer 不改 code、Plan、Evidence、MES、Git，不调用 Runtime/admission，不派 Worker，不直接 route repair，不输出 mandatory implementation HOW。Finding 只交 Brain arbitration；fresh/recheck eligibility 见 lifecycle Contract。
 
-`PASS` 由 Brain/MES consumer 决定是否 materialize `STAGE_ACCEPTED`；`idle`、`done`、测试通过、旧 Gate 或模型摘要都不是审查结论。OpenCode 使用 `task` returned result/failure。
+`PASS` 由 Brain/MES consumer 决定是否 materialize `STAGE_ACCEPTED`；`idle`、`done`、测试通过、旧 Gate 或模型摘要都不是审查结论。Lifecycle: `recheck`；见 `.agents/contracts/brain/agent-lifecycle.md`。本 Role 只返回三轴 review verdict。

@@ -2,7 +2,7 @@
 
 本模板是 SPV dispatch packet、Result schema 与必要 binding 的唯一事实源，供 Planning flow 的
 `proofloop-plan` 为 Brain 直接调度 `stage-plan-verifier`（SPV）使用。
-SPV 是 review-loop Role，Brain 以 `role_skill/subagent_type = stage-plan-verifier` 经 Subagent host dispatch 启动；
+SPV uses the `reverify` lifecycle: Brain dispatches it as a fresh Work Subagent for each exact candidate tuple;
 `proofloop-plan` 仅表示 Planning caller。独立审查 procedure（验证顺序、challenge 方法、结果纪律）分别内嵌于 `.pi/agents/stage-plan-verifier.md` 与 `.opencode/agents/stage-plan-verifier.md`；本模板统一以 Host Agent 文档引用，不形成第二方法源，
 也不教 Planner 如何修复或生成 producer instruction。
 SPV 是只读的独立 falsifier，对按 `execution_mode` 绑定的 pre-accept candidate Thin Plan（三种 mode 均尚未被 Brain 接纳）做全量 structural closure 与高风险 edge counterexample challenge。
@@ -73,11 +73,9 @@ SPV 独立初审顺序与 challenge 方法分别以内嵌 Host 文档 `.pi/agent
 
 - SPV 的 exact tuple：candidate Plan + `project_stage_map_ref` 引用的 current Stage Map entry
   （同一 candidate Git basis）+ canonical Authority verification basis + exact candidate Git
-  tuple。SPV 的 exact tuple 绑定不受 Planner 侧 semantic currentness 影响：即使 Planner 按语义 basis 保持
-  live/passive，SPV 仍对当前 candidate revision 做 fresh full initial，不复用旧 verdict。
+  tuple。SPV 的 exact tuple 绑定不受 Planner 侧 semantic currentness 影响；每个 candidate tuple 都执行 fresh full initial verification，不复用旧 verdict。
 - 任何 Plan 或 Map material revision，或 Plan/Map/Authority/Git tuple 任一要素变化，都必须
-  重新建立 fresh full initial 验证（不复用旧 verdict、不存在默认 bounded recheck）；同一 Agent continuation 只
-  作为重新建立的 fresh 验证。
+  重新建立 fresh full 验证（不复用旧 verdict，不存在默认 bounded recheck）；每次都使用 fresh Work Subagent。
 - future Thin Plan shape 下，Task 级只保留 task-specific facts，共享 protected/forbidden scope 与
   机械 metadata 提升为 Stage/Slice 级默认；SPV 仍逐 Task 验证 task-specific `code_paths`/`test_paths`
   非空、root-bound、无 forbidden overlap，且 candidate Plan 正文不含 mutable acceptance/progress

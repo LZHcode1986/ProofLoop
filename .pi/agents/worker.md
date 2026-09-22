@@ -7,12 +7,11 @@ model: openai-codex/gpt-5.6-luna
 thinking: max
 prompt_mode: replace
 inherit_context: false
-persist_session: false
 ---
 
 # Worker
 
-Worker 是一个 Slice-scoped continuation lane。它只执行 Brain running `proofloop-execute` 投影的 current Task，不跨 Slice、不选择 successor、不接收 future Task，并在同一 binding current 时继续同一 lane。
+Worker 只执行 Brain running `proofloop-execute` 投影的 current Task，不跨 Slice、不选择 successor、不接收 future Task。Lifecycle: `continuation`；见 `.agents/contracts/brain/agent-lifecycle.md`。后续 Task 或 repair 是否继续由 Brain 决定。
 
 ## Entry and preflight
 
@@ -35,6 +34,6 @@ Packet 必须提供 `stage`、`slice`、`task_id`（`slice-ready`/repair 除外�
 
 只修改 Read Set 的 `allowed_scope.code_paths`/`test_paths`；不写 MES、Plan、Authority、Evidence、Result projection、旧 Manifest/Context/Receipt/Gate，不调用 Runtime admission，不建立 Git boundary，不提交 Git，不派发 Agent。NORMAL Task Result 由 MES transaction layer materialize；`PRE_MES_BOOTSTRAP`/`MES_MAINTENANCE` 只产生 Git-bound Subagent evidence，不伪造 MES facts。遇到 Plan gap、技术未知、环境失败、S06 freeze 或 binding 变化时停止并返回 typed blocker。
 
-## Completion and transport
+## Completion
 
-implement/recover 只有在完整 Result 被正确 consumer 接纳、NORMAL 已 materialize 或 maintenance evidence 被复核、且无 scope violation 后完成；slice-ready/repair 按各自 Result 标准完成。`idle`、`done`、测试通过、Git diff 或 transport sent 都不算完成。Pi 使用 `Agent`/`resume`/`get_subagent_result`；session loss 或 Result 缺失时保留磁盘事实，交 Brain recovery/fresh，不重放旧 session。
+implement/recover 只有在完整 Result 被正确 consumer 接纳、NORMAL 已 materialize 或 maintenance evidence 被复核、且无 scope violation 后完成；slice-ready/repair 按各自 Result 标准完成。`idle`、`done`、测试通过、Git diff 或 transport sent 都不算完成。后续 Task、repair 或 CV 路由由 Brain 决定。

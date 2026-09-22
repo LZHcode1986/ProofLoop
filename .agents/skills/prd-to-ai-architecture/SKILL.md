@@ -1,6 +1,7 @@
 ---
 name: prd-to-ai-architecture
-description: Propose 收尾 skill（无独立 ARCHITECTURE phase，不做 artifact-by-artifact 用户确认）：use after the PRD contribution is ready (and on-demand clarification resolved); produce the canonical tech-spec package (PRD.md、tech-spec/architecture.md、tech-spec/contracts.md、tech-spec/acceptance.md); the final completion signal is PROPOSE_READY.
+description: Propose 收尾 skill（无独立 ARCHITECTURE phase，不做 artifact-by-artifact 用户确认）：use after the PRD contribution is ready (and on-demand clarification resolved); produce the four core Authority files and, when frontend scope exists, close the conditional `tech-spec/frontend.md` handoff via `frontend-tech`; the final completion signal is PROPOSE_READY.
+disable-model-invocation: true
 ---
 
 # PRD to AI Architecture
@@ -10,7 +11,7 @@ description: Propose 收尾 skill（无独立 ARCHITECTURE phase，不做 artifa
 - 定位: 统一 Propose 的收尾部分（不拥有独立 ARCHITECTURE phase，不做 artifact-by-artifact 用户确认，不发独立完成 Gate）
 - Prerequisite: 同一 Propose 内 PRD contribution 就绪；需要的产品级技术澄清已并入（按需 `prd-to-tech-design-prep`）
 - Completion: canonical Propose 包完整 → 最终完成信号 `PROPOSE_READY`
-- Handoff: Stage/Slice/Task/dependency execution planning 全部交 `proofloop-plan`（STAGE_PLANNING）；`codebase-design` 仅作为按需加载的 module/seam/domain-boundary capability
+- Handoff: same Propose 内完成四类 core Authority；存在 frontend scope 时，显式加载 `frontend-tech` 完成条件性的 `tech-spec/frontend.md` handoff，然后才返回 `PROPOSE_READY`；Stage/Slice/Task/dependency execution planning 全部交 `proofloop-plan`（STAGE_PLANNING）；`codebase-design` 仅作为按需加载的 module/seam/domain-boundary capability
 - Rollback: 架构需要修改时继续本 skill；PRD 需要修改时回到 `ai-structured-prd`
 
 ## Purpose
@@ -83,6 +84,15 @@ Optional:
    - Map every PRD must-implement item to acceptance criteria and evidence checks; record non-goals and forbidden shortcuts.
    - No task breakdown, no dependency ordering, and no work-item decomposition here — `proofloop-plan` owns Stage/Slice/Task execution planning.
 
+## Conditional frontend handoff closure
+
+Architecture、Contracts 和 Acceptance current 后，判断当前 must-implement outcome 是否存在 frontend scope。Frontend scope 的判断是：至少一个 must-implement product outcome 要求用户通过 user-visible software interface 查看信息或执行交互；纯 API、CLI、background 或 infrastructure work 不产生 frontend scope。
+
+- 无 frontend scope：skip `frontend-tech`，按四类 core Authority 完成 Propose。
+- 有 frontend scope：Brain 显式读取并加载 `.agents/skills/frontend-tech/SKILL.md`，从当前 Product/Technical Authority、可用 design-prototype evidence 和 relevant frontend reality 生成或更新 `tech-spec/frontend.md`。
+- `tech-spec/frontend.md` 是 conditional frontend handoff，不是第五类 core Authority，不创建 frontend phase、Gate 或 status。
+- blocking handoff gap 只在 frontend implementer 必须猜测产品行为、backend capability/semantics、permission/error behavior 或 frontend↔backend boundary 时成立；普通 implementation HOW 不阻塞。
+- blocking gap 必须回真正的 PRD、Architecture、Contracts 或 Acceptance owner 修复，再重新闭合受影响的 `frontend-tech` handoff；不得在 `frontend.md` 内发明语义。
 ## ProofLoop Propose completion
 
 The canonical Propose package is exactly:
@@ -91,10 +101,10 @@ The canonical Propose package is exactly:
 3. `tech-spec/contracts.md`
 4. `tech-spec/acceptance.md`
 
-No artifact-by-artifact user confirmation and no package-wide user checkpoint are required: this skill produces the complete package, and the ONLY final completion signal is `PROPOSE_READY`.
+No artifact-by-artifact user confirmation and no package-wide user checkpoint are required: this skill closes the applicable four core Authority outputs and, when frontend scope exists, the conditional frontend handoff; the ONLY final completion signal is `PROPOSE_READY`.
 
-A user-requested bounded update may touch only the requested owner (e.g. only `tech-spec/architecture.md`); the canonical package stays fixed at the four owners above. `PROPOSE_READY` is emitted only when all four owners are current and consistent.
-A formal `AUTHORITY_GAP` from Planning/SPV is a return to this current Propose owner when the canonical Technical Authority is missing, contradictory, or invalidated by grounded current reality under unchanged Product intent. Complete the bounded update, keep the four-file package current/consistent, and let Brain accept the exact path set before the `authority-update` mechanical boundary; ordinary Technical Authority repair does not require a separate user approval checkpoint.
+A user-requested bounded update may touch only the requested owner (e.g. only `tech-spec/architecture.md`); the four core Authority owners stay fixed. `PROPOSE_READY` is emitted only when all four core owners are current and consistent and, when frontend scope exists, `tech-spec/frontend.md` is current with no blocking frontend handoff gap.
+A formal `AUTHORITY_GAP` from Planning/SPV or a blocking frontend handoff gap returns to this current Propose owner when canonical Technical Authority is missing, contradictory, or invalidated by grounded current reality under unchanged Product intent. Complete the bounded Authority update, rerun the affected `frontend-tech` closure when applicable, keep the four-file package current/consistent, and let Brain accept the exact path set before the `authority-update` mechanical boundary; ordinary Technical Authority repair does not require a separate user approval checkpoint.
 
 Stage/Slice/Task/dependency execution planning belongs to `proofloop-plan`（STAGE_PLANNING）, not to this skill. Brain enters PLANNING directly after `PROPOSE_READY`（proofloop-plan → stable Git boundary → fresh SPV → `PLAN_READY` → accepted Plan → proofloop-execute）. `codebase-design` may be loaded on demand by Planner/Architecture as a module/seam/domain-boundary capability; it never emits a workflow status.
 
@@ -116,6 +126,7 @@ Produce the canonical Propose package; the outputs live at:
 - `tech-spec/architecture.md`
 - `tech-spec/contracts.md`
 - `tech-spec/acceptance.md`
+- `tech-spec/frontend.md` only when frontend scope exists（conditional handoff; produced via `frontend-tech`）
 
 For detailed templates, read:
 
@@ -137,6 +148,7 @@ Do not emit the final `PROPOSE_READY` signal unless:
 - Key roles, permissions, ownership, and state transitions have been scenario-tested where not already resolved by the PRD, docs, or codebase.
 - Hard-to-reverse or surprising decisions are captured in the architecture decision log（`tech-spec/architecture.md`）.
 - All four canonical owners are current and consistent（`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`）.
+- When frontend scope exists, `tech-spec/frontend.md` is current and every material frontend handoff gap is closed or downgraded to genuinely non-blocking implementation freedom.
 ## Anti-Patterns
 
 Reject or revise outputs that:

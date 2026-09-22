@@ -10,8 +10,7 @@ Role procedure、entry、mode、mutation boundary、forbidden actions、completi
 - Pi：`.pi/agents/<role>.md`
 
 两个 Host 都必须保持 `role_skill == subagent_type`，但各自独立加载自己的 Agent 文档。不要新增共享 Role Skill、第二个 Role controller 或跨 Host workflow pointer。MES、Result、Finding、lifecycle 和 packet 字段仍由 `.agents/contracts/brain/` 与 templates 定义。
-
-角色包括 `general`、`worker`、`researcher`、`prototype`、`code-verifier`、`stage-plan-verifier` 和 `stage-reviewer`；`proofloop-plan` 是 Planning dispatch label，不是共享 Role Skill。
+角色包括 `general`、`worker`、`researcher`、`prototype`、`code-verifier`、`stage-plan-verifier`、`stage-reviewer`、`frontend-execute` 和 `frontend-review`；`proofloop-plan` 是 Planning dispatch label，不是共享 Role Skill。
 
 ## Capability Skill
 
@@ -36,6 +35,7 @@ Capability 是角色按 packet/Contract 按需加载的技术方法，不拥有 
 | `ai-structured-prd` | Product intent → structured PRD |
 | `prd-to-tech-design-prep` | Post-PRD technical clarification |
 | `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
+| `frontend-tech` | Propose 中按 frontend scope 条件显式加载，生成 `tech-spec/frontend.md` conditional handoff |
 | `proofloop-plan` | Planning packet/schema 与 SPV references（dispatch label；Planning method 在 Host Planner 文档） |
 | `proofloop-execute` | Stage/Slice lane management and Work Packet projection |
 | `wayfinder` | Oversized-effort map |

@@ -19,10 +19,10 @@ TECHNICAL_UNKNOWN
 
 | Origin | Result owner | Required next action |
 |---|---|---|
-| Propose | `prd-to-ai-architecture` (or `ai-structured-prd` when the product decision changes) | Absorb verified constraints into the relevant canonical owner; continue the same unified Propose; emit only `PROPOSE_READY` when all four owners are current and consistent. |
+| Propose | `prd-to-ai-architecture` (or `ai-structured-prd` when the product decision changes) | Absorb verified constraints into the relevant canonical owner; continue the same unified Propose; if frontend scope exists, close `frontend-tech` and `tech-spec/frontend.md` before emitting the single `PROPOSE_READY`. A blocking frontend handoff gap returns to the owning Authority route; no new phase or status. |
 | Planning | `proofloop-plan` | Re-evaluate the affected Stage/Slice/Task and revise the candidate Thin Plan. If the conclusion changes Architecture/Contracts/Acceptance, return `AUTHORITY_GAP` to the corresponding Propose owner before replanning. |
-| Execute | Brain → `worker`, `proofloop-plan`, or the relevant Authority owner according to the verified impact | Keep the current work blocked or replan only the bounded affected scope; do not create a fifth phase. |
-| Review | Brain → bounded repair, Replan, Researcher/Prototype, or the relevant Authority owner according to the finding | Preserve the finding and integrated facts; do not let technical research directly produce a review verdict. |
+| Execute | Brain → `worker`, `proofloop-plan`, or the relevant Authority owner according to the verified impact | Keep the current work blocked or replan only the bounded affected scope; for a frontend unknown, keep the affected frontend scope blocked and route to the true Authority owner or recovery path; do not create a fifth phase. |
+| Review | Brain → bounded repair, Replan, Researcher/Prototype, or the relevant Authority owner according to the finding | Preserve the finding and integrated facts; for frontend backend/product/permission/cross-boundary unknowns, keep the affected scope blocked, route to the true Authority owner, close `frontend-tech` again after Authority repair, then choose frontend fresh/recovery; do not let technical research directly produce a review verdict. |
 
 ## Result classification
 

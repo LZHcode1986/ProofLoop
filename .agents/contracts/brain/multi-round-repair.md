@@ -35,7 +35,7 @@ Adapter 必须向 Brain synthesis 声明两个分析来源：
 - bounded Repair Work Packet **唯一**读取 `.agents/skills/proofloop-execute/references/worker-template.md#bounded Repair Work Packet`；本 adapter 不重新列出 packet 字段。
 - Worker repair procedure **唯一**读取所选 Host 的 `worker.md#repair` 顺序；本 adapter 不重复 RED、复现、最小修复、测试或 scope 操作。
 - Repair Result envelope **唯一**读取 `.agents/skills/proofloop-execute/references/worker-template.md#Result envelope schema`；字段名、大小写、枚举、`actionToken`、`resultId`、`gitBasis` 和 `taskId` 规则均以该模板为准。本 adapter 不增加 `mode`、替代 `executionMode` 或其他 Result 字段。
-- Adapter-specific 语义只有：Brain synthesis 的完整 failure-family scope 通过 canonical `repair_scope` 交给 Worker；taskless repair Result 经 Brain 接纳后只交给 CV recheck，不形成 Task、CV、Slice 或 Stage completion。
+- Adapter-specific 语义只有：Brain synthesis 的完整 failure-family scope 通过 canonical `repair_scope` 交给 Worker；taskless repair Result 经 Brain 接纳后交给下一次 CV review action，不形成 Task、CV、Slice 或 Stage completion；`agent-lifecycle.md` 决定该 action 是 `RECHECK` 还是 fresh `INITIAL_REVIEW`。
 
 ## 5. Repair history
 
@@ -43,16 +43,16 @@ Brain 按当前 binding 提供有序的历史引用，至少覆盖相关 CV Resu
 
 这些引用是通用 convergence core 的 history 输入，不是新的 Worker Result schema。无法独立隔离累计 diff 时，不能把它解释成独立补丁证明；未接纳的 CV 叙事、progress、checkbox、隐藏会话和旧 Agent metadata 不能补全 history。
 
-## 6. CV recheck adapter
+## CV review handoff
 
-- 当前 review target、Plan/Authority/Git basis、Slice scope、identity 和 clean-room 条件保持有效时，继续使用同一 CV continuation 做 bounded recheck；范围仅覆盖前次 failed criterion、concrete counterexample、repair diff 与 `required_recheck_scope`。
-- target/basis 发生实质变化、session/identity 丢失、CV 写 artifact，或 binding/Result 无法完整重读时，使用现有 lifecycle 的 `REVIEW_RESET_REQUIRED` / recovery，重新进行 fresh initial CV。
+- bounded recheck scope 只覆盖前次 failed criterion、concrete counterexample、repair diff 与 `required_recheck_scope`。
+- Repair Result 接纳后交给下一次 CV review action；fresh `INITIAL_REVIEW` 与 bounded `RECHECK` 的 eligibility、currentness 和 recovery 由 `.agents/contracts/brain/agent-lifecycle.md` 决定。
 - recheck 返回同一 failure family 时，先回 `finding-convergence.md`，由 Brain 更新 synthesis；本 adapter 不追加最新 Finding 后机械重派 Worker。
 - recheck 返回独立 Finding 时，按 Brain 的既有 route 单独处理，不继承无关 family 的 repair scope。
 
 ## 7. Brain handoff
 
-Brain 接纳 Repair Result 前重新读取当前 branch 的 durable facts、Plan/Authority、Git/diff、scope 和 review binding；不从 Worker narrative 判断完成。Result 验证通过后，Brain 按第 6 节把它交给 CV recheck，并依据 convergence core 的 `recheck_basis` 决定继续、fresh、recovery 或停止自动 redispatch。
+Brain 接纳 Repair Result 前重新读取当前 branch 的 durable facts、Plan/Authority、Git/diff、scope 和 review binding；不从 Worker narrative 判断完成。Result 验证通过后，Brain 将其交给下一次 CV review action；`agent-lifecycle.md` 决定 `RECHECK`、fresh `INITIAL_REVIEW`、recovery 或停止自动 redispatch。
 
 CV 的 `claimed_route_code` 仍是 evidence。Brain 使用现有 `accepted_route_code` 和 typed blocker；本 adapter 不新增 `UNRESOLVED_CV_FAILURE`、`HUMAN_REQUIRED` 或其他 generic route。
 

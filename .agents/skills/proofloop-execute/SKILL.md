@@ -1,6 +1,7 @@
 ---
 name: proofloop-execute
-description: STAGE_EXECUTION：以 Vertical Slice Execution Lane 为自治单元，管理 dependency-ready Slice lane、Worker lifecycle、Slice-level CV、candidate Git ref、Integration 与 cleanup；Worker 执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task 后返回 SLICE_CANDIDATE_READY，CV PASS 后先为 PASS_PENDING_CANDIDATE_REF，slice-output 建立 durable canonical candidate ref 后才 READY_TO_INTEGRATE，全部 Slice INTEGRATED 后 EXECUTION_READY_FOR_REVIEW；S06 integrity hard-freeze 时不得从 public Execute projection 继续运行，已闭合的 `MES_MAINTENANCE` branch 使用 evidence-only lane。
+description: STAGE_EXECUTION：以 Vertical Slice Execution Lane 为自治单元，管理 dependency-ready Slice lane、logical Worker lane、Slice-level CV、candidate Git ref、Integration 与 cleanup；Worker 执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task 后返回 SLICE_CANDIDATE_READY，CV PASS 后先为 PASS_PENDING_CANDIDATE_REF，slice-output 建立 durable canonical candidate ref 后才 READY_TO_INTEGRATE，全部 Slice INTEGRATED 后 EXECUTION_READY_FOR_REVIEW；S06 integrity hard-freeze 时不得从 public Execute projection 继续运行，已闭合的 `MES_MAINTENANCE` branch 使用 evidence-only lane。
+disable-model-invocation: true
 ---
 
 # proofloop-execute
@@ -40,7 +41,7 @@ Stage
 └─ Slice C Lane
 ```
 
-每 Slice：一个 Worker lifecycle、一个 isolated Git worktree、一个 Task graph、Slice-level CV；`NORMAL` 依赖 MES transaction layer materialized Task/Result facts，`PRE_MES_BOOTSTRAP` 仅依赖 Git + Git-tracked Plan + 结构化 Subagent transport evidence，`MES_MAINTENANCE` 仅依赖 recovery candidate + Git + frozen/forensic/audit evidence，三者不混用。one Slice = one Worker lifecycle = one isolated worktree = one logical Worker lane。
+每 Slice：一个 logical Worker lane、一个 isolated Git worktree、一个 Task graph、Slice-level CV；`NORMAL` 依赖 MES transaction layer materialized Task/Result facts，`PRE_MES_BOOTSTRAP` 仅依赖 Git + Git-tracked Plan + 结构化 Subagent transport evidence，`MES_MAINTENANCE` 仅依赖 recovery candidate + Git + frozen/forensic/audit evidence，三者不混用。one Slice = one logical Worker lane = one isolated worktree。
 
 Execute（Brain running `proofloop-execute`）按当前 mode 投影 Slice Work Packet，并在每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、只把该 Task 的 per-Task JIT Read Set 投影给同一 Worker：`NORMAL` 从 accepted Thin Plan + MES/Git/current dependency outputs 投影；`PRE_MES_BOOTSTRAP` 从 Git-tracked Plan + bound normative refs/Git facts 投影；`MES_MAINTENANCE` 从 recovery candidate + current Technical Authority/Git + frozen/forensic/audit binding 投影。Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每 Task fresh-read 当前 JIT Read Set / bound normative refs / code anchors / dependency outputs，并在 bounded execution scope（`code_paths`/`test_paths`）内根据 Plan + tech-spec + code reality 决定 HOW；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions。`NORMAL` Task Result 由 MES transaction layer materialize，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` Task Result 是结构化 Subagent transport evidence，不读/写/声称 normal MES。Brain 对每个 Result 先按 schema/binding/Git basis 接纳并返回 closed `TASK_RESULT_ACK`；只有 `ACCEPTED` 后 Worker 才能继续，ACK 不携带 successor 指令。全部 Task 完成且 self-check 后，Worker 只形成 `SLICE_CANDIDATE_READY`，不声称 CV PASS 或 Integration。
 
@@ -69,19 +70,19 @@ Execute（Brain running `proofloop-execute`）按当前 mode 投影 Slice Work P
    `NORMAL` 的 pre-CV 验证 basis 是 live Slice worktree basis，不是 durable canonical candidate ref：`proofloop-<stage>-<slice>`
    在 CV 前尚未建立；`PRE_MES_BOOTSTRAP` 保持 candidate/accepted Git Plan ref + baseline/current Git basis + Worker Subagent transport evidence 的验证 basis。CV 不消费 Brain-projected Slice semantics，自读 Plan 与 tech-spec。完成标准：CV 返回 `PASS|FINDINGS|BLOCKED`。
 6. **路由 CV 结果**：`FINDINGS` → 回 Brain 决定 owner/route，在**同一 Slice worktree** 上 bounded Worker repair →
-   Result acceptance → 同一 CV continuation bounded recheck，直到 PASS 或 typed blocker；此阶段不建立 slice-output
+   Result acceptance → hand off to the next CV review action; its bounded recheck scope is only failed criterion, concrete counterexample, repair diff and `required_recheck_scope`; this stage does not establish slice-output
    boundary、不建立 canonical candidate ref、不 Integration。`BLOCKED` → 结构化 blocker 回 Brain。`PASS` → 进入下一步，但此时 candidate 尚未 durable：`gateCvResult` 绑定 `candidateRefDurable=false`，状态为 `PASS_PENDING_CANDIDATE_REF`（never ready）。
    完成标准：CV 结果已被正确 consumer 接纳或已返回 typed blocker。
 7. **FREEZE CANDIDATE（CV PASS 后）**：Brain 立即 freeze producer writes，fresh-read live basis（worktree HEAD、
    branch、git status、git diff、changed path set）并与刚被 CV 验证的 target/basis 核对；PASS 后若又发生 producer
-   write，CV PASS 不再自动 current，不得继续 boundary，按现有 CV lifecycle 判断 bounded recheck 或 fresh CV。
+   write，CV PASS 不再自动 current，不得继续 boundary；下一次 CV review action 的 fresh/recheck eligibility 由 `.agents/contracts/brain/agent-lifecycle.md` 决定。
    核对 current 后执行 `slice-output`：把最终 CV 已通过且仍 current 的 Slice worktree 内容机械固定为 candidate
    commit，建立/确认 durable canonical candidate ref（`proofloop-<stage>-<slice>`）；ref 已存在且指向其他 commit
    → fail closed 停止并返回 typed recovery blocker，不覆盖、不删除重建、不 direct-fix 搬运。
    slice-output 成功后 Brain fresh-read 并 exact 解析 canonical candidate ref（`proofloop-<stage>-<slice>`）→ commit SHA，且 candidate Git fact
    （ref / base / changed_files）与 slice-output 结果匹配；只有上述 freeze + slice-output 成功 + fresh-read exact
    canonical ref-to-commit 解析 + candidate Git fact 匹配全部成立后，Brain 才把 `candidateRefDurable` 置 true，
-   状态进入 `READY_TO_INTEGRATE`；Brain 在 Worker/CV retain/close 决策处 fresh-read `.agents/contracts/brain/agent-lifecycle.md` 对应 matrix row。完成标准：durable canonical candidate ref 指向
+   状态进入 `READY_TO_INTEGRATE`；Brain 在 Worker/CV/Reviewer 的 continuation、recheck 或 fresh decision 处 fresh-read `.agents/contracts/brain/agent-lifecycle.md` 对应 row。完成标准：durable canonical candidate ref 指向
    唯一 candidate commit，内容与 CV PASS 时一致。
 8. **Integration**：`READY_TO_INTEGRATE`（CV `PASS` + durable canonical candidate ref current）后，Brain/Host 按
    `.agents/contracts/brain/integration.md` 定义的 `proofloop integration apply` 机械事务把该 candidate 集成进
@@ -97,7 +98,7 @@ Execute（Brain running `proofloop-execute`）按当前 mode 投影 Slice Work P
 
 ## Worker 与 Slice loop
 
-- `subagent` 是唯一跨 Agent/session 的 Task/Result 通道：Pi 使用 `Agent`/`resume`/`get_subagent_result`，OpenCode 使用 native child dispatch/session/result；Host Agent close；生命周期细则见 `.agents/contracts/brain/agent-lifecycle.md`。
+- `subagent` 是唯一跨 invocation 的 Task/Result 通道：Pi/OpenCode 的 native dispatch、Result retrieval 和 continuation handle 只由 Host Brain 使用；本 Skill 不定义 Host transport lifecycle。生命周期细则见 `.agents/contracts/brain/agent-lifecycle.md`。
 - Planning 负责 WHAT / WHEN / BOUNDARY，Execute 拥有 JIT projection seam，Worker 在 bounded execution scope 内决定 HOW：
   - Execute 消费当前 mode 的 Thin Plan planning facts（NORMAL 为 accepted Plan；PRE_MES_BOOTSTRAP 为 Git-tracked Plan；MES_MAINTENANCE 为 recovery candidate），结合该 mode 允许的 MES/Git/dependency outputs 投影 Slice Work Packet 与 per-Task JIT Read Set；Execute 不重新设计 Stage/Slice/Task 结构，不修改 Project Stage Map，JIT projection 职责也不回流给 Planner。
   - Worker 在 bounded scope（`code_paths`、`test_paths`）内根据 Plan + tech-spec + code reality 决定具体的代码实现与测试构造（HOW）；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions；Worker 不越界修改未授权路径。
@@ -109,11 +110,8 @@ Execute（Brain running `proofloop-execute`）按当前 mode 投影 Slice Work P
 
 ## CV 与 bounded repair
 
-- 初审是独立 initial，必须 fresh CV；Slice-level 反驳顺序与 verdict 字段以
-  `references/code-verifier-template.md` 为准。CV 不消费 Brain-projected Slice semantics，自读当前 mode 的 Plan（NORMAL accepted；PRE_MES_BOOTSTRAP candidate/accepted Git Plan；MES_MAINTENANCE recovery candidate）、tech-spec、candidate/diff 与 code/tests；CV claimed route 不包含 `AUTHORITY_GAP`，下游问题分类限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`。CV `FINDINGS` 后的 recheck 默认用同一 CV continuation 做 bounded incremental 复查（只覆盖 failed criterion、concrete counterexample、repair diff 与
-  bounded incremental 复查（只覆盖 failed criterion、concrete counterexample、repair diff 与
-  `required_recheck_scope`）；只有 target/basis 重大变化、session/identity 丢失、CV 写 artifact 或
-  binding/Result 无法重读时才 fresh full initial。
+- 初审是独立 initial；Slice-level 反驳顺序与 verdict 字段以 `references/code-verifier-template.md` 为准。CV 不消费 Brain-projected Slice semantics，自读当前 mode 的 Plan、tech-spec、candidate/diff 与 code/tests；CV claimed route 不包含 `AUTHORITY_GAP`，下游问题分类限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`。
+- `recheck` 只覆盖 failed criterion、concrete counterexample、repair diff 与 `required_recheck_scope`。下一次 CV review action 的 fresh-required、currentness 和 recovery 由 `.agents/contracts/brain/agent-lifecycle.md` 决定。
 - `NORMAL` 下 pre-CV 的验证 target 是 live Slice worktree basis（worktree branch/ref + 当前 HEAD + 当前 diff），不是 durable canonical `proofloop-<stage>-<slice>` candidate ref；该 canonical ref 只由 post-PASS `slice-output` 一次性建立。`PRE_MES_BOOTSTRAP` 使用 candidate/accepted Git Plan + baseline/current Git basis；`MES_MAINTENANCE` 使用 recovery candidate Plan + live maintenance worktree + frozen/forensic/audit binding，二者都不发明 PASS 前的 MES result/candidate store。
 - 只有 `PASS` 进入 freeze → slice-output → Integration；`FINDINGS`/`BLOCKED` 回 Brain，不能直接 repair/replan。`NORMAL` downstream 由既有 MES disposition；`MES_MAINTENANCE` 保持 evidence-only。Finding 由 Brain 判定 disposition 与路由；Brain 派发 pointer-first repair packet 给 Worker，不要求 Brain 把 Reviewer 自然语言方案转写为 required_fix，Worker 拥有 repair HOW。
 - 多轮 finding 的通用 family classification、history synthesis、`recheck_basis` 与停止规则由 `.agents/contracts/brain/finding-convergence.md` 管理；Worker/CV 的 repair packet、Result、history source 与 recheck 入口由 `.agents/contracts/brain/multi-round-repair.md` 管理。
@@ -149,14 +147,13 @@ Brain 在 Execute 中独立运行 build/typecheck/test 等验证时（含 CV rep
 ## 恢复与停止
 
 - S06 integrity hard-freeze has precedence over the normal Stage lane: public `status` `EXECUTE`/`proofloop-execute` is observation only. Freeze NORMAL dispatch/continuation, preserve worktree and MES facts, and return a typed recovery/integrity blocker; only the Authority-defined `MES_MAINTENANCE` branch may proceed after its exact entry tuple is fresh-verified. Do not retry quarantine failures or resume from hidden session.
-- Worker/Pane 丢失但已有 diff/Result facts：保留成果，按当前 mode 的 `recover-task`/`recheck`，不重新实现；`MES_MAINTENANCE` 仅从 recovery Plan、Git refs/commits、frozen digest/count 与 forensic/audit 重建。
+- Worker invocation 或 Result 丢失但已有 diff/Result facts：保留成果，按当前 mode 的 `recover-task`/`recheck`，不重新实现；`MES_MAINTENANCE` 仅从 recovery Plan、Git refs/commits、frozen digest/count 与 forensic/audit 重建。
 - Result 缺失、截断、重复、错关联：返回 typed blocker，不接纳；该 Slice lane 暂停推进，由 Brain 决定 recover/fresh 路径，Worker 不跨过未接纳 Result 自动推进。
 - `TASK_RESULT_ACK` 丢失/重复：NORMAL 由 Brain 从 MES 按原 `resultId` 幂等重发或接纳，PRE_MES_BOOTSTRAP / MES_MAINTENANCE 从 Git + Plan/evidence 与对应 recovery binding 重建；stale `actionToken` 或同 id 不同 payload fail closed，不得凭 transport `sent` 推进 successor。
 - Plan continuation 三分类（`tech-spec/contracts.md` §2.2.4a）：`resume` 不写新 generation，继续使用 current accepted generation；`restart` 在 Planning tuple 未变时于同一 generation 下重开受影响 Slice 的 lane（Work identity 换新），上一 attempt 的 facts 只作历史、不足以支撑新 attempt 的 completion/Integration/Review；`replan` 走 `proofloop-plan` 的 Replan。三者都不生成新 `delivery_cycle_id`，都不 backfill 或改写历史 facts。
 - Plan revision / Plan/Git tuple 变化（含 replan、SPV `FINDINGS` 修复）：必须针对新的 Plan/Git tuple 重新建立 fresh full SPV，
   完整重读新 tuple 并重新执行全部验证，不复用旧 verdict；不存在“非重大变化可复用 bounded SPV verdict”的规则。
-- CV finding repair：review target/basis 未变时，按 code-verifier Contract 用同一 CV continuation 做 bounded recheck；
-  仅 target/basis 重大变化、session/identity 丢失、CV 写 artifact 或 binding/Result 无法重读时才 fresh CV。
+- CV finding repair：repair Result 接纳后交给下一次 CV review action；fresh `INITIAL_REVIEW` 或 bounded `RECHECK` 由 `.agents/contracts/brain/agent-lifecycle.md` 决定。
 - Worker lane 的 scope/authority/snapshot 失效：仍按 currentness/Brain recovery 路由（`recover-task`/`recheck`），
   不能用 CV recheck 替代 SPV fresh，也不能用 bounded recheck 复用旧 SPV verdict。
 - `PLAN_GAP` → `proofloop-plan`；`IMPLEMENTATION_DEFECT` → bounded Worker repair；`TECHNICAL_UNKNOWN` → Researcher/Prototype；`EVIDENCE_GAP` → 证据补全或重新核对；`RUNTIME_BLOCKER` → Brain/environment owner。Execute downstream 不直接 claim Product→Technical `AUTHORITY_GAP`：遇到 Plan 缺口返回 `PLAN_GAP`，遇到 tech-spec 自身冲突或证据不足返回 `TECHNICAL_UNKNOWN`/`EVIDENCE_GAP`/`RUNTIME_BLOCKER`，由 Brain 决定是否 route Planning 重新核对 Authority。

@@ -25,14 +25,17 @@ Brain 是 OpenCode primary session 的唯一用户入口、路由器和 durable-
 
 ### Propose / Authority
 
-产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受 PRD、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、旧 Receipt/Manifest/Context 制品或临时缓存补全 Authority。
+产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受四类 core Authority：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、旧 Receipt/Manifest/Context 制品或临时缓存补全 Authority。
+Propose 在四类 core Authority 建立或更新后判断当前 must-implement outcome 是否存在 user-visible frontend scope：至少一个 outcome 要求用户通过 user-visible software interface 查看信息或执行交互。
+有 frontend scope 时，Brain 显式读取并加载 `.agents/skills/frontend-tech/SKILL.md`，生成或更新 `tech-spec/frontend.md`；blocking frontend handoff gap 必须回真正的 PRD、Architecture、Contracts 或 Acceptance owner 修复。handoff current 且无 blocking gap 后，才返回统一的 `PROPOSE_READY`。
+无 frontend scope 时，按原有四类 core Authority 完成 Propose 并返回 `PROPOSE_READY`。`tech-spec/frontend.md` 是 conditional frontend handoff，不是第五类 core Authority，也不产生 frontend phase、Gate 或 status。
 
 ### Planning
 
 1. 读取当前 Authority、Project Stage Map、code reality、Git basis 和 planning Contract。
 2. 按 `.opencode/agents/proofloop-plan.md` 的内嵌规划流程生成或修订 candidate Thin Plan；Planner 只负责 WHAT、WHEN、BOUNDARY，不生成 JIT Work Packet。
 3. 建立 stable Git boundary，fresh dispatch `stage-plan-verifier`。
-4. 只有 SPV `PLAN_READY` 且 Brain 接纳、MES materialize `PLAN_ACCEPTANCE` 后，Plan 才能驱动 Execute。
+4. 只有 SPV `PLAN_READY` 且 Brain 接纳、MES materialize `PLAN_ACCEPTANCE` 后，Core Delivery Plan 才能驱动 Execute。
 5. Plan/Map/Authority/semantic basis 变化时重新建立 fresh SPV；不复用旧 verdict。
 
 ### Execute
@@ -44,6 +47,13 @@ Brain 是 OpenCode primary session 的唯一用户入口、路由器和 durable-
 5. CV `FINDINGS` 先由 Brain 做 finding disposition，再派 bounded repair 和同一 basis 下的 recheck；重大 basis/identity/trust 变化则 fresh initial。
 6. CV `PASS` 后先建立 durable canonical candidate ref，再进入 `READY_TO_INTEGRATE` 和 Integration；没有 candidate ref 不得声称已集成。
 7. 所有 planned Slice `INTEGRATED` 后才进入 Stage Review。
+
+### Frontend parallel route
+
+- frontend scope 不进入 `proofloop-plan → Worker → CV → Integration → Stage Reviewer` Core Delivery lane。Brain 使用不属于 Core Delivery Work Packet 的 bounded frontend request，独立 dispatch `frontend-execute` 或 `frontend-review`。
+- frontend flow sequencing 固定为：current `tech-spec/frontend.md` → Brain dispatch `frontend-execute` → Brain accepts implementation evidence → fresh `frontend-review` `INITIAL_REVIEW`。
+- `frontend-review` `PASS` → 当前 bounded frontend scope 完成。`FINDINGS` → Brain arbitration → fresh bounded `frontend-execute` repair request → Brain accepts repair evidence → 当 review basis 仍 current 时由原 Reviewer 做 bounded recheck；basis 变化则 fresh `INITIAL_REVIEW`。
+- `frontend-review` `BLOCKED` → Brain 分类并路由到 frontend handoff、Authority、dependency 或 recovery route。Reviewer 不直接派 repair；两类 frontend Agent 都不直接写 MES、Plan、Authority、Core Result/Finding 或 Git boundary。
 
 ### Review / Terminal
 
@@ -58,17 +68,19 @@ Brain 是 OpenCode primary session 的唯一用户入口、路由器和 durable-
 - 本地可行性问题派 `prototype`，绑定隔离 worktree、Hard Part、success criteria；Prototype 返回 `RESEARCH_REQUIRED` 时派 one-shot Researcher，事实验证后按原 binding continuation。
 - 未验证的 unknown 不写入 Authority、Plan、MES 或代码决策。
 
-## Subagent dispatch 与生命周期
+## Subagent dispatch 与 Host transport
 
-- `subagent_type` 必须等于角色文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`general`、`researcher`、`prototype`。
-- OpenCode 使用原生 `task` child dispatch；返回的 child result/failure 或完成通知是 transport，结构化 Result 必须由 Brain 读取并校验。
-- continuation-first：先确认这是同一 logical owner 的合法 continuation，再复用 child `sessionID`/continuation handle；sessionID 存在本身不证明业务 continuation 合法。
-- Worker successor、bounded repair、CV/Stage Reviewer same-basis recheck 和 Prototype research return 都必须在 Result/Finding 接纳、binding/currentness 与 ACK/barrier 校验后，向同一 owner 发送 bounded packet；没有有效 continuation 才走 fresh/recovery。
-- OpenCode 不复制 Pi 的 `steer_subagent`；running 或 completed Role 的 bounded clarification 都通过 same-owner continuation，并不得成为 implementation design 或未接纳的新业务工作。
-- CV 与 Stage Reviewer 的 initial review 使用 fresh child；target/basis/identity/trust/clean-room 未变化时，finding 后的 bounded recheck 复用同一 logical reviewer owner；变化、trust 丢失或 Result 无法重读时 fresh。
-- SPV 在 Plan/Map material revision 或 candidate Plan、referenced Map entry、Authority、exact Git tuple 任一变化后，始终 fresh full initial；不得复用旧 verdict。
-- 缺失/截断/重复/错误绑定的 Result、角色配置缺失、权限拒绝或 child dispatch 失败：保留磁盘事实，返回 `RUNTIME_BLOCKER`/对应 typed blocker；不 fallback、不换 role、不伪造 Result。
-- `sessionID`、transcript、model、message id、`idle`、`done` 和 completion notification 不写入 MES、Plan、Authority 或 Result binding。
+Brain 先从 `.agents/contracts/brain/agent-lifecycle.md` 和当前 durable facts 判定 mode，再执行本节 OpenCode mapping。本节不创建 MES identity，也不把 child session 当作 currentness。
+
+- `subagent_type` 必须等于角色文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`frontend-execute`、`frontend-review`、`general`、`researcher`、`prototype`。
+- `one-shot` → 每个 bounded request 使用 fresh native `task` child；读取一次 returned structured Result/failure，Result 接纳后 action 结束。`frontend-execute` 的 repair 仍是新的 fresh child。
+- `continuation` → 只有 lifecycle Contract 已授权同一 logical owner continuation，且 current Plan/Authority/Git/scope、Result/ACK barrier 和新 bounded packet 均可重读时，才使用既有 child `sessionID`/continuation handle；sessionID 存在本身不构成授权。
+- `recheck` → `code-verifier`、`stage-reviewer`、`frontend-review` 的 `INITIAL_REVIEW` 使用 fresh child；只有同一 reviewer basis/currentness 仍成立且 Brain 已授权 bounded `RECHECK` 时，才使用同一 reviewer `sessionID`；basis/trust 变化则 fresh initial。
+- `reverify` → `stage-plan-verifier` 的每个 exact candidate tuple 都使用 fresh child 并从 full initial verification 开始；不得用既有 `sessionID` 携带旧 verdict、finding 或验证上下文。
+- Worker successor、Planner revision、Prototype research return、Reviewer repair/recheck 都必须先经过 Result/Finding 接纳和 lifecycle authorization，再发送 bounded packet；Role 不自行选择 successor。
+- OpenCode 不把 completion notification、session 状态或 child narrative 当作业务 Result；结构化 Result/failure 必须由 Brain 读取、校验并接纳。
+- `sessionID`、transcript、model、message id、`idle`、`done` 和 completion notification 只作 ephemeral transport metadata，不写入 MES、Plan、Authority 或 Result binding。
+- child 创建、continuation、Result 缺失或权限失败时保留磁盘事实，返回既有 `RUNTIME_BLOCKER`/typed blocker；不得 fallback、换 role 或伪造 Result。
 
 ## Recovery / Finding
 

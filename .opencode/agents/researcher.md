@@ -31,4 +31,4 @@ Packet 必须携带 Research Goal、Question、Why It Matters、适用版本/约
 
 ## Boundaries and completion
 
-只读仓库和 packet 授权的 web tools；不实现代码、不写 PRD/Tech Spec/Authority/MES、不调用 Runtime、不建立 Git boundary、不派发 Agent、不自动 retry。需要本地实验交给 Prototype；需要用户凭据或环境权限时返回 blocker。结果必须来源完整、版本清楚、限制和 remaining unknowns 显式列出，并被 Brain 正确接纳；部分来源、模型摘要、`idle`/`done` 或 transport sent 不算完成。OpenCode 使用 `task` returned result。
+只读仓库和 packet 授权的 web tools；不实现代码、不写 PRD/Tech Spec/Authority/MES、不调用 Runtime、不建立 Git boundary、不派发 Agent、不自动 retry。需要本地实验交给 Prototype；需要用户凭据或环境权限时返回 blocker。结果必须来源完整、版本清楚、限制和 remaining unknowns 显式列出，并被 Brain 正确接纳；部分来源、模型摘要、`idle`/`done` 或 transport sent 不算完成。Lifecycle: `one-shot`；见 `.agents/contracts/brain/agent-lifecycle.md`。

@@ -76,7 +76,7 @@ Failure-family classification
         ↓
 既有 owner 执行完整 repair/replan scope（repair owner 自主决定 bounded HOW）
         ↓
-Adapter 按 basis 决定 verifier re-entry
+Brain hands off the repair/replan result to the next verifier review action; `agent-lifecycle.md` determines whether that action is `RECHECK` or fresh `INITIAL_REVIEW`.
         ↓
 PASS / 独立新 Finding / 同族 Finding / 既有 typed blocker / VERIFIER_OVERREACH
 ```
@@ -110,7 +110,7 @@ brain_synthesis:
     current_basis: []
     status: SAME | CHANGED | UNRECONSTRUCTABLE
     reason: <可复核理由>
-  required_recheck_mode: <由 adapter 选择的既有复查模式>
+  required_recheck_scope: <由 convergence synthesis 计算的 bounded scope>
   closure_criteria: []
   stop_conditions: []
 ```
@@ -129,11 +129,11 @@ Brain synthesis 至少必须回答：
 
 ## 7. Adapter 复查规则
 
-| Pair | Brain 的 owner/action | basis current 时 | basis changed 或无法重建时 |
+| Pair | Brain owner/action | next review handoff | lifecycle owner |
 |---|---|---|---|
-| Worker / CV | 既有 bounded Worker repair | 同一 CV continuation 做 bounded recheck | 按既有 lifecycle reset/recovery，fresh initial CV |
-| Planner / SPV | Planner 完整 candidate replan（Stage-level PLAN_GAP 影响 Map 时 owner 仍为 Planner） | Planner semantic Planning basis 仍 current 时（含 Project Stage Map ref / current entry），Planner lifecycle 可 continuation；不复用 SPV verdict | 任一 Plan 或 Map material revision，或 candidate Plan / referenced Map entry / Authority / Git tuple 变化 → fresh full initial SPV；同名 Agent 只复用 transport。相同 candidate blob 的机械 `stage-plan` boundary 不单独使 Planner 失效 |
-| Stage Reviewer | 既有 bounded repair/replan route（General 或 Worker 决定 bounded HOW） | 同一 Reviewer 做 bounded recheck | `REVIEW_RESET_REQUIRED` 或既有 recovery 后 fresh Reviewer |
+| Worker / CV | 既有 bounded Worker repair；保留 complete repair scope 和 `required_recheck_scope` | Repair Result 接纳后交给下一次 CV review action | `agent-lifecycle.md` 决定 `RECHECK` 或 fresh `INITIAL_REVIEW` |
+| Planner / SPV | Planner 完整 candidate replan（Stage-level PLAN_GAP 影响 Map 时 owner 仍为 Planner） | 新 candidate tuple 交给 SPV verification action | `agent-lifecycle.md` 对每个 exact tuple 要求 `reverify` fresh full verification |
+| Stage Reviewer | 既有 bounded repair/replan route（General 或 Worker 决定 bounded HOW） | Repair evidence 接纳后交给下一次 Stage Review action | `agent-lifecycle.md` 决定 bounded `RECHECK` 或 fresh `INITIAL_REVIEW` |
 
 此表只规定 convergence core 选择 adapter 的信息；各 Host Role document、lifecycle Contract 和 packet Template 继续拥有具体步骤、binding 与 schema。
 

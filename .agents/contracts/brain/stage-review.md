@@ -112,7 +112,7 @@ review_result_envelope:
 
 Reviewer 返回结构化 verdict，闭集为 `PASS | FINDINGS | BLOCKED`：
 
-- **PASS**：三轴全部通过且 binding 正确；`review_scope: stage` 由 Brain 发起 `STAGE_ACCEPTED` semantic event，经 MES operational transaction layer materialize `STAGE_ACCEPTED`；`review_scope: maintenance` 仅形成 evidence closure，不写任何 MES Stage/terminal fact；是否关闭 live lifecycle 由 `.agents/contracts/brain/agent-lifecycle.md` 对应 matrix row 的 `close_when` 决定。
+- **PASS**：三轴全部通过且 binding 正确；`review_scope: stage` 由 Brain 发起 `STAGE_ACCEPTED` semantic event，经 MES operational transaction layer materialize `STAGE_ACCEPTED`；`review_scope: maintenance` 仅形成 evidence closure，不写任何 MES Stage/terminal fact。fresh/recheck eligibility 与 currentness 由 `.agents/contracts/brain/agent-lifecycle.md` 决定。
 - **FINDINGS**：至少一个轴未通过 → Reviewer 提交结构化 `finding_evidence_refs` 与 `claimed_route_code`；`review_scope: stage` 下 Brain 可按现有 semantic Finding/MES disposition 处理；`review_scope: maintenance` 下 Brain 只接纳结构化 evidence、决定 bounded route，不写 MES Finding/Task/Work/Stage/terminal fact。Reviewer 若提供 suggested solution 仅作参考，不构成 implementation authorization。
   - 若缺乏 normative support 或超出审查边界，Brain 裁决为 `VERIFIER_OVERREACH`（`accepted_route_code = null`，无 producer repair，无 current-stage Replan，不触发 `HUMAN_REQUIRED`）；
   - 若 claim 成立，Brain 按对应 mode 决定 bounded repair/Replan/Propose/Research；maintenance 全轴 PASS 仍只形成 evidence closure，不写 `STAGE_ACCEPTED`。
@@ -149,41 +149,22 @@ resume_target:
 
 `finding_evidence_refs` 是 Stage/maintenance Reviewer → Brain 的唯一结构化 evidence handoff：FINDINGS/BLOCKED 必须为有序、非空、稳定且可供 Brain 处理的 refs；normal Stage 下 Brain 可写入 durable Finding facts，maintenance 下 refs 只作为 evidence，不写 MES Finding。PASS 必须为空数组。Reviewer 不持久化 narrative；本 Contract 是 envelope/result 字段唯一 owner，Technical Authority 只规定 durable relation semantics。
 
-## Bounded recheck
+## Review action procedure
 
-允许 same Reviewer recheck 的条件：
+Role procedure is selected by packet `verification_type`:
 
-- Stage Goal 未变；
-- Technical Authority (tech-spec) 未变；
-- Plan/Slice partition 未发生 material change；
-- repair scope bounded；
-- Reviewer lifecycle still trustworthy。
-
-bounded repair 可由 General（默认）或 Worker 承担：Brain 已接纳 problem claim，并按 mode 通过 General Contract 提供 explicit allowed/forbidden scope 与 pointer-first repair packet（不要求 Brain 提供 acceptance criteria），repair owner 自主决定 bounded HOW，Brain 不替 repair owner 构造 technical repair design，Reviewer 也不拥有 repair design authorization。
-对 `MES_MAINTENANCE`，General 仅作为本 Review Contract 定义的 post-Review bounded-repair exception：packet 绑定 Reviewer 的 `finding_evidence_refs`、Brain 的 `accepted_route_code` 与完整 maintenance evidence binding，不创建或要求 MES Finding/FINDING_DISPOSITION；它不改变前置 Worker/CV/Integration/Review execution lane。
-General 作为 one-shot bounded repair owner 修复 bounded implementation/composition defect 时，经 `direct-fix` Git boundary 建立 Git 事实，不创建 Slice candidate、不产生 `READY_TO_INTEGRATE`、不运行 Slice CV，也不调用 Integration，General 不继承 Worker Slice lifecycle。
-
-一旦 Goal / Technical Authority (tech-spec) / Plan/Slice partition / material scope 发生实质变化，退出 bounded Review repair，继续走既有 Replan / Propose / Research / fresh-review 路由；不新增 Review 专用 phase、state、Gate、Receipt 或 recovery 机制。
-即使 repair 产生新 Git snapshot，也不自动要求 fresh Reviewer。
-
-必须 fresh reset（`REVIEW_RESET_REQUIRED`，fresh Reviewer 完整独立初审）：
-
-- Goal change；
-- Technical Authority change；
-- Replan materially changes Slice/dependency；
-- repair scope materially expands；
-- Reviewer continuity/trust lost。
-
-Fresh Reviewer 不能以旧 Subagent type/session、旧 clarification 记录、旧 finding 摘要或旧 verdict 推断新结论。
+- `initial`：独立执行 Outcome → Composition → Authority 三轴 review，先独立读取目标、Plan/Authority、snapshot 和真实 artifact，再返回结构化 verdict。
+- `recheck`：重读 finding、current snapshot、repair diff/effect，重跑 resolution oracle，检查直接相关邻近行为，再返回 bounded verdict。
+- Reviewer 全程 read-only，不修改 code、Plan、Evidence、MES 或 Git，不派发 repair，不输出 mandatory implementation HOW。
+- fresh `INITIAL_REVIEW` 与 bounded `RECHECK` 的 eligibility、currentness 和 recovery 由 `.agents/contracts/brain/agent-lifecycle.md` 唯一决定；本 Contract 不决定何时 fresh 或复用 reviewer。
 
 ## Receipt / admission
 
 Stage Reviewer 不写任何 Receipt，也不触发 Gate/admission/finalize 业务。normal `STAGE_ACCEPTED` 只由 Brain 校验结构化 verdict、发起 semantic event，并由 MES transaction layer materialize；maintenance Review 只产生 Git/Subagent transport evidence，状态迁移只来自允许的 normal MES 记录与 Git reality。
 
-## Review-loop lifecycle pointer
+## Lifecycle pointer
 
-Stage Review 是泛化 review-loop 的一个实例。发生 initial dispatch、FINDINGS/BLOCKED、repair 后 recheck、target/basis/identity/trust 变化、Agent/Host/Subagent transport loss，或准备 recall/close 时，fresh-read `.agents/contracts/brain/agent-lifecycle.md` §§3、6–8。
-本 Contract 只拥有 Stage Review 的三轴方法、envelope 与 verdict；lifecycle matrix 是 retain/continuation/close/reset 的唯一 owner。Reviewer 的 raw `PASS` 不是 close；只有 Brain 接纳 `STAGE_ACCEPTED` 且对应 matrix row 的 `close_when` 成立后才可关闭。
+fresh `INITIAL_REVIEW`、bounded `RECHECK`、currentness、fresh-required 和 recovery 只由 `.agents/contracts/brain/agent-lifecycle.md` 决定。本 Contract 只拥有 Stage Review 的三轴 HOW、envelope 和 verdict。
 
 ## Historical
 

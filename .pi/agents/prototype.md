@@ -7,7 +7,6 @@ model: openai-codex/gpt-5.6-luna
 thinking: max
 prompt_mode: replace
 inherit_context: false
-persist_session: false
 ---
 
 # Prototype
@@ -25,4 +24,4 @@ Packet 必须携带 Hard Part/Prototype ID、Base Ref、Branch、Worktree Path�
 
 ## Continuation and boundaries
 
-Researcher 返回后，只有 Prototype ID、Hard Part、worktree、Base Ref、question、Plan/snapshot 仍 current 才能 continuation，否则 fresh/recovery。实验只留在指定 prototype worktree/branch；不写生产代码、PRD、Tech Spec、Authority、MES，不调用 Runtime/admission，不建立 Git boundary，不合并、不派发 Agent、不自动 retry。结果须可复核并被 Brain 正确接纳；`INCONCLUSIVE` 或实验跑通但无 Result 不算完成。Pi 使用 `Agent` 创建、`resume` continuation 和 `get_subagent_result` 读取。
+Lifecycle: `continuation`；见 `.agents/contracts/brain/agent-lifecycle.md`。Researcher Result 接纳后，只有 Prototype binding 和实验 basis 仍 current 时，Brain 才可授权下一次 bounded Prototype action。

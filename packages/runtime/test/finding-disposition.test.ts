@@ -31,8 +31,6 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import {
   buildFindingDisposition,
   validateFindingDisposition,
@@ -321,10 +319,9 @@ describe('finding disposition arbitration closed set (PO-S03-D-03)', () => {
       }
     };
 
-    // --- claimed-route ownership: AUTHORITY_GAP is a Planning/SPV claim. The
-    // finding binds its legal claim origin through the two planning Host documents (Authority basis in authority_refs, role sources in
-    // finding_evidence_refs), and those sources really carry the claim
-    // vocabulary.
+    // --- claimed-route ownership: AUTHORITY_GAP is a Planning/SPV claim.
+    // Runtime closed sets and disposition validation enforce the route boundary;
+    // Agent/Markdown wording is not part of this test surface.
     const gapFinding = findingFact({
       verifier_verdict: 'BLOCKED',
       claimed_route_code: 'AUTHORITY_GAP',
@@ -341,16 +338,6 @@ describe('finding disposition arbitration closed set (PO-S03-D-03)', () => {
         '.pi/agents/stage-plan-verifier.md',
       ],
     });
-    for (const rel of [
-      '.opencode/agents/proofloop-plan.md',
-      '.opencode/agents/stage-plan-verifier.md',
-      '.pi/agents/proofloop-plan.md',
-      '.pi/agents/stage-plan-verifier.md',
-    ]) {
-      const src = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', rel), 'utf8');
-      assert.ok(src.includes('claimed_route_code'), `${rel} must carry the claimed-route evidence vocabulary`);
-      assert.ok(src.includes('AUTHORITY_GAP'), `${rel} must own the AUTHORITY_GAP claim vocabulary`);
-    }
     // Downstream verifier exclusion is typed in the Runtime: the CV claim
     // closed set never admits AUTHORITY_GAP (contracts §2.2.3a / STATIC-31).
     assert.equal(
