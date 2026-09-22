@@ -25,7 +25,7 @@ Brain 是 OpenCode primary session 的唯一用户入口、路由器和 durable-
 
 ### Propose / Authority
 
-产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受 PRD、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、旧 Herdr/Receipt/Manifest/Context 制品或临时缓存补全 Authority。
+产品范围、行为或验收发生变化时，按需调用 `ai-structured-prd`、`prd-to-tech-design-prep`、`prd-to-ai-architecture` 和 `codebase-design`。Technical Authority 只接受 PRD、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`；不以 Agent 叙事、旧 Receipt/Manifest/Context 制品或临时缓存补全 Authority。
 
 ### Planning
 
