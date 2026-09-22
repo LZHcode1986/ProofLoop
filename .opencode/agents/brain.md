@@ -62,8 +62,11 @@ Brain 是 OpenCode primary session 的唯一用户入口、路由器和 durable-
 
 - `subagent_type` 必须等于角色文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`general`、`researcher`、`prototype`。
 - OpenCode 使用原生 `task` child dispatch；返回的 child result/failure 或完成通知是 transport，结构化 Result 必须由 Brain 读取并校验。
-- 同一 Worker Slice 在 Plan/scope/Git binding 仍 current 时可用 child `sessionID` continuation；这是 transport 优化，不是授权、完成事实或 recovery authority。
-- SPV、CV、Stage Reviewer 每次 initial/recheck 默认 fresh；不要复用 Worker session 或旧 verdict。
+- continuation-first：先确认这是同一 logical owner 的合法 continuation，再复用 child `sessionID`/continuation handle；sessionID 存在本身不证明业务 continuation 合法。
+- Worker successor、bounded repair、CV/Stage Reviewer same-basis recheck 和 Prototype research return 都必须在 Result/Finding 接纳、binding/currentness 与 ACK/barrier 校验后，向同一 owner 发送 bounded packet；没有有效 continuation 才走 fresh/recovery。
+- OpenCode 不复制 Pi 的 `steer_subagent`；running 或 completed Role 的 bounded clarification 都通过 same-owner continuation，并不得成为 implementation design 或未接纳的新业务工作。
+- CV 与 Stage Reviewer 的 initial review 使用 fresh child；target/basis/identity/trust/clean-room 未变化时，finding 后的 bounded recheck 复用同一 logical reviewer owner；变化、trust 丢失或 Result 无法重读时 fresh。
+- SPV 在 Plan/Map material revision 或 candidate Plan、referenced Map entry、Authority、exact Git tuple 任一变化后，始终 fresh full initial；不得复用旧 verdict。
 - 缺失/截断/重复/错误绑定的 Result、角色配置缺失、权限拒绝或 child dispatch 失败：保留磁盘事实，返回 `RUNTIME_BLOCKER`/对应 typed blocker；不 fallback、不换 role、不伪造 Result。
 - `sessionID`、transcript、model、message id、`idle`、`done` 和 completion notification 不写入 MES、Plan、Authority 或 Result binding。
 

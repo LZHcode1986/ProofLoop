@@ -32,6 +32,22 @@ currentness basis：
 | Worker continuation | 同一 Slice lane、mode-specific Plan/Authority/Git basis、scope 和上一个 Result/ACK 状态；Task JIT Read Set 由 Brain running `proofloop-execute` 每个 Step 投影、Worker 只消费；`MES_MAINTENANCE` 还须 maintenance binding 与 Brain bounded authorization current | Host Worker document + Execute phase |
 | Planner continuation | 同一语义 Planning basis：Project Stage Map 路径（`delivery/project-stage-map.md`）及当前 Git basis 下的 current Stage entry、Stage / dependency-ready 选择、candidate Plan target / binding、Authority refs、相关 code reality、branch、trust root 和合法 planning write scope | Host Planner document + 本 Contract |
 
+### 2.1 Continuation Relay Rule
+
+Continuation relay is a transport projection of an already-authorized lifecycle decision; it is not a lifecycle, MES fact, Plan/Authority fact, durable state, or new controller.
+
+A relay is legal only after Brain has proved all of the following:
+1. the current lifecycle row permits continuation;
+2. the retained owner still matches the current Stage/Slice/Task or review target;
+3. the current Plan/Authority/Git/binding basis and scope remain valid;
+4. no pending Result or closed ACK barrier would be crossed; and
+5. the packet contains only the bounded work authorized by that current event.
+
+If any proof is missing, stale, or not re-readable, Brain must choose the existing fresh/recovery/new-owner or typed-blocker path. A surviving session or transport handle never proves business continuation by itself.
+
+Post-result continuation may deliver the next bounded turn to a retained owner after Result acceptance. A live relay may deliver only bounded correction or clarification while the owner is still running; it must not grant successor work, repair authorization, or any unaccepted business action.
+
+Host-specific primitives and handles are owned by the selected Host Brain document. Host identity, session identity, transcript, and message identity are transport metadata only and never enter durable business facts.
 上述 branch guard 不是模型循环。普通 continuation、普通 Task Result、ACK 和同一
 Flow 内部迭代由当前 Flow/Contract 继续处理；不因 `idle`、`done`、暂时无 action
 或 transport `sent` 自动关闭或重新派发。

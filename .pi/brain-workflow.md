@@ -54,9 +54,11 @@ Pi Brain 是用户入口、路由器和 durable-fact 解释者。本文件同时
 ## Subagent dispatch 与生命周期
 
 - `subagent_type` 必须等于 `.pi/agents/` 文件 basename：`proofloop-plan`、`stage-plan-verifier`、`worker`、`code-verifier`、`stage-reviewer`、`general`、`researcher`、`prototype`。
-- Pi 使用 `Agent` 创建、`resume` continuation 和 `get_subagent_result` 读取结构化 Result。
-- 同一 Worker Slice 在 Plan/scope/Git binding 仍 current 时可 `resume`；这是 transport 优化，不是授权、完成事实或 recovery authority。
-- SPV、CV、Stage Reviewer 每次 initial/recheck 默认 fresh；不要复用 Worker session 或旧 verdict。
+- Pi 使用 `Agent` 创建、`get_subagent_result` 读取结构化 Result；`resume` 只用于已被 Brain 判定合法的 retained-owner post-result continuation。
+- Worker successor、bounded repair、CV/Stage Reviewer same-basis recheck 和 Prototype research return 都必须先通过 Result/Finding 接纳、binding/currentness 与 ACK/barrier 校验，再向同一 owner 发送 bounded packet。
+- running Role 的 live relay 使用 `steer_subagent`，只允许 bounded correction/claim clarification；不得发送 successor Task、repair authorization 或未接纳的新业务工作。completed Role 的 clarification 使用 `resume`；clarification 不得变成 implementation design 对话。
+- CV 与 Stage Reviewer 的 initial review 使用 fresh Agent；target/basis/identity/trust/clean-room 未变化时，finding 后的 bounded recheck 使用同一 Reviewer continuation；变化、trust 丢失或 Result 无法重读时 fresh。
+- SPV 在 Plan/Map material revision 或 candidate Plan、referenced Map entry、Authority、exact Git tuple 任一变化后，始终 fresh full initial；不得以 `resume` 复用旧 verdict。
 - 缺失/截断/重复/错误绑定的 Result、角色配置缺失、权限拒绝或 Agent 创建失败：保留磁盘事实，返回 `RUNTIME_BLOCKER`/对应 typed blocker；不 fallback、不换 role、不伪造 Result。
 - `agent_id`、`session_id`、transcript、model、message id、`idle`、`done` 和 transport 状态不写入 MES、Plan、Authority 或 Result binding。
 
