@@ -85,6 +85,22 @@ for (const marker of plannerMarkers) {
 assert.match(piPlanner, /Agent.*resume.*get_subagent_result/s);
 assert.match(openCodePlanner, /task.*sessionID.*returned/s);
 
+const piBrain = readFileSync(join(root, '.pi', 'brain-workflow.md'), 'utf8');
+const openCodeBrain = readFileSync(join(root, '.opencode', 'agents', 'brain.md'), 'utf8');
+const lifecycleContract = readFileSync(join(root, '.agents', 'contracts', 'brain', 'agent-lifecycle.md'), 'utf8');
+
+assert.match(piBrain, /Agent[\s\S]*get_subagent_result/);
+assert.match(piBrain, /resume[\s\S]*steer_subagent[\s\S]*successor Task/);
+assert.match(piBrain, /target\/basis[\s\S]*Reviewer continuation/);
+assert.match(piBrain, /SPV[\s\S]*fresh full initial/);
+assert.match(openCodeBrain, /continuation-first/);
+assert.match(openCodeBrain, /logical owner/);
+assert.match(openCodeBrain, /不复制 Pi 的 `steer_subagent`/);
+assert.match(openCodeBrain, /same-owner continuation/);
+assert.match(openCodeBrain, /SPV[\s\S]*fresh full initial/);
+assert.match(lifecycleContract, /Continuation Relay Rule/);
+assert.match(lifecycleContract, /not a lifecycle, MES fact, Plan\/Authority fact, durable state/);
+assert.match(lifecycleContract, /pending Result or closed ACK barrier/);
 const piWorker = readFileSync(rolePath('pi', 'worker'), 'utf8');
 const openCodeWorker = readFileSync(rolePath('opencode', 'worker'), 'utf8');
 assert.match(piWorker, /同一 binding current/);
@@ -149,5 +165,8 @@ console.log(JSON.stringify({
     'session-loss recovery markers',
     'Pi prompt replacement and transport markers',
     'OpenCode effective prompt/debug route',
+    'Pi resume/steer_subagent/result retrieval and ACK barrier markers',
+    'OpenCode continuation-first same-owner relay markers',
+    'Host-neutral relay contract no-durable-state markers',
   ],
 }));
