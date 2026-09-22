@@ -6,4 +6,5 @@ dist/
 .codegraph/
 .proofloop/
 .pi/npm/
+packages/runtime/test/
 packages/runtime/test-dist/
