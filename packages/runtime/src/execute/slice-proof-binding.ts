@@ -37,17 +37,17 @@
  *     SHA-256(SPN(slice/task block)). These plan-internal derived refs are
  *     shape-recognized by the engine and EXCLUDED from the Authority content
  *     delta / owner attribution (plan-file edits never leak stage-wide).
- *   - canonical authority/verification refs are classed by path:
- *       tech-spec/acceptance.md# → acceptance
- *       PRD.md#                  → goal      (stage-level goal authority)
- *       tech-spec/architecture.md# → risk
- *       tech-spec/contracts.md#  → seam
- *     filter = canonical no-whitespace refs only; sort within class ascending,
+ *   - canonical authority/verification refs use the caller's resolved
+ *     descriptor.kind (not the file path). Only PRD.md and the three core
+ *     tech-spec files are admitted as Authority paths; supported kinds are
+ *     acceptance/seam/oracle/risk plus stage-level goal. Authority task and
+ *     proof_spec have no projection bucket here and fail closed.
+ *     Filter = canonical no-whitespace refs only; sort within class ascending,
  *     dedup; .agents bare refs / PO test identifiers / plan-internal non-derived
- *     refs / bare or non-canonical refs are excluded. PRD.md goal-kind refs are
+ *     refs / bare or non-canonical refs are excluded. Goal-kind refs are
  *     indexed and tracked in the stage authority set but own no Slice: their
  *     change fails closed to Stage-wide (never guessed task-local). Missing /
- *     unclassifiable / duplicate resolved-index entries fail closed with
+ *     mismatched / unsupported resolved descriptors fail closed with
  *     REPLAN.IMPACT_INPUT_INVALID.
  *
  * Closed execution binding (sealed in this adapter): every projected snapshot
@@ -183,7 +183,7 @@ const CONTRACTS_PATH = 'tech-spec/contracts.md';
 const ARCHITECTURE_PATH = 'tech-spec/architecture.md';
 const PRD_PATH = 'PRD.md';
 
-type CanonicalClass = 'acceptance' | 'goal' | 'risk' | 'seam';
+type CanonicalClass = 'acceptance' | 'goal' | 'risk' | 'seam' | 'oracle';
 
 /**
  * Canonical refs only: `path#section`, root-relative, no whitespace, not an
@@ -201,17 +201,34 @@ function isCitableCanonicalRef(ref: string, planRef: string): boolean {
   return true;
 }
 
-/** Closed class of a canonical ref by path; unclassifiable → fail closed. */
-function classifyRef(ref: string): CanonicalClass {
+/** Path is an Authority allowlist; only the resolved descriptor owns the kind. */
+function classifyRef(ref: string, desc: VNextReferenceDescriptor): CanonicalClass {
   const path = ref.slice(0, ref.indexOf('#'));
-  if (path === ACCEPTANCE_PATH) return 'acceptance';
-  if (path === PRD_PATH) return 'goal';
-  if (path === ARCHITECTURE_PATH) return 'risk';
-  if (path === CONTRACTS_PATH) return 'seam';
-  throw new SliceProofBindingError(
-    'REPLAN.IMPACT_INPUT_INVALID',
-    `canonical ref ${JSON.stringify(ref)} has no closed class (acceptance/goal/risk/seam)`,
-  );
+  if (path !== ACCEPTANCE_PATH && path !== PRD_PATH && path !== ARCHITECTURE_PATH && path !== CONTRACTS_PATH) {
+    throw new SliceProofBindingError(
+      'REPLAN.IMPACT_INPUT_INVALID',
+      `canonical ref ${JSON.stringify(ref)} has no allowed Authority path`,
+    );
+  }
+  if (desc.ref !== ref) {
+    throw new SliceProofBindingError(
+      'REPLAN.IMPACT_INPUT_INVALID',
+      `resolved descriptor ref ${JSON.stringify(desc.ref)} does not equal requested ref ${JSON.stringify(ref)}`,
+    );
+  }
+  switch (desc.kind) {
+    case 'acceptance':
+    case 'goal':
+    case 'risk':
+    case 'seam':
+    case 'oracle':
+      return desc.kind;
+    default:
+      throw new SliceProofBindingError(
+        'REPLAN.IMPACT_INPUT_INVALID',
+        `resolved descriptor kind ${JSON.stringify(desc.kind)} for ${JSON.stringify(ref)} has no Authority proof projection`,
+      );
+  }
 }
 
 function uniqueSorted(values: readonly string[]): string[] {
@@ -399,15 +416,23 @@ export function projectSliceProofSnapshot(
   const stageCanonical = new Map<string, CanonicalClass>();
   const sliceAcceptance = new Map<string, string[]>();
   const sliceSeam = new Map<string, string[]>();
+  const sliceOracle = new Map<string, string[]>();
   const sliceRisk = new Map<string, string[]>();
-  const addClassed = (sliceId: string | null, ref: string): void => {
+  const addClassed = (sliceId: string, ref: string): void => {
     if (!isCitableCanonicalRef(ref, side.plan_ref)) return;
-    const cls = classifyRef(ref);
+    const desc = side.resolved_reference_index[ref];
+    if (desc === undefined || desc === null || typeof desc !== 'object' || Array.isArray(desc)) {
+      throw new SliceProofBindingError(
+        'REPLAN.IMPACT_INPUT_INVALID',
+        `resolved reference index is missing descriptor for canonical ref ${JSON.stringify(ref)}`,
+      );
+    }
+    const cls = classifyRef(ref, desc);
     stageCanonical.set(ref, cls);
-    if (sliceId === null) return;
     const bucket =
-      cls === 'acceptance' ? sliceAcceptance : cls === 'seam' ? sliceSeam : cls === 'risk' ? sliceRisk : null;
-    if (bucket === null) return; // goal-kind (PRD.md) stays stage-level
+      cls === 'acceptance' ? sliceAcceptance : cls === 'seam' ? sliceSeam :
+      cls === 'oracle' ? sliceOracle : cls === 'risk' ? sliceRisk : null;
+    if (bucket === null) return; // goal-kind Authority refs stay stage-level
     const list = bucket.get(sliceId) ?? [];
     list.push(ref);
     bucket.set(sliceId, list);
@@ -422,21 +447,8 @@ export function projectSliceProofSnapshot(
 
   // Every classed canonical ref must resolve in the caller's index (fail-closed).
   const referenceIndex: Record<string, VNextReferenceDescriptor> = {};
-  for (const [ref, cls] of stageCanonical) {
-    const desc = side.resolved_reference_index[ref];
-    if (desc === undefined) {
-      throw new SliceProofBindingError(
-        'REPLAN.IMPACT_INPUT_INVALID',
-        `resolved reference index is missing descriptor for canonical ref ${JSON.stringify(ref)}`,
-      );
-    }
-    if (desc.kind !== cls) {
-      throw new SliceProofBindingError(
-        'REPLAN.IMPACT_INPUT_INVALID',
-        `resolved descriptor kind ${JSON.stringify(desc.kind)} for ${JSON.stringify(ref)} contradicts its class ${JSON.stringify(cls)}`,
-      );
-    }
-    referenceIndex[ref] = desc;
+  for (const ref of stageCanonical.keys()) {
+    referenceIndex[ref] = side.resolved_reference_index[ref];
   }
 
   // Derived plan-internal descriptors (goal/task refs).
@@ -481,13 +493,14 @@ export function projectSliceProofSnapshot(
     const achievement = sliceAcceptance.get(slice.slice_id) ?? [];
     const seam = sliceSeam.get(slice.slice_id) ?? [];
     const risk = sliceRisk.get(slice.slice_id) ?? [];
+    const oracle = sliceOracle.get(slice.slice_id) ?? [];
     const proofIndex: ReplanProofIndexInput = {
       slice_id: slice.slice_id,
       goal_ref: derivedGoalRefs.get(slice.slice_id)!,
       task_refs: slice.task_ids.map((id) => derivedTaskRefs.get(id)!),
       acceptance_refs: uniqueSorted(achievement),
       seam_refs: uniqueSorted(seam),
-      oracle_refs: [],
+      oracle_refs: uniqueSorted(oracle),
       risk_refs: uniqueSorted(risk).map(
         (refId): ReplanRiskBindingInput => ({
           ref_id: refId,
