@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 TDD is the red → green loop. This skill is the reference that makes that loop produce tests worth keeping: what a good test is, where tests go, the anti-patterns, and the rules of the loop. Every section applies on every cycle — consult them before and during the loop, not after.
 
-When exploring the codebase, read root `CONTEXT.md` (if it exists) so test names, interface vocabulary, domain terminology, and naming consistency match the project's domain language, and respect ADRs in the area being touched. In a ProofLoop Worker lane, this vocabulary read is retained for naming and interface consistency, while the current Work Packet / JIT Read Set and bound normative refs govern the implementation context and boundaries; `CONTEXT.md` remains non-normative Working Memory and does not become an Authority.
+When exploring the codebase, test names, interface vocabulary, domain terminology, and naming consistency must align with the current task's bound normative refs, the existing public code contract, and established project naming — do not re-read PRD or legacy working material as an extra domain source. In a ProofLoop Worker lane, the execution context is the JIT Read Set + bound Technical Authority + current code contract.
 
 ## What a good test is
 

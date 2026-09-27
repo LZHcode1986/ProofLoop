@@ -42,8 +42,8 @@
  * failure is no-write with the last valid snapshot byte-stable, and there is
  * NEVER an automatic retry (contracts §2.1.2). The result reports only
  * materialized fact/relation refs and Git/basis facts — no next action, no
- * route, no dispatch, no reasoning. MES_MAINTENANCE / PRE_MES_BOOTSTRAP
- * never write MES and are rejected at the event boundary.
+ * route, no dispatch, no reasoning. MES_MAINTENANCE
+ * never writes MES and is rejected at the event boundary.
  */
 import { createHash } from 'node:crypto';
 import * as os from 'node:os';
@@ -504,8 +504,8 @@ export class MesTransactionLayer {
       txFail('invalid-event', 'semantic event facts must be a non-empty array');
     }
 
-    // 2) Binding: NORMAL mode only (PRE_MES_BOOTSTRAP / MES_MAINTENANCE never
-    //    write MES), canonical authority refs, optional git basis shape.
+    // 2) Binding: NORMAL mode only (MES_MAINTENANCE never
+    //    writes MES), canonical authority refs, optional git basis shape.
     const binding = event.binding;
     if (!isRecord(binding)) {
       txFail('invalid-event', 'semantic event requires a binding record');
@@ -517,7 +517,7 @@ export class MesTransactionLayer {
       }
     }
     if (binding.execution_mode !== 'NORMAL') {
-      txFail('invalid-event', `the MES operational transaction layer is the NORMAL durable mutator — execution_mode must be NORMAL, got ${JSON.stringify(binding.execution_mode)} (PRE_MES_BOOTSTRAP / MES_MAINTENANCE never write MES)`);
+      txFail('invalid-event', `the MES operational transaction layer is the NORMAL durable mutator — execution_mode must be NORMAL, got ${JSON.stringify(binding.execution_mode)} (MES_MAINTENANCE never writes MES)`);
     }
     const authorityRefs = binding.authority_refs;
     if (!Array.isArray(authorityRefs) || authorityRefs.length === 0) {

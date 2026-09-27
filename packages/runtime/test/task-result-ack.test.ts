@@ -34,7 +34,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import * as crypto from 'node:crypto';
-import { validateWorkerTaskResult } from '../dist/execute/task-result';
+import { validateWorkerTaskResult, TaskResultValidationError } from '../dist/execute/task-result';
 import {
   buildTaskResultAck,
   TaskResultAckError,
@@ -220,17 +220,18 @@ describe('closed TASK_RESULT_ACK generation (S03-B-T02)', () => {
     assert.equal(rejectedPause.reasonCode, 'binding-broken');
     assertClosedAck(rejectedPause);
 
-    // PRE_MES_BOOTSTRAP + ACCEPTED + CONTINUE: no acceptedResultRef.
-    const bootstrap = buildTaskResultAck({
-      ...base,
-      submitted: submittedResult({ executionMode: 'PRE_MES_BOOTSTRAP', resultRef: undefined }),
-      decision: decision({ acceptedResultRef: undefined }),
-      durableFacts: [],
-    });
-    assert.equal(bootstrap.executionMode, 'PRE_MES_BOOTSTRAP');
-    assert.equal(bootstrap.resultDisposition, 'ACCEPTED');
-    assert.equal(bootstrap.acceptedResultRef, undefined);
-    assertClosedAck(bootstrap);
+    // PRE_MES_BOOTSTRAP is retired (Phase 8.3): the closed Task Result
+    // envelope mode set no longer accepts it, so the submitted envelope
+    // itself fails closed at validation — buildTaskResultAck is never
+    // reached with a bootstrap-mode submission.
+    assert.throws(
+      () => submittedResult({ executionMode: 'PRE_MES_BOOTSTRAP', resultRef: undefined }),
+      (err: unknown) => {
+        assert.ok(err instanceof TaskResultValidationError);
+        return true;
+      },
+      'retired PRE_MES_BOOTSTRAP submitted envelope must fail closed',
+    );
   });
 
   test('rejects REJECTED + CONTINUE and invalid field combinations', () => {
@@ -248,7 +249,6 @@ describe('closed TASK_RESULT_ACK generation (S03-B-T02)', () => {
       ['reasonCode missing on PAUSE', decision({ continuationDisposition: 'PAUSE' })],
       ['reasonCode forbidden on ACCEPTED+CONTINUE', decision({ reasonCode: 'why' })],
       ['acceptedResultRef forbidden on REJECTED', decision({ resultDisposition: 'REJECTED', continuationDisposition: 'PAUSE', reasonCode: 'x', acceptedResultRef: 'mes:result:S03:y' })],
-      ['acceptedResultRef forbidden on bootstrap', decision({ acceptedResultRef: 'mes:result:S03:y' })],
       ['unknown decision key', { ...decision(), bogus: 1 } as TaskResultAckDecision],
     ];
     for (const [label, badDecision] of cases) {
@@ -256,7 +256,7 @@ describe('closed TASK_RESULT_ACK generation (S03-B-T02)', () => {
         () =>
           buildTaskResultAck({
             ...base,
-            submitted: label.includes('bootstrap')
+            submitted: label.includes('PRE_MES_BOOTSTRAP')
               ? submittedResult({ executionMode: 'PRE_MES_BOOTSTRAP', resultRef: undefined })
               : submittedResult(),
             decision: badDecision as never,

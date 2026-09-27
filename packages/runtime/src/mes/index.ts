@@ -107,6 +107,28 @@ export type {
   MesBootstrapErrorCode,
 } from './bootstrap';
 
+// MES infrastructure initialization (independent of Stage / Map / Plan).
+export {
+  MES_INIT_REL,
+  MES_INITIALIZATION_VERSION,
+  readMesInitRecord,
+  isMesInitialized,
+  initializeMes,
+} from './bootstrap';
+export type { MesInitRecord } from './bootstrap';
+
+// Authority path presence observation (read-only, deterministic; no MES writes).
+export {
+  MES_AUTHORITY_PATHS,
+  observeAuthorityPaths,
+  observeAuthorityPathBuckets,
+} from './bootstrap';
+export type {
+  MesAuthorityPath,
+  MesAuthorityPresence,
+  MesAuthorityObservation,
+} from './bootstrap';
+
 // S04-B terminal / Review relation closure helpers (write-through predicates).
 export {
   isDurableAcceptedStageSupport,

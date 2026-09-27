@@ -31,11 +31,12 @@ currentness basis：
 |---|---|---|
 | `NEW` / `FRESH` / `RECOVERY-new-agent` dispatch | 当前 Role/dispatch skill、binding、scope、Herdr/Link transport 与 dispatch packet（launch mechanics 遵循 workflow Contract 指引） | `workflow.md` |
 | `MES_MAINTENANCE` dispatch | current integrity blocker, physical quarantine, exact frozen/forensic/audit tuple, recovery candidate + fresh SPV `PLAN_READY`, Brain bounded authorization, role/packet/scope/Herdr binding | workflow + Execute/Worker/CV/Stage Review Contracts |
-| Result acceptance | role template schema、`actionToken`、Result identity、Stage/Slice/Task/Plan binding、mode-specific digest/binding、scope 与该 Result 的 Git/事实 basis；`NORMAL` durable materialization 由 MES transaction layer 完成，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 只由 Git/Plan/evidence 复核 | Brain + 对应 Result Contract + MES transaction owner |
+| Result acceptance | role template schema、`actionToken`、Result identity、Stage/Slice/Task/Plan binding、mode-specific digest/binding、scope 与该 Result 的 Git/事实 basis；`NORMAL` durable materialization 由 MES transaction layer 完成，`MES_MAINTENANCE` 只由 Git/Plan/evidence 复核 | Brain + 对应 Result Contract + MES transaction owner |
 | review `RECHECK` | reviewer identity、review target/basis、repair scope、repair diff、required criterion、mode/maintenance binding（如适用）与 read-only 条件 | lifecycle + 对应 Reviewer Skill |
 | `RECOVERY` | 受影响的 durable facts、binding、scope、Git reality、Result/Finding 与当前 peer 能力；`MES_MAINTENANCE` 另须 frozen snapshot exact digest/count、forensic/audit refs 与 quarantine | Brain + 本 Contract |
 | Worker continuation | 同一 Slice lane、mode-specific Plan/Authority/Git basis、scope 和上一个 Result/ACK 状态；Task JIT Read Set 由 Brain running `proofloop-execute` 每个 Step 投影、Worker 只消费；`MES_MAINTENANCE` 还须 maintenance binding 与 Brain bounded authorization current | Worker/Execute Skill |
 | Planner continuation | 同一语义 Planning basis：Project Stage Map 路径（`delivery/project-stage-map.md`）及当前 Git basis 下的 current Stage entry、Stage / dependency-ready 选择、candidate Plan target / binding、Authority refs、相关 code reality、branch、trust root 和合法 planning write scope | Planning Skill + 本 Contract |
+Planner lifecycle 只能由已经满足 Planning-entry predicate 的 Brain dispatch 启动（predicate = `MES initialized + current PROPOSE_READY`，判定只属于 Brain；Planner 不重复检查该 gate）。Planning-entry 的完整语义与 presence observation 由 `.agents/contracts/brain/mes.md` 与 `.agents/contracts/brain/workflow.md` 持有，本文件只保留该 dispatch prerequisite，不复制其正文。
 
 上述 branch guard 不是模型循环。普通 continuation、普通 Task Result、ACK 和同一
 Flow 内部迭代由当前 Flow/Contract 继续处理；不因 `idle`、`done`、暂时无 action
@@ -95,8 +96,7 @@ Result 只能由当前 Link reply 加对应 role template 进入 lifecycle。Bra
 - reply 只出现一次且关联当前 packet；`sent`、pane 状态、Agent state、claim clarification 和
   Git diff 不代替 Result。
 
-`NORMAL` 下 formal Result 由 Brain 校验并转化为经授权的 semantic event，由 MES operational transaction layer materialize；Brain 不组装 full snapshot、retention 或 canonical relation identity。一次性
-`PRE_MES_BOOTSTRAP` 下允许的 Planner/SPV/CV/首个 MES-persistence Worker Result 是结构化 Link evidence，由 Git + Git-tracked Plan + canonical Authority 复核，不写 MES、不指向 MES `resultRef`；只在 MES persistence 集成并 seed 前、且只对首个 MES-persistence Stage 合法，seed 后永久禁止并恢复 `NORMAL`。
+`NORMAL` 下 formal Result 由 Brain 校验并转化为经授权的 semantic event，由 MES operational transaction layer materialize；Brain 不组装 full snapshot、retention 或 canonical relation identity。
 `RECOVERY_REBASELINE` 下 Planner/SPV Result 与 `MES_MAINTENANCE` 下 Worker/CV/Review Result 都是结构化 Link evidence：前者绑定 recovery-aware candidate Plan、Map/Authority/Git exact tuple，后者绑定 recovery candidate、current Authority/Git、frozen/forensic/audit exact tuple 与 bounded authorization；两者都不要求或声称 current NORMAL MES work identity/resultRef。`PLAN_READY` 在 maintenance/recovery Authority closure、isolated implementation/CV/Review、fresh exact-bound recovery candidate/SPV 与 controlled recovery transaction 之前不 materialize 为 MES PVR/PA 或 `recovery_baseline`。
 Stage Reviewer envelope 按 `.agents/contracts/brain/stage-review.md` 作为 Brain 接纳前的 role-specific structured input，不要求预先存在 durable `resultRef`；只有 normal Stage Review 且 Brain 发起对应 semantic event 时，MES transaction layer 才按 fact kind materialize `fact_kind: result`、Finding/Stage relation 与既有 identity/digest 规则。Maintenance Review 只接纳 Git/Link evidence，不 materialize MES Finding/Stage/terminal fact。accepted Stage/Finding 支持事实所需的 `result_ref` 由 transaction layer 从 canonical durable relation 产生或 exact-validate。
 
@@ -107,7 +107,7 @@ closed `TASK_RESULT_ACK`：
 
 ```yaml
 kind: TASK_RESULT_ACK
-executionMode: NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE
+executionMode: NORMAL | MES_MAINTENANCE
 stageId: <stage-id>
 sliceId: <slice-id>
 taskId: <task-id>
@@ -120,20 +120,20 @@ validatedGitBasis: <validated Result/evidence basis>
 reasonCode: <required for REJECTED or PAUSE>
 ```
 
-只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`。ACK 不得包含 `next_task_id`、`next_action`、`recommended_action`、producer instruction、Receipt、Gate 或 admission credential。`NORMAL + ACCEPTED` 必须有 `acceptedResultRef`；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 或 REJECTED 禁止该字段；`validatedGitBasis` 必填；`MES_MAINTENANCE` 的 ACK 只表示 Brain 接纳 Git/Link evidence，不表示 MES Task completion；`ACCEPTED + CONTINUE` 不得有 `reasonCode`。
+只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`。ACK 不得包含 `next_task_id`、`next_action`、`recommended_action`、producer instruction、Receipt、Gate 或 admission credential。`NORMAL + ACCEPTED` 必须有 `acceptedResultRef`；`MES_MAINTENANCE` 或 REJECTED 禁止该字段；`validatedGitBasis` 必填；`MES_MAINTENANCE` 的 ACK 只表示 Brain 接纳 Git/Link evidence，不表示 MES Task completion；`ACCEPTED + CONTINUE` 不得有 `reasonCode`。
 
 每个新 Result attempt 使用新的 `resultId`；同 payload 重放复用原 id，修正后的 retry
 使用新 id。同一 id + 相同 binding/payload 必须幂等返回原 disposition；同一 id +
 不同 payload 返回 `RESULT_INVALID`；stale token 返回 `RESULT_BINDING_MISMATCH`。
-ACK 丢失或 Brain 重启时，`NORMAL` 从 MES 重建等价 ACK；bootstrap 从 Git、Plan 和当前 evidence 重建；`MES_MAINTENANCE` 从 recovery Plan、Git refs/commits、frozen digest/count 与 forensic/audit 重建，不创建 ack-log、maintenance result store 或第二 result store。
+ACK 丢失或 Brain 重启时，`NORMAL` 从 MES 重建等价 ACK；`MES_MAINTENANCE` 从 recovery Plan、Git refs/commits、frozen digest/count 与 forensic/audit 重建，不创建 ack-log、maintenance result store 或第二 result store。
 
-每个 Step 由 Brain running `proofloop-execute` 从当前 mode 绑定的 Plan 当前 Slice 的稳定 task order 选择第一个 incomplete 且 dependencies 已有被当前 mode 接纳的 outputs、scope/binding current 的 Task，并只把该 Task 的 JIT input 投影给同一 Worker；`NORMAL` predecessor output 来自 MES durable facts，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` predecessor evidence 从 Git + Plan/evidence 重建；不得越过未接纳 predecessor。Brain 不在 ACK 中携带下一 Task 指令。
+每个 Step 由 Brain running `proofloop-execute` 从当前 mode 绑定的 Plan 当前 Slice 的稳定 task order 选择第一个 incomplete 且 dependencies 已有被当前 mode 接纳的 outputs、scope/binding current 的 Task，并只把该 Task 的 JIT input 投影给同一 Worker；`NORMAL` predecessor output 来自 MES durable facts，`MES_MAINTENANCE` predecessor evidence 从 Git + Plan/evidence 重建；不得越过未接纳 predecessor。Brain 不在 ACK 中携带下一 Task 指令。
 
 ## 5. Continuation branches
 
 ### 5.1 Worker
 
-Brain 只启动一次 Slice lane，按当前 mode 投影 Slice-level Work Packet 和首个 dependency-ready Task 的 JIT Read Set；lane 启动后，Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker。Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 开始时读取 Execute 投影的 JIT Read Set、Plan/Authority/Git basis 与依赖输出，提交 Result 并等待 Brain 的 closed ACK。`NORMAL` 的 ACK/Result 由 MES transaction layer materialize；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 的 ACK/Result 只接纳 Git/Link evidence。ACK 接纳后 Worker 继续，直到 self-check 通过返回 `SLICE_CANDIDATE_READY`；Brain 随后按 mode 路由 CV。Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
+Brain 只启动一次 Slice lane，按当前 mode 投影 Slice-level Work Packet 和首个 dependency-ready Task 的 JIT Read Set；lane 启动后，Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker。Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 开始时读取 Execute 投影的 JIT Read Set、Plan/Authority/Git basis 与依赖输出，提交 Result 并等待 Brain 的 closed ACK。`NORMAL` 的 ACK/Result 由 MES transaction layer materialize；`MES_MAINTENANCE` 的 ACK/Result 只接纳 Git/Link evidence。ACK 接纳后 Worker 继续，直到 self-check 通过返回 `SLICE_CANDIDATE_READY`；Brain 随后按 mode 路由 CV。Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
 
 Worker 有 durable code、Evidence 或 projection 而 Agent 丢失时，Brain 使用当前 mode 的 `recover-task`，保留已有成果，重新校验 root-bound scope/binding，不重新实现已有工作；`MES_MAINTENANCE` 还必须重建 frozen/forensic/audit tuple 与 maintenance authorization。Result 缺失或未接纳时 lane 暂停，不得自主越过 barrier。
 
@@ -206,14 +206,13 @@ Review Result 只有在 schema/binding、currentness 和对应持久化/证据�
 
 ```text
 LOSS_DETECTED → REHYDRATE → BINDING_CHECK → RECOVER | REUSE | FRESH
-             → RESULT_REVALIDATE → NORMAL: MES | PRE_MES_BOOTSTRAP: Git + Plan | RECOVERY_REBASELINE: Forensic + Audit + Plan/Git | MES_MAINTENANCE: Recovery Plan + Git + frozen/forensic/audit
+             → RESULT_REVALIDATE → NORMAL: MES | RECOVERY_REBASELINE: Forensic + Audit + Plan/Git | MES_MAINTENANCE: Recovery Plan + Git + frozen/forensic/audit
 ```
 
 `LOSS_DETECTED` 包括 Agent/pane/session 丢失、Brain 重启、Link reply 丢失和 Host
 退出。Brain 只从受影响 role 的 durable facts 重新计算动作：
 
 - `NORMAL`：MES facts、`delivery/project-stage-map.md`（active Map entry）、Planner candidate Plan（含 `project_stage_map_ref`）或 Execute/CV/Review accepted Plan、Authority、structured Result/Finding 与 Git/worktree reality；`MES_MAINTENANCE` 不读取 normal work/result facts。
-- `PRE_MES_BOOTSTRAP`：Git-tracked Plan、`delivery/project-stage-map.md`（由 bootstrap Planner 首次创建后）、canonical Authority、结构化 Link evidence 与 Git/worktree reality，不读取或声称 MES facts。
 - `RECOVERY_REBASELINE`：root-bound forensic incident + read-only audit + current recovery Authority + candidate Plan/Map/Git tuple；`MES_MAINTENANCE`：recovery candidate Plan + current Technical Authority + Git candidate/integration evidence + frozen snapshot exact digest/count + forensic/audit refs + Brain bounded authorization；两者不读取或声称 current NORMAL MES work/result，`PLAN_READY` 在 baseline/maintenance evidence closure 前不写 MES。
 
 | 场景 | 合法动作 | 关键条件 |
@@ -255,6 +254,6 @@ pane/session、claim clarification 和旧 Result 不作为新 cycle 的 authorit
   scope 已由对应 owner 核对；
 - branch 与当前 role、identity、snapshot、review basis 相符；
 - Result 已完成 schema、digest、scope、唯一性和 `actionToken` 校验；
-- formal 业务结论已经由 MES transaction layer 按模式 materialize，或 bootstrap evidence 已由 Git + Plan 复核，或 maintenance/recovery evidence 已满足其独立 seam 的 no-write/审计规则，或 typed blocker/no-write 已保留并给出恢复方向；
+- formal 业务结论已经由 MES transaction layer 按模式 materialize，或 maintenance/recovery evidence 已满足其独立 seam 的 no-write/审计规则，或 typed blocker/no-write 已保留并给出恢复方向；
 - 没有用 Agent narrative、Link delivery、pane/session、claim clarification、checkbox 或 progress
   投影替代 MES/Git authority。

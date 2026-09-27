@@ -9,7 +9,7 @@ Worker 的 repair packet/result schema 由 `.agents/skills/proofloop-execute/ref
 ## 2. 使用条件
 
 - 当前 Slice 的 CV Finding 已由 Brain 按当前 binding 接纳，且既有 route 需要 Worker 执行 bounded `repair`；
-- 当前 Slice、Plan、Authority、Git basis、scope 和 CV review identity 可由现有 Work Packet/JIT Read Set、lifecycle facts 或 bootstrap evidence 复核；
+- 当前 Slice、Plan、Authority、Git basis、scope 和 CV review identity 可由现有 Work Packet/JIT Read Set、durable facts（`NORMAL` 经 MES transaction layer / `MES_MAINTENANCE` 经 Git + Plan + frozen/forensic/audit evidence）复核；
 - 首次局部 repair 继续使用 `proofloop-execute`、canonical `worker` Skill 和 worker template 的正常语义；本 adapter 在跨轮 history 或 convergence 已触发时提供补充绑定。
 
 同族 Finding 的识别、首次跨边界 Finding 的 synthesis，以及 synthesis 后同族失败的停止规则统一由 `finding-convergence.md` 决定。本文件不按 CV 轮次定义 failure family，也不定义通用 round cap。
@@ -20,12 +20,12 @@ Worker 的 repair packet/result schema 由 `.agents/skills/proofloop-execute/ref
 
 Brain 从当前 MES durable facts、当前 Git/diff、accepted Plan/Authority、已接纳的 CV Result/Finding 和 Worker repair Result 建立 adapter 输入。历史只引用当前 work/binding 下可验证的 Result/Finding，不复制 Result 正文。
 
-### PRE_MES_BOOTSTRAP
+### MES_MAINTENANCE
 
-首个 MES-persistence Stage 的 bootstrap 窗口内，Brain 从 Git、Git-tracked candidate/accepted Plan、canonical Authority、结构化 Link evidence 和 Git/worktree reality 建立输入；不依赖 MES work identity 或 resultRef。seed 后恢复 `NORMAL`，本 adapter 不扩展 bootstrap 窗口。
+MES integrity hard-freeze 期间，Brain 从 Git、Git-tracked recovery candidate Plan、canonical Authority、forensic/audit refs、结构化 Link evidence 和 Git/worktree reality 建立输入；不依赖 NORMAL MES work identity 或 resultRef。
 
 Adapter 必须向 Brain synthesis 声明两个分析来源：
-- `authoritative_history_source`：可重读的 Worker/CV Result/Finding 或 bootstrap evidence；
+- `authoritative_history_source`：可重读的 Worker/CV Result/Finding 或 maintenance/recovery evidence；
 - `current_basis_source`：当前 Slice/Plan/Authority/Git/review binding facts。
 
 这两个名称是 Brain 的分析声明，不是持久化字段。若当前 Contract 定义的 `FINDING_DISPOSITION` 在实现中可用，Brain 可以读取它；不可用时从已有 Result/Finding、Plan、Authority、Git 和 binding facts 重建。无法完整重建 history 或 current basis 时，Brain 走既有 recovery/fresh 或 typed blocker。

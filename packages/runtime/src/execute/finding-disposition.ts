@@ -24,8 +24,8 @@
  *     (resume_target === verifier-lane) with accepted_route_code null — no
  *     automatic producer repair / Replan / HUMAN_REQUIRED; a PASS finding or
  *     a candidate-plan revision can never produce an acceptance
- *     (§2.2.2 / E2E-20); PRE_MES_BOOTSTRAP never writes this durable fact
- *     (STATIC-13/14: bootstrap evidence is Git-bound, no second decision
+ *     (§2.2.2 / E2E-20); non-NORMAL evidence never writes this durable fact
+ *     (STATIC-13/14: maintenance evidence is Git-bound, no second decision
  *     store). The assembled envelope is re-validated through the canonical
  *     validateMesFactEnvelope so no field can bypass the MES closed set;
  *   - `effectiveRoute` exposes ONLY accepted_route_code read-only —
@@ -173,12 +173,12 @@ export function validateFindingDisposition(value: unknown): Record<string, unkno
         message: `Expected one of: ${MES_EXECUTION_MODES.map((m) => JSON.stringify(m)).join(', ')}`,
       });
     } else if (executionMode !== 'NORMAL') {
-      // STATIC-13/14: PRE_MES_BOOTSTRAP never writes a durable disposition
-      // fact — bootstrap evidence is Git-bound, there is no second decision
+      // STATIC-13/14: non-NORMAL evidence never writes a durable disposition
+      // fact — maintenance evidence is Git-bound, there is no second decision
       // store/log.
       errors.push({
         path: 'finding_disposition.executionMode',
-        message: `finding_disposition is a NORMAL-only durable fact (PRE_MES_BOOTSTRAP never writes it; bootstrap evidence is Git-bound, no second decision store)`,
+        message: `finding_disposition is a NORMAL-only durable fact (non-NORMAL evidence never writes it; maintenance evidence is Git-bound, no second decision store)`,
       });
     }
 

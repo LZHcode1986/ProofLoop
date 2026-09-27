@@ -184,20 +184,9 @@ describe('MES fact-kind binding (S01-B-T01)', () => {
       SchemaValidationError,
     );
 
-    // PRE_MES_BOOTSTRAP work: no pre-seed MES work identity / resultRef
-    // prerequisites — but the Git-tracked plan + Git basis are still bound.
-    const bootstrap = validateMesFactBinding({
-      fact_kind: 'work',
-      execution_mode: 'PRE_MES_BOOTSTRAP',
-      authority_refs: ['PRD.md#FR-005'],
-      scope: scope(),
-      plan_binding: candidateBinding('PLAN_READY'),
-      git_basis: GIT_BASIS,
-    });
-    assert.equal(bootstrap.execution_mode, 'PRE_MES_BOOTSTRAP');
-    assert.equal(bootstrap.work_id, undefined);
-
-    // Bootstrap MUST NOT pretend to carry a pre-seed MES work identity.
+    // PRE_MES_BOOTSTRAP is retired (Phase 8.3): it is no longer a legal
+    // execution mode, so every PRE_MES_BOOTSTRAP binding must fail closed
+    // at the mode gate — no bootstrap-shaped fact can be materialized.
     assert.throws(
       () =>
         validateMesFactBinding({
@@ -205,14 +194,12 @@ describe('MES fact-kind binding (S01-B-T01)', () => {
           execution_mode: 'PRE_MES_BOOTSTRAP',
           authority_refs: ['PRD.md#FR-005'],
           scope: scope(),
-          work_id: 'mes:work:S01:1',
           plan_binding: candidateBinding('PLAN_READY'),
           git_basis: GIT_BASIS,
         }),
       SchemaValidationError,
+      'PRE_MES_BOOTSTRAP binding must fail closed',
     );
-
-    // Bootstrap MUST NOT point at a MES resultRef (Link evidence only).
     assert.throws(
       () =>
         validateMesFactBinding({
@@ -225,19 +212,7 @@ describe('MES fact-kind binding (S01-B-T01)', () => {
           git_basis: GIT_BASIS,
         }),
       SchemaValidationError,
-    );
-
-    // Bootstrap still requires a Git basis (durable recovery = Git facts).
-    assert.throws(
-      () =>
-        validateMesFactBinding({
-          fact_kind: 'work',
-          execution_mode: 'PRE_MES_BOOTSTRAP',
-          authority_refs: ['PRD.md#FR-005'],
-          scope: scope(),
-          plan_binding: candidateBinding('PLAN_READY'),
-        }),
-      SchemaValidationError,
+      'PRE_MES_BOOTSTRAP result binding must fail closed',
     );
 
     // Unknown mode / unknown fact kind / unknown fields fail closed — no
@@ -320,67 +295,36 @@ describe('MES fact-kind binding (S01-B-T01)', () => {
     );
   });
 
-  test('PRE_MES execution-bound facts require a Git Plan binding (CV-S01-B-05)', () => {
-    const base = {
-      fact_kind: 'work' as const,
-      execution_mode: 'PRE_MES_BOOTSTRAP' as const,
-      authority_refs: ['PRD.md#FR-005'],
-      scope: scope(),
-      git_basis: GIT_BASIS,
-    };
-    // No plan_binding at all fails closed.
-    assert.throws(() => validateMesFactBinding(base), SchemaValidationError);
-    // A binding whose nested verification_result_ref points at a pre-seed MES
-    // resultRef is never valid bootstrap evidence.
-    assert.throws(
-      () =>
-        validateMesFactBinding({
-          ...base,
-          plan_binding: {
-            binding_stage: 'accepted' as const,
-            accepted_plan_ref: PLAN_REF,
-            source_candidate_plan_ref: PLAN_REF,
-            verification_result_ref: 'mes:result:S01:1',
-          },
-        }),
-      SchemaValidationError,
-    );
-    assert.throws(
-      () =>
-        validateMesFactBinding({
-          ...base,
-          fact_kind: 'git',
-          plan_binding: {
-            binding_stage: 'accepted' as const,
-            accepted_plan_ref: PLAN_REF,
-            source_candidate_plan_ref: PLAN_REF,
-            verification_result_ref: 'mes:verification:S01:1',
-          },
-        }),
-      SchemaValidationError,
-    );
-    // A valid accepted Git Plan binding with a Git-bound verification ref
-    // passes, and candidate (pre-accept Git Plan) is also legal.
+  test('PRE_MES_BOOTSTRAP is retired — every bootstrap-mode binding fails closed (Phase 8.3)', () => {
+    // Phase 8.3: PRE_MES_BOOTSTRAP was removed from the closed execution
+    // mode set, so no bootstrap-shaped fact can be materialized regardless
+    // of its plan binding.
+    for (const factKind of ['work', 'result', 'git'] as const) {
+      assert.throws(
+        () =>
+          validateMesFactBinding({
+            fact_kind: factKind,
+            execution_mode: 'PRE_MES_BOOTSTRAP',
+            authority_refs: ['PRD.md#FR-005'],
+            scope: scope(),
+            plan_binding: candidateBinding('PLAN_READY'),
+            git_basis: GIT_BASIS,
+          }),
+        SchemaValidationError,
+        `PRE_MES_BOOTSTRAP ${factKind} binding must fail closed`,
+      );
+    }
+    // NORMAL remains the sole legal execution mode.
     const ok = validateMesFactBinding({
-      ...base,
-      plan_binding: {
-        binding_stage: 'accepted' as const,
-        accepted_plan_ref: PLAN_REF,
-        source_candidate_plan_ref: PLAN_REF,
-        verification_result_ref: 'bootstrap:verification:abc',
-      },
+      fact_kind: 'work',
+      execution_mode: 'NORMAL',
+      authority_refs: ['PRD.md#FR-003'],
+      scope: scope(),
+      work_id: 'mes:work:S01:1',
+      plan_binding: acceptedBinding(),
+      git_basis: GIT_BASIS,
     });
-    assert.equal(ok.plan_binding!.binding_stage, 'accepted');
-    const candidateOk = validateMesFactBinding({
-      ...base,
-      plan_binding: {
-        binding_stage: 'candidate' as const,
-        candidate_plan_ref: PLAN_REF,
-        accepted_plan_ref: null,
-        verdict: 'PLAN_READY' as const,
-      },
-    });
-    assert.equal(candidateOk.plan_binding!.binding_stage, 'candidate');
+    assert.equal(ok.execution_mode, 'NORMAL');
   });
 
   test('rejects drive-relative/absolute authority refs and drive-relative plan refs (CV-S01-B-06)', () => {

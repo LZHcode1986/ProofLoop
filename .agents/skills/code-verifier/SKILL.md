@@ -18,13 +18,13 @@ Code Verifier (CV) 是只读、独立的 Slice 反驳者，不是 Evidence 审�
    允许 verdict 与 Result schema 的唯一事实源；
 2. `.agents/contracts/brain/agent-lifecycle.md`：review-loop、Result binding 与 recovery/reset
    语义（本 Skill 只引用，不定义）；
-3. Brain dispatch 指定的 Technical Authority/Acceptance 稳定 ref（tech-spec-only，CV 不读 PRD）与对应模式的 Plan binding：`NORMAL` 只读取 accepted Thin Plan；`PRE_MES_BOOTSTRAP` 只读取 candidate/accepted Git Plan；`MES_MAINTENANCE` 只读取 recovery candidate Thin Plan + maintenance binding，不复制正文。
+3. Brain dispatch 指定的 Technical Authority/Acceptance 稳定 ref（tech-spec-only，CV 不读 PRD）与对应模式的 Plan binding：`NORMAL` 只读取 accepted Thin Plan；`MES_MAINTENANCE` 只读取 recovery candidate Thin Plan + maintenance binding，不复制正文。
 
 进入条件缺一不可，否则在初审前返回 `BLOCKED`：
 
 - packet 携带可验证的 Slice Goal、Technical Authority/Acceptance refs（tech-spec-only，不包含 PRD）、对应模式的 Plan binding、candidate Git ref/diff、real code/tests、当前 Git HEAD；`MES_MAINTENANCE` 另需 frozen/forensic/audit exact tuple 与 quarantine evidence。
-- packet 携带 `execution_mode`（`NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE`）与 `actionToken`，并按对应模式完成 binding 校验。
-- `NORMAL` 的 Plan binding 是 accepted Thin Plan，且 packet 还需 MES work identity/resultRef；`PRE_MES_BOOTSTRAP` 仅对首个 MES-persistence Stage 合法，Plan binding 是 candidate/accepted Git Plan，且使用 canonical Technical Authority refs、baseline/current Git basis 与 Worker Link evidence，不要求 MES status、MES work identity 或 MES `resultRef`；`MES_MAINTENANCE` 仅对 Authority-defined S06 hard-freeze branch 合法，Plan binding 是 recovery candidate Thin Plan，且使用 current Technical Authority、live maintenance Git basis、frozen/forensic/audit exact tuple、quarantine 与 Brain bounded authorization，不要求或产生 MES status/work identity/resultRef；packet 必须能支撑对应 Worker→CV→Integration→maintenance Review 链路。
+- packet 携带 `execution_mode`（`NORMAL | MES_MAINTENANCE`）与 `actionToken`，并按对应模式完成 binding 校验。
+- `NORMAL` 的 Plan binding 是 accepted Thin Plan，且 packet 还需 MES work identity/resultRef；`MES_MAINTENANCE` 仅对 Authority-defined S06 hard-freeze branch 合法，Plan binding 是 recovery candidate Thin Plan，且使用 current Technical Authority、live maintenance Git basis、frozen/forensic/audit exact tuple、quarantine 与 Brain bounded authorization，不要求或产生 MES status/work identity/resultRef；packet 必须能支撑对应 Worker→CV→Integration→maintenance Review 链路。
 - Worker Result refs / Worker Link evidence 仅作 supporting evidence，不替代独立验证；
 - read-only 约束与 expected result 明确。
 - S06 integrity hard-freeze 时，public `status`/`required_skill` 只作 observation；CV 不接受新的 NORMAL dispatch/recheck。仅在 `MES_MAINTENANCE` packet entry tuple fresh-valid 时执行 evidence-only CV；否则返回 typed `BLOCKED`/recovery evidence，不触碰真实 MES。
@@ -33,7 +33,7 @@ Code Verifier (CV) 是只读、独立的 Slice 反驳者，不是 Evidence 审�
 
 严格按顺序完成一个 CV session，独立反驳完成前不读取 Worker Evidence：
 
-1. 先读 Slice Goal、Technical Authority/Acceptance（仅限 tech-spec：Architecture / Contracts / Acceptance；不读 PRD）、对应模式的 Plan binding、当前 code/tests/diff 和 `git_basis.head`；CV 不消费 Brain-projected Slice semantics，自己读取 Plan 与 tech-spec；`NORMAL` 加载 accepted Thin Plan 与 MES work identity，`PRE_MES_BOOTSTRAP` 加载 candidate/accepted Git Plan 与 Git/Technical Authority facts，`MES_MAINTENANCE` 加载 recovery candidate、maintenance binding、Git/Technical Authority facts 与 quarantine evidence；后两者不读 Worker Evidence 之外的 normal MES identity/status/resultRef。
+1. 先读 Slice Goal、Technical Authority/Acceptance（仅限 tech-spec：Architecture / Contracts / Acceptance；不读 PRD）、对应模式的 Plan binding、当前 code/tests/diff 和 `git_basis.head`；CV 不消费 Brain-projected Slice semantics，自己读取 Plan 与 tech-spec；`NORMAL` 加载 accepted Thin Plan 与 MES work identity，`MES_MAINTENANCE` 加载 recovery candidate、maintenance binding、Git/Technical Authority facts 与 quarantine evidence；后者不读 Worker Evidence 之外的 normal MES identity/status/resultRef。
 2. 对每个 PO 和高风险路径设计并执行 concrete refutation：检查 PO coverage、test/seam/oracle validity、
    forbidden mocks、scope side effects、regression risk 和真实 call path。
 3. 独立反驳固定后，才读取 Worker Result 对照独立观察，检查 declared proof 是否真的支撑 Slice Goal。
@@ -44,7 +44,7 @@ Slice Goal/Authority/Plan/candidate basis 时返回 `BLOCKED`，不猜字段、�
 
 ## Mode / 分支
 
-`execution_mode` 判别叠加在独立反驳顺序之上：`NORMAL` 使用 accepted Thin Plan + candidate Git ref/diff + MES work identity，verdict 是由 Brain 接纳并授权、再由 MES operational transaction layer materialize 的正式 CV semantic event input；`PRE_MES_BOOTSTRAP` 仅对首个 MES-persistence Stage 合法，使用 candidate/accepted Git Plan + canonical Authority refs + baseline/current Git basis + Worker Link evidence；`MES_MAINTENANCE` 仅对 Authority-defined S06 hard-freeze branch 合法，使用 recovery candidate Plan + canonical Authority refs + live maintenance Git basis + frozen/forensic/audit binding + Brain bounded authorization；后两种是结构化 Link evidence，不写 MES、不指向 MES resultRef。三种 mode 下 CV 都全程 read-only、独立反驳，并保留 review-loop 语义。
+`execution_mode` 判别叠加在独立反驳顺序之上：`NORMAL` 使用 accepted Thin Plan + candidate Git ref/diff + MES work identity，verdict 是由 Brain 接纳并授权、再由 MES operational transaction layer materialize 的正式 CV semantic event input；`MES_MAINTENANCE` 仅对 Authority-defined S06 hard-freeze branch 合法，使用 recovery candidate Plan + canonical Authority refs + live maintenance Git basis + frozen/forensic/audit binding + Brain bounded authorization；后者是结构化 Link evidence，不写 MES、不指向 MES resultRef。各 mode 下 CV 都全程 read-only、独立反驳，并保留 review-loop 语义。
 - `verification_type: initial`：独立初审，创建 fresh CV session，完整执行上述独立反驳顺序。
 - `verification_type: recheck`：Worker repair 完成后，Brain 重读 durable facts，默认派发同一 CV
   continuation 做 bounded incremental 复查。recheck 只覆盖前次 failed criterion、concrete
@@ -84,10 +84,10 @@ CV 全程 read-only。不改 code、tests、Plan、Evidence、Manifest、Receipt
 - 允许 verdict：`PASS`（返回 Brain/Execute freeze-and-boundary 流程）、`FINDINGS`/`BLOCKED`（回 Brain）；`REVIEW_RESET_REQUIRED` 是
   lifecycle reset 信号。
 - 完整 Result schema 只读取 `code-verifier-template.md`；本 Skill 不复制字段。Brain 只能把 `PASS` 且 durable canonical candidate ref 已建立的 candidate 交给 Integration，不得改写其他结果为通过。
-- `FINDINGS`/`BLOCKED` 中的 `claimed_route_code` 仅是 CV claim，且不包含 `AUTHORITY_GAP`（下游问题分类仅限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`）；Finding 仅回 Brain，不得直接 repair/replan。`NORMAL` 下 Brain 可发起 `FINDING_DISPOSITION` semantic event，由 MES transaction layer materialize（如适用）；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 下只保留结构化 evidence，不写 MES。若判定 `VERIFIER_OVERREACH`，`accepted_route_code` 为空，不自动 repair/Replan/HUMAN_REQUIRED；真实用户决策缺口才形成局部 `HUMAN_REQUIRED` pause。
+- `FINDINGS`/`BLOCKED` 中的 `claimed_route_code` 仅是 CV claim，且不包含 `AUTHORITY_GAP`（下游问题分类仅限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`）；Finding 仅回 Brain，不得直接 repair/replan。`NORMAL` 下 Brain 可发起 `FINDING_DISPOSITION` semantic event，由 MES transaction layer materialize（如适用）；`MES_MAINTENANCE` 下只保留结构化 evidence，不写 MES。若判定 `VERIFIER_OVERREACH`，`accepted_route_code` 为空，不自动 repair/Replan/HUMAN_REQUIRED；真实用户决策缺口才形成局部 `HUMAN_REQUIRED` pause。
 - Result binding 按 lifecycle §4：`stage`/`slice`、authority/plan/candidate basis 与当前 packet 一致；
   reply 只出现一次、完整且关联当前 packet。
-- Result binding 按 `execution_mode` 显式：`NORMAL` 是正式 CV verdict input，由 Brain 接纳/授权后交 MES transaction layer materialize（绑定 MES work identity/resultRef）；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 是结构化 Link evidence（binding = execution_mode + authority_refs + candidate/accepted 或 recovery candidate Plan ref + git_basis + maintenance_binding（MES_MAINTENANCE）+ actionToken），不写 MES、不指向 MES resultRef；三种 mode 下 reply 只出现一次、完整且关联当前 packet。
+- Result binding 按 `execution_mode` 显式：`NORMAL` 是正式 CV verdict input，由 Brain 接纳/授权后交 MES transaction layer materialize（绑定 MES work identity/resultRef）；`MES_MAINTENANCE` 是结构化 Link evidence（binding = execution_mode + authority_refs + recovery candidate Plan ref + git_basis + maintenance_binding + actionToken），不写 MES、不指向 MES resultRef；各 mode 下 reply 只出现一次、完整且关联当前 packet。
 - 跨 Agent 通道只使用 Herdr Link（`herdr_link_peers`/`herdr_link_send`/`herdr_link_close`）；Link outer
   envelope 保持 `herdr-link/1` opaque，Agent Name/pane/session/message id 只作 ephemeral routing，不写入
   authority。

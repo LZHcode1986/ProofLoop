@@ -10,9 +10,9 @@ disable-model-invocation: true
 
 ## Phase ownership
 
-- **进入**：四类 canonical Authority（PRD、Architecture、Contracts、Acceptance）已就绪，或上一 Stage `STAGE_ACCEPTED` 后进入下一 Stage Planning，或收到 Brain 仲裁接纳的 Replan 请求；`NORMAL` 要求 Authority + relevant MES/Git facts + Project Stage Map（若已存在），且不存在 S06 MES integrity hard-freeze；`PRE_MES_BOOTSTRAP` 下进入只要求 Authority + current code reality + Git baseline/current facts，不要求 MES 或 accepted Plan；`RECOVERY_REBASELINE` 仅在 `MES_RECOVERY_REQUIRED`、exact pre-image branch 已被 forensic/audit 证伪且 recovery Authority current 时进入，读取 Authority + current code/Git + forensic/audit refs + existing dirty recovery patch，不读取或声称 current NORMAL MES scope/work/result；S06 remediation planning 只能在 Authority-defined maintenance/recovery seam 已 current 后进入，且不写 NORMAL PVR/PA。初始 candidate 创建/revision（含 bootstrap/recovery）与 Replan（需既有 accepted Plan + MES facts）分开判定。
+- **进入**：四类 canonical Authority（PRD、Architecture、Contracts、Acceptance）已就绪，或上一 Stage `STAGE_ACCEPTED` 后进入下一 Stage Planning，或收到 Brain 仲裁接纳的 Replan 请求；`NORMAL` 要求 Authority + relevant MES/Git facts + Project Stage Map（若已存在），且不存在 S06 MES integrity hard-freeze；`RECOVERY_REBASELINE` 仅在 `MES_RECOVERY_REQUIRED`、exact pre-image branch 已被 forensic/audit 证伪且 recovery Authority current 时进入，读取 Authority + current code/Git + forensic/audit refs + existing dirty recovery patch，不读取或声称 current NORMAL MES scope/work/result；S06 remediation planning 只能在 Authority-defined maintenance/recovery seam 已 current 后进入，且不写 NORMAL PVR/PA。初始 candidate 创建/revision（含 recovery）与 Replan（需既有 accepted Plan + MES facts）分开判定。
 - **Planner action 终点**：Planner 产出/修订 candidate Thin Plan（及按需更新 Project Stage Map）并冻结四项 invariant 后，返回 `CANDIDATE_PLAN_READY` 结束当前 Planner action。Planner 不 dispatch SPV。
-- **Phase 完成与接纳**：Planner action 结束后，由 Brain / Contract 负责建立 candidate Git boundary 并调度独立的 `stage-plan-verifier`（SPV）；candidate Thin Plan 经独立 SPV 返回 `PLAN_READY` 后，`NORMAL` 由 Brain 授权 semantic planning event，先经 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT` 再 materialize `PLAN_ACCEPTANCE`（`PRE_MES_BOOTSTRAP` 采纳 Git-tracked Thin Plan）；S06 hard-freeze 下禁止 NORMAL acceptance；`RECOVERY_REBASELINE` 的 `PLAN_READY` 只是 maintenance/recovery evidence，closure 前不写 PVR/PA、不进入 Execute。
+- **Phase 完成与接纳**：Planner action 结束后，由 Brain / Contract 负责建立 candidate Git boundary 并调度独立的 `stage-plan-verifier`（SPV）；candidate Thin Plan 经独立 SPV 返回 `PLAN_READY` 后，`NORMAL` 由 Brain 授权 semantic planning event，先经 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT` 再 materialize `PLAN_ACCEPTANCE`；S06 hard-freeze 下禁止 NORMAL acceptance；`RECOVERY_REBASELINE` 的 `PLAN_READY` 只是 maintenance/recovery evidence，closure 前不写 PVR/PA、不进入 Execute。
 - **交接**：accepted Thin Plan 交给 `proofloop-execute`；Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body。
 - **回退**：Authority 缺口回对应 authority Skill；技术未知回 Researcher/Prototype；SPV finding 经 Brain 仲裁后由本 Skill 修复。
 
@@ -28,7 +28,7 @@ disable-model-invocation: true
    - **Verification seam validity**：当当前 obligation 需要新增 verification/test seam 或 materially 改变已有 seam 时，定向读取 `.agents/skills/test-driven-development/SKILL.md` 的 `What a good test is` / `Seams — where tests go` / `Anti-patterns`，只借「通过什么边界证明」的判断，不承担 Worker 的 RED/GREEN HOW。
    - **Binding closure**：仅当同一 binding-critical 字段、标识、digest、credential 或其他绑定值跨越 producer、validator、persistence、consumer 或 recovery 任一边界传递时，在冻结相关 Task/Dependencies 前读取 `references/transaction-binding-closure.md`。该 reference 只映射当前 Contract/Authority 已有对象和字段；schema/object ownership 继续由原有 authority 定义。
 
-Canonical Authority 只来自四类文件：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`。root `CONTEXT.md`、Working Material、旧 Receipt/Manifest/MES 都不是 Product/Technical Authority。Project Stage Map 是 `delivery/project-stage-map.md`，由 Planner 拥有，不属于 MES fact/status，不缓存 operational readiness。Thin Plan 只保存 execution-owned facts，不复制 Authority 正文。
+Canonical Authority 只来自四类文件：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`。Working Material、旧 Receipt/Manifest/MES 都不是 Product/Technical Authority。Project Stage Map 是 `delivery/project-stage-map.md`，由 Planner 拥有，不属于 MES fact/status，不缓存 operational readiness。Thin Plan 只保存 execution-owned facts，不复制 Authority 正文。
 
 ## Authority handoff（PRD → tech-spec，Planner 职责）
 
@@ -110,10 +110,10 @@ MAP CHECK
   - 读取 canonical Authority 与当前代码现实；
   - 按需加载 `.agents/skills/codebase-design/SKILL.md` 的 `Project Stage boundary test`（独立交付 outcome、stable downstream seam、真实 dependency、避免技术层横切、entry criteria、exit outcome）；
   - 创建首份公共 Project Stage Map（`delivery/project-stage-map.md`），定义并持久化各 Stage 的 Stage id / depends_on / goal / entry criteria 准入谓词定义（persist predicate definition，不持久化当前评估结果）/ Technical Authority refs（tech-spec-only）；
-  - 依据当前 execution_mode 允许的当前事实对 entry predicate 进行求值评估（evaluate against current facts permitted by the active execution_mode；`NORMAL` 模式依据 relevant MES/Git 与 Planning 输入，`PRE_MES_BOOTSTRAP` 模式依据 Git/Authority/代码现实输入，不读取/不依赖 MES）；
+  - 依据当前 execution_mode 允许的当前事实对 entry predicate 进行求值评估（evaluate against current facts permitted by the active execution_mode；`NORMAL` 模式依据 relevant MES/Git 与 Planning 输入）；
   - 选定当前 dependency-ready Stage（select dependency-ready Stage）。
 - **Map present（后续 Rolling-Wave Planning）**：
-  - 读取现有 `delivery/project-stage-map.md` 中持久化的 predicate definition，并读取当前 execution_mode 允许的当前事实与代码现实（read predicate definition；`NORMAL` 读取 relevant MES/Git 事实，`PRE_MES_BOOTSTRAP` 读取 Git/Authority/代码现实，不读取/不依赖 MES）；
+  - 读取现有 `delivery/project-stage-map.md` 中持久化的 predicate definition，并读取当前 execution_mode 允许的当前事实与代码现实（read predicate definition；`NORMAL` 读取 relevant MES/Git 事实）；
   - 依据当前 execution_mode 允许的当前事实对 entry predicate 进行求值评估（evaluate against current facts permitted by the active execution_mode），选定/确认当前 dependency-ready Stage（select dependency-ready Stage）；
   - Review 当前 Stage 的 goal、dependencies 与 entry criteria 谓词定义：
     - 发生 material recomposition（Stage 新增、删除、拆分、合并或阶段目标重大调整）或 entry criteria 谓词定义本身发生实质修改（material predicate-definition change）时，加载 `codebase-design` 的 `Project Stage boundary test` 并修订 Map；
@@ -132,7 +132,7 @@ MAP CHECK
 
 锁定当前 Stage target 后建立本次规划的上下文与输入绑定：
 
-- 绑定当前 Stage target、canonical Authority refs（PRD、Architecture、Contracts、Acceptance）、Git basis 与 durable facts（`NORMAL` 模式读取 MES facts，`PRE_MES_BOOTSTRAP` 模式读取 Git baseline/current facts 与 candidate/accepted Git Plan facts，不读取或声称 MES facts）；读取四类 Authority 以完成 handoff，但 candidate Map/Plan 的 downstream `authority_refs` 只指向 tech-spec Pack（见 Authority handoff）；
+- 绑定当前 Stage target、canonical Authority refs（PRD、Architecture、Contracts、Acceptance）、Git basis 与 durable facts（`NORMAL` 模式读取 MES facts）；读取四类 Authority 以完成 handoff，但 candidate Map/Plan 的 downstream `authority_refs` 只指向 tech-spec Pack（见 Authority handoff）；
 - 绑定 Planner mutation scope（仅限 planning artifacts：`delivery/project-stage-map.md` 与 candidate Thin Plan 写入路径，不等于 future Worker execution scope）；
 - **执行纪律**：任务未形成前不进行仓库级代码扫描（不 repo-wide scan）；不读取无关模块；Brain dispatch 只陈述 current target/facts/refs/binding，不把 Brain prompt 当第二方法源。
 
@@ -142,10 +142,17 @@ MAP CHECK
 - 严守读取边界，无全局或无目标代码扫描。
 
 ### 3. TRACE
-以当前 Stage obligation、Technical Authority entity 与 current MES/Git/code reality 为输入执行 bounded trace；不得先创建 provisional Slice/Task 再寻找代码依据：
+TRACE 以当前 Stage obligation、Technical Authority entity 与 current MES/Git/code reality 为输入执行 bounded grounding；不得先创建 provisional Slice/Task 再寻找代码依据。完成条件不是“已读取相关代码”，而是每个可能影响 Slice boundary、dependency、ownership 或 verification strategy 的 relevant obligation 都已形成可供 Slice composition 直接消费的 grounded planning conclusion。固定推理方向：`Stage obligation → Authority requirement → current reality → existing classification/route → planning consequence`。
 - 对每个 relevant obligation 先分类，并把可进入 Plan 的分类落到 Task 级闭集 `obligation_state`（值域与语义见 `tech-spec/contracts.md` §4.1）：默认 `IMPLEMENTATION_MISSING`，仅当既有实现已真正满足该 obligation 时用 `EXISTING_SEAM`。其余分类不进入 Thin Plan Task：`TECHNICAL_UNKNOWN`（可行性未验证，转 Research/Prototype）、`AUTHORITY_GAP`（PRD→tech-spec 缺失/矛盾，或 unchanged Product intent 下 grounded current code/runtime 反证 current Technical Authority）与 normal implementation/repair（Authority 已充分但实现缺陷），按各自 route 处理。
 - `EXISTING_SEAM` 必须携带 SPV 与 Stage Review 都能重跑的 seam：`verification_refs` 里给出具体 test/spec/contract ref，以及不依赖被测实现自身计算的 expected result。pre-accept SPV 在 candidate Git basis 上复核它，Stage Review 在 integrated snapshot 上再证一次。缺 seam、seam 证不出该 obligation、或把仍需新实现的工作写成 `EXISTING_SEAM`，一律按 `tech-spec/contracts.md` §4.1/§7 判 `PLAN_GAP`；不得据此跳过真实实现工作（`tech-spec/acceptance.md` E2E-29）。
 - 只对当前 obligation 定向读取真实 public/cross-module seam、durable fact、state、producer/consumer、persistence 与 test oracle；不进行 repo-wide scan。
+- 读取 current reality 的目的不是建立文件/路径清单，而是判断它是否足以支撑对应的 Technical Authority requirement。对每个可能改变 Slice boundary、dependency、ownership 或 verification strategy 的 relevant obligation，进入 `COMPOSE SLICES` 前都必须形成一条可直接消费的 grounded planning conclusion，至少闭合：
+  - Authority requirement：对应规范要求什么。
+  - current reality：系统当前实际提供什么，依据是什么。
+  - classification/route：沿用本节既有分类与 route，不新增 enum。
+  - planning consequence：该现实对 Slice boundary、dependency、ownership 或 verification strategy 有何直接影响。
+- 若 current reality 反证某个 Slice-shaping assumption，必须先按现有 route 处理；不得由 Planner 假设能力存在后继续 composition。
+- 保持 bounded：这里只闭合会改变 Slice composition 的现实；仅影响 Slice 内部 Task HOW、具体文件分配或局部测试选择的事实，留到 `DECOMPOSE TASKS BY SLICE` 做 slice-local grounding，不扩成 repo-wide scan。
 - 对 `EXISTING_SEAM` / `IMPLEMENTATION_MISSING` 确定可观察 outcome、relevant code/test paths、真实 producer/consumer dependencies 与 test oracle；由 `DECOMPOSE TASKS BY SLICE` 再将这些 reality 分配给所属 Slice 的 Task-specific `code_paths`/`test_paths` 与 Task dependencies；`TECHNICAL_UNKNOWN` / `AUTHORITY_GAP` 直接形成结构化 blocker，不猜测补全。
 - 需要新增或 materially 改变 verification/test seam 的 obligation：先闭合 observable outcome → stable seam → independent expected result，再交给 `COMPOSE SLICES`；seam 至少直接观察该 obligation 的行为 / durable relation / machine contract / public seam，expected result 来自独立 Contract / invariant / known behavior（不复制 implementation 自己的计算或结构）；semantic-preserving 前提先确认：所谓变化确实不改变 public contract / machine-consumed input / observable behavior（公开 schema field 或 machine-consumed 结构 rename 是 public contract change，不是「纯内部 refactor」）——只有该前提成立时，普通内部重构或非机器消费 prose 整理使 proof 失败，才是 invalid oracle 的强反例，此时重选 seam/test（除非被检查源码/repository structure 本身是正式 machine contract）。
 - **先识别验证对象（verification object → oracle）**：Planner 在 working reasoning 中先回答「这个 verification 实际在观察什么？」，再决定对应 oracle：程序 observable behavior / durable relation / recovery behavior、machine-consumed contract / parser / public surface、repository structure 本身作为明确 machine rule、还是非机器消费的说明性 prose。验证对象决定 oracle；不存在「静态测试天然坏 / Markdown 天然不能测试 / 字段名测试天然坏」的先验标签。
@@ -156,18 +163,19 @@ MAP CHECK
 - Existing Plan/test patterns 是 code-reality evidence，不是 Planning authority 或自动 precedent：旧 pattern 必须重新通过 current Authority + current Skill + current code reality + current verification-seam validity 才能沿用。
 - Plan 自己引入而 PRD/Technical Authority 未要求的 helper、signature、schema、graph 或 protocol detail 属于 Plan choice；不反向升级 Authority，后续按 `PLAN_GAP` 回 Planner。
 **Checkable completion criteria**：
-- 每个 relevant obligation 都有可复核分类与对应 code/test reality 证据；
+- 每个可能影响 Slice boundary、dependency、ownership 或 verification strategy 的 relevant obligation，都有 grounded planning conclusion：Authority requirement、current reality、existing classification/route 与 planning consequence 四者闭合。
+- 不存在仍依赖未验证假设的 Slice-shaping capability：技术事实未知或 Authority 缺口按现有 route 形成结构化 blocker；Authority 已充分但实现缺失/有缺陷时按 normal implementation/repair route 规划，不得假设能力已存在。
 - 每个需要 verification 的 obligation 都有可观察 outcome + stable seam + valid verification/test oracle，或形成结构化 blocker；test path 不是仅因为旧 Stage 有同类文件而被选中；
 - trace 在当前边界闭合后停止，不产生无目标扩读。
 - 对每个 relevant obligation 已先识别 verification object 并选择对应 oracle（machine/public/repository invariant 保留或说明理由；非机器 prose consistency 不冒充 behavior proof）；mixed test 已按 assertion class 拆分判断；
 - existing verification impact 已沿行为影响链 bounded trace：受 behavior change 影响的 existing regression fixture / verification seam 均有归属（落入 Task scope 或显式暴露为缺口），无 repo-wide test scan；
 ### 4. COMPOSE SLICES
 
-分层的第一次：只形成 Stage → Slice topology，暂不创建 Task。消费 TRACE 已确认的 reality 与 classifications，先只选择最小可交付的 Slice 边界：
+分层的第一次：只形成 Stage → Slice topology，暂不创建 Task。消费 TRACE 已闭合的 grounded planning conclusions；Slice composition 必须同时服从 Technical Authority 与 current reality，不得绕过 TRACE conclusions、仅按抽象 capability boundary 切片。这些结论仅作为 Planner 的 working reasoning 供本次 composition 消费，不把 TRACE 的具体推理复制进 Thin Plan。先只选择最小可交付的 Slice 边界：
 
 - 定义每个 Slice 的 goal、observable outcome、semantic scope、stable seam、verification/oracle basis、真实 `depends_on` 与 authority refs；
 - 以 `Tracer bullet` 为 leading word：每个 Slice 是一条从可观察 outcome 直达独立验证的端到端轨迹；fresh 首次形成 Slice topology 或 Slice 发生 material repartition（新增、删除、拆分、合并、重新划分）时，加载 `.agents/skills/codebase-design/SKILL.md` 的 `Vertical Slice boundary test`；
-- 分解方向固定为：observable Slice outcome → stable seam → independent verification → real blocking dependency；TRACE 得到的 code/test reality 保持为 evidence，具体 Task ownership 留到 `DECOMPOSE TASKS BY SLICE` 分配；
+- 分解方向固定为：observable Slice outcome → stable seam → independent verification → real blocking dependency；具体 Task ownership 留到 `DECOMPOSE TASKS BY SLICE` 分配。
 - 不得反过来按技术层横切直接切片（如 types.ts → Slice A、store.ts → Slice B），除非这些边界本身各自形成独立可验证 outcome；
 - 每条 `A depends_on B` 必须能指出 A 实际需要 B 已产生的哪个 output / fact / seam / verified capability；回答不出就不是 blocking dependency，不因「通常先 schema 后 store」「实现顺序看起来合理」制造 dependency；
 - Planning 只定义 WHAT / WHEN / BOUNDARY，不设计 Worker HOW；implementation choice 留在 execution-owned Plan scope，不写回 Technical Authority。
@@ -176,7 +184,7 @@ MAP CHECK
 - 每个 Slice 是一个 tracer-bullet outcome，具有可观察 seam/oracle 与真实 dependency，可在完整 Stage 完成前独立验证；
 - Slice topology 足以作为后续 Task decomposition 的 skeleton，且每个 Slice 对应 TRACE 已确认的 outcome、seam 与 scope；
 - 依赖只表达真实 prerequisite；dependencies 闭合，无循环、无隐藏 producer/consumer。
-
+- 每个 material Slice boundary 与 blocking dependency，都能反向闭合到 TRACE 中对应的 obligation outcome 与 relevant reality consequence。
 ### 5. VALIDATE SLICE TOPOLOGY
 
 创建 Task 前，对整个 Slice topology 做一次整体检查，作为 Slice composition 与 Task decomposition 之间明确的 reasoning checkpoint：
@@ -285,7 +293,7 @@ Task decomposition 顺序固定为：Slice outcome → Slice obligations → Tas
 
 SPV 是独立的 review-loop Role（经 Herdr Link configured start 启动，role_skill=config_agent=stage-plan-verifier），对 pre-accept candidate Thin Plan 做只读独立 falsify（全量 structural closure + 高风险 edge counterexample challenge）。SPV 结果一律回 Brain，由 Brain 重读事实后做 finding disposition：
 
-- `PLAN_READY`：Brain 先授权 semantic planning event，经 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT`（`candidate_plan_ref` 必填、`accepted_plan_ref: null`），再 materialize `PLAN_ACCEPTANCE` 并接纳为 accepted（`NORMAL`；`PRE_MES_BOOTSTRAP` 采纳 Git-tracked Thin Plan，不写 MES），随后将 accepted Plan 路由至 `proofloop-execute`；S06 hard-freeze 下不执行 NORMAL acceptance。
+- `PLAN_READY`：Brain 先授权 semantic planning event，经 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT`（`candidate_plan_ref` 必填、`accepted_plan_ref: null`），再 materialize `PLAN_ACCEPTANCE` 并接纳为 accepted（`NORMAL`），随后将 accepted Plan 路由至 `proofloop-execute`；S06 hard-freeze 下不执行 NORMAL acceptance。
 - `FINDINGS`：SPV 发现 concrete counterexample 或 structural gap。SPV 的 `claimed_route_code` 只是 evidence；Brain 重读 Authority / Plan / scope / code reality 后发起 `FINDING_DISPOSITION` semantic event，由 MES transaction layer materialize（如适用）。若判定为 `VERIFIER_OVERREACH`，`accepted_route_code` 为空，不触发 Replan；若确认为有效 Finding，Brain 派发 Replan 修复。
 - `BLOCKED`：SPV 缺少输入、Authority 存在缺口、技术未知或环境受阻，带结构化 blocker 回 Brain。
 - `AUTHORITY_GAP`：Product intent → Technical Authority → grounded reality handoff failure（含 PRD requirement 在 tech-spec 缺失/矛盾，或 unchanged Product intent 下 current code/runtime 反证/证明 Authority 不足），回当前 Propose Authority owner；owner 完成 bounded update 后由 Brain acceptance + `authority-update` 固化，再 fresh Planning/SPV。
@@ -317,21 +325,13 @@ new / changed
 
 ## 重启验证
 
-`NORMAL` 重启后从 Git、四类 Authority、Project Stage Map、既有 Thin Plan、Findings 与 MES 事实重新建立上下文；`PRE_MES_BOOTSTRAP` 重启后只从 Git、四类 Authority、Project Stage Map、candidate/accepted Git Plan、Findings 与结构化 Link evidence 建立上下文，不读取或声称 MES。
+`NORMAL` 重启后从 Git、四类 Authority、Project Stage Map、既有 Thin Plan、Findings 与 MES 事实重新建立上下文。
 验证以文件、真实命令与 Git 状态为准：
 
 ```text
 git diff --check
 ```
 
-## Pre-MES bootstrap（一次性例外）
-
-在 MES persistence 集成并 seed accepted Plan/bootstrap facts 前，accepted Thin Plan 是该 Stage 唯一 Git-tracked durable truth：只使用 Git Plan ref + baseline HEAD/current HEAD 作为 binding 与验证基础；不写入 MES/Status、不声称 MES/Status 事实；不产生 MES Result、也不产生 Receipt、Manifest、Gate 或第二状态机，也不把 bootstrap 状态描述为更高完成度。
-
-- bootstrap 只在 MES persistence 集成且 accepted Plan/bootstrap facts 已被 seed 前有效；seed 之后 `PRE_MES_BOOTSTRAP` 永久禁止，恢复正常 Planning → MES transaction → Execute → Review；S06 integrity hard-freeze 时 NORMAL transaction/continuation 仍被禁止。
-- 本 Skill 不声称 MES 已实现；MES 是否就绪以 mes Contract 与 Git 事实为准。
-- 在 map-absent 分支下，由 bootstrap 首次 Planning 创建首份公共 `delivery/project-stage-map.md` 并选定首个 MES-persistence Stage。
-- `PLAN_READY` 的 bootstrap handoff：Planner 返回 `CANDIDATE_PLAN_READY`，经 Brain 调度 fresh SPV 验证返回 `PLAN_READY` 后，Brain 直接采纳 Git-tracked Thin Plan（不写 MES），只把首个 MES-persistence Stage 以 bootstrap binding 路由给 Execute；seed 前不接受、不依赖 MES 写入。seed 后恢复 Planning → MES → Execute → Review 的正常路径。
 
 ## 硬边界
 

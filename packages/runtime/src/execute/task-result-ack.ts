@@ -17,7 +17,7 @@
  * reasonCode. Only ACCEPTED+CONTINUE / ACCEPTED+PAUSE / REJECTED+PAUSE are
  * legal; REJECTED+CONTINUE is invalid. `acceptedResultRef` is only allowed on
  * NORMAL+ACCEPTED and must resolve to a durably written MES `result` fact
- * belonging to THIS submission; PRE_MES_BOOTSTRAP and REJECTED forbid it.
+ * belonging to THIS submission; REJECTED forbids it.
  * `reasonCode` is required exactly when REJECTED or PAUSE and forbidden on
  * ACCEPTED+CONTINUE. `validatedGitBasis` equals the validated submitted
  * basis. The ACK never carries next_task_id / next_action /
@@ -170,8 +170,7 @@ export function buildTaskResultAck(input: TaskResultAckInput): TaskResultAck {
   const gitBasis = submitted.gitBasis;
   const digest = submitted.resultPayloadDigest;
   if (
-    (mode !== 'NORMAL' && mode !== 'PRE_MES_BOOTSTRAP' && mode !== 'MES_MAINTENANCE') ||
-    typeof resultId !== 'string' ||
+    (mode !== 'NORMAL' && mode !== 'MES_MAINTENANCE') ||
     resultId.length === 0 ||
     typeof actionToken !== 'string' ||
     actionToken.length === 0 ||

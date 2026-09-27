@@ -28,7 +28,7 @@
  *     verification_type ∈ {initial, recheck}, canonical stage/slice ids,
  *     root-relative planRef, canonical authorityRefs, closed gitBasis {head
  *     40-hex, candidateRef, diffRef}, resultRef required under NORMAL and
- *     forbidden under PRE_MES_BOOTSTRAP, non-empty summary, the closed
+ *     forbidden under non-NORMAL modes, non-empty summary, the closed
  *     acceptance list fields, claimed_route_code closed (or null),
  *     FINDINGS-only fields (failed_criterion / failure_signature /
  *     required_recheck_scope) and recheck-only fields
@@ -96,14 +96,14 @@ export const CV_VERIFICATION_TYPES = ['initial', 'recheck'] as const;
 export type CvVerificationType = (typeof CV_VERIFICATION_TYPES)[number];
 
 /** Closed execution modes carried by the CV result envelope. */
-export const CV_EXECUTION_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE'] as const;
+export const CV_EXECUTION_MODES = ['NORMAL', 'MES_MAINTENANCE'] as const;
 export type CvExecutionMode = (typeof CV_EXECUTION_MODES)[number];
 
 
 /**
  * Closed MES_MAINTENANCE binding carried by a CV result (code-verifier
  * template, camelCase canonical fields). Omitted for NORMAL /
- * PRE_MES_BOOTSTRAP; required under MES_MAINTENANCE.
+ * Omitted for NORMAL; required under MES_MAINTENANCE.
  */
 export interface CvMaintenanceBinding {
   readonly frozenSnapshotRef: string;
@@ -138,9 +138,9 @@ export interface CvResultEnvelope {
   readonly planRef: string;
   readonly authorityRefs: string[];
   readonly gitBasis: CvGitBasis;
-  /** NORMAL: required root-relative MES result ref; bootstrap/maintenance: omitted. */
+  /** NORMAL: required root-relative MES result ref; maintenance: omitted. */
   readonly resultRef?: string;
-  /** MES_MAINTENANCE only; omitted for NORMAL / PRE_MES_BOOTSTRAP. */
+  /** MES_MAINTENANCE only; omitted for NORMAL. */
   readonly maintenanceBinding?: CvMaintenanceBinding;
   readonly summary: string;
   readonly acceptance_refs_checked: string[];
@@ -518,11 +518,11 @@ export function validateCvResult(value: unknown): CvResultEnvelope {
     } else if (resultRef !== undefined) {
       errors.push({
         path: 'cv_result.resultRef',
-        message: 'Non-NORMAL CV results (PRE_MES_BOOTSTRAP / MES_MAINTENANCE) must omit resultRef (Git-bound Link evidence only)',
+        message: 'Non-NORMAL CV results (MES_MAINTENANCE) must omit resultRef (Git-bound Link evidence only)',
       });
     }
     // maintenanceBinding: REQUIRED exactly under MES_MAINTENANCE; forbidden
-    // under NORMAL / PRE_MES_BOOTSTRAP (no second schema, no smuggling).
+    // under NORMAL (no second schema, no smuggling).
     if (executionMode === 'MES_MAINTENANCE' && obj.maintenanceBinding === undefined) {
       errors.push({
         path: 'cv_result.maintenanceBinding',

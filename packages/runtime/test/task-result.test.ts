@@ -150,21 +150,19 @@ describe('Worker Task Result envelope validation (S03-B-T01)', () => {
     assert.notEqual(changed.resultPayloadDigest, base.resultPayloadDigest);
   });
 
-  test('accepts a PRE_MES_BOOTSTRAP envelope without resultRef', () => {
+  test('rejects a retired PRE_MES_BOOTSTRAP envelope (Phase 8.3)', () => {
+    // Phase 8.3: PRE_MES_BOOTSTRAP was removed from the closed Task Result
+    // execution mode set — every bootstrap-mode envelope must fail closed.
     const envelope = validEnvelope({
       executionMode: 'PRE_MES_BOOTSTRAP',
       planRef: 'delivery/stages/S03/plan.md',
     });
     delete envelope.resultRef;
-    const validated = validateWorkerTaskResult(envelope);
-    assert.equal(validated.executionMode, 'PRE_MES_BOOTSTRAP');
-    assert.equal(validated.resultRef, undefined);
-    // Digest over the payload without the resultRef key (key dropped, not null),
-    // with the executionMode value swapped to PRE_MES_BOOTSTRAP.
-    const canonicalNoResultRef = VALID_CANONICAL
-      .replace('"executionMode":"NORMAL"', '"executionMode":"PRE_MES_BOOTSTRAP"')
-      .replace('"resultRef":"mes:result:S03:S03-B-T01:1",', '');
-    assert.equal(validated.resultPayloadDigest, sha256Hex(canonicalNoResultRef));
+    assert.throws(() => validateWorkerTaskResult(envelope), (err: unknown) => {
+      assert.ok(err instanceof TaskResultValidationError);
+      assert.equal(err.outcome, 'RESULT_INVALID');
+      return true;
+    });
   });
 
   test('rejects NORMAL without resultRef and bootstrap with resultRef', () => {
@@ -369,6 +367,6 @@ describe('Worker Task Result envelope validation (S03-B-T01)', () => {
 
   test('exposes the closed outcome / mode / sub-shape sets', () => {
     assert.deepEqual([...TASK_RESULT_OUTCOMES], ['completed', 'blocked', 'needs-decision', 'failed']);
-    assert.deepEqual([...TASK_RESULT_MODES], ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE']);
+    assert.deepEqual([...TASK_RESULT_MODES], ['NORMAL', 'MES_MAINTENANCE']);
   });
 });

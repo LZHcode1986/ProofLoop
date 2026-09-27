@@ -136,10 +136,11 @@ describe('closed Worker Work Packet schemas (S03-C-T01)', () => {
     assert.throws(() => validateBoundedRepairWorkPacket(repairPacket({ repair_scope: ['packages/runtime//src/x.ts'] })), WorkPacketValidationError);
   });
 
-  test('keeps bootstrap mode Git-bound and rejects MES-only result fields', () => {
-    const bootstrap = slicePacket({ execution_mode: 'PRE_MES_BOOTSTRAP' });
-    assert.equal(validateSliceWorkPacket(bootstrap).execution_mode, 'PRE_MES_BOOTSTRAP');
-    assert.equal(validateJitReadSet({ ...jitReadSet(), execution_mode: 'PRE_MES_BOOTSTRAP' }).execution_mode, 'PRE_MES_BOOTSTRAP');
+  test('rejects retired PRE_MES_BOOTSTRAP mode and MES-only result fields', () => {
+    // Phase 8.3: PRE_MES_BOOTSTRAP was removed from the closed Worker
+    // packet execution-mode set — every bootstrap-mode packet fails closed.
+    assert.throws(() => validateSliceWorkPacket(slicePacket({ execution_mode: 'PRE_MES_BOOTSTRAP' })), WorkPacketValidationError);
+    assert.throws(() => validateJitReadSet({ ...jitReadSet(), execution_mode: 'PRE_MES_BOOTSTRAP' }), WorkPacketValidationError);
     assert.throws(() => validateSliceWorkPacket(slicePacket({ resultRef: 'mes:result:S03:S03-C:1' })), WorkPacketValidationError);
     assert.throws(() => validateJitReadSet(jitReadSet({ result_ref: 'mes:result:S03:S03-C:1' })), WorkPacketValidationError);
   });

@@ -15,10 +15,8 @@
  *   - `NORMAL` execution-bound facts (`work` / `result` / `git`) must bind an
  *     `accepted` Plan, a MES work identity where applicable, Authority refs,
  *     and a Git basis;
- *   - `PRE_MES_BOOTSTRAP` execution-bound facts are Git-tracked Link
- *     evidence: they must NOT carry a pre-seed MES work identity or
- *     resultRef, and they bind the candidate/accepted Git Plan ref + Git
- *     basis only — no pre-seed MES prerequisite is invented.
+ *   - NORMAL 是唯一 durable MES execution mode（pre-seed bootstrap 已退役，
+ *     PRE_MES_BOOTSTRAP 不再有任何合法 caller，不再作为 execution mode 接受）；
  *
  * The validator is a closed set: unknown fields, malformed shapes, and
  * kind/mode-inconsistent bindings all fail with the canonical
@@ -54,8 +52,8 @@ import type {
 
 export { SchemaValidationError };
 
-/** Closed execution modes for fact binding (MES vs pre-seed bootstrap). */
-export const MES_EXECUTION_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP'] as const;
+/** Closed execution modes for fact binding (NORMAL is the sole durable MES mutator; maintenance evidence never writes MES). */
+export const MES_EXECUTION_MODES = ['NORMAL'] as const;
 export type MesExecutionMode = (typeof MES_EXECUTION_MODES)[number];
 
 /**
@@ -499,11 +497,8 @@ export function projectReadyClosedGitBasisError(basis: unknown): string | undefi
  * Kind/mode binding rules:
  *  - `plan_binding` fact requires a plan_binding value;
  *  - execution-bound facts (`work` / `result` / `git`) require a canonical
- *    stage scope, and then diverge by mode:
- *    - NORMAL binds an accepted Plan + MES work identity (work/result) +
- *      durable refs (result) + Git basis;
- *    - PRE_MES_BOOTSTRAP must not carry a pre-seed MES work identity or
- *      resultRef, and always binds a Git basis (Link evidence is Git-bound).
+ *    stage scope, and then bind an accepted Plan + MES work identity
+ *    (work/result) + durable refs (result) + Git basis (NORMAL).
  */
 function validateKindModeRules(
   kind: MesFactKind,
@@ -543,7 +538,7 @@ function validateKindModeRules(
     if (mode !== 'NORMAL') {
       errors.push({
         path: 'execution_mode',
-        message: `${kind} is a NORMAL-only durable fact (PRE_MES_BOOTSTRAP never writes it)`,
+        message: `${kind} is a NORMAL-only durable fact`,
       });
     }
     const binding = isObject(record.plan_binding)
@@ -629,12 +624,12 @@ function validateKindModeRules(
 
   if (kind === 'project_ready') {
     // Terminal fact (contracts.md §5.1 / acceptance E2E-06): NORMAL-only
-    // durable fact — PRE_MES_BOOTSTRAP never writes a second operational
+    // durable fact — MES_MAINTENANCE never writes a second operational
     // store (STATIC-13/14).
     if (mode !== 'NORMAL') {
       errors.push({
         path: 'execution_mode',
-        message: 'project_ready is a NORMAL-only durable fact (PRE_MES_BOOTSTRAP never writes it)',
+        message: 'project_ready is a NORMAL-only durable fact',
       });
     }
     // Terminal facts do NOT inherit unrelated Stage/Work/Result binding
@@ -700,7 +695,7 @@ function validateKindModeRules(
     if (mode !== 'NORMAL') {
       errors.push({
         path: 'execution_mode',
-        message: `${kind} is a NORMAL-only durable fact (PRE_MES_BOOTSTRAP never writes it)`,
+        message: `${kind} is a NORMAL-only durable fact`,
       });
     }
     const scope = isObject(record.scope) ? record.scope : undefined;
@@ -757,45 +752,12 @@ function validateKindModeRules(
     return;
   }
 
-  // PRE_MES_BOOTSTRAP: Git-tracked Link evidence — every execution-bound
-  // fact must carry a valid candidate/accepted Git Plan binding, the nested
-  // binding refs must not point to a pre-seed MES resultRef (CV-S01-B-05),
-  // and the Git basis stays mandatory.
-  if (
-    binding === undefined ||
-    (binding.binding_stage !== 'candidate' && binding.binding_stage !== 'accepted')
-  ) {
-    errors.push({
-      path: 'plan_binding',
-      message: `PRE_MES_BOOTSTRAP ${kind} fact must bind a candidate or accepted Git Plan (plan_binding)`,
-    });
-  }
-  if (binding !== undefined && binding.binding_stage === 'accepted' && binding.verification_result_ref !== undefined) {
-    // A pre-seed MES ref (e.g. `mes:result:...` / `mes:verification:...`)
-    // is never valid bootstrap evidence: bootstrap verification refs are
-    // Git-bound (CV-S01-B-05).
-    if (/^mes:/.test(binding.verification_result_ref)) {
-      errors.push({
-        path: 'plan_binding.verification_result_ref',
-        message: `PRE_MES_BOOTSTRAP verification_result_ref must not point to a pre-seed MES ref (got ${binding.verification_result_ref})`,
-      });
-    }
-  }
-  if (record.work_id !== undefined) {
-    errors.push({
-      path: 'work_id',
-      message: 'PRE_MES_BOOTSTRAP must not carry a pre-seed MES work identity',
-    });
-  }
-  if (record.result_ref !== undefined) {
-    errors.push({
-      path: 'result_ref',
-      message: 'PRE_MES_BOOTSTRAP must not carry a MES resultRef (Link evidence only)',
-    });
-  }
-  if (record.git_basis === undefined) {
-    errors.push({ path: 'git_basis', message: `PRE_MES_BOOTSTRAP ${kind} fact requires a git_basis` });
-  }
+  // NORMAL is the only legal execution mode for execution-bound MES facts
+  // (PRE_MES_BOOTSTRAP retired: no legal caller remains — Phase 8.3).
+  errors.push({
+    path: 'execution_mode',
+    message: `${kind} execution-bound fact requires a NORMAL execution mode (PRE_MES_BOOTSTRAP no longer accepted)`,
+  });
 }
 
 /**

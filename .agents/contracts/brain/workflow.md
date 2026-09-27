@@ -43,11 +43,11 @@ Contract 继续处理。Agent `idle`/`done`、Link `sent`、checkbox 或模型�
 | Trigger | Flow / owner entry | Exit / next boundary |
 |---|---|---|
 | 新产品范围、行为或验收需要建立/修改（含历史 `PROJECT_READY` 后的新实质工作 / 新 delivery cycle） | Propose：`ai-structured-prd`；按需 `prd-to-tech-design-prep`；`prd-to-ai-architecture`；若其判定存在 frontend scope，则在同一 Propose 内显式加载 `frontend-tech` 完成 `tech-spec/frontend.md` handoff closure | `PROPOSE_READY` → 进入该 delivery cycle 的 Planning；post-ready 新实质工作不得绕过 Propose |
-| `PROPOSE_READY`、上一 Delivery Stage 的 `STAGE_ACCEPTED` 或 Replan 请求 | Planning：`proofloop-plan`；SPV 使用独立的 `stage-plan-verifier` review-loop Role | fresh SPV `PLAN_READY` 被接纳 → Execute |
+| current `PROPOSE_READY`（及其它 Planning 触发如 上一 Stage `STAGE_ACCEPTED` / Replan） | Planning：`proofloop-plan`；SPV 使用独立的 `stage-plan-verifier` review-loop Role | fresh SPV `PLAN_READY` 被接纳 → Execute |
 | accepted Plan 就绪且存在 dependency-ready Slice | Execute：`proofloop-execute` / Worker lane | Slice candidate → CV；全部 Slice `INTEGRATED` → Stage Review |
 | recovery candidate + fresh SPV `PLAN_READY` + exact frozen/forensic/audit tuple + quarantine + Brain bounded authorization | `MES_MAINTENANCE` Execute/Worker lane | evidence-only Slice candidate → CV PASS → Git candidate/integration/cleanup evidence → maintenance Review；不写 MES、不进入 normal Stage/terminal acceptance |
 | `SLICE_CANDIDATE_READY` | Slice-level `code-verifier` | `PASS` → Execute freeze-and-boundary 流程；`FINDINGS` / `BLOCKED` → Brain arbitration |
-| CV `PASS` 且 candidate ref durable | Integration：`.agents/contracts/brain/integration.md` | `NORMAL` → `INTEGRATED`；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` → Git evidence integration；maintenance 完成后 → evidence-only maintenance Review，不写 MES |
+| CV `PASS` 且 candidate ref durable | Integration：`.agents/contracts/brain/integration.md` | `NORMAL` → `INTEGRATED`；`MES_MAINTENANCE` → Git evidence integration；maintenance 完成后 → evidence-only maintenance Review，不写 MES |
 | `EXECUTION_READY_FOR_REVIEW` | Stage Review：`stage-reviewer` | `STAGE_ACCEPTED` → 当前 Delivery cycle 的下一 Stage 进入 Planning（Brain 按 current Map + MES/Git facts route）或该 cycle 的 `PROJECT_READY` |
 | verifier/reviewer finding 或事务 blocker | Brain arbitration / recovery | repair、Replan、Propose、Research/Prototype、HUMAN_REQUIRED 或 typed blocker |
 | S06 MES integrity incident / hard-freeze | Brain recovery/integrity control; current public `status` remains observation only | physical MES quarantine → read-only forensic closure → current Propose/Technical Authority correction → fresh remediation Planning/SPV → `MES_MAINTENANCE` bounded evidence-only Worker/CV/Git/maintenance Review → controlled recovery → rehydrate/audit → S06 impact decision |
@@ -81,6 +81,7 @@ Brain arbitration 直接驱动迁移。
 ## 4. Cross-Flow transitions and completion
 
 - Propose 的 core canonical Authority 始终是四类（`PRD.md`、Architecture、Contracts、Acceptance）；存在 frontend scope 时，同一 Propose 还必须完成条件性的 `tech-spec/frontend.md` handoff closure 后才能返回统一的 `PROPOSE_READY`。该 handoff 不成为第五类 core Authority，也不增加 Propose 内部 Gate 或新的完成状态。
+- Planning-entry 判定只属于 Brain：Brain 准备 dispatch Planning 时依次 ① 确保 MES initialized（MES 可更早独立初始化，只建立 infrastructure metadata，不产生 operational facts）② 做 fresh Authority path presence observation（四个 canonical path：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`，只返回 present / missing / unreadable，read-only）③ missing/unreadable → 停留在 Propose 并把精确路径交给 Propose owner；all present → Brain 按当前 Propose completion criterion 验证内容 ④ Brain 接纳 current `PROPOSE_READY` ⑤ 只有 `MES initialized + current PROPOSE_READY` 时 dispatch `proofloop-plan`。不新增 `PLANNING_READY` 或其它 gate 状态；Brain 不规定 Propose 内先补哪个文档；Planner 不承担该判定或该 gate。MES initialization 的完整语义由 `.agents/contracts/brain/mes.md` 持有，本文件只保留上述 pointer / local prerequisite。
 - Planning 只有在 fresh SPV 返回 `PLAN_READY` 且 Brain 完成 Plan acceptance 后才
   允许 Execute；candidate Plan 不自动成为 accepted Plan。
 - Execute 只有在全部计划内 Slice 通过独立 CV、完成 Integration 并达到

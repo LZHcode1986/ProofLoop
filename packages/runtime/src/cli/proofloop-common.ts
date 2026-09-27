@@ -471,7 +471,6 @@ export interface CliRequestInput {
   /** Integration Contract (D.1) closed fields. */
   readonly execution_mode?:
     | 'NORMAL'
-    | 'PRE_MES_BOOTSTRAP'
     | 'MES_MAINTENANCE'
     | undefined;
   readonly expected_worktree?: string | undefined;
@@ -525,7 +524,7 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
 const REQUEST_BASE_FIELDS = new Set(['domain', 'operation']);
 
 /** Closed Integration execution modes (integration.md D.1). */
-export const INTEGRATION_EXECUTION_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE'] as const;
+export const INTEGRATION_EXECUTION_MODES = ['NORMAL', 'MES_MAINTENANCE'] as const;
 
 /** Lexical root-relative path check for integration worktree identities. */
 function isCanonicalRootRelativeRequestPath(value: unknown): value is string {
@@ -601,7 +600,7 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     // Integration Contract (D.1): execution_mode is a closed enum.
     if (key === 'execution_mode') {
       if (typeof record[key] !== 'string' || !(INTEGRATION_EXECUTION_MODES as readonly string[]).includes(record[key] as string)) {
-        return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'request field "execution_mode" must be one of NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE' };
+        return { ok: false, code: 'RUNTIME.INPUT_INVALID', message: 'request field "execution_mode" must be one of NORMAL | MES_MAINTENANCE' };
       }
       continue;
     }
@@ -655,7 +654,6 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     candidate_base_ref: record.candidate_base_ref as string | undefined,
     execution_mode: record.execution_mode as
       | 'NORMAL'
-      | 'PRE_MES_BOOTSTRAP'
       | 'MES_MAINTENANCE'
       | undefined,
     expected_worktree: record.expected_worktree as string | undefined,

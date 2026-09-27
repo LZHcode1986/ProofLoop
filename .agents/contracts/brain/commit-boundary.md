@@ -162,7 +162,7 @@ files are tolerated in the worktree, but other-Slice files are NEVER committed.
 
 | Boundary Type | Scope rule |
 |---|---|
-| `baseline-authority` | `CONTEXT.md`, `PRD.md`, `tech-spec/*`, `progress.md` |
+| `baseline-authority` | `PRD.md`, `tech-spec/*`, `progress.md` |
 | `stage-plan` | dirty paths under `delivery/stages/<stage-id>/` and the exact canonical Project Stage Map path `delivery/project-stage-map.md`; exact Brain-declared `tolerated_paths` may remain dirty but are never committed |
 | `artifact-archive` | exactly the two requested source/destination paths inside the same `delivery/stages/<stage-id>/`; Brain pre-executes the exact `git mv`; the CLI validates the already-staged pure rename (source tracked at pre-commit HEAD, destination absent, blob/mode preserved) and commits it with the stable message `artifact-archive: <stage-id>` |
 | `authority-update` | explicit paths under approved authority roots |
@@ -211,7 +211,7 @@ A successful boundary result is a Git fact, not business admission. Brain must:
 
 1. verify the result against the freshly re-read Git facts;
    `tolerated_paths` is supporting mechanical evidence and is never a committable scope.
-2. 对 `NORMAL` 把 `commit_sha`、`changed_files` 和 `dirty_after` 作为 boundary-result semantic event 交给 MES transaction layer materialize；对 `PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 仅记入 Git + Git-tracked Plan/evidence，不写 MES；
+2. 对 `NORMAL` 把 `commit_sha`、`changed_files` 和 `dirty_after` 作为 boundary-result semantic event 交给 MES transaction layer materialize；对 `MES_MAINTENANCE` 仅记入 Git + Git-tracked Plan/evidence，不写 MES；
 3. continue to the next action from the current MES status + Skill (not from a
    Receipt chain or a derived Primary Next Action).
 

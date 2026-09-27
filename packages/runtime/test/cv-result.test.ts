@@ -27,8 +27,9 @@
  *     (REVIEW_RESET_REQUIRED is a lifecycle signal only and is never a
  *     verdict), verification_type ∈ {initial, recheck}, canonical stage/slice
  *     ids, root-relative planRef, canonical authorityRefs, gitBasis {head
- *     40-hex, candidateRef, diffRef}, resultRef required under NORMAL and
- *     forbidden under PRE_MES_BOOTSTRAP, summary non-empty, the acceptance
+ *     40-hex, candidateRef, diffRef}, resultRef required under NORMAL;
+ *     retired PRE_MES_BOOTSTRAP rejected at the closed mode gate, summary
+ *     non-empty, the acceptance
  *     list fields, claimed_route_code closed (or null), FINDINGS-only fields
  *     (failed_criterion / failure_signature / required_recheck_scope) and
  *     recheck-only fields (previous_failure_signature / repair_diff_basis)
@@ -166,13 +167,10 @@ describe('slice-level cv result envelope (PO-S03-D-01)', () => {
     assert.equal(recheck.previous_failure_signature, 'counterexample: unbound acceptance ref');
     assert.equal(recheck.repair_diff_basis, 'diff/S03-D-repair.patch');
 
-    // PRE_MES_BOOTSTRAP must omit resultRef (Git-bound evidence only).
-    const bootstrap = validateCvResult(
-      validCvResult({ execution_mode: 'PRE_MES_BOOTSTRAP', resultRef: undefined }),
-    );
-    assert.equal(bootstrap.execution_mode, 'PRE_MES_BOOTSTRAP');
-    assert.equal(bootstrap.resultRef, undefined);
-
+    // PRE_MES_BOOTSTRAP is retired (Phase 8.3): the closed CV execution
+    // mode set no longer accepts it, so a bootstrap-mode CV result fails
+    // closed at the mode gate.
+    assert.throws(() => validateCvResult(validCvResult({ execution_mode: 'PRE_MES_BOOTSTRAP', resultRef: undefined })), SchemaValidationError);
     const schemaError = (input: Record<string, unknown>): string | undefined => {
       try {
         validateCvResult(input);
@@ -248,9 +246,10 @@ describe('slice-level cv result envelope (PO-S03-D-01)', () => {
     assert.match(schemaError(validCvResult({ gitBasis: { head: HEAD, candidateRef: CANDIDATE_REF, diffRef: 'C:\\windows\\path' } }))!, /diffRef/i);
     assert.match(schemaError(validCvResult({ gitBasis: { head: HEAD, candidateRef: CANDIDATE_REF, diffRef: DIFF_REF, extraBasis: 1 } }))!, /extraBasis/i);
 
-    // resultRef: REQUIRED under NORMAL, FORBIDDEN under PRE_MES_BOOTSTRAP.
+    // resultRef: REQUIRED under NORMAL; retired PRE_MES_BOOTSTRAP is
+    // rejected at the closed mode gate (Phase 8.3), not by resultRef rules.
     assert.match(schemaError(validCvResult({ resultRef: undefined }))!, /resultRef/i);
-    assert.match(schemaError(validCvResult({ execution_mode: 'PRE_MES_BOOTSTRAP' }))!, /resultRef/i);
+    assert.match(schemaError(validCvResult({ execution_mode: 'PRE_MES_BOOTSTRAP' }))!, /execution_mode|Expected one of/i);
 
     // summary non-empty.
     assert.match(schemaError(validCvResult({ summary: '' }))!, /summary/i);

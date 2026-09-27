@@ -104,8 +104,7 @@ Ruling something out of scope is a scoping act, not a step on the route. When a 
 
 在 ProofLoop 项目中使用本 skill 时，决策与 domain term 的归档位置以 Brain/packet 指定的当前 canonical Authority owner 为准：
 
-- domain terms 不写入 root `CONTEXT.md`（CONTEXT 已降级为 Working Memory，不是 downstream Authority）；decision log 只写入当前 canonical `tech-spec/architecture.md`。
-- ProofLoop 决策按归属写入 `PRD.md` / `tech-spec/architecture.md` / `tech-spec/contracts.md` / `tech-spec/acceptance.md`：product 决策 → `PRD.md`；architecture 决策/decision log → `tech-spec/architecture.md`；contract/state 决策 → `tech-spec/contracts.md`；acceptance 决策 → `tech-spec/acceptance.md`。
+- product/domain vocabulary → `PRD.md` Glossary；architecture decision / ADR → `tech-spec/architecture.md`；contract/state semantics → `tech-spec/contracts.md`；acceptance semantics → `tech-spec/acceptance.md`（decision log 只写当前 canonical owner）。
 - 非 ProofLoop map 不受影响：仍以 tracker（issue 上的 resolution comment + map 的 Decisions-so-far）为唯一 decision source。
 
 ## Invocation
@@ -116,7 +115,7 @@ Two modes. Either way, **never resolve more than one ticket per session.**
 
 User invokes with a loose idea.
 
-1. **Name the destination.** Interview the user one question at a time (discipline: `prd-to-ai-architecture/references/grilling-protocol.md`) to pin down what this map is finding its way to — the spec, decision, or change. Resolve domain terms as they settle（ProofLoop 项目例外：见 `## ProofLoop decisions`；不写入 root `CONTEXT.md`）。The destination fixes the scope, so it's settled first.
+1. **Name the destination.** Interview the user one question at a time (discipline: `prd-to-ai-architecture/references/grilling-protocol.md`) to pin down what this map is finding its way to — the spec, decision, or change. Resolve domain terms as they settle（ProofLoop 项目例外：见 `## ProofLoop decisions`；按当前 canonical owner 归档）。The destination fixes the scope, so it's settled first.
 2. **Map the frontier.** Grill again, **breadth-first** this time: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the way to the destination is already clear, the whole journey small enough for one session — you don't need a map. Stop and ask the user how they'd like to proceed.
 3. **Create the map** (label `wayfinder:map`): Destination and Notes filled in, Decisions-so-far empty, the fog sketched into **Not yet specified**.
 4. **Create the tickets you can specify now** as child issues of the map — then wire blocking edges in a **second pass** (issues need ids before they can reference each other). Wiring sorts them into the frontier and the blocked; everything you can't yet specify stays in the fog — the **Not yet specified** section.

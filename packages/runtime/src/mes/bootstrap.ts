@@ -1,9 +1,12 @@
 /**
- * @proofloop/runtime — one-time MES bootstrap seed (S01-B-T02).
+ * @proofloop/runtime — legacy one-time MES seed (S01-B-T02).
  *
- * Bridges the Git-tracked accepted Plan / bootstrap facts into the MES
- * persistence seam and establishes the minimal operational facts the first
- * `NORMAL READ STATUS` needs (mes.md Pre-MES bootstrap section):
+ * Legacy seed compatibility retained for existing seed-backed stores and
+ * historical fixture/recovery compatibility. It is NOT a current Brain
+ * dispatch/genesis path: since MES initialization, a fresh store is
+ * initialized via `initializeMes` (`.proofloop/mes/init.json`) and the first
+ * NORMAL planning facts come from the Planning lifecycle (mes.md "MES
+ * initialization" section):
  *
  *   - `seedMesBootstrap` accepts ONLY canonical Authority refs, an accepted
  *     Git Plan ref and the baseline/current Git basis, plus the Brain-supplied
@@ -15,9 +18,9 @@
  *   - the FIRST valid seed on an empty pre-seed store succeeds without any
  *     pre-seed MES status / work identity / resultRef (PO-S01-B-03);
  *   - the SAME seed is idempotent (no rewrite, no duplicate facts); a
- *     CONFLICTING seed or a second bootstrap fails closed, and the
- *     completion flag (`isMesSeeded`) permanently closes the
- *     `PRE_MES_BOOTSTRAP` branch for later Brain dispatch (PO-S01-B-04);
+ *     CONFLICTING seed or a second bootstrap fails closed, and the seed
+ *     completion flag (`isMesSeeded`) is the legacy seed-backed compatibility
+ *     predicate (PO-S01-B-04);
  *   - the Brain-supplied status tuple is explicitly persisted and re-readable,
  *     so the next `NORMAL READ STATUS` needs no inference (PO-S01-B-05).
  *
@@ -32,7 +35,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { isSha256Hex, VNEXT_REF_GRAMMAR_RE, CANONICAL_STAGE_ID_RE } from '@proofloop/kernel';
 import { canonicalStringify } from '../cli/proofloop-common';
-import { canonicalPathWithinRoot, readRootBoundFile } from '../path-guard';
+import { canonicalPathWithinRoot, openNoFollowRead, readRootBoundFile } from '../path-guard';
 import { MES_SCHEMA_VERSION } from './types';
 import type { MesFactEnvelope, MesGitBasis } from './types';
 import { MesSnapshotStore } from './store';
@@ -119,6 +122,7 @@ export type MesBootstrapErrorCode =
   | 'conflict'
   | 'invalid-seed'
   | 'corrupt-seed'
+  | 'corrupt-init'
   | 'unreadable'
   | 'write-failed';
 
@@ -479,8 +483,11 @@ export function readMesSeedRecord(root: string): MesSeedRecord | null {
 }
 
 /**
- * True once the store has been seeded — this permanently closes the
- * `PRE_MES_BOOTSTRAP` branch for subsequent Brain dispatch.
+ * True once the store has been seeded — the legacy seed-backed compatibility
+ * predicate retained for existing seed-backed stores and historical fixture /
+ * recovery compatibility. It does NOT describe a current Brain dispatch
+ * branch: the `PRE_MES_BOOTSTRAP` branch is retired and has no legal
+ * current dispatch/genesis path.
  *
  * Seed completion requires BOTH a valid seed record AND every expected
  * plan_binding + git seed fact with canonical matching values. Additional
@@ -714,5 +721,331 @@ export function readMesSnapshotFacts(root: string): MesFactEnvelope[] {
     seedFail('escape', 'store root must be a non-empty path');
   }
   return new MesSnapshotStore(root).read();
+}
+
+/** Root-relative MES initialization metadata location (same MES dir as seed/snapshot). */
+export const MES_INIT_REL = path.join('.proofloop', 'mes', 'init.json');
+
+/** Current initialization metadata version (bumped only by a breaking metadata shape change). */
+export const MES_INITIALIZATION_VERSION = 1 as const;
+
+/**
+ * Closed initialization metadata record: proves MES infrastructure was
+ * initialized and is re-readable. It contains ONLY infrastructure identity
+ * fields — no Plan / Stage / Authority refs / delivery cycle / status tuple /
+ * operational fact payload (mes.md "MES initialization").
+ */
+export interface MesInitRecord {
+  readonly schema_version: number;
+  readonly initialization_version: number;
+}
+
+const INIT_RECORD_KNOWN_FIELDS = ['schema_version', 'initialization_version'] as const;
+
+/** Parse + validate an init record (fail closed on corruption / unknown shape). */
+function parseInitRecord(raw: string, source: string): MesInitRecord {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    seedFail('corrupt-init', `MES init record at ${source} is not valid JSON`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    seedFail('corrupt-init', 'MES init record must be a JSON object');
+  }
+  const obj = parsed as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (!(INIT_RECORD_KNOWN_FIELDS as readonly string[]).includes(key)) {
+      seedFail('corrupt-init', `MES init record has unknown field "${key}"`);
+    }
+  }
+  if (obj.schema_version !== MES_SCHEMA_VERSION) {
+    seedFail('corrupt-init', `MES init record schema_version must be ${MES_SCHEMA_VERSION}`);
+  }
+  if (obj.initialization_version !== MES_INITIALIZATION_VERSION) {
+    seedFail('corrupt-init', `MES init record initialization_version must be ${MES_INITIALIZATION_VERSION}`);
+  }
+  return {
+    schema_version: MES_SCHEMA_VERSION,
+    initialization_version: MES_INITIALIZATION_VERSION,
+  };
+}
+
+/** Reject any present init path before an atomic init write can replace it. */
+function assertInitPathAvailableForWrite(root: string): void {
+  const probe = probeSeedAbsence(path.resolve(root), MES_INIT_REL);
+  if (probe.absent) return;
+  if (probe.symlinkAt !== undefined) {
+    seedFail(
+      'escape',
+      `MES init record path "${MES_INIT_REL}" contains a symlink at "${probe.symlinkAt}" — a symlinked init is never writable`,
+    );
+  }
+  seedFail('unreadable', `cannot confirm MES init record absence: ${probe.reason ?? 'unknown'}`);
+}
+
+/** Atomic root-bound write of the init record (temp + fsync + rename). */
+function writeInitRecord(root: string, record: MesInitRecord): void {
+  assertInitPathAvailableForWrite(root);
+  const canonical = canonicalPathWithinRoot(path.resolve(root), MES_INIT_REL);
+  if (canonical === null) {
+    seedFail('escape', `MES init record path "${MES_INIT_REL}" escapes the trust root`);
+  }
+  const dir = path.dirname(canonical!);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    seedFail('write-failed', `cannot create init directory: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const content = canonicalStringify(record);
+  const tmp = path.join(dir, `.init.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}.tmp`);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(tmp, 'wx');
+    fs.writeFileSync(fd, content, 'utf8');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(tmp, canonical!);
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      /* ignore */
+    }
+    seedFail('write-failed', `cannot atomically persist MES init record: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Read the persisted root-bound MES init record.
+ *
+ * @returns the validated record, or `null` when no init metadata exists.
+ * A present-but-invalid state (escape / symlink / corrupt / unknown shape)
+ * fails closed — never a partial or guessed record.
+ */
+export function readMesInitRecord(root: string): MesInitRecord | null {
+  if (typeof root !== 'string' || root.length === 0) {
+    seedFail('escape', 'store root must be a non-empty path');
+  }
+  const canonical = canonicalPathWithinRoot(path.resolve(root), MES_INIT_REL);
+  if (canonical === null) {
+    seedFail('escape', `MES init record path "${MES_INIT_REL}" escapes the trust root`);
+  }
+  try {
+    fs.lstatSync(canonical!);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      const probe = probeSeedAbsence(path.resolve(root), MES_INIT_REL);
+      if (!probe.absent) {
+        if (probe.symlinkAt !== undefined) {
+          seedFail(
+            'escape',
+            `MES init record path "${MES_INIT_REL}" contains a symlink at "${probe.symlinkAt}" — a symlinked init is never a missing record`,
+          );
+        }
+        seedFail('unreadable', `cannot confirm MES init record absence: ${probe.reason ?? 'unknown'}`);
+      }
+      return null;
+    }
+    seedFail('unreadable', `cannot stat MES init record: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  let raw: string;
+  try {
+    raw = readRootBoundFile(root, MES_INIT_REL).content;
+  } catch (err) {
+    seedFail('unreadable', `cannot read MES init record: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return parseInitRecord(raw, MES_INIT_REL);
+}
+
+/**
+ * True when the MES infrastructure is initialized: a valid init record
+ * exists, OR a valid existing seed-backed store exists.
+ *
+ * For a seed-backed store this requires the SAME complete-legality as
+ * `isMesSeeded`: a valid seed record AND every expected seed-owned fact
+ * present in the snapshot with canonical-matching values (architecture
+ * Initialization boundary). A parseable seed record alone is NOT
+ * initialized: a store whose snapshot is missing/mismatched with its seed
+ * fails closed rather than guessing. Corrupt / unreadable records also
+ * fail closed.
+ */
+export function isMesInitialized(root: string): boolean {
+  if (typeof root !== 'string' || root.length === 0) {
+    seedFail('escape', 'store root must be a non-empty path');
+  }
+  if (readMesInitRecord(root) !== null) return true;
+  const seedRecord = readMesSeedRecord(root);
+  if (seedRecord === null) return false;
+  // Existing seed-backed store: must be a legal, complete store (seed record
+  // + matching seed-owned snapshot facts). A store whose snapshot is missing
+  // or inconsistent with its seed is NOT initialized — fail closed; never
+  // let a broken seed become initialized by presence of the record alone.
+  if (!isMesSeeded(root)) {
+    seedFail(
+      'corrupt-seed',
+      'existing seed-backed store is not fully seeded (seed record / snapshot facts mismatch) — not initialized',
+    );
+  }
+  return true;
+}
+
+/**
+ * One-time MES infrastructure initialization (idempotent, root-bound,
+ * fail-closed).
+ *
+ * - A valid existing init record: idempotent no-op (record returned, nothing
+ *   rewritten).
+ * - A valid existing seed-backed store (no init record, `isMesSeeded`
+ *   holds): considered initialized WITHOUT creating `init.json` and without
+ *   rewriting seed/snapshot (mes.md "MES initialization" / Step 4.2).
+ * - A present seed-backed store that is NOT fully seeded (seed record
+ *   parses but snapshot misses/mismatches expected seed-owned facts): fail
+ *   closed — never legalize an inconsistent store by writing init.json,
+ *   never treat it as initialized.
+ * - No valid init record and no valid existing seed: writes ONLY the minimal
+ *   `init.json` metadata; snapshot facts may remain empty (Step 4.3).
+ * - A present-but-corrupt init record: fail closed (never silently rewritten).
+ *
+ * @returns the current init record, or `null` when the store is
+ * seed-backed (no init.json created).
+ * @throws {MesBootstrapError} on any fail-closed condition.
+ */
+export function initializeMes(root: string): MesInitRecord | null {
+  if (typeof root !== 'string' || root.length === 0) {
+    seedFail('escape', 'store root must be a non-empty path');
+  }
+  const existingInit = readMesInitRecord(root);
+  if (existingInit !== null) return existingInit;
+  const seedRecord = readMesSeedRecord(root);
+  if (seedRecord !== null) {
+    // Seed-backed store: only a fully legal store (matching seed-owned
+    // snapshot facts) counts as initialized. An inconsistent seed must fail
+    // closed and must NOT be papered over with a fresh init.json.
+    if (!isMesSeeded(root)) {
+      seedFail(
+        'corrupt-seed',
+        'existing seed-backed store is not fully seeded (seed record / snapshot facts mismatch) — not initialized, init.json not created',
+      );
+    }
+    return null;
+  }
+  const record: MesInitRecord = {
+    schema_version: MES_SCHEMA_VERSION,
+    initialization_version: MES_INITIALIZATION_VERSION,
+  };
+  writeInitRecord(root, record);
+  return record;
+}
+
+/** The four canonical Authority paths observed by MES presence observation. */
+export const MES_AUTHORITY_PATHS = [
+  'PRD.md',
+  path.join('tech-spec', 'architecture.md'),
+  path.join('tech-spec', 'contracts.md'),
+  path.join('tech-spec', 'acceptance.md'),
+] as const;
+
+export type MesAuthorityPath = (typeof MES_AUTHORITY_PATHS)[number];
+
+/** Closed presence outcome for one canonical Authority path. */
+export type MesAuthorityPresence = 'present' | 'missing' | 'unreadable';
+
+/** One deterministic read-only observation result. */
+export interface MesAuthorityObservation {
+  readonly path: MesAuthorityPath;
+  readonly presence: MesAuthorityPresence;
+}
+
+/**
+ * Probe one root-relative path component-by-component without following links.
+ * Empty regular files count as `present` only when they are actually
+ * readable: after confirming a final regular-file component, the existing
+ * no-follow read primitive (`openNoFollowRead`) verifies readability without
+ * parsing content and without a check-then-open TOCTOU window — open success
+ * is `present`; escape / inode-mismatch / not-regular-file / unreadable all
+ * map to `unreadable`. Any symlink (final or intermediate), non-regular
+ * component, or unreadable file is `unreadable` (never followed, never
+ * treated as missing); ENOENT is `missing`. This mirrors the seed/init path
+ * probe semantics so the observation is deterministic and root-bound.
+ */
+function probeAuthorityPresence(root: string, rel: string): MesAuthorityPresence {
+  const parts = rel.split(path.sep).filter((part) => part.length > 0 && part !== '.');
+  let current = root;
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    const next = path.join(current, part);
+    let lst: fs.Stats;
+    try {
+      lst = fs.lstatSync(next);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return code === 'ENOENT' ? 'missing' : 'unreadable';
+    }
+    if (lst.isSymbolicLink()) return 'unreadable';
+    const last = i === parts.length - 1;
+    if (!last) {
+      if (!lst.isDirectory()) return 'unreadable';
+      current = next;
+      continue;
+    }
+    if (!lst.isFile()) return 'unreadable';
+    // Safety readability probe via the existing no-follow primitive
+    // (path-guard openNoFollowRead): parent canonicalization + O_NOFOLLOW
+    // open + post-open dev/ino identity check close the lstat → open TOCTOU
+    // window (a concurrent swap to a symlink fails closed). The file is
+    // never read or parsed — the fd is opened and closed only.
+    const opened = openNoFollowRead(root, rel);
+    if (!opened.ok) return 'unreadable';
+    fs.closeSync(opened.fd);
+    return 'present';
+  }
+  return 'unreadable';
+}
+
+/**
+ * Read-only, deterministic presence observation of the four canonical
+ * Authority paths (mes.md "Authority path presence observation").
+ *
+ * - Only checks root-bound filesystem reality; never reads Markdown content.
+ * - Empty files count as `present` (presence != readiness).
+ * - Never modifies MES, never writes init metadata, never produces a MES fact.
+ * - Does NOT emit `PROPOSE_READY` or any route suggestion — the result is
+ *   handed to Brain for semantic interpretation.
+ */
+export function observeAuthorityPaths(root: string): MesAuthorityObservation[] {
+  if (typeof root !== 'string' || root.length === 0) {
+    seedFail('escape', 'store root must be a non-empty path');
+  }
+  const resolvedRoot = path.resolve(root);
+  return MES_AUTHORITY_PATHS.map((rel) => ({
+    path: rel,
+    presence: probeAuthorityPresence(resolvedRoot, rel),
+  }));
+}
+
+/**
+ * Convenience projection: the exact closed outcome buckets.
+ */
+export function observeAuthorityPathBuckets(root: string): {
+  readonly present: MesAuthorityPath[];
+  readonly missing: MesAuthorityPath[];
+  readonly unreadable: MesAuthorityPath[];
+} {
+  const observations = observeAuthorityPaths(root);
+  return {
+    present: observations.filter((o) => o.presence === 'present').map((o) => o.path),
+    missing: observations.filter((o) => o.presence === 'missing').map((o) => o.path),
+    unreadable: observations.filter((o) => o.presence === 'unreadable').map((o) => o.path),
+  };
 }
 export type { MesGitBasis };
