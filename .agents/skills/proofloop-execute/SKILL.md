@@ -104,12 +104,24 @@ Execute（Brain running `proofloop-execute`）按当前 mode 投影 Slice Work P
   - Worker 在 bounded scope（`code_paths`、`test_paths`）内根据 Plan + tech-spec + code reality 决定具体的代码实现与测试构造（HOW）；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions；Worker 不越界修改未授权路径。
   - Worker 的 authority refs 仅限 bound normative refs（Technical Authority）。
 - Worker 执行被投影的 current Task：RED → 最小实现 → GREEN → Task Evidence → Task Result；`NORMAL` Task Result 作为 semantic event 经 MES transaction layer materialize，`MES_MAINTENANCE` 返回结构化 Link evidence（Git + Plan + 对应 binding），都不是 checkbox/凭证/next-action 完成。Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
+- **producer proof**（orchestration consequence；完整 producer-proof 语义由
+  worker/SKILL.md 持有）：Task Result acceptance 必须满足 Worker Skill 的 producer-proof
+  完成标准（新增/变更的 runnable verification seam 由 producer 实际运行并记录证据，
+  或返回 typed blocker）；Execute、CV 与 integrated Stage verification 独立再证相关
+  行为，不替代 Worker GREEN。
 - 全部 Task 完成后 Worker 返回 `SLICE_CANDIDATE_READY`；它不是 CV `PASS` 或 Slice Commit。
 - Worker 每 Task 推进前 fresh-read 当前 binding（accepted/candidate Plan、bound normative refs、Slice scope、Git basis、dependency outputs），按 Slice packet 与 Thin Plan 由 Execute 投影的 JIT Read Set 执行；不跨 Slice、不从 scope 外选择或发明 Task。
 - Brain 只负责 lane 启动与逐 Task Result 的 schema/binding/Git 复核、semantic-event authorization 及 `TASK_RESULT_ACK`；`NORMAL` 由 MES transaction layer materialize，`MES_MAINTENANCE` 重读 Git + Plan/evidence；ACK 不携带下一 Task 指令；下一 current Task 的选择与投影由 Brain running `proofloop-execute` 每个 Step 执行，Worker 返回 `SLICE_CANDIDATE_READY` 后才路由 CV。
 
 ## CV 与 bounded repair
 
+- **accepted-owner-first**：执行中发现新的 defect、regression 或 verification failure 时，
+  先按当前 accepted Plan ownership 解析该缺陷，再做任何 producer mutation。若 Planning
+  tuple 保持 current 且缺陷落在既有合法 owner 边界内，继续走该 scope 拥有的既有
+  resume、restart 或 bounded-repair 机制；若无合法 accepted owner，或修正会改变
+  Stage/Slice/Task goal、dependency、ownership、material scope 或 verification boundary，
+  在 mutation 前返回 `PLAN_GAP` 并路由 Planning。Execute/Worker 不发明 Plan 之外的
+  Task、Slice 或临时组合单元作为 repair shortcut。
 - 初审是独立 initial，必须 fresh CV；Slice-level 反驳顺序与 verdict 字段以
   `references/code-verifier-template.md` 为准。CV 不消费 Brain-projected Slice semantics，自读当前 mode 的 Plan（NORMAL accepted；MES_MAINTENANCE recovery candidate）、tech-spec、candidate/diff 与 code/tests；CV claimed route 不包含 `AUTHORITY_GAP`，下游问题分类限 `IMPLEMENTATION_DEFECT`、`PLAN_GAP`、`TECHNICAL_UNKNOWN`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`、`EVIDENCE_GAP`。CV `FINDINGS` 后的 recheck 默认用同一 CV continuation 做 bounded incremental 复查（只覆盖 failed criterion、concrete counterexample、repair diff 与
   bounded incremental 复查（只覆盖 failed criterion、concrete counterexample、repair diff 与

@@ -45,6 +45,13 @@ Reviewer 全程 read-only（`edit: deny`），不修改 code、Plan、Authority�
 - Acceptance
 - Stage / cross-slice consequence
 
+## Review packet 纪律
+
+finding 的 current-contradiction 方法（具体矛盾 → 规范绑定 → 后果绑定）由
+stage-reviewer/SKILL.md 持有，本 Contract 不复制。Review packet 在 Required fields
+的 ref-first 基础上，只携带稳定 refs、identities、bindings 与 factual evidence
+limitations；不包含 Brain 撰写的 evaluative diagnosis、preferred route、planning
+critique 或预期 reviewer 独立推导的 acceptance criteria。
 ## Required fields
 
 Packet 改为 ref-first；`review_scope: stage` 使用 accepted Plan + Technical Authority (tech-spec) + integrated snapshot，`review_scope: maintenance` 使用 `execution_mode: MES_MAINTENANCE`、recovery candidate Plan + current Technical Authority + maintenance Git/forensic/audit binding。两者均不包含 Brain 投影的产品层引用、目标摘要、解读或 Brain acceptance criteria（去 generic canonical Authority、去 raw Stage risk level、去 Brain acceptance criteria）。Reviewer 从 stable refs 独立自读并重建目标与验收标准：

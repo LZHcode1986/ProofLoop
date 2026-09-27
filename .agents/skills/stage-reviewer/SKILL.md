@@ -55,6 +55,15 @@ Reviewer 若返回 finding，按 `stage-review.md` Contract 提供 `finding_evid
 本 Skill 没有 E2E 由 Reviewer 直接执行的说法：project-level 自动验收已确定不需要，project scope 从本
 Skill 删除；Reviewer 只处理 Stage。
 
+## Finding 的 current-contradiction 要求
+
+每条 finding 必须：(1) 指出 current integrated snapshot（maintenance 为 Git evidence
+snapshot）中的具体矛盾；(2) 把该矛盾绑定到 reviewer 允许 basis 内的 accepted Plan 或
+Technical Authority（tech-spec）；(3) 把该矛盾绑定到当前 Outcome、Composition 或
+Authority consequence。历史执行过程、规划粒度或方法论偏好不可独立审查；只有在其在
+当前轴范围内显式为当前矛盾时才相关。每条 finding 应可陈述为"当前目标 X 与规范依据
+Y 矛盾，后果 Z"。审查目标与验收标准由 Reviewer 从 packet 的稳定 refs 独立重建
+（packet 内容纪律由 stage-review.md 持有）。
 ## Mode / 分支
 
 - `review_scope: maintenance` 仅可使用 `execution_mode: MES_MAINTENANCE`；它验证 evidence-only Git lifecycle，不产生 `STAGE_ACCEPTED`/`PROJECT_READY`，也不写 MES。`review_scope: stage` 仅可使用 `NORMAL`。

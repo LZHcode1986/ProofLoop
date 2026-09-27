@@ -54,7 +54,10 @@ Task 边界：每个 Task 必须自足（local closure / verification closure / 
 1. **RED**：先运行 baseline/新增失败测试或其他 PO oracle，确认失败属于当前 Task。
 2. **最小实现**：只编辑 `allowed_scope.code_paths`，复用现有 seam/类型/依赖，不顺手重构。
 3. **GREEN**：运行目标 test、必要回归 test、typecheck/build 和 scope/diff 检查；失败保留实际命令、exit code
-   与输出摘要。
+   与输出摘要。若当前 Task 新增或 materially 改变 runnable verification seam，producer
+   必须先实际运行该 seam 再提交 Result，并把实际命令、实际结果与 oracle evidence 记入
+   Result；当前执行环境无法运行该 seam 时返回既有 typed blocker，不把 Task 投影为完成。
+   下游 CV 与 integrated Stage verification 独立再证相关行为，不替代 producer GREEN。
 4. **Task Result**：按 worker-template 写 Result（`NORMAL` 为 semantic event input，包含 PO 结果、commands、actual result、changed files、test/seam validity、risk/regression 与 remaining unknowns；`MES_MAINTENANCE` 为结构化 Link evidence，不写 MES、不指向 MES resultRef），并为每次提交携带 Slice-lane `actionToken` 与唯一 `resultId`。
 5. **返回、等待接纳并继续**：按 template 通过 Herdr Link 发送当前 Result 后，必须等待 Brain 对同一 `resultId` 返回闭集 `TASK_RESULT_ACK`；只有 `ACCEPTED + CONTINUE` 才表示同一 lane 继续，`ACCEPTED + PAUSE` 或 `REJECTED + PAUSE` 停止并等待 Brain recovery/route，禁止 `REJECTED + CONTINUE`。下一 current Task 由 Brain running `proofloop-execute` 从稳定 task order 选择并只投影该 Task 的 JIT input，Worker 接收投影的下一 Task JIT Read Set 后执行，全部 Task 完成且 self-check 通过后进入 `slice-ready` 返回 `SLICE_CANDIDATE_READY`；不自行派发 CV、不跨 Slice。
 
@@ -80,6 +83,8 @@ Task 边界：每个 Task 必须自足（local closure / verification closure / 
 
 - 只在 Read Set 的 `allowed_scope.code_paths`/`test_paths` 内修改生产代码/测试；不修改其他 Task/Slice、
   Authority、accepted Thin Plan 或旧 Runtime-owned 制品。
+- 执行中发现新 defect/regression/verification failure 时，先回 Brain 按当前 accepted Plan
+  ownership 解析后再做任何 mutation；不发明 Plan 之外的 Task、Slice 或临时组合单元。
 - Task Result 作为 semantic event input 由 `execution_mode` 处理：`NORMAL` 经 MES operational transaction layer materialize；`MES_MAINTENANCE` 为结构化 Link evidence（不写 MES），不由 checkbox/凭证/next-action 替代。
 - `repair` 例外：只改实现代码、不编辑 Plan projection，任何 projection 不得移动。
 

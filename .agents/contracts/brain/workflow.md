@@ -38,6 +38,63 @@ Brain 只有在以下四类边界事件重新选择 Flow：
 Contract 继续处理。Agent `idle`/`done`、Link `sent`、checkbox 或模型摘要也不是
 完成信号。
 
+### 2.1 边界内序：RECONSTRUCT → REFRESH → ARBITRATE → ROUTE
+
+每个 Routing Boundary 内，Brain 按固定顺序执行以下四步；顺序内联在本节，因为每个
+Routing Boundary 都需要完整顺序。事件到具体 canonical owner 的分支只走 §3.1 的
+Event-local fresh-read pointers（每个事件只需一条分支），本节不新增第二张事件表。
+
+**Step 1 — RECONSTRUCT**：从 durable MES facts、incoming 结构化 Result/Finding、
+当前 Plan binding 与 Git reality 重建当前 scope、basis、事件 identity 与相关 relations。
+若当前 basis 无法唯一重建，留在既有 recovery 或 typed-blocker 路线。
+完成标准：下一个决策使用的每个 identity 都有当前 durable 或 repository 来源支撑；
+不依赖对话记忆、Agent 摘要、时间戳排序或推断的 newest state。
+
+**Step 2 — REFRESH**：按 §3.1 现有 Event-local fresh-read pointers，只加载当前事件
+所需的唯一 canonical Contract/Skill owner。同一 Flow 内普通 continuation 不重载
+无关 workflow 材料。
+完成标准：Brain 分类或路由当前事件前，context 中已有一个适用的 canonical owner
+working set。
+
+**Step 3 — ARBITRATE**：只裁决 Brain-owned 问题：currentness、normative support、
+accepted ownership、invalidation scope、continuation class、route。Brain 不设计
+Planner 分解、Worker repair HOW、verifier 验收标准或 reviewer 实现方案。
+完成标准：决策可由当前 basis + 刚读取的 canonical owner 语义重建。
+
+ARBITRATE 内含通用 actionable-claim 仲裁（四性质闭集）。Brain 对每个独立的
+verifier/reviewer claim 分别仲裁；会授权 producer mutation、restart、replan 或使
+当前 work/binding 失效的 actionable claim，只有在以下四个性质全部闭合时才能驱动
+该 corrective route：
+
+1. **Normative support**：claim 被 verifier/reviewer 允许使用的 accepted Plan、
+   Technical Authority 或 Contract basis 支持。
+2. **Current contradiction**：claim 在当前 review target 中指出具体 counterexample、
+   relation failure、可观察失败或其它矛盾。
+3. **Current basis**：claim 的 target、Plan、Git basis、scope 与 identity 仍可重建为 current。
+4. **Bounded invalidation**：该矛盾使特定当前 outcome、ownership boundary、scope、
+   binding、dependency 或 verification consequence 失效。
+
+Disposition：
+- Normative support 可能存在但 evidence/current basis 不足：走既有 evidence、blocker
+  或 recovery route；
+- Normative support 缺失或 claim 超出 verifier 声明的 review basis：以既有
+  `VERIFIER_OVERREACH` disposition 终结该 claim（语义见 finding-convergence.md §8）；
+- 独立 claim 独立仲裁；同一 verdict 中捆绑的另一个已成立 claim，不给该 claim
+  提供 normative support；
+- `TECHNICAL_UNKNOWN`、`EVIDENCE_GAP`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`
+  等 typed blocker/unknown 不要求 current contradiction，在 current basis 验证后按
+  各自既有 Contract 走 typed route。
+
+完成标准：每个被接纳的 corrective route 都有可追溯的 normative source 与当前矛盾；
+每个被驳回的 claim 有基于 missing support 或 role scope 的有界理由，而不是
+reviewer preference。本文件不编码项目、reviewer、技术、Task 大小或历史 incident
+案例作为判据。
+
+**Step 4 — ROUTE**：只发送稳定 identities、bindings、refs、Brain-owned 授权与
+launch 所需 ephemeral transport identity；具体发送内容与 dispatch 顺序见 §5
+Global Dispatch Rule。接收 Role 自行决定其内部方法。
+完成标准：目标 owner 能仅凭 canonical refs 执行，无需 Brain 编写的 semantic rewrite。
+
 ## 3. Trigger → Flow → Exit
 
 | Trigger | Flow / owner entry | Exit / next boundary |

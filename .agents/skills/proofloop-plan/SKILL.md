@@ -57,13 +57,16 @@ Canonical Authority + Project Stage Map
 ```
 
 **Planning 与 Execute 分工**：
-- Planning = WHAT / WHEN / BOUNDARY；
+- Planning = WHAT / WHEN / BOUNDARY；Planning WHEN 仅指 Stage/Slice/Task dependency 与
+  blocking prerequisite ordering；Task 内部 RED/GREEN 顺序、具体验证命令、producer
+  first-execution timing 与其它 implementation-loop sequencing 属于 Execute/Worker HOW，
+  只有形成真实 cross-Task prerequisite 的执行顺序才进入 Plan 依赖图；
 - Execute（`proofloop-execute` + `worker-template`）= accepted Plan + current facts → Slice Work Packet / per-Task JIT Read Set；
 - Worker = 被投影 current Task 的 HOW。
 - Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
 Planner 不拥有 JIT Work Packet schema/projection，只提供 Execute 投影所需的 planning facts。
 
-**Thin Plan** 只包含：Stage/Slice/Task goals、dependencies、semantic scope、code anchors、verification refs、Task 级 `obligation_state`、done/stop conditions、小粒度 tech-spec Authority refs（tech-spec-only）。不承载 Receipt/Gate、不承载 mutable execution state。
+**Thin Plan** 只包含：Stage/Slice/Task goals、dependencies、semantic scope、code anchors、verification refs（稳定 verification seams 与独立 expected results）、Task 级 `obligation_state`、done/stop conditions、ownership boundaries、小粒度 tech-spec Authority refs（tech-spec-only）。不承载 Receipt/Gate、不承载 mutable execution state、不存储 producer-internal verification timing（Task 内部执行时序属于 Execute/Worker HOW）。
 
 **Future Thin Plan shape（只约束 future candidate Plans，不回写已 accepted 的 S01 Plan）**：Task 级只保留 task-specific facts——goals、dependencies、semantic scope、code anchors、task-specific `code_paths`/`test_paths`、verification refs、`obligation_state`、done/stop、required Skills 与 Skill 要求的 Proof Obligation binding；可证明为 Stage/Slice 共享 invariant 的 protected/forbidden scope、机械 metadata 与重复的 Authority refs 提升为共享的 Stage/Slice 默认，不在每个 Task 重复；重复 Authority refs 只收窄为稳定小粒度 ref，不用摘要替代 canonical Authority；candidate Plan 正文不记录 mutable acceptance/progress state（candidate/accepted 状态由 lifecycle/MES/Git facts 持有）。该 shape 是 execution-owned 的 prose/template 指导，不新增第二个 Plan 事实源、不新增 schema/phase/status。
 

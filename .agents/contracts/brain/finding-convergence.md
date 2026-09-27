@@ -20,6 +20,10 @@ Brain 对 Finding 进行 normative-first 仲裁：
 
 首次、局部且由单一 owner 可完成的 Finding 继续走既有 arbitration route。触发 convergence 后，Brain 在 owner dispatch 前完成本 Contract 的 family classification 与 synthesis。
 
+所有 verifier/reviewer claim 的通用四性质仲裁内联在 `workflow.md` §2.1 Step 3 —
+ARBITRATE；本 Contract 只在上述收敛分支加载，负责 family classification、synthesis
+与 stop discipline，不复制该通用测试。
+
 ## 3. 输入与 currentness
 
 Brain 先从当前分支可重读事实建立 basis：
