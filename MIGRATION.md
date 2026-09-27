@@ -1,6 +1,7 @@
 # MIGRATION.md — 迁移到新项目指南
 
-把本模板仓库迁移到一个新业务项目，按以下三步操作。
+本仓库是可复用的流程框架（不含权威文档与开发过程数据）：把框架复制到一个新业务
+项目，再创建新项目自己的权威文档并初始化，按以下三步操作。
 
 ## 第一步：复制（直接复制，不改内容）
 
@@ -13,19 +14,21 @@
 | `.opencode/agents/brain.md` | OpenCode 唯一 Brain host primary（thin host）；只保留 Brain identity、必要权限与 canonical workflow pointer（`.agents/contracts/brain/workflow.md`） |
 | `.pi/extensions/proofloop-mode.ts` | Pi Brain host entry（thin host）；只保留 mode 切换、持久化与同一 canonical workflow pointer（`.agents/contracts/brain/workflow.md`） |
 | `AGENTS.md` | 项目规则（流程纪律、职责边界） |
-| `opencode.json`、`.opencode/tui.json` | harness 配置（按需复制；`tui.json` 保持停用的 `{}`，不得恢复旧 plugin dispatch） |
+| `opencode.json` | harness 配置（按需复制；`tui.json` 保持停用，不得恢复旧 plugin dispatch） |
 
-## 第二步：改写（复制后修改内容，保留结构）
+## 第二步：创建自己的权威文档（从零创建，不复制）
 
-| 文件 | 改什么 |
+框架不携带 `PRD.md`、`tech-spec/` 或上下文文件，新项目按下面清单从零创建：
+
+| 文件 | 内容 |
 |---|---|
-| `CONTEXT.md` | 换成新项目的当前执行上下文（Working Memory；不是 Authority） |
-| `PRD.md` | 换成新项目的产品权威（目标、用户场景、验收约束、FR、Scope、Decision ledger） |
-| `tech-spec/`（4 个文件） | 换成新项目的架构/合同/难点/验收矩阵（保留结构；语义收敛到四类 canonical Authority：Architecture / Contracts / Acceptance；按 `prd-to-ai-architecture` 技能生成） |
+| `PRD.md` | 新项目的产品权威（目标、用户场景、验收约束、FR、Scope、Decision ledger、Glossary） |
+| `tech-spec/` | 新项目的架构/合同/难点/验收矩阵（四类 canonical Authority：Architecture / Contracts / Acceptance；按 `prd-to-ai-architecture` 技能生成） |
+| 项目上下文 | 新项目自行维护 Working Memory（**不是 Authority**）。旧项目若仍有 root `CONTEXT.md`，完成 Authority/Glossary handoff 检查后直接删除；不迁移为新的 Working Memory artifact，新项目也不应创建该文件 |
 
 四阶段主流程（Propose → Planning → Execute → Review → PROJECT_READY）、MES/status、
 Brain Routing Boundary / 单一 workflow（`.agents/contracts/brain/workflow.md`）、Thin Plan / JIT Work Packet、Slice lane / CV / Integration、
-三轴 Stage Review、PROJECT_READY 的语义按模板保留。
+三轴 Stage Review、PROJECT_READY 的语义按 `.agents/**` 模板保留。
 
 ## 第三步：初始化（新项目从零生成，不要复制）
 
@@ -72,9 +75,9 @@ node packages/runtime/dist/cli/proofloop.js status --json            # 只读 ME
 ```
 
 > Runtime 已交付 root-bound MES snapshot/seed、fact/binding validation、MES operational transaction layer
-> （S06-R-A-T01，唯一 normal durable mutator，`packages/runtime/src/mes/transaction.ts`）与只读
-> `proofloop status` observation seam；Brain host 接线（经 transaction layer 的 operational write-back）、
-> rich aggregation / 完整 cross-runtime E2E 仍为 follow-up。MES/status 语义见 `.agents/contracts/brain/mes.md`。
+> （`packages/runtime/src/mes/transaction.ts`，唯一 normal durable mutator）与只读 `proofloop status`
+> observation seam；Brain host 接线（经 transaction layer 的 operational write-back）、rich aggregation /
+> 完整 cross-runtime E2E 仍为 follow-up。MES/status 语义见 `.agents/contracts/brain/mes.md`。
 
 ## 注意
 
