@@ -58,11 +58,11 @@ export interface IntegrationRequest {
   readonly candidate_base_ref: string;
   readonly paths: readonly string[];
   /**
-   * Integration Contract (D.1): NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE.
+   * Integration Contract (D.1): NORMAL | MES_MAINTENANCE.
    * Defaults to NORMAL for direct seam callers; the public CLI enforces the
    * closed required schema.
    */
-  readonly execution_mode?: 'NORMAL' | 'PRE_MES_BOOTSTRAP' | 'MES_MAINTENANCE';
+  readonly execution_mode?: 'NORMAL' | 'MES_MAINTENANCE';
   /** Root-relative mode-specific target worktree ('.' for NORMAL). */
   readonly expected_worktree?: string;
   /**
@@ -75,7 +75,7 @@ export interface IntegrationRequest {
 
 export interface IntegrationResult {
   /** Integration Contract (D.1) handoff: the executed mode + target. */
-  readonly execution_mode: 'NORMAL' | 'PRE_MES_BOOTSTRAP' | 'MES_MAINTENANCE';
+  readonly execution_mode: 'NORMAL' | 'MES_MAINTENANCE';
   readonly expected_worktree: string;
   readonly pre_integration_head: string;
   readonly commit_sha: string;
@@ -345,12 +345,12 @@ export function applyIntegration(root: string, request: IntegrationRequest): Int
   //         (zero-write; any failure before the staged apply leaves
   //         HEAD/index/worktree byte-identical) ----
   const mode = request.execution_mode ?? 'NORMAL';
-  if (mode !== 'NORMAL' && mode !== 'PRE_MES_BOOTSTRAP' && mode !== 'MES_MAINTENANCE') {
-    fail('INTEGRATION.REQUEST_INVALID', `execution_mode must be one of NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE, received ${JSON.stringify(mode)}`);
+  if (mode !== 'NORMAL' && mode !== 'MES_MAINTENANCE') {
+    fail('INTEGRATION.REQUEST_INVALID', `execution_mode must be one of NORMAL | MES_MAINTENANCE, received ${JSON.stringify(mode)}`);
   }
   const expectedWorktree = request.expected_worktree ?? '.';
-  // maintenance_binding is MES_MAINTENANCE-only: present under NORMAL or
-  // PRE_MES_BOOTSTRAP is a closed-schema violation (zero-write).
+  // maintenance_binding is MES_MAINTENANCE-only: present under NORMAL is a
+  // closed-schema violation (zero-write).
   if (mode !== 'MES_MAINTENANCE' && request.maintenance_binding !== undefined) {
     fail('INTEGRATION.REQUEST_INVALID', 'maintenance_binding is only valid under execution_mode MES_MAINTENANCE');
   }
@@ -398,7 +398,7 @@ export function applyIntegration(root: string, request: IntegrationRequest): Int
   })();
   // The transaction runs IN the mode-specific target worktree (its own
   // HEAD/index/worktree): NORMAL = the current Stage worktree (== git root);
-  // PRE_MES_BOOTSTRAP / MES_MAINTENANCE = the root-bound isolated evidence
+  // MES_MAINTENANCE = the root-bound isolated evidence
   // worktree. The candidate refs live in the same repository (shared object
   // store), so ref resolution / ancestry / patch diff are worktree-agnostic.
   let target = gitRoot;

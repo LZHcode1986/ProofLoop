@@ -410,7 +410,7 @@ function requireToleratedPaths(request: BoundaryCloseRequest, root: string): str
 }
 
 /** Approved authority roots (commit-boundary.md authority-update scope). */
-const AUTHORITY_ROOTS: readonly string[] = ['CONTEXT.md', 'PRD.md', 'progress.md', 'tech-spec'];
+const AUTHORITY_ROOTS: readonly string[] = ['PRD.md', 'progress.md', 'tech-spec'];
 
 /** Canonical Project Stage Map path (commit-boundary.md stage-plan scope). */
 export const CANONICAL_STAGE_MAP_PATH = 'delivery/project-stage-map.md';
@@ -418,7 +418,6 @@ export const CANONICAL_STAGE_MAP_PATH = 'delivery/project-stage-map.md';
 /** runtime-repair forbidden roots: Stage artifacts, authority documents and agent configuration. */
 const RUNTIME_REPAIR_DENIED_ROOTS: readonly string[] = [
   'delivery',
-  'CONTEXT.md',
   'PRD.md',
   'progress.md',
   'tech-spec',
@@ -489,7 +488,7 @@ function prefixScope(request: BoundaryCloseRequest): readonly string[] {
   const stage = validateStage(request.stage, STAGE_REQUIRED_TYPES.has(type));
   switch (type) {
     case 'baseline-authority':
-      return ['CONTEXT.md', 'PRD.md', 'progress.md', 'tech-spec'];
+      return ['PRD.md', 'progress.md', 'tech-spec'];
     case 'stage-plan':
       return [`delivery/stages/${stage as string}`, CANONICAL_STAGE_MAP_PATH];
     case 'stage-close':

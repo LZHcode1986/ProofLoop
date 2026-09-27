@@ -172,7 +172,7 @@ resolutionOracle: <condition proving resolution>
 - `actionToken` 由 Brain/Host 在 fresh dispatch、fresh rebind 或 recovery-new-lane 建立 packet binding 时生成；合法同一 lane 的 continuation 可复用当前 lane token，fresh/recovery/rebind 后旧 token 失效。
 - Agent 不生成、不裁剪、不从 `subagent_type`、`agent_id`、`session_id`、transcript、transport message id 或其他 transport id 派生 token。
 - Core Delivery Result 的 role schema、closed fields、Stage/Slice/Task、mode-specific Plan/Authority、Git basis 和 transaction/recovery basis 必须一致。Frontend Result 按本 Contract 的 closed envelopes 校验。
-- `NORMAL` formal Result 由 Brain 校验并转化为经授权的 semantic event，由 MES operational transaction layer materialize；`PRE_MES_BOOTSTRAP`、`RECOVERY_REBASELINE` 和 `MES_MAINTENANCE` 的对应 Result 只由 Git、Plan、Authority、forensic/audit 和当前 evidence 复核，不伪造 NORMAL MES facts。
+- `NORMAL` formal Result 由 Brain 校验并转化为经授权的 semantic event，由 MES operational transaction layer materialize；`RECOVERY_REBASELINE` 和 `MES_MAINTENANCE` 的对应 Result 只由 Git、Plan、Authority、forensic/audit 和当前 evidence 复核，不伪造 NORMAL MES facts。
 
 ### 4.3 Worker Task Result ACK
 
@@ -180,7 +180,7 @@ Worker 在 Slice lane 内只执行 Brain 投影的 current Task。每个 Task Re
 
 ```yaml
 kind: TASK_RESULT_ACK
-executionMode: NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE
+executionMode: NORMAL | MES_MAINTENANCE
 stageId: <stage-id>
 sliceId: <slice-id>
 taskId: <task-id>
@@ -193,7 +193,7 @@ validatedGitBasis: <validated Result/evidence basis>
 reasonCode: <required for REJECTED or PAUSE>
 ```
 
-只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`。ACK 不携带 `next_task_id`、`next_action`、producer instruction、Receipt、Gate 或 admission credential。`NORMAL + ACCEPTED` 必须有 `acceptedResultRef`；bootstrap/maintenance 或 rejected 禁止该字段；`validatedGitBasis` 必填。
+只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`。ACK 不携带 `next_task_id`、`next_action`、producer instruction、Receipt、Gate 或 admission credential。`NORMAL + ACCEPTED` 必须有 `acceptedResultRef`；maintenance 或 rejected 禁止该字段；`validatedGitBasis` 必填。
 
 每个新 Result attempt 使用新的 `resultId`；同 payload 重放保持幂等，修正后的 retry 使用新 id；同 id 不同 payload、stale token 或 binding 不符必须 no-write。
 
@@ -203,6 +203,7 @@ Role procedure is owned by the selected Pi/OpenCode Role document and the corres
 
 - `worker` continuation eligibility requires the same Slice lane, current Plan/Authority/Git basis, root-bound scope and accepted Result/ACK barrier. Successor Task and repair routing remain Brain/Execute decisions; multiple bounded actions do not create a new MES `work_id`.
 - `proofloop-plan` continuation eligibility requires the same semantic Planning basis: current Map entry, Stage/dependency-ready choice, candidate Plan binding, Authority refs, code reality, branch, trust root and planning scope. A mechanical boundary for the same candidate blob does not by itself invalidate the basis.
+- Planner lifecycle 只能由已经满足 Planning-entry predicate 的 Brain dispatch 启动（predicate = `MES initialized + current PROPOSE_READY`，判定只属于 Brain；Planner 不重复检查该 gate）。Planning-entry 的完整语义与 presence observation 由 `.agents/contracts/brain/mes.md` 与两个 Host Brain 文档（`.opencode/agents/brain.md` / `.pi/brain-workflow.md`）持有，本文件只保留该 dispatch prerequisite，不复制其正文。
 - `prototype` continuation eligibility requires the same Prototype/Hard Part, worktree, Base Ref, question, Plan/snapshot and an accepted Researcher Result.
 - `code-verifier`、`stage-reviewer`、`frontend-review` use their Role procedure for `INITIAL_REVIEW` or bounded `RECHECK`; finding disposition, repair routing and fresh/recheck eligibility remain Brain plus this Contract.
 - `stage-plan-verifier` uses its Role procedure for full verification; every new exact candidate tuple is governed by `reverify` and fresh full initial verification.
@@ -241,5 +242,5 @@ Recovery 不覆盖用户已有 code、Evidence、Plan projection 或其他 durab
 - chosen Role 与 current lifecycle row、identity、snapshot/review basis 相符；
 - Result 完成对应 schema、scope、token、唯一性和 currentness 校验；
 - continuation、recheck 或 reverify 的所有授权条件已经闭合；
-- formal business conclusion 已由 MES transaction layer materialize，或对应 bootstrap/recovery/maintenance evidence 已按其独立 no-write 规则保存；
+- formal business conclusion 已由 MES transaction layer materialize，或对应 recovery/maintenance evidence 已按其独立 no-write 规则保存；
 - 没有用 Host identity、session/transcript、transport delivery、Agent state、claim clarification、checkbox 或 progress 投影替代 MES/Git authority。

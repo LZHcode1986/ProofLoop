@@ -12,14 +12,14 @@ import { isCanonicalAuthorityRef, isCanonicalRootRelativeRef } from '../mes/bind
 import { MAINTENANCE_LANE_PLAN_REF, MAINTENANCE_LANE_STAGE } from '../mes/maintenance-seam';
 
 /** Closed execution branches for Worker packets. */
-export const WORK_PACKET_EXECUTION_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE'] as const;
+export const WORK_PACKET_EXECUTION_MODES = ['NORMAL', 'MES_MAINTENANCE'] as const;
 export type WorkPacketExecutionMode = (typeof WORK_PACKET_EXECUTION_MODES)[number];
 
 /**
  * Recovery candidate Plan slice/task grammar for the MES_MAINTENANCE lane
  * (recovery-plan-r3.md slices like S06-R-D with tasks S06-R-D-T01). The
  * lane binds the recovery candidate Plan, not MES canonical identity, so its
- * ids may carry one extra `-[A-Z]+` group. NORMAL / PRE_MES_BOOTSTRAP keep
+ * ids may carry one extra `-[A-Z]+` group. NORMAL keeps
  * the strict canonical grammar unchanged (no second NORMAL schema).
  */
 const MAINTENANCE_SLICE_ID_RE = /^S\d+-[A-Z]+(?:-[A-Z]+)?$/;
@@ -125,8 +125,7 @@ export interface JitReadSet {
   readonly task_goal: string;
   /**
    * Canonical worker-template field name: `plan_ref` in every mode
-   * (NORMAL = same thin-plan-ref; PRE_MES_BOOTSTRAP = candidate/accepted Git
-   * Plan ref; MES_MAINTENANCE = recovery candidate Thin Plan ref). The
+   * (NORMAL = same thin-plan-ref; MES_MAINTENANCE = recovery candidate Thin Plan ref). The
    * non-canonical `accepted_plan_ref` alias is NOT part of the canonical
    * maintenance schema and is rejected as an unknown field.
    */
@@ -453,7 +452,7 @@ function validateMaintenanceBinding(value: unknown, label: string): WorkPacketMa
 
 /**
  * Mode closure of the packet maintenance_binding: required exactly under
- * MES_MAINTENANCE and forbidden under NORMAL / PRE_MES_BOOTSTRAP (no second
+ * MES_MAINTENANCE and forbidden under NORMAL (no second
  * schema, no smuggling).
  */
 function closeMaintenanceBinding(mode: WorkPacketExecutionMode, value: unknown, label: string): WorkPacketMaintenanceBinding | undefined {
@@ -540,7 +539,7 @@ export function validateSliceWorkPacket(value: unknown): SliceWorkPacket {
 
   // `mode` is deliberately read/validated here even though both branches use
   // the same lexical Plan-ref grammar.  The branch distinction belongs to the
-  // caller's binding; this seam must not invent MES prerequisites for bootstrap.
+  // caller's binding; this seam must not invent MES prerequisites for any mode.
   return {
     execution_mode: mode,
     target_agent: 'worker',

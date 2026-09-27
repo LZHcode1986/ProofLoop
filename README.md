@@ -28,7 +28,7 @@ Propose / 规划 → PROPOSE_READY
 | `.pi/agents/*.md` | Pi 独立加载的 Role 工作流程与 Host 配置 | 按 Pi 配置调整 |
 | `.pi/brain-workflow.md` | Pi Brain 独立加载的 Brain 工作流程 | 按 Pi 入口调整 |
 | `.pi/extensions/proofloop-mode.ts` | Pi mode/session 宿主入口 | 直接复制后核对 |
-| `CONTEXT.md` / `PRD.md` / `tech-spec/` | Working Memory 与四类 canonical Authority | 复制后改写 |
+| `PRD.md` / `tech-spec/` | canonical Product / Technical Authority templates（需改写） | 复制后改写 |
 | `AGENTS.md` | 项目规则和执行边界 | 直接复制 |
 
 Pi 与 OpenCode 各自读取对应目录下的 Agent 文档；Role 工作流程不再放在共享目录。共享文件只保留机器字段、MES、Result、packet/template 和跨角色 Contract 语义。

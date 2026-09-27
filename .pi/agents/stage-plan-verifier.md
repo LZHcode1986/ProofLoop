@@ -33,5 +33,5 @@ Packet 必须包含 candidate Thin Plan、同一 Git basis 可重建的 `project
 
 ## Freshness and boundaries
 
-`NORMAL` / `PRE_MES_BOOTSTRAP` 都是 pre-accept 验证。`PLAN_READY` 只能由 Brain 接纳后 materialize planning facts，不能直接授权 Execute。Plan/Map/Authority/Git tuple 任一变化都重新 fresh full initial verification，不复用旧 verdict；SPV 始终绑定 exact candidate tuple。
+`NORMAL` 是 pre-accept 验证。`PLAN_READY` 只能由 Brain 接纳后 materialize planning facts，不能直接授权 Execute。Plan/Map/Authority/Git tuple 任一变化都重新 fresh full initial verification，不复用旧 verdict；SPV 始终绑定 exact candidate tuple。
 Lifecycle: `reverify`；见 `.agents/contracts/brain/agent-lifecycle.md`。每个新的 exact candidate tuple 都从 step 1 执行 fresh full initial verification；不复用旧 verdict、finding 或验证上下文。

@@ -18,7 +18,7 @@
  *
  * Failures raise `TaskResultValidationError` carrying a closed §7 outcome:
  *   - `RESULT_INVALID` — unknown keys, control characters, invalid closed
- *     values, out-of-bound paths, NORMAL/bootstrap field violations;
+ *     values, out-of-bound paths, NORMAL/maintenance field violations;
  *   - `RESULT_BINDING_MISMATCH` — malformed git basis (the submitted
  *     basis cannot bind the Result; §4.3 validatedGitBasis).
  *
@@ -50,14 +50,14 @@ import {
 import { MAINTENANCE_LANE_PLAN_REF, MAINTENANCE_LANE_STAGE } from '../mes/maintenance-seam';
 
 /** Closed Worker Task Result execution modes (worker-template). */
-export const TASK_RESULT_MODES = ['NORMAL', 'PRE_MES_BOOTSTRAP', 'MES_MAINTENANCE'] as const;
+export const TASK_RESULT_MODES = ['NORMAL', 'MES_MAINTENANCE'] as const;
 export type TaskResultMode = (typeof TASK_RESULT_MODES)[number];
 
 /**
  * Recovery candidate Plan slice/task grammar for the MES_MAINTENANCE lane
  * (recovery-plan-r3.md slices like S06-R-D with tasks S06-R-D-T01). The
  * lane binds the recovery candidate Plan, not MES canonical identity, so its
- * ids may carry one extra `-[A-Z]+` group. NORMAL / PRE_MES_BOOTSTRAP keep
+ * ids may carry one extra `-[A-Z]+` group. NORMAL keeps
  * the strict canonical grammar unchanged.
  */
 const MAINTENANCE_SLICE_ID_RE = /^S\d+-[A-Z]+(?:-[A-Z]+)?$/;
@@ -78,8 +78,8 @@ export type TaskResultSubShape = 'task' | 'taskless';
 
 /**
  * Closed MES_MAINTENANCE binding carried by a Task Result (worker-template
- * Result envelope, camelCase canonical fields). Omitted for NORMAL /
- * PRE_MES_BOOTSTRAP; required under MES_MAINTENANCE.
+ * Result envelope, camelCase canonical fields). Omitted for NORMAL;
+ * required under MES_MAINTENANCE.
  */
 export interface TaskResultMaintenanceBinding {
   readonly frozenSnapshotRef: string;
@@ -132,7 +132,7 @@ export interface WorkerTaskResultEnvelope {
   readonly gitBasis: MesGitBasis;
   readonly actionToken: string;
   readonly resultId: string;
-  /** MES_MAINTENANCE only; omitted for NORMAL / PRE_MES_BOOTSTRAP. */
+  /** MES_MAINTENANCE only; omitted for NORMAL. */
   readonly maintenanceBinding?: TaskResultMaintenanceBinding;
 }
 
@@ -153,7 +153,7 @@ export interface ValidatedWorkerTaskResult {
   readonly actionToken: string;
   readonly resultId: string;
   readonly subShape: TaskResultSubShape;
-  /** MES_MAINTENANCE only; omitted for NORMAL / PRE_MES_BOOTSTRAP. */
+  /** MES_MAINTENANCE only; omitted for NORMAL. */
   readonly maintenanceBinding?: TaskResultMaintenanceBinding;
   /** 64-hex SHA-256(SPN(result_payload_fields)) per the S03-A-T01 formula. */
   readonly resultPayloadDigest: string;
@@ -478,19 +478,12 @@ export function validateWorkerTaskResult(
       ? undefined
       : expectRootRelative(record.resultRef, 'result.resultRef', 'resultRef');
 
-  // 6) resultRef mode rule: NORMAL requires it, bootstrap forbids it.
+  // 6) resultRef mode rule: NORMAL requires it, MES_MAINTENANCE forbids it.
   if (executionMode === 'NORMAL' && resultRef === undefined) {
     pushError(
       errors,
       'result.resultRef',
       'NORMAL Task Result requires a root-relative MES resultRef',
-    );
-  }
-  if (executionMode === 'PRE_MES_BOOTSTRAP' && record.resultRef !== undefined) {
-    pushError(
-      errors,
-      'result.resultRef',
-      'PRE_MES_BOOTSTRAP Task Result must not carry a MES resultRef (Git-bound Link evidence only)',
     );
   }
   if (executionMode === 'MES_MAINTENANCE' && record.resultRef !== undefined) {
@@ -501,7 +494,7 @@ export function validateWorkerTaskResult(
     );
   }
   // 6b) MES_MAINTENANCE evidence-only closure: maintenanceBinding REQUIRED
-  //     under MES_MAINTENANCE, forbidden under NORMAL / PRE_MES_BOOTSTRAP
+  //     under MES_MAINTENANCE, forbidden under NORMAL
   //     (no second schema, no smuggling).
   let maintenanceBinding: TaskResultMaintenanceBinding | undefined;
   if (executionMode === 'MES_MAINTENANCE' && record.maintenanceBinding === undefined) {

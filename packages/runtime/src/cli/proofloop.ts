@@ -28,7 +28,7 @@
 
 import { runBoundaryDomain } from './proofloop-boundary';
 import { runIntegrationDomain } from './proofloop-integration';
-import { readMesSeedRecord, isMesSeeded, readMesSnapshotFacts } from '../mes/bootstrap';
+import { readMesSeedRecord, isMesSeeded, readMesSnapshotFacts, isMesInitialized } from '../mes/bootstrap';
 import type { MesStatusTuple } from '../mes/bootstrap';
 import {
   projectSparseStatus,
@@ -131,19 +131,31 @@ export function runStatusDomain(root: string, options: StatusCliOptions): CliEnv
     }
   }
   if (!seeded) {
-    // (S05-C-T02 / PO-S05-C-03) Post-recovery reachability: when the one-time
-    // seed record / seed-owned facts are unavailable after a LEGAL recovery
-    // baseline, the public status entry derives the cycle-filtered current
-    // status from the DURABLE facts alone — it never backfills missing
-    // seed-owned facts and never revives PRE_MES_BOOTSTRAP. Without a
-    // recovery context the existing fail-closed refusal is preserved.
+    // (Phase 6 / S05-C-T02) Post-recovery reachability + initialized-store
+    // projection: when the store is MES-initialized (init metadata or a
+    // legal existing seed) and its durable facts carry a current-cycle PVR/PA
+    // or a recovery baseline, the public status derives the cycle-filtered
+    // current status from the DURABLE facts alone — it never backfills missing
+    // seed-owned facts and never revives PRE_MES_BOOTSTRAP. When the store is
+    // initialized but has NO operational facts yet, the entry returns a typed
+    // no-operational-state observation instead of demanding `seedMesBootstrap`
+    // first (a fresh initialized store is legal).
+    let initialized = false;
+    try {
+      initialized = isMesInitialized(root);
+    } catch (error) {
+      return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES initialization state: ${errorMessage(error)}`);
+    }
     return statusFromDurableFacts(
       root,
       command,
       options,
       record === null
-        ? 'MES status requires a seeded store (seedMesBootstrap first) or a legal recovery baseline'
+        ? initialized
+          ? 'MES initialized but no current operational state (no seed record / recovery baseline / current-cycle planning facts)'
+          : 'MES store is not initialized (missing init metadata or seed)'
         : 'MES store is not fully seeded (seed record / snapshot facts mismatch)',
+      initialized,
     );
   }
   // (PO-S05-C-03) A SEEDED store may ALSO carry a newer legal NORMAL cycle
@@ -209,11 +221,45 @@ export function runStatusDomain(root: string, options: StatusCliOptions): CliEnv
  * entry stops with a typed AUTHORITY_GAP refusal instead of inventing
  * semantics.
  */
+/**
+ * True when the durable facts carry at least one cycle-bearing in-flight
+ * candidate/accepted planning binding (PVR/PA with a non-empty
+ * `plan_binding.delivery_cycle_id`). Used by every durable-facts status
+ * projection path.
+ */
+function hasCurrentCyclePlanningBinding(facts: ReturnType<typeof readMesSnapshotFacts>): boolean {
+  return facts.some(
+    (fact) =>
+      (fact.fact_kind === 'planning_verification_result' || fact.fact_kind === 'plan_acceptance') &&
+      fact.plan_binding !== undefined &&
+      fact.plan_binding.delivery_cycle_id !== undefined &&
+      fact.plan_binding.delivery_cycle_id.length > 0,
+  );
+}
+
+/**
+ * (Phase 6 / S05-C-T02 / PO-S05-C-03) Durable-facts status observation path:
+ * reads the durable snapshot facts and projects the current NORMAL cycle
+ * status from the DURABLE facts alone (never backfilling missing seed-owned
+ * facts and never reviving PRE_MES_BOOTSTRAP).
+ *
+ * Hard boundary (repair review): a normal current-cycle PVR/PA binding may
+ * project status ONLY when the store is MES-initialized. An uninitialized
+ * store that nevertheless carries normal Planning facts must fail closed
+ * with RUNTIME.BLOCKED — raw facts in an uninitialized store never produce a
+ * normal PLANNING projection. Legal recovery `recovery_baseline` evidence
+ * keeps its existing projection rule unchanged.
+ *
+ * The read NEVER writes; when no provable current-cycle observation exists
+ * the entry stops with the typed `missingMessage` instead of inventing
+ * semantics.
+ */
 function statusFromDurableFacts(
   root: string,
   command: CliCommand,
   options: StatusCliOptions,
   missingMessage: string,
+  initialized: boolean,
 ): CliEnvelope {
   let facts: ReturnType<typeof readMesSnapshotFacts>;
   try {
@@ -221,10 +267,29 @@ function statusFromDurableFacts(
   } catch (error) {
     return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES snapshot facts: ${errorMessage(error)}`);
   }
-  if (!facts.some((fact) => fact.fact_kind === 'recovery_baseline')) {
-    return errorEnvelope(command, 'RUNTIME.BLOCKED', missingMessage);
+  // Legal recovery baseline (S05-C-T02 / PO-S05-C-03): a store carrying a
+  // recovery_baseline observes via the recovery contract — no init metadata
+  // or seed record is required, and the current-cycle PVR/PA written on top
+  // of the baseline projects as before (retained unchanged, not rebuilt).
+  const hasRecoveryBaseline = facts.some((fact) => fact.fact_kind === 'recovery_baseline');
+  if (hasRecoveryBaseline) {
+    return projectCurrentCycleEnvelope(command, options, facts);
   }
-  return projectCurrentCycleEnvelope(command, options, facts);
+  // Pure NORMAL current-cycle projection requires an initialized store: an
+  // uninitialized store carrying raw PVR/PA facts must fail closed (hard
+  // boundary) — raw facts in an uninitialized store never produce a normal
+  // PLANNING projection.
+  if (hasCurrentCyclePlanningBinding(facts)) {
+    if (!initialized) {
+      return errorEnvelope(
+        command,
+        'RUNTIME.BLOCKED',
+        'MES store is not initialized (missing init metadata or seed) — cannot project normal Planning status from raw durable facts',
+      );
+    }
+    return projectCurrentCycleEnvelope(command, options, facts);
+  }
+  return errorEnvelope(command, 'RUNTIME.BLOCKED', missingMessage);
 }
 
 /**
@@ -252,14 +317,7 @@ function seededStatusFromDurableFacts(
   } catch (error) {
     return errorEnvelope(command, 'RUNTIME.BLOCKED', `cannot read MES snapshot facts: ${errorMessage(error)}`);
   }
-  const hasCurrentCycleBinding = facts.some(
-    (fact) =>
-      (fact.fact_kind === 'planning_verification_result' || fact.fact_kind === 'plan_acceptance') &&
-      fact.plan_binding !== undefined &&
-      fact.plan_binding.delivery_cycle_id !== undefined &&
-      fact.plan_binding.delivery_cycle_id.length > 0,
-  );
-  if (!hasCurrentCycleBinding) {
+  if (!hasCurrentCyclePlanningBinding(facts)) {
     return null;
   }
   return projectCurrentCycleEnvelope(command, options, facts);

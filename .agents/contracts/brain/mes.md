@@ -141,7 +141,7 @@ resume_target: <producer | planner | authority-owner | research | recovery | ver
 created_by: brain
 ```
 
-`VERIFIER_OVERREACH` 只能由 Brain disposition 产生；此时 `accepted_route_code` 为空，不自动触发 repair/Replan/HUMAN_REQUIRED。PRE_MES_BOOTSTRAP 不写这些 durable facts，不创建 decision log 或第二 result store；丢失后从 Git、Authority、Plan 与现有 Finding/evidence 重新分类。
+`VERIFIER_OVERREACH` 只能由 Brain disposition 产生；此时 `accepted_route_code` 为空，不自动触发 repair/Replan/HUMAN_REQUIRED。retired `PRE_MES_BOOTSTRAP` 不是合法 disposition path：它不写这些 durable facts，不创建 decision log 或第二 result store（`MES_MAINTENANCE` evidence 同样 Git-bound、no-write）；丢失后从 Git、Authority、Plan 与现有 Finding/evidence 重新分类。
 
 ### HUMAN_REQUIRED locality
 
@@ -236,22 +236,35 @@ MES 不输出“建议下一步”。Verifier 不需要默认读取全量 MES；
 - `verification_result_ref`、`delivery_cycle_id`、accepted Plan 与 Work/Task/Result/terminal predecessor 等 canonical identity 若可由 durable relation 唯一解析，由 MES transaction layer 解析/物化；caller typo 或非 canonical binding 不得被接受。
 - Recovery/maintenance 输入按事实类别读取：正常 continuation 使用 current MES facts + current Map/Plan/Authority/Result/Finding/Git；S06 integrity maintenance 使用 current MES read-only snapshot + exact frozen SHA/count + root-bound forensic/audit + current Authority + Git reality，不使用 public status route、stale recovery candidate 或 hidden session；eventual controlled recovery 另需 fresh exact-bound candidate/SPV。
 
-## Pre-MES bootstrap（一次性例外）
+## MES initialization
 
-在 MES persistence 集成并 seed accepted Plan/bootstrap facts 前，MES 尚未运作：accepted Thin Plan 是唯一 Git-tracked durable recovery truth（Git Plan ref + baseline HEAD/current Git facts）。该阶段不写入 MES/Status、不声称任何 MES/Status
-事实，不产生 MES Result，不产生 Receipt、Manifest、Gate 或第二状态机，也不把 bootstrap 状态
-迁移描述为正式 MES 记录。
+MES initialization 是独立基础设施动作，只回答“当前 repository 的 MES 基础设施是否已建立并可可靠重读”：
 
-bootstrap 上下文（`PRE_MES_BOOTSTRAP`）可以携带结构化 Planner/Worker Subagent transport Results，但它们不是 MES
-operational records：其 binding = execution_mode + authority refs + candidate/accepted Git Plan ref +
-baseline/current Git basis + Stage/Slice/Task（如适用）+ actionToken，不指向任何 MES resultRef。
+- 可在 Planning 前任意时点执行；最迟 Planning dispatch 前必须完成。
+- root-bound；只建立最小 initialization metadata（`.proofloop/mes/init.json`，closed shape，只含 schema / initialization version 等证明基础设施已初始化的字段），不产生 operational facts。
+- 幂等：重复 initialization 不改变结果、不重写既有 metadata。
+- 可重读：initialization 后必须能重新读取并确认 initialized = true。
+- corrupt/unreadable init metadata fail closed（typed blocker，不视为 initialized，不自动重写）。
+- 已有合法 `seed.json` 的 store 视为已初始化：不要求 `init.json`、不自动创建、不重写 seed/snapshot、不迁移。
+- 新项目（无合法 init metadata 且无合法 existing seed）初始化后 `initialized = true`、snapshot facts 可以为空。
+- 初始化不写 accepted Plan / Git basis / status / Authority refs / delivery cycle / status tuple；不 backfill 项目历史。
+- 初始化本身不产生 Planning / Execute / Review operational facts；MES initialized 不等于 workflow operational facts 已存在。
 
-该一次性规则只在 MES persistence 集成且 accepted Plan/bootstrap facts 已被 seed 前有效：
+## Authority path presence observation
 
-- 只有首个 MES-persistence Stage 可 pre-seed 执行；其他 Stage 一律不得 bootstrap。
-- seed 后 `PRE_MES_BOOTSTRAP` 永久禁止，恢复正常 Planning → MES transaction → Execute → Review；所有 NORMAL Result/Finding/Review/Git operational events 经 transaction layer materialize。MES integrity hard-freeze 期间只允许 Authority-defined maintenance/recovery evidence，不允许 NORMAL operational write。
+MES / Runtime 只提供机械的 canonical Authority path presence observation（read-only）：
+
+- 固定检查四个 canonical path：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`。
+- 只返回 present / missing / unreadable，与真实 filesystem 一致。
+- 空文件算 present；symlink escape / 无法安全读取归 unreadable 或 typed fail-closed。
+- 不读取或判断文档正文语义；所有 present != `PROPOSE_READY`。
+- 不修改 MES、不进入 initialization metadata、不产生 MES fact。
+- MES 只把观察结果交给 Brain；不决定 Propose 内补文档顺序，不 route Skill，不输出 `PROPOSE_READY` 或 route 建议。
+
+## Normal operational lifecycle
+
+初始化完成后，Planning / Execute / Review 的正常 durable facts 继续经现有 MES operational transaction layer 写入（见上文“MES 事实类别”与“写入原则”）；MES initialization 与 Authority presence observation 不改变正常 operational lifecycle。
 - 本 Contract 描述 MES 语义，不代表 MES 已实现；实现状态以 Runtime 与 Git 事实为准。
-
 ## 终态
 
 当前 Delivery cycle 的 planned Stage 集合由 Brain 读取 active Project Stage Map（`delivery/project-stage-map.md`）确定，并与 MES 持有的 `STAGE_ACCEPTED` durable facts 进行核对；MES 本身不生成 Stage graph，也不维护计划集合。

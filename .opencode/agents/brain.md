@@ -32,6 +32,9 @@ Propose 在四类 core Authority 建立或更新后判断当前 must-implement o
 
 ### Planning
 
+Planning-entry predicate（Brain-owned，Planner 不重复检查；不新增 PLANNING_READY / AUTHORITY_READY / MES_READY / Gate artifact）：
+0. 首次 Planning dispatch 前：① ensure MES initialized（MES 可提前初始化，只建立最小 initialization metadata，不产生 operational facts；已有合法 `seed.json` 的 store 视为已初始化，不要求/不自动创建 `init.json`）；② fresh observe 四个 canonical Authority path（`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`）的 present / missing / unreadable；③ missing/unreadable → 停留 Propose，把精确 path 路由给对应 owner；④ 全部 present → 按 Propose completion criterion 评估并接纳 current `PROPOSE_READY`；⑤ 只有 MES initialized + current `PROPOSE_READY` 才允许 dispatch `proofloop-plan`。
+
 1. 读取当前 Authority、Project Stage Map、code reality、Git basis 和 planning Contract。
 2. 按 `.opencode/agents/proofloop-plan.md` 的内嵌规划流程生成或修订 candidate Thin Plan；Planner 只负责 WHAT、WHEN、BOUNDARY，不生成 JIT Work Packet。
 3. 建立 stable Git boundary，fresh dispatch `stage-plan-verifier`。

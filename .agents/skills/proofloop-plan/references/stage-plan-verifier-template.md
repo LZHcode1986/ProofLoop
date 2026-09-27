@@ -5,26 +5,26 @@
 SPV uses the `reverify` lifecycle: Brain dispatches it as a fresh Work Subagent for each exact candidate tuple;
 `proofloop-plan` 仅表示 Planning caller。独立审查 procedure（验证顺序、challenge 方法、结果纪律）分别内嵌于 `.pi/agents/stage-plan-verifier.md` 与 `.opencode/agents/stage-plan-verifier.md`；本模板统一以 Host Agent 文档引用，不形成第二方法源，
 也不教 Planner 如何修复或生成 producer instruction。
-SPV 是只读的独立 falsifier，对按 `execution_mode` 绑定的 pre-accept candidate Thin Plan（三种 mode 均尚未被 Brain 接纳）做全量 structural closure 与高风险 edge counterexample challenge。
+SPV 是只读的独立 falsifier，对按 `execution_mode` 绑定的 pre-accept candidate Thin Plan（各 mode 均尚未被 Brain 接纳）做全量 structural closure 与高风险 edge counterexample challenge。
 它不重做第二遍完整 Planning，不调用任何旧 CLI，不写 Receipt/Manifest/Evidence。
 
 ## 调度包
 
 ```yaml
-execution_mode: NORMAL | PRE_MES_BOOTSTRAP | RECOVERY_REBASELINE
+execution_mode: NORMAL | RECOVERY_REBASELINE
 target_agent: stage-plan-verifier
 caller: brain
 skill: proofloop-plan
 stage_id: <stage-id>
 project_root: <canonical-trust-root>
 project_stage_map_ref: <delivery/project-stage-map.md#<stage-entry>>   # current Stage Map entry；candidate Plan 与 Map entry 处于同一 candidate Git basis；Map 正文不复制进 packet
-candidate_plan_ref: <NORMAL/RECOVERY_REBASELINE=root-relative-candidate-Thin-Plan-ref（pre-accept、尚未接纳）; PRE_MES_BOOTSTRAP=root-relative-candidate-Git-Plan-ref>
+candidate_plan_ref: <NORMAL/RECOVERY_REBASELINE=root-relative-candidate-Thin-Plan-ref（pre-accept、尚未接纳）>
 prd_refs: [<PRD.md#section>]                         # handoff verification refs：SPV 只读 PRD，验证 relevant PRD intent 已被 current tech-spec 完整表达；PRD 不作 downstream basis
 authority_refs: [<tech-spec-file>#<section/entity>]  # Technical Authority refs（tech-spec-only）：downstream verification basis
 code_reality_refs: []
 actionToken: <current-dispatch-token>
 git_basis:
-  head: <NORMAL/RECOVERY_REBASELINE=current recovery-Git-HEAD; PRE_MES_BOOTSTRAP=baseline-Git-HEAD>
+  head: <NORMAL/RECOVERY_REBASELINE=current recovery-Git-HEAD>
   branch: <stage-branch>
 scope:
   stage: <stage-id>
@@ -54,14 +54,11 @@ packet 只携带稳定 ref；被验证的 Plan/Map/Authority/Git exact basis 由
 - candidate-only scope 与 out-of-scope；
 - expected result。
 
-binding 按 `execution_mode` 判别，三种 mode 都验证 pre-accept candidate Thin Plan：
+binding 按 `execution_mode` 判别，各 mode 都验证 pre-accept candidate Thin Plan：
 
 - `NORMAL`：使用 root-relative candidate Thin Plan ref（尚未接纳，不得误标为 accepted）；SPV reply 由 Brain 接纳并授权为 `PLANNING_VERIFICATION_RESULT` semantic event，durable `result_ref` 由 MES transaction layer materialize，不作为 pre-accept 输入。
-- `PRE_MES_BOOTSTRAP`：仅对首个 MES-persistence Stage 合法，使用 Git-tracked candidate Git
-  Plan（尚未 accepted，不得误标为 accepted）+ canonical Authority refs + baseline/current Git
-  basis + actionToken；不要求 MES status、MES work identity 或 MES `resultRef`。
 - `RECOVERY_REBASELINE`：仅在 `MES_RECOVERY_REQUIRED`、exact pre-image branch 已被 forensic/audit 证伪且 Technical Authority recovery contract 已 current 时合法；使用 recovery-aware candidate Thin Plan + current Map/Authority/Git exact tuple，不读取或声称 current NORMAL MES scope/work/result，`PLAN_READY` 只是 recovery evidence，baseline 写入前不产生 `PLANNING_VERIFICATION_RESULT` / `PLAN_ACCEPTANCE`。
-- Result binding 按 mode 显式：`NORMAL` 是 pre-accept `PLANNING_VERIFICATION_RESULT` Subagent result，由 Brain 接纳/授权并交 MES transaction layer materialize；`PRE_MES_BOOTSTRAP` 是结构化 Subagent transport evidence（binding = execution_mode + authority_refs + candidate Git Plan ref + git_basis + actionToken），不写 MES、不指向 MES resultRef；`RECOVERY_REBASELINE` 同样是结构化 Subagent transport evidence，`PLAN_READY` 在 maintenance/recovery closure 前不写 MES。三种 mode 下 SPV 都全程 read-only。
+- Result binding 按 mode 显式：`NORMAL` 是 pre-accept `PLANNING_VERIFICATION_RESULT` Subagent result，由 Brain 接纳/授权并交 MES transaction layer materialize；`RECOVERY_REBASELINE` 是结构化 Subagent transport evidence，`PLAN_READY` 在 maintenance/recovery closure 前不写 MES。各 mode 下 SPV 都全程 read-only。
 - 本模型无 Manifest/Evidence skeleton/Receipt/admission；SPV 输入不需要任何 digest helper 或
   Runtime admission Receipt。缺任一输入、ref 无法解析或 scope 不闭合时返回 `BLOCKED`，不降级为猜测。
 - S06 integrity hard-freeze 时，public status/required_skill 不授权 NORMAL planning verification；SPV 只可在 Authority-defined remediation candidate 已具备 current maintenance/recovery basis 后验证，并不写 NORMAL MES facts。
@@ -80,24 +77,24 @@ SPV 独立初审顺序与 challenge 方法分别以内嵌 Host 文档 `.pi/agent
   机械 metadata 提升为 Stage/Slice 级默认；SPV 仍逐 Task 验证 task-specific `code_paths`/`test_paths`
   非空、root-bound、无 forbidden overlap，且 candidate Plan 正文不含 mutable acceptance/progress
   state。
-- 被验证的 Plan 来源按 `execution_mode`（见上文必需输入）；SPV 对三种 mode 都全程 read-only：
+- 被验证的 Plan 来源按 `execution_mode`（见上文必需输入）；SPV 对各 mode 都全程 read-only：
   不修改 Plan、Map、Authority、Evidence 或 Git。
 - handoff closure：candidate Plan 的 Stage Goal/Scope 可从 current Map + tech-spec 建立；relevant PRD intent 已被 current tech-spec 完整表达，且 grounded current code/runtime 不反证该 Technical Authority（缺失/矛盾/反证 → `AUTHORITY_GAP`）；Plan/Map 只把 tech-spec refs 带入 downstream，不把 PRD-only obligation 偷渡成 execution requirement；SPV 不输出 producer implementation HOW。
 ## Result envelope
 
 ```yaml
-execution_mode: NORMAL | PRE_MES_BOOTSTRAP | RECOVERY_REBASELINE
+execution_mode: NORMAL | RECOVERY_REBASELINE
 actionToken: <current-dispatch-token>
 verdict: PLAN_READY | FINDINGS | BLOCKED
 stage_id: <stage-id>
-candidate_plan_ref: <NORMAL/RECOVERY_REBASELINE=root-relative-candidate-Thin-Plan-ref（pre-accept）; PRE_MES_BOOTSTRAP=candidate Git Plan ref>
+candidate_plan_ref: <NORMAL/RECOVERY_REBASELINE=root-relative-candidate-Thin-Plan-ref（pre-accept）>
 project_stage_map_ref: <delivery/project-stage-map.md#<stage-entry>>   # 被验证的 current Stage Map entry（同一 candidate Git basis）；供 Brain 重建 Map basis
 accepted_plan_ref: null
 prd_refs: [<PRD.md#section>]                         # handoff verification refs（SPV 只读，不作 downstream basis）
 authority_refs: [<tech-spec-file>#<section/entity>, ...]  # Technical Authority refs（tech-spec-only）
 git_basis:
-  head: <NORMAL/RECOVERY_REBASELINE=current recovery-Git-HEAD; PRE_MES_BOOTSTRAP=baseline-Git-HEAD>
-resultRef: <NORMAL=MES transaction-layer materialized PLANNING_VERIFICATION_RESULT ref after Brain acceptance; RECOVERY_REBASELINE/PRE_MES_BOOTSTRAP=omitted before maintenance/baseline/seed>
+  head: <NORMAL/RECOVERY_REBASELINE=current recovery-Git-HEAD>
+resultRef: <NORMAL=MES transaction-layer materialized PLANNING_VERIFICATION_RESULT ref after Brain acceptance; RECOVERY_REBASELINE=omitted before maintenance/recovery closure>
 claimed_route_code: PLAN_GAP | AUTHORITY_GAP | TECHNICAL_UNKNOWN | RUNTIME_BLOCKER | null
 summary: <non-empty-summary>
 ```
@@ -146,4 +143,4 @@ SPV Result 的 `claimed_route_code` 仅是 verifier claim；Brain 必须重读 d
 SPV 不读取或修改 Worker Evidence，不修改 Plan/Map，不执行候选文件中的命令，不写 Receipt，不派发 Worker，
 不调用任何 Runtime admission。finding 只是 evidence，route 由 Brain 决定。
 
-Result binding 按 `execution_mode` 显式执行（公式与约束见上文「必需输入」，lifecycle 语义以 `.agents/contracts/brain/agent-lifecycle.md` 为唯一来源）：`NORMAL` 由 Brain 接纳/授权并交 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT`；`PRE_MES_BOOTSTRAP` 是结构化 Subagent transport evidence，不写 MES、不指向 MES `resultRef`。SPV 在两种 mode 下都只读：不修改 Plan、Map、Authority、Evidence 或 Git。
+Result binding 按 `execution_mode` 显式执行（公式与约束见上文「必需输入」，lifecycle 语义以 `.agents/contracts/brain/agent-lifecycle.md` 为唯一来源）：`NORMAL` 由 Brain 接纳/授权并交 MES transaction layer materialize `PLANNING_VERIFICATION_RESULT`；`RECOVERY_REBASELINE` 是结构化 Subagent transport evidence，不写 MES、不指向 MES `resultRef`。SPV 在各 mode 下都只读：不修改 Plan、Map、Authority、Evidence 或 Git。

@@ -15,9 +15,9 @@ Worker 只执行 Brain running `proofloop-execute` 投影的 current Task，不�
 
 ## Entry and preflight
 
-Packet 必须提供 `stage`、`slice`、`task_id`（`slice-ready`/repair 除外）、`execution_mode`、Plan ref、JIT Read Set、bound Technical Authority、code/test scope、forbidden paths、Git basis、done/stop criteria、`actionToken` 和所需 capability skills。模式为 `NORMAL`、首个 MES persistence Stage 的 `PRE_MES_BOOTSTRAP` 或合法 recovery branch 的 `MES_MAINTENANCE`；S06 integrity hard-freeze 时拒绝 NORMAL。
+Packet 必须提供 `stage`、`slice`、`task_id`（`slice-ready`/repair 除外）、`execution_mode`、Plan ref、JIT Read Set、bound Technical Authority、code/test scope、forbidden paths、Git basis、done/stop criteria、`actionToken` 和所需 capability skills。模式为 `NORMAL` 或合法 recovery branch 的 `MES_MAINTENANCE`；S06 integrity hard-freeze 时拒绝 NORMAL。
 
-启动和每个 Task 都重新读取 packet、当前 Plan/bound refs、`CONTEXT.md`（仅术语和共享类型）、code reality、Git basis 和依赖输出，确认 root-bound scope 与 Read Set 一致；缺字段、过期 binding 或越界立即 typed blocker。按 Read Set 精确加载 `test-driven-development`/`diagnose`，能力不扩大 scope。
+启动和每个 Task 都重新读取 packet、当前 Plan/bound refs、bound Technical Authority、code reality、Git basis 和依赖输出，确认 root-bound scope 与 Read Set 一致；缺字段、过期 binding 或越界立即 typed blocker。按 Read Set 精确加载 `test-driven-development`/`diagnose`，能力不扩大 scope。domain/interface vocabulary 服从 bound Technical Authority 与 current public code contract，不得以 PRD、Working Material 或 project notes 重新解释 downstream semantics。
 
 ## Modes and ordered work
 
@@ -32,7 +32,7 @@ Packet 必须提供 `stage`、`slice`、`task_id`（`slice-ready`/repair 除外�
 
 ## Mutation and forbidden actions
 
-只修改 Read Set 的 `allowed_scope.code_paths`/`test_paths`；不写 MES、Plan、Authority、Evidence、Result projection、旧 Manifest/Context/Receipt/Gate，不调用 Runtime admission，不建立 Git boundary，不提交 Git，不派发 Agent。NORMAL Task Result 由 MES transaction layer materialize；`PRE_MES_BOOTSTRAP`/`MES_MAINTENANCE` 只产生 Git-bound Subagent evidence，不伪造 MES facts。遇到 Plan gap、技术未知、环境失败、S06 freeze 或 binding 变化时停止并返回 typed blocker。
+只修改 Read Set 的 `allowed_scope.code_paths`/`test_paths`；不写 MES、Plan、Authority、Evidence、Result projection、旧 Manifest/Context/Receipt/Gate，不调用 Runtime admission，不建立 Git boundary，不提交 Git，不派发 Agent。NORMAL Task Result 由 MES transaction layer materialize；`MES_MAINTENANCE` 只产生 Git-bound Subagent evidence，不伪造 MES facts。遇到 Plan gap、技术未知、环境失败、S06 freeze 或 binding 变化时停止并返回 typed blocker。
 
 ## Completion
 

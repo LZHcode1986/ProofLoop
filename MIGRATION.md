@@ -20,10 +20,11 @@ Pi 与 OpenCode 都必须从各自 Agent 文档加载 Role 工作流程；不要
 
 ## 改写
 
-- `CONTEXT.md`：新项目 Working Memory，不作为 Authority。
-- `PRD.md`：产品目标、用户场景、Scope、FR 和验收约束。
+- `PRD.md`：产品目标、用户场景、Scope、FR、验收约束（含 Glossary）。
 - `tech-spec/`：Architecture、Contracts、Acceptance 和 process discipline。
 - 每个 Host 的 Agent 文档：按项目调整 model、variant、工具权限和 scope 说明；不得改变 `role_skill == subagent_type`、Result binding、fallback/retry 或 recovery 规则。
+
+> **旧项目迁移说明：** 旧项目若仍有 root `CONTEXT.md`，完成 Authority/Glossary handoff 检查后直接删除；不迁移为新的 Working Memory artifact，新项目也不应创建该文件。
 
 主流程保持：Propose → Planning → Execute → Review → `PROJECT_READY`。Planning 由 Planner/SPV 完成，Execute 使用 JIT Work Packet、Worker、CV 和 Integration，Review 使用 Outcome → Composition → Authority 三轴。
 

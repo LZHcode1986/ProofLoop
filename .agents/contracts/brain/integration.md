@@ -1,6 +1,6 @@
 # Integration 控制面 Contract
 
-本 Contract 定义 Brain 向 Runtime `proofloop integration apply` CLI 发送的机械 Integration 事务请求，以及调用前后 Brain 必须重读的 Git 事实。Integration 是把一个 CV `PASS` 且 durable canonical candidate ref current 的 Slice candidate 集成进目标 Git evidence worktree 的**独立专用机械事务**：`NORMAL` 集成进当前 Stage 工作树并形成 normal `INTEGRATED`；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 集成只形成 Git + Git-tracked Plan/evidence，后者只能在 isolated maintenance evidence worktree 执行，不写 MES、不产生 normal `INTEGRATED`/`CLEANED` 或 Stage/terminal state。Integration 不复用/伪装成 `boundary close`，也不引入 Gate、Review、Manifest、Receipt、admission、next-action 或第二状态机语义。
+本 Contract 定义 Brain 向 Runtime `proofloop integration apply` CLI 发送的机械 Integration 事务请求，以及调用前后 Brain 必须重读的 Git 事实。Integration 是把一个 CV `PASS` 且 durable canonical candidate ref current 的 Slice candidate 集成进目标 Git evidence worktree 的**独立专用机械事务**：`NORMAL` 集成进当前 Stage 工作树并形成 normal `INTEGRATED`；`MES_MAINTENANCE` 集成只形成 Git + Git-tracked Plan/evidence，只能在 isolated maintenance evidence worktree 执行，不写 MES、不产生 normal `INTEGRATED`/`CLEANED` 或 Stage/terminal state。Integration 不复用/伪装成 `boundary close`，也不引入 Gate、Review、Manifest、Receipt、admission、next-action 或第二状态机语义。
 
 Brain owns the judgment that a candidate is ready to integrate（CV `PASS` + durable canonical candidate ref current）and owns recovery decisions.
 Runtime owns the deterministic Git transaction.
@@ -10,18 +10,18 @@ Brain and every Agent MUST NOT integrate by running `git merge`, `git cherry-pic
 
 ## Use when
 
-CV `PASS` + durable canonical candidate ref current（`READY_TO_INTEGRATE`）后，Brain 决定把该 candidate 集成：`NORMAL` 进入当前 Stage 工作树；`PRE_MES_BOOTSTRAP`（首个 MES-persistence Stage）或 `MES_MAINTENANCE` 进入对应 isolated Git evidence worktree，均由本 Contract 执行机械事务。完整上游顺序由 `.agents/skills/proofloop-execute/SKILL.md` 定义，本 Contract 只消费其产物、不复制上游流程：
+CV `PASS` + durable canonical candidate ref current（`READY_TO_INTEGRATE`）后，Brain 决定把该 candidate 集成：`NORMAL` 进入当前 Stage 工作树；`MES_MAINTENANCE` 进入对应 isolated Git evidence worktree，均由本 Contract 执行机械事务。完整上游顺序由 `.agents/skills/proofloop-execute/SKILL.md` 定义，本 Contract 只消费其产物、不复制上游流程：
 
 ```text
-CV basis：`NORMAL` = live Slice worktree basis；`PRE_MES_BOOTSTRAP` = candidate/accepted Git Plan + baseline/current Git basis + Worker Subagent transport evidence；`MES_MAINTENANCE` = recovery candidate + live maintenance Git basis + frozen/forensic/audit binding
+CV basis：`NORMAL` = live Slice worktree basis；`MES_MAINTENANCE` = recovery candidate + live maintenance Git basis + frozen/forensic/audit binding
 READY_TO_INTEGRATE = CV PASS + durable canonical candidate ref current
 → Brain 调用 proofloop integration apply（目标 worktree 由 mode-specific binding 固定）→ mode-specific Git result
 → `NORMAL`: INTEGRATED → cleanup（CLEANUP_PENDING → CLEANED）
-→ `PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE`: Git evidence integration → evidence cleanup；maintenance 后进入 evidence-only maintenance Review，不形成 MES 状态
+→ `MES_MAINTENANCE`: Git evidence integration → evidence cleanup；maintenance 后进入 evidence-only maintenance Review，不形成 MES 状态
 ```
 
-- durable canonical candidate ref（`proofloop-<stage>-<slice>`）由 post-CV-PASS `slice-output` 一次性建立；Integration 只消费该 durable candidate 的补丁，应用进 mode-specific target worktree 并建立 integration commit；`NORMAL` 可形成 `INTEGRATED`，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 只形成 Git evidence，且只集成 CV 实际通过的同一候选成果。
-- **CV PASS ≠ Integration completion**：CV `PASS` 只支持进入 Integration；`NORMAL` Integration 成功才形成 `INTEGRATED`，`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 成功只形成对应 Git evidence。
+- durable canonical candidate ref（`proofloop-<stage>-<slice>`）由 post-CV-PASS `slice-output` 一次性建立；Integration 只消费该 durable candidate 的补丁，应用进 mode-specific target worktree 并建立 integration commit；`NORMAL` 可形成 `INTEGRATED`，`MES_MAINTENANCE` 只形成 Git evidence，且只集成 CV 实际通过的同一候选成果。
+- **CV PASS ≠ Integration completion**：CV `PASS` 只支持进入 Integration；`NORMAL` Integration 成功才形成 `INTEGRATED`，`MES_MAINTENANCE` 成功只形成对应 Git evidence。
 - Integration 是独立步骤，不与 CV、boundary close 或 cleanup 合并。
 
 ## 与 boundary close 的关系
@@ -41,7 +41,7 @@ READY_TO_INTEGRATE = CV PASS + durable canonical candidate ref current
   "expected_branch": "<branch>",
   "expected_worktree": "<root-relative-target-worktree>",
   "stage": "S<digits>",
-  "execution_mode": "NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE",
+  "execution_mode": "NORMAL | MES_MAINTENANCE",
   "slice": "<slice-id>",
   "candidate_ref": "<candidate Git ref>",
   "candidate_base_ref": "<candidate base Git ref>",
@@ -60,7 +60,7 @@ READY_TO_INTEGRATE = CV PASS + durable canonical candidate ref current
 
 - 闭合 schema：unknown field、path escape、protected path 与意外 HEAD/branch 一律拒绝（`RUNTIME.INPUT_INVALID` / `INTEGRATION.*`）。
 - `execution_mode`、`expected_worktree` 与 conditional `maintenance_binding` 是闭集字段；除 `maintenance_binding` 在非 maintenance mode 被省略外，不存在其他可选字段。
-- `execution_mode` 必须与上游 CV/Plan binding 一致；`NORMAL` 目标为当前 Stage worktree，`PRE_MES_BOOTSTRAP` 仅首个 MES-persistence Stage，`MES_MAINTENANCE` 仅 S06 hard-freeze 的 isolated maintenance evidence worktree。
+- `execution_mode` 必须与上游 CV/Plan binding 一致；`NORMAL` 目标为当前 Stage worktree，`MES_MAINTENANCE` 仅 S06 hard-freeze 的 isolated maintenance evidence worktree。
 - `expected_worktree` 必须等于当前 target worktree 的 root-relative identity；maintenance 不得指向 frozen S06 main/C worktree。
 - `maintenance_binding` 仅在 `MES_MAINTENANCE` 出现，且 frozen snapshot/forensic/audit refs 与 digest/count 必须 exact-match；其他 mode 发送该字段一律拒绝。
 - `expected_head` 是当前 mode-specific target worktree 的 pinned HEAD：mismatch 在任何 Git 写之前失败。
@@ -72,7 +72,7 @@ READY_TO_INTEGRATE = CV PASS + durable canonical candidate ref current
 Brain 在调用 CLI 前必须重读并确认：
 
 - canonical Trust Root、expected branch、expected target worktree 与 mode-specific target；
-- 当前 HEAD == `expected_head`，且 index 为空、target worktree 干净（`NORMAL` 目标 = 当前 Stage 工作树；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 目标 = 对应 isolated evidence worktree；maintenance 不触碰 frozen S06 main/C worktree）；
+- 当前 HEAD == `expected_head`，且 index 为空、target worktree 干净（`NORMAL` 目标 = 当前 Stage 工作树；`MES_MAINTENANCE` 目标 = 对应 isolated evidence worktree；maintenance 不触碰 frozen S06 main/C worktree）；
 - stage/slice 与 candidate binding 明确（来自 `READY_TO_INTEGRATE` 的 CV `PASS` + durable canonical candidate ref）；
 - 无未决 scope decision。
 
@@ -98,7 +98,7 @@ CLI 按确定顺序执行；任何校验失败都在 Git 写之前 fail closed�
 
 ```json
 {
-  "execution_mode": "NORMAL | PRE_MES_BOOTSTRAP | MES_MAINTENANCE",
+  "execution_mode": "NORMAL | MES_MAINTENANCE",
   "expected_worktree": "<root-relative-target-worktree>",
   "pre_integration_head": "<40-char sha>",
   "commit_sha": "<40-char sha>",
@@ -114,8 +114,8 @@ CLI 按确定顺序执行；任何校验失败都在 Git 写之前 fail closed�
 Brain 必须：
 
 1. 把结果与 fresh-re-read 的 Git 事实核对（`git status`、`git diff`、`git diff --cached`、HEAD、changed-files）；
-2. 对 `NORMAL` 把 `commit_sha`、`changed_files`、`candidate_ref` / `candidate_base_ref` 交给 MES transaction layer materialize 对应 normal Integration facts；对 `PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 仅写入 Git + Git-tracked Plan/evidence，maintenance 不写 MES、不产生 `INTEGRATED`/`CLEANED` 或任何 Stage/terminal fact；
-3. `NORMAL` 从当前 MES status + Skill 继续；`PRE_MES_BOOTSTRAP` / `MES_MAINTENANCE` 从 Git + Plan/evidence（maintenance 另含 frozen/forensic/audit tuple）继续，不从 Receipt 链或 derived next action 继续。
+2. 对 `NORMAL` 把 `commit_sha`、`changed_files`、`candidate_ref` / `candidate_base_ref` 交给 MES transaction layer materialize 对应 normal Integration facts；对 `MES_MAINTENANCE` 仅写入 Git + Git-tracked Plan/evidence，maintenance 不写 MES、不产生 `INTEGRATED`/`CLEANED` 或任何 Stage/terminal fact；
+3. `NORMAL` 从当前 MES status + Skill 继续；`MES_MAINTENANCE` 从 Git + Plan/evidence（maintenance 另含 frozen/forensic/audit tuple）继续，不从 Receipt 链或 derived next action 继续。
 
 ## Recovery 与返回码
 
