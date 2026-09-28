@@ -73,6 +73,8 @@ export interface LaneWorkFactInput {
   readonly authority_refs: readonly string[];
   readonly plan_binding: MesPlanBinding;
   readonly git_basis: MesGitBasis;
+  /** (Change C / contracts §2.1.6) Optional Work-attempt successor edge (null = lineage root). */
+  readonly supersedes_work_ref?: string | null;
   /** Dispatch token is accepted as projection input but never emitted in the fact. */
   readonly actionToken?: string;
 }
@@ -86,6 +88,8 @@ export interface LaneWorkFactInputCamel {
   readonly authorityRefs: readonly string[];
   readonly planBinding: MesPlanBinding;
   readonly gitBasis: MesGitBasis;
+  /** (Change C / contracts §2.1.6) Optional Work-attempt successor edge (null = lineage root). */
+  readonly supersedesWorkRef?: string | null;
   readonly actionToken?: string;
 }
 
@@ -353,6 +357,7 @@ export function buildLaneWorkFact(value: unknown): MesFactEnvelope {
   const allowed = new Set([
     'fact_id', 'factId', 'stage_id', 'stageId', 'slice_id', 'sliceId', 'work_id', 'workId',
     'authority_refs', 'authorityRefs', 'plan_binding', 'planBinding', 'git_basis', 'gitBasis',
+    'supersedes_work_ref', 'supersedesWorkRef',
     'actionToken',
   ]);
   ensureNoUnknownFields(input, allowed, 'lane Work fact input');
@@ -379,6 +384,7 @@ export function buildLaneWorkFact(value: unknown): MesFactEnvelope {
     authority_refs: readInputField(input, 'authority_refs', 'authorityRefs'),
     scope: { stage_id: stageId, slice_id: sliceId },
     work_id: workId,
+    supersedes_work_ref: readInputField(input, 'supersedes_work_ref', 'supersedesWorkRef'),
     plan_binding: readInputField(input, 'plan_binding', 'planBinding'),
     git_basis: readInputField(input, 'git_basis', 'gitBasis'),
   };

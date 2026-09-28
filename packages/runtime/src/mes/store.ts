@@ -87,7 +87,7 @@ import {
 } from '../path-guard';
 import { MES_SCHEMA_VERSION } from './types';
 import { validateMesFactEnvelope, SchemaValidationError } from './validate';
-import { verifyPlanAcceptanceSupport, verifyAcceptedStageReviewResultSupport, validateTaskFactGraphBinding, taskFactScopeConsistencyError, verifyPlanAcceptanceSuccessionGraphError, resolvePlanAcceptanceGenerationTips, isCycleBearingPlanAcceptanceGeneration } from './binding';
+import { verifyPlanAcceptanceSupport, verifyAcceptedStageReviewResultSupport, validateTaskFactGraphBinding, taskFactScopeConsistencyError, verifyPlanAcceptanceSuccessionGraphError, resolvePlanAcceptanceGenerationTips, isCycleBearingPlanAcceptanceGeneration, verifyWorkLineageGraphError } from './binding';
 import { isDurableAcceptedStageSupport, verifyProjectReadySupportError, resolveFindingDispositionRefError, verifyProjectReadySuccessionGraphError } from './terminal';
 import type { MesFactEnvelope, MesGitBasis } from './types';
 
@@ -1672,6 +1672,25 @@ export class MesSnapshotStore {
       storeFail(
         'invalid-fact',
         `cannot persist MES snapshot: ${planAcceptanceSuccessionError}（契约 §7 RESULT_INVALID：planning acceptance succession graph fails closed，no-write）`,
+      );
+    }
+    // 1h-4) (Change C / contracts §2.1.6, STATIC-36) Work-attempt lineage
+    //       succession graph atomic validation over the WHOLE resulting set
+    //       (submitted ∪ retained): every Work lineage (Execute = Stage + Slice
+    //       + delivery cycle + accepted generation; Review = Stage-only Review
+    //       scope + delivery cycle + accepted generation) must form exactly ONE
+    //       append-only acyclic chain whose unique tip is the current Work
+    //       attempt. self-reference, missing / non-work / cross-lineage
+    //       (cross-stage / slice / cycle / generation) target, duplicate target
+    //       (branch), directed cycle, stale predecessor, and zero / multiple
+    //       tips all fail closed atomic no-write（契约 §7 RESULT_INVALID）。
+    //       The chain is a pure function of the durable facts, so restart /
+    //       rehydrate rebuilds the same chain and the same tip.
+    const workLineageError = verifyWorkLineageGraphError(merged);
+    if (workLineageError !== undefined) {
+      storeFail(
+        'invalid-fact',
+        `cannot persist MES snapshot: ${workLineageError}（契约 §7 RESULT_INVALID：work lineage succession graph fails closed，no-write）`,
       );
     }
     // 1i) (S04-B-T01) `finding_disposition.finding_ref` durable unique

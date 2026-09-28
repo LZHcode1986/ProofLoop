@@ -225,6 +225,9 @@ const ENVELOPE_KNOWN_FIELDS = new Set([
   // successor edge (plan_acceptance accepted generation only; null = new
   // chain root, exact ref = preceding (stage, cycle) chain-tip fact_id).
   'supersedes_plan_acceptance_ref',
+  // Change C: closed Work-attempt successor edge (work fact only; null = new
+  // lineage root, exact ref = preceding Work lineage chain-tip fact_id).
+  'supersedes_work_ref',
 ]);
 
 const SCOPE_KNOWN_FIELDS = new Set(['stage_id', 'slice_id', 'task_id']);
@@ -526,6 +529,17 @@ function validateKindBinding(
     errors.push({
       path: 'mes_fact.supersedes_plan_acceptance_ref',
       message: `supersedes_plan_acceptance_ref is plan_acceptance-only; only a cycle-bearing accepted generation carries the top-level predecessor edge (${kind} facts must not carry it)`,
+    });
+  }
+  // (Change C) Per-kind `supersedes_work_ref` position rule (contracts §2.1.6 /
+  // architecture planning-acceptance-succession Work-attempt currentness,
+  // STATIC-36): the Work-attempt successor edge is `work`-ONLY at the envelope
+  // top level. Any other fact kind carrying it is a position violation /
+  // cross-kind payload and fails closed.
+  if (kind !== 'work' && envelope.supersedes_work_ref !== undefined) {
+    errors.push({
+      path: 'mes_fact.supersedes_work_ref',
+      message: `supersedes_work_ref is work-only; only a NORMAL work fact carries the Work-attempt top-level predecessor edge (${kind} facts must not carry it)`
     });
   }
 
@@ -1073,6 +1087,19 @@ function validateKindBinding(
     }
     if (kind === 'result' && envelope.result_ref === undefined) {
       errors.push({ path: 'result_ref', message: 'result fact requires a durable result_ref' });
+    }
+    // (Change C) Work-attempt successor edge value shape (contracts §2.1.6):
+    // null = lineage root; string = exact durable fact_id (non-empty, no
+    // control characters). Chain resolution / cross-fact validity is the
+    // store-boundary machine closure (no-write on a broken lineage invariant).
+    if (kind === 'work' && envelope.supersedes_work_ref !== undefined) {
+      const succ = envelope.supersedes_work_ref;
+      if (succ !== null && (typeof succ !== 'string' || succ.length === 0 || hasControlCharacter(succ))) {
+        errors.push({
+          path: 'mes_fact.supersedes_work_ref',
+          message: 'supersedes_work_ref must be null or a non-empty opaque fact_id string without control characters'
+        });
+      }
     }
     // result kind (S03-A-T01): closed result_id + result_payload_digest pair
     // with the machine-closed legacy S01 predicate. Non-S01 result facts

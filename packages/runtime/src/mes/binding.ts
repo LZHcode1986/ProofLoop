@@ -1360,6 +1360,166 @@ export function resolvePlanAcceptanceGenerationTips(
   return { ok: true, tips };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// (Change A/Change C) Work-attempt currentness — contracts §2.1.6 /
+// architecture planning-acceptance-succession (Work-attempt currentness),
+// STATIC-36, reuse audit .docs/proofloop-mes-current-work-reuse-audit.md.
+// Each Work lineage is one append-only acyclic chain through the top-level
+// `supersedes_work_ref` edge; the unique tip is the current Work attempt.
+// All helpers are pure functions of the durable fact set — never array
+// order, timestamps, Git recency, work_id naming or a second pointer/store.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Exact cycle-bearing Work predicate: accepted `work` + delivery cycle + stage provenance. */
+export function isCycleBearingWork(fact: MesFactEnvelope): boolean {
+  if (fact.fact_kind !== 'work') return false;
+  const binding = fact.plan_binding;
+  if (binding === undefined || binding.binding_stage !== 'accepted') return false;
+  if (typeof binding.delivery_cycle_id !== 'string' || binding.delivery_cycle_id.length === 0) return false;
+  const stageId = fact.scope?.stage_id;
+  return typeof stageId === 'string' && stageId.length > 0;
+}
+
+/**
+ * Work lineage key derived from durable scope/binding (never a naming
+ * convention): Execute lineage = (stage, slice, delivery cycle, accepted-
+ * generation verification_result_ref); Review lineage = (stage-only, delivery
+ * cycle, verification_result_ref). Two restart attempts under the same accepted
+ * generation share a lineage key (they chain); a superseded generation differs
+ * by `verification_result_ref` and is a separate (older) lineage.
+ */
+export function workLineageKeyOf(
+  fact: MesFactEnvelope,
+): string | undefined {
+  if (!isCycleBearingWork(fact)) return undefined;
+  const binding = fact.plan_binding;
+  if (binding === undefined || binding.binding_stage !== 'accepted') return undefined;
+  const stageId = fact.scope!.stage_id as string;
+  const cycle = binding.delivery_cycle_id as string;
+  const sliceId = fact.scope?.slice_id;
+  const execute = typeof sliceId === 'string' && sliceId.length > 0;
+  return canonicalStringify([
+    execute ? 'execute-work' : 'review-work',
+    stageId,
+    execute ? sliceId : undefined,
+    cycle,
+    binding.verification_result_ref ?? undefined,
+  ]);
+}
+
+/** Group cycle-bearing Work attempts into per-lineage groups. */
+interface WorkLineageGroup { readonly key: string; readonly nodes: MesFactEnvelope[]; }
+function groupWorkLineages(facts: readonly MesFactEnvelope[]): WorkLineageGroup[] {
+  // A legacy `work` fact that OMITS `supersedes_work_ref` is a read-only
+  // compat root (contracts §13): it never joins a chain and never counts as a
+  // tip/root, so it cannot force ambiguous-tip failures on unrelated legacy
+  // snapshots. Only facts that CARRY the field (null = new chainable root, or
+  // an exact ref) form chained lineages and are validated.
+  const groups = new Map<string, WorkLineageGroup>();
+  for (const fact of facts) {
+    if (fact.supersedes_work_ref === undefined) continue; // legacy compat root
+    const key = workLineageKeyOf(fact);
+    if (key === undefined) continue;
+    const g = groups.get(key);
+    if (g === undefined) groups.set(key, { key, nodes: [fact] });
+    else g.nodes.push(fact);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Atomic Work-lineage graph validation over the whole resulting set: every
+ * Work lineage is exactly one acyclic append-only chain with a unique tip.
+ * Self-reference, missing / non-work target, cross-lineage (cross-stage/
+ * slice/cycle/generation) target, duplicate target (branch), directed cycle,
+ * zero / multiple tips all fail closed. Retained legacy `work` facts that omit
+ * `supersedes_work_ref` are read-only compatibility roots and never chain.
+ */
+export function verifyWorkLineageGraphError(
+  facts: readonly MesFactEnvelope[],
+): string | undefined {
+  const byId = new Map<string, MesFactEnvelope>();
+  for (const fact of facts) byId.set(fact.fact_id, fact);
+  for (const group of groupWorkLineages(facts)) {
+    const localById = new Map(group.nodes.map((fact) => [fact.fact_id, fact] as const));
+    const referencedPredecessors = new Map<string, string>();
+    for (const node of group.nodes) {
+      const predecessor = node.supersedes_work_ref;
+      if (predecessor === undefined) continue; // retained compat root
+      if (predecessor === null) continue; // new chain root (write boundary enforces single root)
+      if (typeof predecessor !== 'string' || predecessor.length === 0) {
+        return `work fact ${JSON.stringify(node.fact_id)} carries a malformed supersedes_work_ref（no-write）`;
+      }
+      if (predecessor === node.fact_id) {
+        return `work fact ${JSON.stringify(node.fact_id)} supersedes itself（self-reference no-write）`;
+      }
+      const target = localById.get(predecessor);
+      if (target === undefined) {
+        const foreign = byId.get(predecessor);
+        if (foreign === undefined) {
+          return `work fact ${JSON.stringify(node.fact_id)} predecessor ${JSON.stringify(predecessor)} does not resolve to a durable fact in the resulting set（missing target no-write）`;
+        }
+        // A chained (new-shape) fact may anchor onto a RETAINED legacy compat
+        // root of the SAME lineage key (field omitted, never backfilled). Any
+        // other foreign target — a chained work of another lineage, a non-work
+        // fact, or a different lineage key — is a cross-lineage violation.
+        if (workLineageKeyOf(foreign) !== group.key || foreign.supersedes_work_ref !== undefined) {
+          return `work fact ${JSON.stringify(node.fact_id)} predecessor ${JSON.stringify(predecessor)} resolves to ${JSON.stringify(foreign.fact_id)} which is not a cycle-bearing work fact of the same Work lineage（cross-lineage target no-write）`;
+        }
+        const legacyReferrer = referencedPredecessors.get(predecessor);
+        if (legacyReferrer !== undefined && legacyReferrer !== node.fact_id) {
+          return `work facts ${JSON.stringify(legacyReferrer)} and ${JSON.stringify(node.fact_id)} both supersede legacy compat root ${JSON.stringify(predecessor)}（duplicate target / branch no-write）`;
+        }
+        referencedPredecessors.set(predecessor, node.fact_id);
+        continue;
+      }
+      const referrer = referencedPredecessors.get(predecessor);
+      if (referrer !== undefined && referrer !== node.fact_id) {
+        return `work facts ${JSON.stringify(referrer)} and ${JSON.stringify(node.fact_id)} both supersede ${JSON.stringify(predecessor)}（duplicate target / branch no-write）`;
+      }
+      referencedPredecessors.set(predecessor, node.fact_id);
+    }
+    for (const start of group.nodes) {
+      const seen = new Set<string>();
+      let cursor = start;
+      while (typeof cursor.supersedes_work_ref === 'string' && cursor.supersedes_work_ref.length > 0) {
+        if (seen.has(cursor.fact_id)) {
+          return `work lineage chain ${JSON.stringify(group.key)} contains a directed cycle through ${JSON.stringify(cursor.fact_id)}（directed cycle no-write）`;
+        }
+        seen.add(cursor.fact_id);
+        const next = localById.get(cursor.supersedes_work_ref);
+        if (next === undefined) break;
+        cursor = next;
+      }
+    }
+    const tips = group.nodes.filter((fact) => !referencedPredecessors.has(fact.fact_id));
+    if (tips.length !== 1) {
+      return `work lineage ${JSON.stringify(group.key)} must form exactly one acyclic chain with a unique Work-attempt tip; found ${tips.length} tip(s)（ambiguous zero/multiple tips no-write）`;
+    }
+  }
+  return undefined;
+}
+
+/** Unique current Work-attempt tip per lineage (fail-closed on broken lineage). */
+export function resolveWorkLineageTips(
+  facts: readonly MesFactEnvelope[],
+): { readonly ok: true; readonly tips: readonly MesFactEnvelope[] } | { readonly ok: false; readonly error: string } {
+  const graphError = verifyWorkLineageGraphError(facts);
+  if (graphError !== undefined) return { ok: false, error: graphError };
+  const tips: MesFactEnvelope[] = [];
+  for (const group of groupWorkLineages(facts)) {
+    const referenced = new Set(
+      group.nodes
+        .filter((f) => typeof f.supersedes_work_ref === 'string' && (f.supersedes_work_ref as string).length > 0)
+        .map((f) => f.supersedes_work_ref as string),
+    );
+    const groupTips = group.nodes.filter((fact) => !referenced.has(fact.fact_id));
+    if (groupTips.length === 1) tips.push(groupTips[0]);
+  }
+  return { ok: true, tips };
+}
+
+
 /**
  * (S06-R-B-T01) Canonical binding-critical identity resolution over the
  * current durable relation (contracts.md #/entities/mes-binding-critical-identity

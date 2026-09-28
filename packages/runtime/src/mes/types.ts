@@ -304,6 +304,24 @@ export interface MesFactEnvelope {
    */
   readonly supersedes_plan_acceptance_ref?: string | null;
 
+  /**
+   * (Change A/Change C / contracts §2.1.6, architecture planning-acceptance-
+   * succession Work-attempt currentness, STATIC-36): closed `work`-only append-only
+   * successor edge for Work-attempt currentness. EXACTLY a NORMAL `work` fact
+   * carries it at the envelope TOP LEVEL. `null` = first attempt of a Work
+   * lineage (no other `work` fact for the same lineage exists in submitted ∪
+   * retained); a string = the exact durable `fact_id` of the unique preceding
+   * chain tip of the same lineage — Execute lineage = Stage + Slice + delivery cycle
+   * + accepted generation; Review lineage = Stage-only Review scope + delivery
+   * cycle + accepted generation. omitted = retained legacy `work` fact (read-only,
+   * never backfilled). Every other fact kind carrying it fails closed. Chain
+   * invariant: self-reference, missing/non-work target, cross-stage/slice/cycle/
+   * generation target, stale predecessor, branch, cycle, zero/multiple tips → typed
+   * fail, no-write. Identity is decided by chain structure alone — never by
+   * insertion order, timestamp, Git recency, work_id naming or newest-wins.
+   */
+  readonly supersedes_work_ref?: string | null;
+
   /** Closed `recovery_baseline` payload (NORMAL disaster recovery only). */
   readonly recovery_id?: string;
   readonly preimage_status?: MesRecoveryPreimageStatus;

@@ -38,7 +38,7 @@
  */
 import type { MesFactEnvelope, MesFactKind } from './types';
 import { MES_FACT_KINDS } from './types';
-import { resolveCanonicalAcceptanceRelation, resolvePlanAcceptanceGenerationTips, isCycleBearingPlanAcceptanceGeneration } from './binding';
+import { resolveCanonicalAcceptanceRelation, resolvePlanAcceptanceGenerationTips, isCycleBearingPlanAcceptanceGeneration, resolveWorkLineageTips, workLineageKeyOf } from './binding';
 /** Closed relation-validity status of one durable fact. */
 export type MesRelationValidity =
   | 'relation-valid'
@@ -137,6 +137,59 @@ function resolveSupersededGenerationBinding(
   return { tipFactId: tip.fact_id, boundGenerationFactId: boundGeneration.fact_id };
 }
 
+/** The superseded Work-attempt binding of one bound fact. */
+interface MesSupersededWorkAttemptBinding {
+  /** The unique current Work-attempt tip `work_id` of the owning Work lineage. */
+  readonly tipWorkId: string;
+  /** The NON-CURRENT Work attempt whose `work_id` the fact is bound to. */
+  readonly boundWorkFactId: string;
+}
+
+/**
+ * (Change C / contracts §2.1.6, STATIC-36) The SINGLE canonical superseded-
+ * Work-attempt predicate: a fact bound to a NON-CURRENT Work attempt of its own
+ * Work lineage (same execute/review lineage key) is superseded — readable /
+ * auditable but permanently non-authorizing. The current attempt is the unique
+ * chain tip of the owning lineage (never work_id naming, insertion order,
+ * timestamp, Git recency or newest-wins). A broken / ambiguous lineage returns
+ * `undefined` (fail-closed continues at the status/store boundaries) instead of
+ * guessing a tip. Facts bound to a work_id with no matching `work` fact are not
+ * work-attempt-superseded by this predicate.
+ */
+function resolveSupersededWorkAttemptBinding(
+  facts: readonly MesFactEnvelope[],
+  fact: MesFactEnvelope,
+): MesSupersededWorkAttemptBinding | undefined {
+  const workId = fact.work_id;
+  if (typeof workId !== 'string' || workId.length === 0) return undefined;
+  const workFacts = facts.filter((candidate) => candidate.fact_kind === 'work' && candidate.work_id === workId);
+  if (workFacts.length === 0) return undefined;
+  const owning = workFacts[0];
+  const owningKey = workLineageKeyOf(owning);
+  if (owningKey === undefined) return undefined;
+  const tipResolution = resolveWorkLineageTips(facts);
+  if (!tipResolution.ok) return undefined; // broken lineage → caller fails closed
+  const lineageTips = tipResolution.tips.filter(
+    (tip) => tip.fact_id !== owning.fact_id && workLineageKeyOf(tip) === owningKey,
+  );
+  // (M1-F1b) A legacy compat root (field omitted) is STILL arbitrable when a
+  // NEW-shape Work attempt anchors onto it: the chained successor supersedes
+  // the retained legacy root, so the root and everything bound to its work_id
+  // become non-authorizing. Without such an anchor it is a standalone legacy
+  // attempt and is left to the canonical relation comparison.
+  if (owning.supersedes_work_ref === undefined && lineageTips.length === 0) {
+    const anchored = facts.some(
+      (c) => c.fact_kind === 'work' && c.supersedes_work_ref === owning.fact_id && workLineageKeyOf(c) === owningKey,
+    );
+    if (!anchored) return undefined;
+  }
+  if (lineageTips.length === 0) return undefined;
+  const tipWorkId = lineageTips[0].work_id as string;
+  if (tipWorkId === workId) return undefined; // current attempt
+  return { tipWorkId, boundWorkFactId: owning.fact_id };
+}
+
+
 function classifyOne(
   facts: readonly MesFactEnvelope[],
   fact: MesFactEnvelope,
@@ -153,6 +206,16 @@ function classifyOne(
       fact_kind: fact.fact_kind,
       status: 'relation-invalid',
       reason: `fact ${JSON.stringify(fact.fact_id)} is bound to a NON-CURRENT accepted generation ${JSON.stringify(superseded.boundGenerationFactId)} of (stage ${JSON.stringify(fact.scope?.stage_id)}, cycle ${JSON.stringify(binding.delivery_cycle_id)}) — the current chain tip is ${JSON.stringify(superseded.tipFactId)}（superseded generation → non-authorizing history，no-write）`,
+    };
+  }
+  // (Change C) Non-current (superseded) Work attempt → non-authorizing history.
+  const supersededAttempt = resolveSupersededWorkAttemptBinding(facts, fact);
+  if (supersededAttempt !== undefined) {
+    return {
+      fact_id: fact.fact_id,
+      fact_kind: fact.fact_kind,
+      status: 'relation-invalid',
+      reason: `fact ${JSON.stringify(fact.fact_id)} is bound to a NON-CURRENT Work attempt ${JSON.stringify(supersededAttempt.boundWorkFactId)} — the current Work-attempt tip is ${JSON.stringify(supersededAttempt.tipWorkId)}（superseded work attempt → non-authorizing history，no-write）`,
     };
   }
   // The canonical relation must RESOLVE uniquely from the durable set. A
@@ -261,10 +324,17 @@ export function classifyInvalidHistory(facts: readonly MesFactEnvelope[]): MesIn
   const sorted = [...canonical].sort((a, b) => (a.fact_id < b.fact_id ? -1 : a.fact_id > b.fact_id ? 1 : 0));
   const invalidFactIds = sorted.filter((f) => f.status === 'relation-invalid').map((f) => f.fact_id);
   const unverifiableFactIds = sorted.filter((f) => f.status === 'relation-unverifiable').map((f) => f.fact_id);
-  // Superseded (non-current generation) subset, from the SAME canonical
-  // predicate `classifyOne` used — never a second currentness inference.
+  // Superseded (non-current generation / non-current Work attempt) subset,
+  // from the SAME canonical predicates `classifyOne` uses — never a second
+  // currentness inference. STATIC-36 phase filtering excludes exactly this
+  // PROVABLY-superseded class (superseded facts never drive current phase),
+  // while plain misbound (typo) facts keep the stage in-flight.
   const supersededFactIds = ordered
-    .filter((fact) => resolveSupersededGenerationBinding(ordered, fact) !== undefined)
+    .filter(
+      (fact) =>
+        resolveSupersededGenerationBinding(ordered, fact) !== undefined ||
+        resolveSupersededWorkAttemptBinding(ordered, fact) !== undefined,
+    )
     .map((fact) => fact.fact_id)
     .sort();
   return {
