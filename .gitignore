@@ -3,8 +3,6 @@ docs/
 node_modules/
 dist/
 *.tsbuildinfo
-.codegraph/
 .proofloop/
 .pi/npm/
-packages/runtime/test/
 packages/runtime/test-dist/

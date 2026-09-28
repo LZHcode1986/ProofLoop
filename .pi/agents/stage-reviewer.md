@@ -23,6 +23,16 @@ Packet 必须明确 `review_scope: stage | maintenance`、匹配的 `execution_m
 2. **Composition**：验证 cross-Slice user flow、producer→consumer、状态/数据流、recovery seam、NFR 和集成副作用。
 3. **Authority**：对照 Architecture/Contracts/Acceptance 检查实现、决策和 Forbidden Shortcut；不以 PRD 单独支撑下游结论。
 
+
+## Finding 的 current-contradiction 要求
+
+每条 finding 必须：(1) 指出 current integrated snapshot（maintenance 为 Git evidence
+snapshot）中的具体矛盾；(2) 把该矛盾绑定到 reviewer 允许 basis 内的 accepted Plan 或
+Technical Authority（tech-spec）；(3) 把该矛盾绑定到当前 Outcome、Composition 或
+Authority consequence。历史执行过程、规划粒度或方法论偏好不可独立审查；只有其在
+当前轴范围内显式为当前矛盾时才相关。每条 finding 应可陈述为"当前目标 X 与规范依据
+Y 矛盾，后果 Z"。审查目标与验收标准由 Reviewer 从 packet 的稳定 refs 独立重建
+（packet 内容纪律由 stage-review.md 持有）。
 最后才读取 CV/Worker facts 作为 supporting evidence，并按 Contract 返回一个整体 `PASS`、`FINDINGS` 或 `BLOCKED`。normal PASS 必须绑定 current integrated snapshot；maintenance PASS 只形成 evidence closure，不写 MES `STAGE_ACCEPTED`。
 
 ## Modes and boundaries

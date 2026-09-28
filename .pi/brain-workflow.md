@@ -14,6 +14,89 @@ Pi Brain 是用户入口、路由器和 durable-fact 解释者。本文件同时
 
 任何 Subagent 结果只有在对应 Contract/Template 校验、binding current 且 consumer 接纳后才具有流程效力。
 
+### 边界内序（Routing Boundary 事件内）：RECONSTRUCT → REFRESH → ARBITRATE → ROUTE
+
+每个 Routing Boundary 事件内，Brain 按固定顺序执行以下四步；顺序内联在本节，因为每个
+Routing Boundary 都需要完整顺序。事件到具体 canonical owner 的分支只走下文
+「Event-local fresh-read pointers」表；lifecycle reuse/fresh/recheck 继续由
+`agent-lifecycle.md` 持有。本节不新增第二张事件映射表。
+
+**Step 1 — RECONSTRUCT**：从 durable MES facts、incoming 结构化 Result/Finding、
+当前 Plan binding 与 Git reality 重建当前 scope、basis、事件 identity 与相关 relations。
+若当前 basis 无法唯一重建，留在既有 recovery 或 typed-blocker 路线。
+完成标准：下一个决策使用的每个 identity 都有当前 durable 或 repository 来源支撑；
+不依赖对话记忆、Agent 摘要、时间戳排序或推断的 newest state。
+
+**Step 2 — REFRESH**：按下文「Event-local fresh-read pointers」表（WHEN → READ），
+只加载当前事件所需的唯一 canonical Contract/Skill owner。同一 Flow 内普通
+continuation 不重载无关 workflow 材料。
+完成标准：Brain 分类或路由当前事件前，context 中已有一个适用的 canonical owner
+working set。
+
+**Step 3 — ARBITRATE**：只裁决 Brain-owned 问题：currentness、normative support、
+accepted ownership、invalidation scope、continuation class、route。Brain 不设计
+Planner 分解、Worker repair HOW、verifier 验收标准或 reviewer 实现方案。
+完成标准：决策可由当前 basis + 刚读取的 canonical owner 语义重建。
+
+ARBITRATE 内含通用 actionable-claim 仲裁（四性质闭集）。Brain 对每个独立的
+verifier/reviewer claim 分别仲裁；会授权 producer mutation、restart、replan 或使
+当前 work/binding 失效的 actionable claim，只有在以下四个性质全部闭合时才能驱动
+该 corrective route：
+
+1. **Normative support**：claim 被 verifier/reviewer 允许使用的 accepted Plan、
+   Technical Authority 或 Contract basis 支持。
+2. **Current contradiction**：claim 在当前 review target 中指出具体 counterexample、
+   relation failure、可观察失败或其它矛盾。
+3. **Current basis**：claim 的 target、Plan、Git basis、scope 与 identity 仍可重建为 current。
+4. **Bounded invalidation**：该矛盾使特定当前 outcome、ownership boundary、scope、
+   binding、dependency 或 verification consequence 失效。
+
+Disposition：
+- Normative support 可能存在但 evidence/current basis 不足：走既有 evidence、blocker
+  或 recovery route；
+- Normative support 缺失或 claim 超出 verifier 声明的 review basis：以既有
+  `VERIFIER_OVERREACH` disposition 终结该 claim（语义见 finding-convergence.md §8）；
+- 独立 claim 独立仲裁；同一 verdict 中捆绑的另一个已成立 claim，不给该 claim
+  提供 normative support；
+- `TECHNICAL_UNKNOWN`、`EVIDENCE_GAP`、`RUNTIME_BLOCKER`、`USER_DECISION_REQUIRED`
+  等 typed blocker/unknown 不要求 current contradiction，在 current basis 验证后按
+  各自既有 Contract 走 typed route。
+
+完成标准：每个被接纳的 corrective route 都有可追溯的 normative source 与当前矛盾；
+每个被驳回的 claim 有基于 missing support 或 role scope 的有界理由，而不是
+reviewer preference。本文件不编码项目、reviewer、技术、Task 大小或历史 incident
+案例作为判据。
+
+**Step 4 — ROUTE**：只发送稳定 identities、bindings、refs、Brain-owned 授权与
+launch 所需 ephemeral transport identity；dispatch policy 见 `agent-lifecycle.md`，
+Host transport 映射见下文「Subagent dispatch 与 Host transport」节。接收 Role 自行决定
+其内部方法。
+完成标准：目标 owner 能仅凭 canonical refs 执行，无需 Brain 编写的 semantic rewrite。
+
+### Event-local fresh-read pointers
+
+以下 pointer 绑定真实事件；事件发生时先 fresh-read 唯一 owner，再沿下文主流程执行。
+普通同一 Flow 内连续动作不要求重读全部 Contract。REFRESH（边界内序 Step 2）按本表
+只加载当前事件所需的唯一 canonical owner，不重载无关 workflow 材料。
+
+| WHEN | READ |
+|---|---|
+| `CANDIDATE_PLAN_READY`、SPV `FINDINGS` 或 Plan acceptance / continuation / close decision | `.agents/contracts/brain/agent-lifecycle.md`；Planning 方法另读所选 Host 的 proofloop-plan Role 文档 |
+| `SLICE_CANDIDATE_READY`、CV dispatch、CV `FINDINGS` 或 repair/recheck | `.agents/contracts/brain/agent-lifecycle.md` + `.agents/skills/proofloop-execute/SKILL.md`；CV schema 读其 template |
+| Result acceptance、lifecycle continuation、recall/reset 或 retain/close decision | `.agents/contracts/brain/agent-lifecycle.md` 对应 role row；NORMAL durable Result/Finding write 另读 `.agents/contracts/brain/mes.md`，Git transaction 另读其 owner |
+| MES read/write/status decision | `.agents/contracts/brain/mes.md` |
+| Git boundary request 或 candidate freeze | `.agents/contracts/brain/commit-boundary.md` |
+| `READY_TO_INTEGRATE`、Integration request 或 Integration failure | `.agents/contracts/brain/integration.md`；生命周期判断另读 `.agents/contracts/brain/agent-lifecycle.md` |
+| Stage Review dispatch/result/recheck | `.agents/contracts/brain/stage-review.md`；retain/close/reset 另读 `.agents/contracts/brain/agent-lifecycle.md` |
+| Finding 跨 binding boundary 或同一 failure family 再现 | `.agents/contracts/brain/finding-convergence.md`；首次局部 Finding 继续既有 arbitration route |
+| `TECHNICAL_UNKNOWN` | `.agents/contracts/brain/technical-unknown.md` |
+| Agent/Host/lifecycle loss、binding invalidation、cancel/reset/recovery | `.agents/contracts/brain/agent-lifecycle.md` + 当前 branch owner；先从 durable facts 重建 currentness |
+| context/tool-output pressure | `AGENTS.md` 的 context cleanup 规则；只调用 `ctx_reduce`，不推导 Agent completion |
+
+`PLAN_READY`、Task 完成、CV `PASS` 和 `INTEGRATED` 都只触发各自表中的下一边界，
+不越过未完成的 Flow。SPV、CV 和 Stage Reviewer 的 claimed route 不能绕过 Brain
+arbitration 直接驱动迁移。
+
 ## 主流程
 
 ### Propose / Authority

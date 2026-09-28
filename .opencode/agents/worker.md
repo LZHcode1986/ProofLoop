@@ -38,11 +38,18 @@ Packet 必须提供 `stage`、`slice`、`task_id`（`slice-ready`/repair 除外�
 
 对 implement/recover 按 RED → 最小实现 → GREEN → Result：先验证失败属于当前 Task，只改 allowed code/test scope，运行目标/回归/typecheck/build 和 diff 检查，按 `worker-template` 返回完整 Result。返回后等待同一 `resultId` 的闭集 `TASK_RESULT_ACK`；只有 `ACCEPTED + CONTINUE` 才接收 Brain 投影的下一个 Task JIT Read Set。不得批量实现多个 Task。
 
+若当前 Task 新增或 materially 改变 runnable verification seam，producer 必须先实际运行该
+seam 再提交 Result，并把实际命令、实际结果与 oracle evidence 记入 Result；当前执行环境
+无法运行该 seam 时返回既有 typed blocker，不把 Task 投影为完成。下游 CV 与 integrated
+Stage verification 独立再证相关行为，不替代 producer GREEN。
+
 `slice-ready` 只汇总已接纳事实，不声称 CV PASS、Commit、Integration 或 Stage 完成。`repair` 先复现失败、做最小修复、运行 bounded recheck tests，并把 repair scope 证据交回 Brain；不更新 Plan，不自行触发 CV。
 
 ## Mutation and forbidden actions
 
 只修改 Read Set 的 `allowed_scope.code_paths`/`test_paths`；不写 MES、Plan、Authority、Evidence、Result projection、旧 Manifest/Context/Receipt/Gate，不调用 Runtime admission，不建立 Git boundary，不提交 Git，不派发 Agent。NORMAL Task Result 由 MES transaction layer materialize；`MES_MAINTENANCE` 只产生 Git-bound Subagent evidence，不伪造 MES facts。遇到 Plan gap、技术未知、环境失败、S06 freeze 或 binding 变化时停止并返回 typed blocker。
+- 执行中发现新 defect/regression/verification failure 时，先回 Brain 按当前 accepted Plan
+  ownership 解析后再做任何 mutation；不发明 Plan 之外的 Task、Slice 或临时组合单元。
 
 ## Completion
 
