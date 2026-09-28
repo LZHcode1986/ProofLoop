@@ -61,6 +61,10 @@ export {
   validateTaskFactGraphBinding,
   acceptedStageSupportShapeError,
   projectReadyClosedGitBasisError,
+  verifyWorkLineageGraphError,
+  resolveWorkLineageTips,
+  isCycleBearingWork,
+  workLineageKeyOf,
 } from './binding';
 export type {
   MesExecutionMode,

@@ -231,9 +231,16 @@ describe('MES public surface + proofloop status (S01-C-T02)', () => {
       assert.equal(humanEnvelope.ok, true);
       const text = String(resultOf(humanEnvelope));
       assert.ok(text.startsWith('S01 / EXECUTE\nskill=proofloop-execute'), text);
-      assert.ok(text.includes('blocked=1'), text);
-      assert.ok(text.includes('finding=2'), text);
-      assert.ok(!text.includes('replan=0'), 'zero counters never rendered');
+      // (M2-R2 Blocker 3) The legacy seed fallback no longer projects seed
+      // tuple counters as current operational counters: anomaly counters are
+      // durable-derived projections only (contracts §2.3), and this store
+      // carries no current-cycle durable facts — so no counter lines render.
+      assert.ok(!text.includes('blocked='), text);
+      assert.ok(!text.includes('finding='), text);
+      assert.ok(!text.includes('repair='), text);
+      assert.ok(!text.includes('human_required='), text);
+      assert.ok(!text.includes('recovery='), text);
+      assert.ok(!text.includes('replan='), text);
 
       // Same read-only facts as a structured projection via `--json`.
       const json = runCli(['status', '--json'], { cwd: fixture.dir });
@@ -243,7 +250,10 @@ describe('MES public surface + proofloop status (S01-C-T02)', () => {
       assert.equal(structured.scope, 'S01');
       assert.equal(structured.phase, 'EXECUTE');
       assert.equal(structured.required_skill, 'proofloop-execute');
-      assert.deepEqual(structured.counters, { blocked: 1, finding: 2 });
+      // (M2-R2 Blocker 3) counters are durable-derived projections only — the
+      // legacy seed fallback never surfaces seed tuple counters, so the
+      // structured projection must not carry them.
+      assert.equal(structured.counters, undefined, 'legacy seed fallback projects no counters');
 
       // Bounded detail: human-readable adds the durable Git/Plan detail.
       const detail = runCli(['status', '--detail'], { cwd: fixture.dir });
@@ -265,7 +275,7 @@ describe('MES public surface + proofloop status (S01-C-T02)', () => {
         assert.equal(detailStructured.scope, 'S01');
         assert.equal(detailStructured.phase, 'EXECUTE');
         assert.equal(detailStructured.required_skill, 'proofloop-execute');
-        assert.deepEqual(detailStructured.counters, { blocked: 1, finding: 2 });
+        assert.equal(detailStructured.counters, undefined, 'detail also projects no seed counters');
         assert.deepEqual(detailStructured.git_basis, {
           head: fixture.head,
           branch: fixture.branch,

@@ -125,6 +125,7 @@ function workFact(id: string, ref: string, cycle = CYCLE, digest = PLAN_DIGEST):
     authority_refs: ['tech-spec/contracts.md#2.1.3'],
     scope: { stage_id: 'S06', slice_id: 'S06-D', task_id: 'S06-D-T01' },
     work_id: `mes:work:${id}`,
+    supersedes_work_ref: null,
     plan_binding: {
       binding_stage: 'accepted',
       accepted_plan_ref: PLAN_REF,

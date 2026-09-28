@@ -67,6 +67,66 @@ function acceptedBinding() {
   };
 }
 
+/** Accepted binding matching the NORMAL-shape canonical PVR/PA cycle. */
+function acceptedCycleBinding() {
+  return { ...acceptedBinding(), delivery_cycle_id: CYCLE_ID };
+}
+
+const CYCLE_ID = 'cycle-s03-1';
+
+/**
+ * Canonical NORMAL-shape planning relation (candidate PVR + accepted PA) for
+ * fixtures that must prove task currentness: tasks bound to an accepted plan
+ * are only relation-valid (authorizing → current-operational) when the
+ * durable facts carry the resolvable canonical PVR/PA (cv-s06-r-c2). Bare
+ * task fixtures without it classify every task `unverifiable`, so they can
+ * never drive BLOCKED_BY / SLICE_CANDIDATE_READY (M2-R2 Blocker 1).
+ */
+function canonicalPvr(): MesFactEnvelope {
+  return {
+    schema_version: 2 as const,
+    fact_id: 'mes:fact:planning_verification_result:S03:1',
+    fact_kind: 'planning_verification_result' as const,
+    created_by: 'brain',
+    authority_refs: ['tech-spec/contracts.md#2.2.2'],
+    scope: { stage_id: 'S03' },
+    work_id: 'mes:work:S03:planning:1',
+    result_ref: 'mes:result:S03:planning-verification-1',
+    verifier_role: 'stage-plan-verifier',
+    action_token: 's03-spv-1',
+    plan_binding: {
+      binding_stage: 'candidate' as const,
+      candidate_plan_ref: PLAN_REF,
+      accepted_plan_ref: null,
+      verdict: 'PLAN_READY',
+      plan_digest: PLAN_DIGEST,
+      delivery_cycle_id: CYCLE_ID,
+    },
+    git_basis: GIT_BASIS,
+  };
+}
+
+function canonicalPa(): MesFactEnvelope {
+  return {
+    schema_version: 2 as const,
+    fact_id: 'mes:fact:plan_acceptance:S03:1',
+    fact_kind: 'plan_acceptance' as const,
+    created_by: 'brain',
+    authority_refs: ['tech-spec/contracts.md#2.2.2'],
+    scope: { stage_id: 'S03' },
+    supersedes_plan_acceptance_ref: null,
+    plan_binding: {
+      binding_stage: 'accepted' as const,
+      accepted_plan_ref: PLAN_REF,
+      source_candidate_plan_ref: PLAN_REF,
+      verification_result_ref: 'mes:result:S03:planning-verification-1',
+      plan_digest: PLAN_DIGEST,
+      delivery_cycle_id: CYCLE_ID,
+    },
+    git_basis: GIT_BASIS,
+  };
+}
+
 /** Minimal accepted Thin Plan (§4.1 shape) covering every slice used below. */
 function planFixture(): Record<string, unknown> {
   return {
@@ -308,24 +368,24 @@ describe('MES execute L2 detail projection (S03-A-T02)', () => {
       taskFact('S03-H-T01', 'IN_PROGRESS', ['S03-H-T00']),
       // S03-I: mixed status → EXECUTING.
       taskFact('S03-I-T01', 'IN_PROGRESS', []),
-      // S03-J: latest finding is FINDINGS (historical PASS first) → NOT
-      // CV_PASSED; tasks complete → SLICE_CANDIDATE_READY (CV counterexample: a
-      // historical PASS must not override the later FINDINGS).
+      // S03-J: findings {PASS, FINDINGS}. Set-union CV (M1-F3): any FINDINGS in
+      // the current attempt blocks CV_PASSED regardless of fact_id order; tasks
+      // complete → SLICE_CANDIDATE_READY.
       taskFact('S03-J-T01', 'TASK_COMPLETE', []),
       findingFact('S03-J', 'PASS'),
       { ...findingFact('S03-J', 'FINDINGS'), fact_id: 'mes:fact:finding:S03:S03-J:cv-2' },
-      // S03-K: latest finding is PASS (after an earlier FINDINGS) → CV_PASSED.
+      // S03-K: findings {FINDINGS, PASS}. Same set-union rule → NOT CV_PASSED
+      // (an authorizing FINDINGS is never overridden by a coexisting PASS via
+      // ID order). Tasks complete → SLICE_CANDIDATE_READY.
       taskFact('S03-K-T01', 'TASK_COMPLETE', []),
       findingFact('S03-K', 'FINDINGS'),
       { ...findingFact('S03-K', 'PASS'), fact_id: 'mes:fact:finding:S03:S03-K:cv-2' },
-      // S03-L: latest disposition is NON-PLAN_GAP (earlier PLAN_GAP first) →
-      // NOT REPLAN (CV-S03-A-R2: latest disposition wins). Tasks complete →
-      // SLICE_CANDIDATE_READY.
+      // S03-L: disposition {PLAN_GAP, IMPLEMENTATION_DEFECT}. Any authorizing
+      // PLAN_GAP anywhere → REPLAN (independent of fact_id order).
       taskFact('S03-L-T01', 'TASK_COMPLETE', []),
       dispositionFact('S03-L', 'PLAN_GAP'),
       { ...dispositionFact('S03-L', 'IMPLEMENTATION_DEFECT'), fact_id: 'mes:fact:disposition:S03:S03-L:2' },
-      // S03-M: latest disposition IS PLAN_GAP (after an earlier non-PLAN_GAP)
-      // → REPLAN.
+      // S03-M: disposition {IMPLEMENTATION_DEFECT, PLAN_GAP} → same REPLAN rule.
       taskFact('S03-M-T01', 'TASK_COMPLETE', []),
       dispositionFact('S03-M', 'IMPLEMENTATION_DEFECT'),
       { ...dispositionFact('S03-M', 'PLAN_GAP'), fact_id: 'mes:fact:disposition:S03:S03-M:2' },
@@ -344,12 +404,15 @@ describe('MES execute L2 detail projection (S03-A-T02)', () => {
     assert.equal(stateOf('S03-G'), 'BLOCKED_BY');
     assert.equal(stateOf('S03-H'), 'BLOCKED_BY');
     assert.equal(stateOf('S03-I'), 'EXECUTING');
-    assert.equal(stateOf('S03-J'), 'SLICE_CANDIDATE_READY', 'latest FINDINGS overrides historical PASS');
-    assert.equal(stateOf('S03-K'), 'CV_PASSED', 'latest PASS restores CV_PASSED after an earlier FINDINGS');
+    assert.equal(stateOf('S03-J'), 'SLICE_CANDIDATE_READY', 'PASS+FINDINGS set: any FINDINGS blocks CV_PASSED');
+    assert.equal(stateOf('S03-K'), 'SLICE_CANDIDATE_READY', 'FINDINGS+PASS set: any FINDINGS in current attempt blocks CV_PASSED (no opaque-ID restore)');
     const jSlice = detail.slices.find((s) => s.slice_id === 'S03-J')!;
-    assert.equal(jSlice.latest_finding_ref, 'mes:fact:finding:S03:S03-J:cv-2', 'latest_finding_ref points at the newest finding');
-    assert.equal(stateOf('S03-L'), 'SLICE_CANDIDATE_READY', 'latest non-PLAN_GAP disposition overrides earlier PLAN_GAP');
-    assert.equal(stateOf('S03-M'), 'REPLAN', 'latest PLAN_GAP disposition projects REPLAN');
+    const kSlice = detail.slices.find((s) => s.slice_id === 'S03-K')!;
+    assert.deepEqual(jSlice.finding_refs, ['mes:fact:finding:S03:S03-J:cv-1', 'mes:fact:finding:S03:S03-J:cv-2'], 'multiple findings expose a bounded set, not a fake single latest');
+    assert.equal(jSlice.latest_finding_ref, undefined, 'no fake latest_finding_ref when the set has multiple members');
+    assert.deepEqual(kSlice.finding_refs, ['mes:fact:finding:S03:S03-K:cv-1', 'mes:fact:finding:S03:S03-K:cv-2'], 'bounded finding set for S03-K');
+    assert.equal(stateOf('S03-L'), 'REPLAN', 'a PLAN_GAP disposition anywhere in current attempt projects REPLAN');
+    assert.equal(stateOf('S03-M'), 'REPLAN', 'a PLAN_GAP disposition anywhere in current attempt projects REPLAN');
 
 
 
@@ -486,7 +549,12 @@ describe('MES execute L2 detail projection (S03-A-T02)', () => {
       const graph = buildAcceptedPlanTaskGraph(planFixture(), PLAN_REF, PLAN_DIGEST);
       const store = createMesSnapshotStore(fixture.dir);
       store.write(
-        [taskFact('S03-G-T00', 'TASK_COMPLETE', []), taskFact('S03-G-T01', 'TASK_COMPLETE', ['S03-G-T00'], { blocked_by_task_id: 'S03-G-T00' })],
+        [
+          canonicalPvr(),
+          canonicalPa(),
+          { ...taskFact('S03-G-T00', 'TASK_COMPLETE', []), plan_binding: acceptedCycleBinding() },
+          { ...taskFact('S03-G-T01', 'TASK_COMPLETE', ['S03-G-T00'], { blocked_by_task_id: 'S03-G-T00' }), plan_binding: acceptedCycleBinding() },
+        ],
         { acceptedPlanTaskGraph: graph },
       );
       const rehydrated = store.read();
@@ -503,11 +571,16 @@ describe('MES execute L2 detail projection (S03-A-T02)', () => {
     // Parallel-state fixture (E2E-16 / HP-009): S03-A is blocked (direct +
     // propagated), S03-B has no blocker at all and must stay runnable.
     const facts: MesFactEnvelope[] = [
-      taskFact('S03-A-T00', 'TASK_COMPLETE', []),
-      taskFact('S03-A-T01', 'TASK_COMPLETE', ['S03-A-T00'], { blocked_by_task_id: 'S03-A-T00' }),
-      taskFact('S03-A-T02', 'IN_PROGRESS', ['S03-A-T01']),
-      taskFact('S03-B-T01', 'IN_PROGRESS', []),
-      taskFact('S03-B-T02', 'PLANNED', ['S03-B-T01']),
+      // Canonical planning relation so the tasks are relation-valid:
+      // bare task facts classify every task `unverifiable` and can never
+      // drive BLOCKED_BY / EXECUTING distinctions (M2-R2 Blocker 1).
+      canonicalPvr() as MesFactEnvelope,
+      canonicalPa() as MesFactEnvelope,
+      { ...taskFact('S03-A-T00', 'TASK_COMPLETE', []), plan_binding: acceptedCycleBinding() },
+      { ...taskFact('S03-A-T01', 'TASK_COMPLETE', ['S03-A-T00'], { blocked_by_task_id: 'S03-A-T00' }), plan_binding: acceptedCycleBinding() },
+      { ...taskFact('S03-A-T02', 'IN_PROGRESS', ['S03-A-T01']), plan_binding: acceptedCycleBinding() },
+      { ...taskFact('S03-B-T01', 'IN_PROGRESS', []), plan_binding: acceptedCycleBinding() },
+      { ...taskFact('S03-B-T02', 'PLANNED', ['S03-B-T01']), plan_binding: acceptedCycleBinding() },
     ];
     const detail = projectExecuteDetail(facts);
 

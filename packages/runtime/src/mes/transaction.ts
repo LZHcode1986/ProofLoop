@@ -623,6 +623,24 @@ export class MesTransactionLayer {
       const validateResultingSet = (): void => {
         validateSubmittedGitFactDomains(submitted, resulting);
         assertUnambiguousStageSupportCohorts(resulting);
+        // (M1-F1 / Change C write closure) A submitted Work fact that actually
+        // materializes (NEW fact_id or changed payload) MUST carry the
+        // Work-attempt relation: null = first lineage attempt, exact
+        // predecessor fact_id = restart (contracts §2.1.6). Retained legacy
+        // Work (field omitted) collapses byte-identically above and is never
+        // re-admitted — the gate applies to the submitted delta only, so old
+        // durable snapshots stay readable.
+        const materializedSet = new Set(materialized);
+        for (const fact of submitted) {
+          if (fact.fact_kind !== 'work') continue;
+          if (!materializedSet.has(fact.fact_id)) continue; // retained replay — not re-admitted
+          if (fact.supersedes_work_ref === undefined) {
+            txFail('invalid-fact', `submitted Work fact ${JSON.stringify(fact.fact_id)} must carry supersedes_work_ref (null = first lineage attempt, exact predecessor fact_id = restart)（契约 §2.1.6：new NORMAL Work write closed，no-write）`);
+          }
+          if (fact.supersedes_work_ref !== null && (typeof fact.supersedes_work_ref !== 'string' || fact.supersedes_work_ref.length === 0)) {
+            txFail('invalid-fact', `submitted Work fact ${JSON.stringify(fact.fact_id)} carries a malformed supersedes_work_ref（no-write）`);
+          }
+        }
         resolveBinding();
       };
       validateResultingSet();

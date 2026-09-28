@@ -160,6 +160,7 @@ function s06dFact(
     },
     git_basis: BASIS,
     ...(task ? { task_status: 'TASK_COMPLETE', depends_on_task_ids: [] } : {}),
+    ...(fact_kind === 'work' ? { supersedes_work_ref: null as string | null } : {}),
     ...extra,
   };
 }

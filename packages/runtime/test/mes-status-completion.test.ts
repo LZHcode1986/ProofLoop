@@ -282,17 +282,22 @@ function allKeys(value: unknown, root = ''): string[] {
 }
 
 describe('invalid immutable history → status completion consumer (S06-R-C-T02)', () => {
-  test('frozen-context fixture: S06-D slice NEVER projects INTEGRATED/CLEANED/READY_TO_INTEGRATE/SLICE_CANDIDATE_READY; falls to EXECUTING; durable refs stay readable', () => {
+  test('frozen-context fixture: S06-D slice NEVER projects INTEGRATED/CLEANED/READY_TO_INTEGRATE/SLICE_CANDIDATE_READY; falls to EXECUTING; invalid-history refs are NOT surfaced as unlabeled current L2 refs (M2-F3)', () => {
     const detail: MesExecuteDetail = projectExecuteDetail(frozenContextFixture());
     const slice = detail.slices.find((s) => s.slice_id === 'S06-D');
     assert.ok(slice !== undefined, 'S06-D slice must be projected');
     assert.equal(FORBIDDEN_STATES.includes(slice.state), false, `state must not be a completion state: ${slice.state}`);
     assert.equal(slice.state, 'EXECUTING', 'only the in-flight fallback may project');
-    // Durable refs stay readable/auditable (the history is never hidden).
-    assert.equal(slice.integration_ref, 'proofloop-s06-d', 'integration ref stays readable');
+    // (M2-F3) The whole S06-D attempt is misbound (TYPO_REF) → relation-invalid
+    // → non-authorizing: its refs must NOT masquerade as unlabeled current
+    // operational refs. Invalid immutable history stays durable/readable in
+    // raw MES history for audit, never stuffed into current L2 fields
+    // without a historical_ label (contracts §2.4).
+    assert.equal(slice.integration_ref, undefined, 'misbound integration ref is not a current operational ref');
     assert.equal(slice.candidate_ref, undefined, 'no candidate git fact exists');
-    assert.equal(slice.latest_finding_ref, 'mes:fact:finding:S06:S06-D:post-fact-recovery-cv-1');
-    assert.equal(slice.latest_result_ref, 'mes:result:S06:S06-D:slice-ready:post-fact-recovery-1');
+    assert.equal(slice.latest_finding_ref, undefined, 'misbound finding ref is not a current operational ref');
+    assert.equal(slice.result_refs, undefined, 'misbound result refs are not current operational refs');
+    assert.equal(slice.latest_result_ref, undefined, 'no fake single latest_result_ref');
   });
 
   test('positive control: the SAME S06-D facts on the canonical ref close CLEANED (gate is invalid-history-specific)', () => {

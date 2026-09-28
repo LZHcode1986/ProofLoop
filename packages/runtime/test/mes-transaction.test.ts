@@ -106,15 +106,16 @@ function projectFact(id: string): MesFactEnvelope {
   };
 }
 
-function workFact(id: string, planRef = WORK_PLAN_REF): MesFactEnvelope {
+function workFact(id: string, planRef = WORK_PLAN_REF, sliceId = 'S01-A'): MesFactEnvelope {
   return {
     schema_version: 2,
     fact_id: `mes:fact:work:${id}`,
     fact_kind: 'work',
     created_by: 'brain',
     authority_refs: ['PRD.md#FR-003'],
-    scope: { stage_id: 'S01', slice_id: 'S01-A', task_id: 'S01-A-T01' },
+    scope: { stage_id: 'S01', slice_id: sliceId, task_id: `${sliceId}-T01` },
     work_id: `mes:work:${id}`,
+    supersedes_work_ref: null,
     plan_binding: {
       binding_stage: 'accepted',
       accepted_plan_ref: planRef,
@@ -401,14 +402,14 @@ describe('MES operational transaction layer (S06-R-A-T01)', () => {
     const fixture = makeFixture();
     try {
       const store = new MesSnapshotStore(fixture.dir);
-      const seed = [pvrWork('1'), paWork('1'), projectFact('p1'), workFact('w1'), workFact('w2')];
+      const seed = [pvrWork('1'), paWork('1'), projectFact('p1'), workFact('w1'), workFact('w2', WORK_PLAN_REF, 'S01-B')];
       store.write(seed);
       const preDigest = snapshotDigest(fixture.dir);
       assert.ok(preDigest !== null, 'seed snapshot must exist');
 
       // The caller submits ONLY the new fact — never the full snapshot.
       const layer = createMesTransactionLayer(fixture.dir);
-      const result = layer.commit(event([workFact('w3')]));
+      const result = layer.commit(event([workFact('w3', WORK_PLAN_REF, 'S01-C')]));
 
       // unrelated durable fact IDs are preserved by default.
       assert.deepEqual(result.preservedFactIds, [
@@ -464,7 +465,7 @@ describe('MES operational transaction layer (S06-R-A-T01)', () => {
       // The delta carries only ONE new work fact — the caller does NOT
       // resubmit p1/p2/w1 (this is exactly the Sep-10/12 partial-replace
       // incident pattern). The transaction layer must preserve them.
-      layer.commit(event([workFact('w2')]));
+      layer.commit(event([workFact('w2', WORK_PLAN_REF, 'S01-B')]));
       const durable = store.read();
       assert.deepEqual(
         durable.map((f) => f.fact_id),
@@ -807,8 +808,10 @@ describe('MES operational transaction layer (S06-R-A-T01)', () => {
           );
         });
 
+      // Two DISTINCT lineages (S01-A / S01-B) so the concurrent work facts
+      // each form a valid single-root lineage under the write-closure rules.
       const doneA = spawnWorker(event([workFact('wA')]), 'A');
-      const doneB = spawnWorker(event([workFact('wB')]), 'B');
+      const doneB = spawnWorker(event([workFact('wB', WORK_PLAN_REF, 'S01-B')]), 'B');
       // Both workers signal ready, then commit simultaneously.
       while (Atomics.load(ready, 0) < 2) {
         Atomics.wait(ready, 0, Atomics.load(ready, 0), 50);

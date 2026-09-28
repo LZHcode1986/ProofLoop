@@ -185,8 +185,20 @@ export function runStatusDomain(root: string, options: StatusCliOptions): CliEnv
     // terminal relations fail closed typed (STATIC-30/31).
     const durableFacts = readMesSnapshotFacts(root);
     const adjunct = projectTerminalAdjunct(durableFacts);
-    const sparseBase = projectSparseStatus(seedRecord.status);
-    const detailBase = projectDetailStatus(seedRecord);
+    // (M2-R2 Blocker 3) The legacy seed tuple remains readable as a historical
+    // / bootstrap record (readMesSeedRecord keeps its full status incl.
+    // counters), but the PUBLIC anomaly counters are durable-derived
+    // projections (contracts §2.3 / Change F) — never projected from the seed
+    // tuple, and `repair / human_required / recovery` have no closed durable
+    // opening+closing predicate. The legacy fallback therefore projects the
+    // seed's scope/phase/required_skill only; no counters are invented.
+    const seedStatusNoCounters: MesStatusTuple = {
+      scope: seedRecord.status.scope,
+      phase: seedRecord.status.phase,
+      required_skill: seedRecord.status.required_skill,
+    };
+    const sparseBase = projectSparseStatus(seedStatusNoCounters);
+    const detailBase = projectDetailStatus({ ...seedRecord, status: seedStatusNoCounters });
     const result = options.detail
       ? options.jsonOutput
         ? adjunct !== undefined
@@ -338,7 +350,31 @@ function projectCurrentCycleEnvelope(
 ): CliEnvelope {
   try {
     const current = projectCycleFilteredStatus(facts);
-    const tuple: MesStatusTuple = { scope: current.scope, phase: current.phase, required_skill: current.required_skill };
+    const adjunct = projectTerminalAdjunct(facts);
+    // (Change D / STATIC-35) Legitimate Stage-to-Stage Rolling-Wave boundary:
+    // no unique in-flight Stage and a provable open-cycle PRE_TERMINAL. The
+    // public surface reports the project-level observation and NEVER invents
+    // a Stage or picks the next one (Brain + Map own next-Stage selection).
+    if (current.observation === 'between-stage') {
+      const detail = projectCycleFilteredDetail(facts);
+      const result = options.jsonOutput
+        ? detail
+        : (detail.project_terminal !== undefined
+            ? formatProjectTerminalAdjunct(detail.project_terminal)
+            : 'project_terminal=PRE_TERMINAL') +
+          (detail.accepted_stage_support_ids !== undefined && detail.accepted_stage_support_ids.length > 0
+            ? `\naccepted_stage_support_ids=${detail.accepted_stage_support_ids.join(' ')}`
+            : '');
+      return okEnvelope(command, result);
+    }
+    // (M2-1B / Change F) Thread the DERIVED L1 counters from the durable facts
+    // through to the sparse tuple (projectSparseStatus surfaces non-zero ones).
+    const tuple: MesStatusTuple = {
+      scope: current.scope as string,
+      phase: current.phase as string,
+      required_skill: current.required_skill as string,
+      ...(current.counters !== undefined ? { counters: current.counters } : {}),
+    };
     // (PO-S06-B-01) The projection-only `project_terminal` adjunct (contracts
     // 2.3.1) is exposed by the PUBLIC status surface in BOTH sparse forms
     // (human + JSON) when a current cycle/terminal observation is provable —
@@ -346,7 +382,6 @@ function projectCurrentCycleEnvelope(
     // projectCycleFilteredDetail / formatDetailStatus). Reuses the S06-A
     // projection seam (projectTerminalAdjunct); nothing is written, no
     // second store/pointer, no route/next-action (STATIC-14/30/31).
-    const adjunct = projectTerminalAdjunct(facts);
     const result = options.detail
       ? options.jsonOutput
         ? projectCycleFilteredDetail(facts)

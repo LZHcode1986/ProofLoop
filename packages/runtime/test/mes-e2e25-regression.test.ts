@@ -103,7 +103,7 @@ describe('E2E-25 MES operational transaction regression (S06-R-D-T02)', () => {
       const layer = createMesTransactionLayer(fixture.dir);
       // The delta carries only ONE new work fact — the caller never
       // resubmits p1/p2/w1 (exactly the Sep-10 incident pattern).
-      layer.commit(event([e25Work('w2')]) as never);
+      layer.commit(event([e25Work('w2', { sliceId: 'S01-B' })]) as never);
       const ids = durableIds(fixture.dir);
       for (const expected of ['mes:fact:planning_verification_result:S01:1', 'mes:fact:plan_acceptance:S01:1', 'mes:fact:project:p1', 'mes:fact:project:p2', 'mes:fact:work:w1', 'mes:fact:work:w2']) {
         assert.ok(ids.includes(expected), `missing durable fact ${expected}`);
@@ -120,7 +120,7 @@ describe('E2E-25 MES operational transaction regression (S06-R-D-T02)', () => {
       seed(fixture.dir, sep12BaseSnapshot());
       const layer = createMesTransactionLayer(fixture.dir);
       const before = snapshotDigest(fixture.dir);
-      const result = layer.commit(event([e25Work('w2')]) as never);
+      const result = layer.commit(event([e25Work('w2', { sliceId: 'S01-B' })]) as never);
       assert.ok(result.resultingFactIds.length > 0);
       const after = snapshotDigest(fixture.dir);
       assert.notEqual(after, before, 'a valid delta must persist');
@@ -130,7 +130,7 @@ describe('E2E-25 MES operational transaction regression (S06-R-D-T02)', () => {
       }
       // Replay of the same event is byte-identical (idempotent no-change).
       const replayDigest = snapshotDigest(fixture.dir);
-      layer.commit(event([e25Work('w2')]) as never);
+      layer.commit(event([e25Work('w2', { sliceId: 'S01-B' })]) as never);
       assert.equal(snapshotDigest(fixture.dir), replayDigest, 'byte-identical replay must be byte-stable');
     } finally {
       fixture.cleanup();

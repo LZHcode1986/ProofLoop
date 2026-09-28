@@ -46,7 +46,7 @@ import {
 } from './types';
 import type { MesFactEnvelope, MesTaskStatus } from './types';
 import { duplicateAcceptedStageSupportError, isDurableAcceptedStageSupport, verifyProjectReadySupportError, verifyProjectReadySuccessionGraphError } from './terminal';
-import { resolvePlanAcceptanceGenerationTips } from './binding';
+import { resolvePlanAcceptanceGenerationTips, resolveWorkLineageTips, workLineageKeyOf } from './binding';
 import { validateMesFactEnvelope, SchemaValidationError } from './validate';
 import { classifyInvalidHistory } from './history-oracle';
 /** Closed failure code for a status projection input violation. */
@@ -140,9 +140,14 @@ const GIT_BASIS_KNOWN_FIELDS = ['head', 'branch', 'worktree'] as const;
  * `counters` field is omitted entirely when nothing is non-zero.
  */
 export interface MesSparseStatus {
-  readonly scope: string;
-  readonly phase: string;
-  readonly required_skill: string;
+  /**
+   * Per-Stage scope / phase / required_skill. Omitted on a project-level
+   * between-Stage observation (STATIC-35) where no unique in-flight Stage
+   * exists and the legal PRE_TERMINAL frontier is reported instead.
+   */
+  readonly scope?: string;
+  readonly phase?: string;
+  readonly required_skill?: string;
   readonly counters?: Readonly<Partial<Record<MesAnomalyCounterKey, number>>>;
 }
 
@@ -176,6 +181,19 @@ export interface MesDetailStatus extends MesSparseStatus {
    * observation is proven; never a MES fact / phase / route / second store.
    */
   readonly project_terminal?: MesProjectTerminalAdjunct;
+  /** (Change D / STATIC-35) Ascending accepted-stage support ids on a project-level between-Stage observation. */
+  readonly accepted_stage_support_ids?: readonly string[];
+  /**
+   * (M2-F2 / Change G) Stage-scoped execute L2: the current Stage + cycle's
+   * slices/tasks projected through the SAME Current Operational Basis as
+   * `projectExecuteDetail`, so the PUBLIC `--detail` surface carries the
+   * operational frontier (current Work ref / semantic owner / waiting-for /
+   * blocked_by / Result-Finding refs / Git refs / cleanup_pending). Present
+   * only on a stage-scoped observation; a between-Stage (project-level)
+   * observation never fabricates Stage L2.
+   */
+  readonly slices?: readonly MesSliceExecuteState[];
+  readonly tasks?: readonly MesTaskExecuteState[];
 }
 
 /** Validate the Brain-supplied status tuple shape (fail closed). */
@@ -370,6 +388,33 @@ export function formatDetailStatus(projection: MesDetailStatus): string {
   if (projection.project_terminal !== undefined) {
     lines.push(`project_terminal=${projection.project_terminal.state}`);
   }
+  // (M2-R2 / Finding 4) Operational L2 parity: when the detail carries the
+  // execute L2 (slices/tasks — stage-scoped current-cycle projection), the
+  // HUMAN form renders the SAME read-only projection deterministically:
+  // one `slice=` line per slice (ascending slice_id) and one `task=` line
+  // per task (ascending fact_id), each carrying only the fields the durable
+  // facts provide. Between-Stage (project-level) detail has no slices/tasks
+  // and renders none. No route / next-action / reasoning text.
+  for (const slice of projection.slices ?? []) {
+    const bits = [`slice=${slice.slice_id}:${slice.state}`];
+    if (slice.current_work_ref !== undefined) bits.push(`work=${slice.current_work_ref}`);
+    if (slice.semantic_owner !== undefined) bits.push(`owner=${slice.semantic_owner}`);
+    if (slice.waiting_for !== undefined) bits.push(`wait=${slice.waiting_for}`);
+    if (slice.blocked_by !== undefined) bits.push(`blocked_by=${slice.blocked_by}`);
+    if (slice.cleanup_pending === true) bits.push('cleanup_pending');
+    if (slice.candidate_ref !== undefined) bits.push(`candidate_ref=${slice.candidate_ref}`);
+    if (slice.integration_ref !== undefined) bits.push(`integration_ref=${slice.integration_ref}`);
+    if (slice.latest_finding_ref !== undefined) bits.push(`finding_ref=${slice.latest_finding_ref}`);
+    else if (slice.finding_refs !== undefined) bits.push(`finding_refs=${slice.finding_refs.join(',')}`);
+    if (slice.latest_result_ref !== undefined) bits.push(`result_ref=${slice.latest_result_ref}`);
+    else if (slice.result_refs !== undefined) bits.push(`result_refs=${slice.result_refs.join(',')}`);
+    lines.push(bits.join(' '));
+  }
+  for (const task of projection.tasks ?? []) {
+    const bits = [`task=${task.task_id}:${task.task_status}`];
+    if (task.blocked_by !== undefined) bits.push(`blocked_by=${task.blocked_by}`);
+    lines.push(bits.join(' '));
+  }
   return lines.join('\n');
 }
 
@@ -393,6 +438,15 @@ export const MES_SLICE_EXECUTE_STATES = [
 ] as const;
 export type MesSliceExecuteStateValue = (typeof MES_SLICE_EXECUTE_STATES)[number];
 
+/** (M2-2 / Change G) Semantic owner of the current slice frontier — a projection of the durable state (contracts §2.4), never process/pane state. */
+export type MesSemanticOwner =
+  | 'worker'
+  | 'code-verifier'
+  | 'integrator'
+  | 'planner'
+  | 'stage-reviewer'
+  | 'brain';
+
 /** Per-task L2 projection (S03-A-T02). */
 export interface MesTaskExecuteState {
   readonly task_id: string;
@@ -407,14 +461,24 @@ export interface MesTaskExecuteState {
 export interface MesSliceExecuteState {
   readonly slice_id: string;
   readonly state: MesSliceExecuteStateValue;
+  /** Current Work attempt fact_id (the slice's authorizing Work lineage tip). */
+  readonly current_work_ref?: string;
+  /** Semantic owner of the current slice frontier (projection of the durable state, never process/pane state). */
+  readonly semantic_owner?: MesSemanticOwner;
+  /** What the semantic owner is waiting on (projection; see contracts §2.4). */
+  readonly waiting_for?: string;
   /** Propagated effective blocker of the slice (task id), when blocked. */
   readonly blocked_by?: string;
   /** True while an integration git fact exists without a cleanup git fact (§2.4). */
   readonly cleanup_pending?: boolean;
-  /** Latest result_ref of the slice's result facts (fact order). */
+  /** Single result_ref when the current attempt has exactly one authorizing result. */
   readonly latest_result_ref?: string;
-  /** Latest finding fact_id of the slice's finding facts (fact order). */
+  /** Bounded set of current attempt's authorizing result refs when multiple (no relation-defined winner). */
+  readonly result_refs?: readonly string[];
+  /** Single finding fact_id when the current attempt has exactly one authorizing finding. */
   readonly latest_finding_ref?: string;
+  /** Bounded set of current attempt's authorizing finding ids when multiple (no relation-defined winner). */
+  readonly finding_refs?: readonly string[];
   /** candidate_ref of the slice's candidate git fact, when present. */
   readonly candidate_ref?: string;
   /** candidate_ref of the slice's integration git fact, when present. */
@@ -453,6 +517,265 @@ export interface MesExecuteDetail {
  *
  * @throws {MesStatusError} on any fail-closed input.
  */
+/** Ascending lexicographic fact_id comparator — the canonical deterministic view (permutation-invariant). */
+function byFactId(a: MesFactEnvelope, b: MesFactEnvelope): number {
+  return a.fact_id < b.fact_id ? -1 : a.fact_id > b.fact_id ? 1 : 0;
+}
+
+
+/**
+ * (M2-1B) Shared Current Operational Basis builder — a single source of
+ * truth for execute detail, L1 counters and L2 detail. Lifted verbatim from
+ * `projectExecuteDetail` (M1) with NO semantic change: oracle currentness +
+ * per-slice attempt scoping + unified operational predicate + effective
+ * blocked graph all live here so the projections never drift apart.
+ */
+interface CurrentOperationalBasis {
+  readonly oracle: ReturnType<typeof classifyInvalidHistory>;
+  readonly nonAuthorizingIds: ReadonlySet<string>;
+  readonly isAuthorizing: (fact: MesFactEnvelope) => boolean;
+  readonly sliceFacts: ReadonlyMap<string, readonly MesFactEnvelope[]>;
+  readonly sliceOrder: readonly string[];
+  readonly sliceSupersededWorkIds: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly isCurrentAttemptFact: (fact: MesFactEnvelope) => boolean;
+  readonly taskById: ReadonlyMap<string, MesFactEnvelope>;
+  readonly effectiveBlocked: ReadonlyMap<string, string | undefined>;
+  readonly currentTaskFacts: readonly MesFactEnvelope[];
+  readonly findingById: ReadonlyMap<string, MesFactEnvelope>;
+  readonly isCurrentOperationalFact: (fact: MesFactEnvelope) => boolean;
+}
+function buildCurrentOperationalBasis(typed: readonly MesFactEnvelope[]): CurrentOperationalBasis {
+  const oracle = classifyInvalidHistory(typed);
+  const nonAuthorizingIds = new Set<string>([...oracle.invalidFactIds, ...oracle.unverifiableFactIds]);
+  const isAuthorizing = (fact: MesFactEnvelope): boolean => !nonAuthorizingIds.has(fact.fact_id);
+
+  // --- per-slice grouping; canonical slicing order (ascending slice_id) so
+  // the projected Slices array is permutation-invariant, not input-array-order.
+  const sliceFacts = new Map<string, MesFactEnvelope[]>();
+  for (const fact of typed) {
+    const sliceId = fact.scope?.slice_id;
+    if (sliceId === undefined) continue;
+    const bucket = sliceFacts.get(sliceId);
+    if (bucket === undefined) sliceFacts.set(sliceId, [fact]);
+    else bucket.push(fact);
+  }
+  const sliceOrder: string[] = [...sliceFacts.keys()].sort();
+
+  // --- attempt-scoped execute projection: a slice's CURRENT attempt is
+  // the unique tip of its Work lineage. Prior/restarted Work facts are history;
+  // facts bound to a SUPERSEDED work_id never drive the current Task set,
+  // blocked graph, completion predicate, CV state or Git lifecycle. Facts that
+  // carry NO work_id (e.g. unbound legacy finding_disposition / git facts)
+  // cannot be attributed to a superseded attempt and are kept. A slice with no
+  // Work facts has a single implicit attempt — its whole fact set is current.
+  const tipsRes = resolveWorkLineageTips(typed);
+  const sliceSupersededWorkIds = new Map<string, Set<string>>();
+  for (const sliceId of sliceOrder) {
+    const sliceFacts0 = sliceFacts.get(sliceId) ?? [];
+    const workFacts = sliceFacts0.filter((f) => f.fact_kind === 'work');
+    if (workFacts.length === 0) continue; // legacy implicit attempt
+    const allWorkIds = new Set<string>();
+    for (const w of workFacts) if (typeof w.work_id === 'string') allWorkIds.add(w.work_id);
+    // Current tip(s) are the surviving attempts; every OTHER distinct work_id in
+    // this slice is a superseded attempt whose facts must be excluded. (M1-F1b
+    // composition) A tip only counts as CURRENT when it is relation-valid (the
+    // oracle authorizes it): an old-generation Work is its own lineage tip but
+    // is classified relation-invalid, so its tasks must NOT enter the current
+    // completion / Task set (generation × Work composition).
+    const tips = tipsRes.ok ? tipsRes.tips : [];
+    const tipWorkIds = new Set<string>();
+    for (const tip of tips) {
+      if (tip.scope?.slice_id === sliceId && typeof tip.work_id === 'string' && isAuthorizing(tip)) tipWorkIds.add(tip.work_id);
+    }
+    // Only a work_id that is REPLACED by a surviving tip in THIS slice is
+    // superseded. If no tip resolves (single legacy work, field omitted), the
+    // whole slice is a current implicit attempt — nothing is dropped.
+    const superseded = new Set<string>();
+    if (allWorkIds.size > 0 && tipWorkIds.size > 0) {
+      for (const wid of allWorkIds) if (!tipWorkIds.has(wid)) superseded.add(wid);
+    }
+    sliceSupersededWorkIds.set(sliceId, superseded);
+  }
+  const isCurrentAttemptFact = (fact: MesFactEnvelope): boolean => {
+    const sliceId = fact.scope?.slice_id;
+    if (sliceId === undefined) return true;
+    const superseded = sliceSupersededWorkIds.get(sliceId);
+    // Unbound facts (no work_id) can't be attributed to a superseded attempt.
+    if (typeof fact.work_id !== 'string' || superseded === undefined || superseded.size === 0) return true;
+    return !superseded.has(fact.work_id);
+  };
+
+  // (M1-F1b composition / M2-R2 Blocker 1) Unified current-operational-basis
+  // predicate FIRST (the task graph below consumes it): a fact participates
+  // in the current Task set / completion / CV / disposition / Git lifecycle
+  // only when it belongs to the CURRENT accepted generation (relation-valid),
+  // is current under Work-attempt currentness, and — for facts without their
+  // own work_id (finding_disposition) — inherits currentness through its
+  // durable owner relation disposition.finding_ref → finding.work_id.
+  // Old-generation / superseded owner facts therefore keep their dispositions
+  // out of the current slice (restart boundary can never leak a stale
+  // PLAN_GAP arbitration).
+  const findingById = new Map<string, MesFactEnvelope>();
+  for (const f of typed) {
+    if (f.fact_kind === 'finding' && typeof f.fact_id === 'string') findingById.set(f.fact_id, f);
+  }
+  const isCurrentOperationalFact = (fact: MesFactEnvelope): boolean => {
+    if (!isAuthorizing(fact)) return false;
+    if (typeof fact.work_id === 'string') return isCurrentAttemptFact(fact);
+    if (fact.fact_kind === 'finding_disposition' && typeof fact.finding_ref === 'string') {
+      const owner = findingById.get(fact.finding_ref);
+      if (owner !== undefined) return isCurrentOperationalFact(owner);
+      // Unresolvable owner: leave the existing fail-closed relation checks to
+      // rule on it rather than guessing currentness.
+      return true;
+    }
+    return true;
+  };
+
+  // --- per-task effective blocked_by (direct wins; propagation along the
+  // real depends_on_task_ids edges in fact order; defensive cycle guard).
+  // (M2-R2 Blocker 1) ONLY current OPERATIONAL tasks participate — a task
+  // must pass the FULL current-operational predicate (current accepted
+  // generation AND current Work attempt), so an old-generation task that
+  // reuses a current work_id can never enter the task graph, the blocked
+  // graph, the completion predicate or the L2 task list, and restart task_id
+  // reuse can never bleed between attempts. Permutation-invariant: the graph
+  // is built from the current-operational set, never from input order.
+  const currentTaskFacts = typed.filter((fact) => fact.fact_kind === 'task' && isCurrentOperationalFact(fact));
+  const taskById = new Map<string, MesFactEnvelope>();
+  for (const fact of currentTaskFacts) {
+    if (fact.scope?.task_id !== undefined) taskById.set(fact.scope.task_id, fact);
+  }
+  const effectiveBlocked = new Map<string, string | undefined>();
+  const computeBlocked = (taskId: string, visiting: Set<string>): string | undefined => {
+    if (effectiveBlocked.has(taskId)) return effectiveBlocked.get(taskId);
+    if (visiting.has(taskId)) return undefined;
+    visiting.add(taskId);
+    const fact = taskById.get(taskId);
+    let result: string | undefined;
+    if (fact !== undefined) {
+      if (fact.blocked_by_task_id !== undefined) {
+        result = fact.blocked_by_task_id;
+      } else {
+        for (const dep of fact.depends_on_task_ids ?? []) {
+          const depBlocked = computeBlocked(dep, visiting);
+          if (depBlocked !== undefined) {
+            result = depBlocked;
+            break;
+          }
+        }
+      }
+    }
+    visiting.delete(taskId);
+    effectiveBlocked.set(taskId, result);
+    return result;
+  };
+  for (const fact of currentTaskFacts) {
+    if (fact.scope?.task_id !== undefined) computeBlocked(fact.scope.task_id, new Set());
+  }
+  return {
+    oracle,
+    nonAuthorizingIds,
+    isAuthorizing,
+    sliceFacts,
+    sliceOrder,
+    sliceSupersededWorkIds,
+    isCurrentAttemptFact,
+    taskById,
+    effectiveBlocked,
+    currentTaskFacts,
+    findingById,
+    isCurrentOperationalFact,
+  };
+}
+
+
+/**
+ * (M2-1B / Change F) Derive Stage-scoped L1 anomaly counters from the DURABLE
+ * facts via the shared Current Operational Basis — the same single currentness
+ * implementation as execute detail / L2, never the seed tuple and never a
+ * second classifier. `typed` must be scoped to the observed cycle + Stage.
+ *
+ * Implemented per contracts §2.3 (Change F) and E2E-30:
+ *   `blocked` — Slices in this Stage whose current-attempt Task graph resolves
+ *       a dependency blocker (one count per Slice; descendant Tasks on the
+ *       dependency chain are NOT double counted). Blocker durably resolving in
+ *       the same lineage closes it.
+ *   `cleanup` — Slices where an authorizing integration git fact exists but no
+ *       cleanup git fact yet (same current attempt); closing cleanup git fact
+ *       closes it.
+ *   `finding` — actionable FINDINGS/BLOCKED findings of the current attempt
+ *       with NO durable Brain disposition edge (finding_ref →
+ *       finding_disposition); the durable edge closes it (arbitration-pending
+ *       backlog).
+ *   `replan` — distinct findings behind CURRENT accepted PLAN_GAP
+ *       dispositions; successor accepted generation / currentness closes them
+ *       via the shared operational predicate.
+ *
+ * `repair` / `human_required` / `recovery` are NOT implemented (no closed
+ * durable opening + closing predicate; a missing key means "no authorized
+ * durable projection", NOT a proven zero). Zero counters are omitted.
+ */
+function deriveStageAnomalyCounters(
+  typed: readonly MesFactEnvelope[],
+  stageId: string,
+): Readonly<Partial<Record<MesAnomalyCounterKey, number>>> | undefined {
+  const basis = buildCurrentOperationalBasis(typed);
+  const counters: Partial<Record<MesAnomalyCounterKey, number>> = {};
+  // (M2-F1) Index dispositions by finding_ref, but ONLY the CURRENT
+  // operational ones (the shared basis authorizes them): a historical /
+  // relation-invalid disposition (old generation, superseded attempt) must
+  // NEVER close the current finding backlog — only a current/authorizing
+  // Brain arbitration edge does (contracts §2.3 `finding`).
+  const dispositionsByFinding = new Map<string, MesFactEnvelope[]>();
+  for (const f of typed) {
+    if (f.fact_kind === 'finding_disposition' && typeof f.finding_ref === 'string' && basis.isCurrentOperationalFact(f)) {
+      const arr = dispositionsByFinding.get(f.finding_ref);
+      if (arr === undefined) dispositionsByFinding.set(f.finding_ref, [f]);
+      else arr.push(f);
+    }
+  }
+  let blockedSlices = 0;
+  let cleanupSlices = 0;
+  let pendingFindings = 0;
+  const replanFindings = new Set<string>();
+  for (const sliceId of basis.sliceOrder) {
+    const sliceFacts = (basis.sliceFacts.get(sliceId) ?? []).filter((f) => f.scope?.stage_id === stageId);
+    if (sliceFacts.length === 0) continue;
+    const current = sliceFacts.filter((f) => basis.isCurrentAttemptFact(f));
+    // blocked: any current-attempt Task with an effective blocker counts the Slice once.
+    const anyBlockedTask = current.some(
+      (f) => f.fact_kind === 'task' && f.scope?.task_id !== undefined && basis.effectiveBlocked.get(f.scope.task_id) !== undefined,
+    );
+    if (anyBlockedTask) blockedSlices += 1;
+    // cleanup: authorizing integration without cleanup in the same current attempt.
+    const gitFacts = current.filter((f) => f.fact_kind === 'git');
+    const hasIntegration = gitFacts.some((g) => g.git_subkind === 'integration' && basis.isCurrentOperationalFact(g));
+    const hasCleanup = gitFacts.some((g) => g.git_subkind === 'cleanup' && basis.isCurrentOperationalFact(g));
+    if (hasIntegration && !hasCleanup) cleanupSlices += 1;
+    // finding backlog: actionable FINDINGS/BLOCKED findings with no durable disposition edge.
+    for (const f of current) {
+      if (f.fact_kind !== 'finding') continue;
+      if (!basis.isCurrentOperationalFact(f)) continue;
+      if (f.verifier_verdict !== 'FINDINGS' && f.verifier_verdict !== 'BLOCKED') continue;
+      const disps = dispositionsByFinding.get(f.fact_id);
+      if (disps === undefined || disps.length === 0) pendingFindings += 1;
+    }
+    // replan: distinct findings behind current accepted PLAN_GAP dispositions.
+    for (const d of current) {
+      if (d.fact_kind !== 'finding_disposition') continue;
+      if (!basis.isCurrentOperationalFact(d)) continue;
+      if (d.accepted_route_code !== 'PLAN_GAP') continue;
+      if (typeof d.finding_ref === 'string') replanFindings.add(d.finding_ref);
+    }
+  }
+  if (blockedSlices > 0) counters.blocked = blockedSlices;
+  if (cleanupSlices > 0) counters.cleanup = cleanupSlices;
+  if (pendingFindings > 0) counters.finding = pendingFindings;
+  if (replanFindings.size > 0) counters.replan = replanFindings.size;
+  return Object.keys(counters).length > 0 ? counters : undefined;
+}
+
 export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExecuteDetail {
   if (!Array.isArray(facts)) {
     statusFail('execute detail input must be an array of validated MES facts');
@@ -556,46 +879,57 @@ export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExec
   // SLICE_CANDIDATE_READY) or the CV verdict. The oracle classification is a
   // pure function of the durable fact set, so restart / re-hydrate yields the
   // identical projection.
-  const oracle = classifyInvalidHistory(typed);
-  const nonAuthorizingIds = new Set<string>([...oracle.invalidFactIds, ...oracle.unverifiableFactIds]);
-  const isAuthorizing = (fact: MesFactEnvelope): boolean => !nonAuthorizingIds.has(fact.fact_id);
+  // (M2-1B) Shared Current Operational Basis: oracle currentness + per-slice
+  // attempt scoping + unified operational predicate + effective blocked graph
+  // are consolidated in buildCurrentOperationalBasis so execute detail, L1
+  // counters and L2 detail consume exactly one currentness implementation.
+  const basis = buildCurrentOperationalBasis(typed);
+  const { isAuthorizing, isCurrentAttemptFact, isCurrentOperationalFact, sliceFacts, sliceOrder, effectiveBlocked, currentTaskFacts } = basis;
 
-  // --- per-task effective blocked_by (direct wins; propagation along the
-  // real depends_on_task_ids edges in fact order; defensive cycle guard).
-  const taskFacts = typed.filter((fact) => fact.fact_kind === 'task');
-  const taskById = new Map<string, MesFactEnvelope>();
-  for (const fact of taskFacts) {
-    if (fact.scope?.task_id !== undefined) taskById.set(fact.scope.task_id, fact);
+/**
+ * (M2-2 / Change G / M2-F4) Closed semantic ownership / wait condition
+ * implied by the current durable slice state (contracts §2.4). This is a
+ * projection, not a route: it names who owns the current frontier and what
+ * durable condition it is waiting on, never "who must act next". Purely
+ * derived — never process/pane state, never Herdr liveness; adds no durable
+ * owner fact or second state machine. Restart reconstructs the same pair
+ * from the same facts.
+ *
+ * A single CLEANED Slice does NOT prove Stage-level Review readiness
+ * (E2E-05 requires all Slices INTEGRATED), so CLEANED declares no owner/wait
+ * until Stage-level readiness is mechanically provable elsewhere.
+ */
+function semanticOwnerOf(
+  state: MesSliceExecuteStateValue,
+  blockedBy: string | undefined,
+): { readonly owner: MesSemanticOwner; readonly waiting: string } | undefined {
+  switch (state) {
+    case 'EXECUTING':
+      return { owner: 'worker', waiting: 'task_result' };
+    case 'BLOCKED_BY':
+      return blockedBy !== undefined ? { owner: 'worker', waiting: blockedBy } : undefined;
+    case 'SLICE_CANDIDATE_READY':
+      return { owner: 'code-verifier', waiting: 'verifier_result' };
+    case 'CV_PASSED':
+      return { owner: 'brain', waiting: 'candidate_git' };
+    case 'READY_TO_INTEGRATE':
+      return { owner: 'integrator', waiting: 'integration' };
+    case 'INTEGRATED':
+    case 'CLEANUP_PENDING':
+      return { owner: 'integrator', waiting: 'cleanup' };
+    case 'REPLAN':
+      return { owner: 'planner', waiting: 'plan_revision' };
+    case 'CLEANED':
+      // Slice complete; Stage-level Review readiness is NOT mechanically
+      // provable from a single CLEANED Slice (E2E-05), so no owner/wait
+      // is declared (M2-F4).
+      return undefined;
   }
-  const effectiveBlocked = new Map<string, string | undefined>();
-  const computeBlocked = (taskId: string, visiting: Set<string>): string | undefined => {
-    if (effectiveBlocked.has(taskId)) return effectiveBlocked.get(taskId);
-    if (visiting.has(taskId)) return undefined;
-    visiting.add(taskId);
-    const fact = taskById.get(taskId);
-    let result: string | undefined;
-    if (fact !== undefined) {
-      if (fact.blocked_by_task_id !== undefined) {
-        result = fact.blocked_by_task_id;
-      } else {
-        for (const dep of fact.depends_on_task_ids ?? []) {
-          const depBlocked = computeBlocked(dep, visiting);
-          if (depBlocked !== undefined) {
-            result = depBlocked;
-            break;
-          }
-        }
-      }
-    }
-    visiting.delete(taskId);
-    effectiveBlocked.set(taskId, result);
-    return result;
-  };
-  for (const fact of taskFacts) {
-    if (fact.scope?.task_id !== undefined) computeBlocked(fact.scope.task_id, new Set());
-  }
+}
 
-  const tasks: MesTaskExecuteState[] = taskFacts.map((fact) => {
+  // (Change E) Canonical task ordering: ascending fact_id — never input array
+  // position — so the projected tasks/slices are permutation-invariant.
+  const tasks: MesTaskExecuteState[] = [...currentTaskFacts].sort(byFactId).map((fact) => {
     const taskId = fact.scope?.task_id as string;
     const blocked = effectiveBlocked.get(taskId);
     const out: MesTaskExecuteState = {
@@ -606,49 +940,53 @@ export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExec
     };
     return out;
   });
-
-  // --- per-slice grouping (first-appearance order is deterministic).
-  const sliceOrder: string[] = [];
-  const sliceFacts = new Map<string, MesFactEnvelope[]>();
-  for (const fact of typed) {
-    const sliceId = fact.scope?.slice_id;
-    if (sliceId === undefined) continue;
-    if (!sliceFacts.has(sliceId)) {
-      sliceFacts.set(sliceId, []);
-      sliceOrder.push(sliceId);
-    }
-    sliceFacts.get(sliceId)!.push(fact);
-  }
-
   const slices: MesSliceExecuteState[] = sliceOrder.map((sliceId) => {
-    const sliceFactSet = sliceFacts.get(sliceId)!;
-    const tasksInSlice = sliceFactSet.filter((fact) => fact.fact_kind === 'task');
-    const gitFacts = sliceFactSet.filter((fact) => fact.fact_kind === 'git');
-    const findings = sliceFactSet.filter((fact) => fact.fact_kind === 'finding');
-    const results = sliceFactSet.filter((fact) => fact.fact_kind === 'result');
-    const dispositions = sliceFactSet.filter((fact) => fact.fact_kind === 'finding_disposition');
-
-    const cleanupFact = gitFacts.find((fact) => fact.git_subkind === 'cleanup');
-    const integrationFact = gitFacts.find((fact) => fact.git_subkind === 'integration');
-    const candidateFact = gitFacts.find((fact) => fact.git_subkind === 'candidate');
+    const sliceFactSet = sliceFacts.get(sliceId)!.filter(isCurrentAttemptFact);
+    // (Change E / M1-F3) Canonical per-slice candidate arrays (ascending
+    // fact_id) for STABLE PRESENTATION only — never for semantic selection.
+    // (M2-R2 Blocker 1) Only CURRENT OPERATIONAL facts participate in the
+    // per-slice candidate sets: an old-generation task/git/finding/result
+    // that reuses a current work_id is relation-invalid history and must
+    // never feed the completion predicate, the blocked graph or the git
+    // ambiguity count.
+    const tasksInSlice = sliceFactSet.filter((fact) => fact.fact_kind === 'task' && isCurrentOperationalFact(fact)).sort(byFactId);
+    const gitFacts = sliceFactSet.filter((fact) => fact.fact_kind === 'git' && isCurrentOperationalFact(fact)).sort(byFactId);
+    const findings = sliceFactSet.filter((fact) => fact.fact_kind === 'finding' && isCurrentOperationalFact(fact)).sort(byFactId);
+    const results = sliceFactSet.filter((fact) => fact.fact_kind === 'result' && isCurrentOperationalFact(fact)).sort(byFactId);
+    const dispositions = sliceFactSet.filter((fact) => fact.fact_kind === 'finding_disposition' && isCurrentOperationalFact(fact)).sort(byFactId);
+    // (M1-F3) Same-subkind git facts in the current attempt carry no
+    // relation-defined winner: two candidate (or integration/cleanup) git
+    // facts would be an ambiguous current Git lifecycle. NEVER pick one by
+    // opaque fact_id (the reviewer: "disposition / result / Git 也仍然存在
+    // 相同模式") — fail closed typed instead.
+    const uniqueGitOf = (subkind: string): MesFactEnvelope | undefined => {
+      const matches = gitFacts.filter((fact) => fact.git_subkind === subkind);
+      if (matches.length > 1) {
+        statusFail(`slice ${sliceId} carries ${matches.length} ${subkind} git facts in the current attempt with no relation-defined winner — ambiguous current ${subkind} (no-write)`);
+      }
+      return matches[0];
+    };
+    const cleanupFact = uniqueGitOf('cleanup');
+    const integrationFact = uniqueGitOf('integration');
+    const candidateFact = uniqueGitOf('candidate');
     // (S06-R-C-T02) Completion-driving git facts must be relation-valid: a
     // misbound (relation-invalid) git fact stays readable/auditable but can
     // never project CLEANED / INTEGRATED / READY_TO_INTEGRATE.
-    const authorizingCleanupFact = cleanupFact !== undefined && isAuthorizing(cleanupFact) ? cleanupFact : undefined;
-    const authorizingIntegrationFact = integrationFact !== undefined && isAuthorizing(integrationFact) ? integrationFact : undefined;
-    const authorizingCandidateFact = candidateFact !== undefined && isAuthorizing(candidateFact) ? candidateFact : undefined;
-    // CV verdict uses the LATEST AUTHORIZING finding (facts order): a
-    // historical PASS followed by a later FINDINGS must NOT keep the slice
-    // CV_PASSED, and a relation-invalid finding never drives cvPass — the
-    // projection reflects the current authorizing durable facts only.
-    const authorizingFindings = findings.filter((fact) => isAuthorizing(fact));
-    const latestAuthorizingFinding = authorizingFindings.length > 0 ? authorizingFindings[authorizingFindings.length - 1] : undefined;
-    const cvPass = latestAuthorizingFinding !== undefined && latestAuthorizingFinding.verifier_verdict === 'PASS';
-    // Disposition verdict uses the LATEST disposition (facts order): an
-    // earlier PLAN_GAP disposition followed by a later non-PLAN_GAP one no
-    // longer projects REPLAN (CV-S03-A-R2).
-    const latestDisposition = dispositions.length > 0 ? dispositions[dispositions.length - 1] : undefined;
-    const replan = latestDisposition !== undefined && latestDisposition.accepted_route_code === 'PLAN_GAP';
+    const authorizingCleanupFact = cleanupFact !== undefined && isCurrentOperationalFact(cleanupFact) ? cleanupFact : undefined;
+    const authorizingIntegrationFact = integrationFact !== undefined && isCurrentOperationalFact(integrationFact) ? integrationFact : undefined;
+    const authorizingCandidateFact = candidateFact !== undefined && isCurrentOperationalFact(candidateFact) ? candidateFact : undefined;
+    // (M1-F3) CV verdict is set-union over the current attempt's authorizing
+    // findings, NEVER fact_id-last: the slice is CV_PASSED only when it has at
+    // least one authorizing finding and EVERY authorizing finding is PASS. Any
+    // FINDINGS in the current attempt blocks CV_PASSED deterministically, so
+    // opaque fact_id-renaming can never flip the state.
+    const authorizingFindings = findings.filter((f) => isCurrentOperationalFact(f));
+    const cvPass = authorizingFindings.length > 0 && authorizingFindings.every((f) => f.verifier_verdict === 'PASS');
+    // (M1-F3) Disposition verdict likewise: anywhere a current-attempt
+    // authorizing disposition is PLAN_GAP the slice is REPLAN (a reroute the
+    // Brain must take), independent of fact_id order.
+    const authorizingDispositions = dispositions.filter((f) => isCurrentOperationalFact(f));
+    const replan = authorizingDispositions.length > 0 && authorizingDispositions.some((f) => f.accepted_route_code === 'PLAN_GAP');
 
     const firstBlockedTask = tasksInSlice.find((fact) => {
       const taskId = fact.scope?.task_id;
@@ -679,20 +1017,40 @@ export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExec
     } else {
       state = 'EXECUTING';
     }
+    // (M2-2 / Change G) Current Work attempt of this slice: the unique
+    // authorizing work fact of the current attempt (the lineage tip). Exposed
+    // only when exactly one such work fact exists; never invented.
+    const currentWorkFacts = sliceFactSet.filter((f) => f.fact_kind === 'work' && isAuthorizing(f));
+    const currentWorkRef = currentWorkFacts.length === 1 ? currentWorkFacts[0].fact_id : undefined;
+    // (M2-2 / Change G) Semantic owner / waiting-for: closed projection of the
+    // durable slice state (contracts §2.4) — never process/pane state.
+    const semantic = semanticOwnerOf(state, blockedBy);
 
-    const lastResult = results.length > 0 ? results[results.length - 1] : undefined;
-    const latestFinding = findings.length > 0 ? findings[findings.length - 1] : undefined;
-    // Readable refs come from the DURABLE facts (invalid immutable history is
-    // never hidden): refs stay observable even when they do not authorize.
+    // (M2-F3) Current L2 refs come ONLY from current operational facts:
+    // a relation-invalid (misbound / superseded-generation) git/result/finding
+    // fact NEVER masquerades as the unlabeled current candidate/integration/
+    // cleanup/result/finding ref. Invalid immutable history remains durable
+    // and readable in raw MES history for audit — it is not stuffed into the
+    // current L2 fields without a historical_ label (contracts §2.4).
+    const authorizingCleanupRef = authorizingCleanupFact?.candidate_ref;
+    const authorizingIntegrationRef = authorizingIntegrationFact?.candidate_ref;
+    const authorizingCandidateRef = authorizingCandidateFact?.candidate_ref;
+    // (M1-F3) Readable refs: a single result/finding is definite; multiple
+    // disjoint candidates carry no relation-defined winner, so expose the
+    // bounded set (ascending fact_id) rather than a fake single "latest".
+    const resultRefs = results.filter((f) => isCurrentOperationalFact(f)).map((f) => f.result_ref).filter((r): r is string => typeof r === 'string');
+    const findingRefs = findings.filter((f) => isCurrentOperationalFact(f)).map((f) => f.fact_id);
     const out: MesSliceExecuteState = {
       slice_id: sliceId,
       state,
+      ...(currentWorkRef !== undefined ? { current_work_ref: currentWorkRef } : {}),
+      ...(semantic !== undefined ? { semantic_owner: semantic.owner, waiting_for: semantic.waiting } : {}),
       ...(blockedBy !== undefined ? { blocked_by: blockedBy } : {}),
-      ...(integrationFact !== undefined && cleanupFact === undefined ? { cleanup_pending: true } : {}),
-      ...(lastResult?.result_ref !== undefined ? { latest_result_ref: lastResult.result_ref } : {}),
-      ...(latestFinding !== undefined ? { latest_finding_ref: latestFinding.fact_id } : {}),
-      ...(candidateFact?.candidate_ref !== undefined ? { candidate_ref: candidateFact.candidate_ref } : {}),
-      ...(integrationFact?.candidate_ref !== undefined ? { integration_ref: integrationFact.candidate_ref } : {}),
+      ...(authorizingIntegrationFact !== undefined && authorizingCleanupFact === undefined ? { cleanup_pending: true } : {}),
+      ...(resultRefs.length === 1 ? { latest_result_ref: resultRefs[0] } : resultRefs.length > 1 ? { result_refs: resultRefs } : {}),
+      ...(findingRefs.length === 1 ? { latest_finding_ref: findingRefs[0] } : findingRefs.length > 1 ? { finding_refs: findingRefs } : {}),
+      ...(authorizingCandidateRef !== undefined ? { candidate_ref: authorizingCandidateRef } : {}),
+      ...(authorizingIntegrationRef !== undefined ? { integration_ref: authorizingIntegrationRef } : {}),
     };
     return out;
   });
@@ -995,18 +1353,33 @@ function resolveCurrentCycle(
  *   when the current-cycle observation path cannot be proven.
  */
 export interface MesCycleFilteredStatus {
-  /** The unique opaque current delivery-cycle ID. */
+  /** The unique opaque current delivery-cycle ID (always present). */
   readonly cycle_id: string;
-  /** The current in-flight Stage (`^S\d+$`). */
-  readonly scope: string;
   /**
-   * Cycle-filtered per-stage phase: PLANNING / EXECUTE / REVIEW, or
-   * STAGE_ACCEPTED once the unique in-flight stage has a same-cycle
-   * accepted-stage support (contracts §5.1 closed per-stage phase set).
+   * Observation shape. `stage-scoped` (default, omitted field) carries the
+   * per-Stage tuple below; `between-stage` is the legal Stage-to-Stage
+   * Rolling-Wave boundary (no unique in-flight Stage, PROVES PRE_TERMINAL)
+   * and carries `accepted_stage_support_ids` instead of a Stage tuple.
    */
-  readonly phase: MesStatusPhase;
-  /** The required skill of the projected phase (never invented). */
-  readonly required_skill: string;
+  readonly observation?: 'stage-scoped' | 'between-stage';
+  /** Current in-flight Stage (`^S\d+$`) — present iff stage-scoped. */
+  readonly scope?: string;
+  /** Cycle-filtered per-stage phase: PLANNING / EXECUTE / REVIEW / STAGE_ACCEPTED. */
+  readonly phase?: MesStatusPhase;
+  /** Required skill of the projected phase (never invented). */
+  readonly required_skill?: string;
+  /** Ascending canonical accepted-stage support ids (between-Stage observation only). */
+  /** Ascending canonical accepted-stage support ids (between-Stage observation only). */
+  readonly accepted_stage_support_ids?: string[];
+  /**
+   * (M2-1B / Change F) Sparse L1 anomaly counters DERIVED from the durable
+   * facts for the current Stage (stage-scoped observation only): `blocked` /
+   * `cleanup` / `finding` / `replan`. Never read from the seed tuple; `repair`
+   * / `human_required` / `recovery` are intentionally not implemented (their
+   * durable closing predicates are not closed — a missing key means "no
+   * authorized projection", NOT zero). Zero counters are omitted.
+   */
+  readonly counters?: Readonly<Partial<Record<MesAnomalyCounterKey, number>>>;
 }
 
 export function projectCycleFilteredStatus(
@@ -1074,9 +1447,18 @@ export function projectCycleFilteredStatus(
   if (inFlight.length === 1) {
     const stage = inFlight[0];
     const stageFacts = sameCycle.filter((fact) => fact.scope!.stage_id === stage);
+    // (Change D / STATIC-36) Generation-filtered phase: only facts NOT
+    // PROVABLY SUPERSEDED (non-current accepted generation / non-current Work
+    // attempt) derive the phase. Superseded-generation / superseded-attempt
+    // stage-only Review facts stay readable but can never flip the current
+    // phase to REVIEW. Plain misbound (typo) execution facts keep the stage
+    // in-flight (EXECUTE/REVIEW) per S06-R-C-T02 and NEVER authorize
+    // STAGE_ACCEPTED.
+    const supersededIds = new Set<string>(oracle.supersededFactIds);
+    const phaseStageFacts = stageFacts.filter((fact) => !supersededIds.has(fact.fact_id));
     // mes.md current-phase ordering: stage-only Review work/result/finding
     // → REVIEW (Review wins over the coexisting slice-scoped execute facts).
-    const reviewFact = stageFacts.some(
+    const reviewFact = phaseStageFacts.some(
       (fact) =>
         (fact.fact_kind === 'work' || fact.fact_kind === 'result' || fact.fact_kind === 'finding') &&
         fact.scope?.slice_id === undefined &&
@@ -1084,7 +1466,7 @@ export function projectCycleFilteredStatus(
     );
     // task or slice/task-scoped execution facts → EXECUTE; the `task` fact
     // must participate in the current-scope candidate.
-    const executeFact = stageFacts.some((fact) => {
+    const executeFact = phaseStageFacts.some((fact) => {
       if (fact.fact_kind === 'task') return true;
       const scope = fact.scope;
       return (
@@ -1098,12 +1480,40 @@ export function projectCycleFilteredStatus(
     });
     const phase: MesStatusPhase = reviewFact ? 'REVIEW' : executeFact ? 'EXECUTE' : 'PLANNING';
     const requiredSkill = phase === 'REVIEW' ? 'stage-reviewer' : phase === 'EXECUTE' ? 'proofloop-execute' : 'proofloop-plan';
-    return { cycle_id: currentCycle, scope: stage, phase, required_skill: requiredSkill };
+    // (M2-1B / Change F) Derived sparse L1 anomaly counters for this Stage
+    // over its same-cycle current-attempt facts (never the seed tuple).
+    const stageCycleFacts = sameCycle.filter((fact) => fact.scope!.stage_id === stage);
+    const counters = deriveStageAnomalyCounters(stageCycleFacts, stage);
+    return {
+      cycle_id: currentCycle,
+      scope: stage,
+      phase,
+      required_skill: requiredSkill,
+      ...(counters !== undefined ? { counters } : {}),
+    };
   }
   if (inFlight.length === 0 && candidateStages.length === 1) {
     // The unique in-flight stage now carries a same-cycle accepted-stage
     // support (contracts §5.1 STAGE_ACCEPTED).
     return { cycle_id: currentCycle, scope: candidateStages[0], phase: 'STAGE_ACCEPTED', required_skill: 'stage-reviewer' };
+  }
+  if (inFlight.length === 0 && candidateStages.length > 1) {
+    // (Change D / STATIC-35) Legitimate Stage-to-Stage Rolling-Wave boundary:
+    // the current cycle is OPEN (no legal matching terminal → provable
+    // PRE_TERMINAL) and every same-cycle candidate carries an accepted-stage
+    // support, so NO unique in-flight Stage exists. This is a legal project-
+    // level frontier, NOT AUTHORITY_GAP: status returns the project-level
+    // between-Stage PRE_TERMINAL observation and MES does not invent a Stage.
+    const hasSameCycleTerminal = typed.some(
+      (fact) => fact.fact_kind === 'project_ready' && fact.delivery_cycle_id === currentCycle,
+    );
+    if (!hasSameCycleTerminal) {
+      return {
+        cycle_id: currentCycle,
+        observation: 'between-stage',
+        accepted_stage_support_ids: [...acceptedStages].sort(),
+      };
+    }
   }
   if (inFlight.length === 0) {
     statusAuthorityGap('no in-flight stage: every same-cycle candidate stage has a same-cycle accepted-stage support (missing in-flight candidate)');
@@ -1127,6 +1537,17 @@ export function projectCycleFilteredDetail(
 ): MesDetailStatus {
   const typed = expectValidatedFacts(facts, 'cycle-filtered detail');
   const current = projectCycleFilteredStatus(typed, opts);
+  // (Change D / STATIC-35) project-level between-Stage observation: no unique
+  // in-flight Stage → no per-Stage tuple. Detail returns the legal PRE_TERMINAL
+  // reality (accepted-stage support ids) + the projection-only project_terminal
+  // adjunct; MES never invents a Stage or chooses the next one.
+  if (current.observation === 'between-stage') {
+    const adjunct = projectTerminalAdjunct(typed, opts);
+    return {
+      accepted_stage_support_ids: current.accepted_stage_support_ids ?? [],
+      ...(adjunct !== undefined ? { project_terminal: adjunct } : {}),
+    };
+  }
   const base: MesDetailStatus = {
     scope: current.scope,
     phase: current.phase,
@@ -1186,8 +1607,28 @@ export function projectCycleFilteredDetail(
     if (pvrFact.result_ref !== undefined) extra.planning_verification_result_ref = pvrFact.result_ref;
   }
   const adjunct = projectTerminalAdjunct(typed, opts);
+  // (M2-1B / Change F) The bounded detail view carries the same derived L1
+  // counters as the sparse status (stage-scoped observation), so --detail
+  // never loses them.
+  // (M2-F2 / Change G) Stage-scoped execute L2: merge the current Stage +
+  // cycle's slices/tasks through the SAME Current Operational Basis as
+  // projectExecuteDetail, so the PUBLIC --detail surface carries the
+  // operational frontier (current Work ref / semantic owner / waiting-for /
+  // blocked_by / Result-Finding refs / Git refs / cleanup_pending). Only the
+  // observed Stage's same-cycle facts feed the projection; between-Stage
+  // (project-level) never fabricates Stage L2 (handled above).
+  const stageCycleFacts = typed.filter(
+    (fact) =>
+      fact.scope?.stage_id === current.scope &&
+      cycleOf(fact) === current.cycle_id &&
+      fact.fact_kind !== 'project_ready',
+  );
+  const execute = projectExecuteDetail(stageCycleFacts);
   return {
     ...base,
+    ...(current.counters !== undefined ? { counters: current.counters } : {}),
+    slices: execute.slices,
+    tasks: execute.tasks,
     ...(extra as Partial<MesDetailStatus>),
     ...(adjunct !== undefined ? { project_terminal: adjunct } : {}),
   };

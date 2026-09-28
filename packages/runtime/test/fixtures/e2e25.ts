@@ -103,15 +103,17 @@ export function e25Project(id: string): MesFactEnvelope {
  * Accepted-bound work fact. `verificationResultRef` defaults to the canonical
  * ref; pass E25_TYPO_REF for the Sep-13 typo incident shape.
  */
-export function e25Work(id: string, opts: { verificationResultRef?: string; planRef?: string } = {}): MesFactEnvelope {
+export function e25Work(id: string, opts: { verificationResultRef?: string; planRef?: string; sliceId?: string } = {}): MesFactEnvelope {
+  const sliceId = opts.sliceId ?? 'S01-A';
   return {
     schema_version: 2,
     fact_id: `mes:fact:work:${id}`,
     fact_kind: 'work',
     created_by: 'brain',
     authority_refs: ['PRD.md#FR-003'],
-    scope: { stage_id: 'S01', slice_id: 'S01-A', task_id: 'S01-A-T01' },
+    scope: { stage_id: 'S01', slice_id: sliceId, task_id: `${sliceId}-T01` },
     work_id: `mes:work:${id}`,
+    supersedes_work_ref: null,
     plan_binding: {
       binding_stage: 'accepted',
       accepted_plan_ref: opts.planRef ?? E25_PLAN_REF,
