@@ -22,10 +22,6 @@ jobs:
 
       - name: Build kernel + runtime (tsc)
         run: npm run build
-
-      - name: Compile runtime tests (tsc -p)
-        run: npx tsc -p packages/runtime/test/tsconfig.json
-
       - name: CLI smoke — proofloop status fails closed on unseeded template (exit 2 + RUNTIME.BLOCKED)
         run: |
           set +e

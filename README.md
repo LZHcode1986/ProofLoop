@@ -2,8 +2,9 @@
 
 本仓库是 **ProofLoop v2 新流程模型**（Propose → Planning → Execute → Review →
 PROJECT_READY）的干净模板：包含迁移到新项目所需的流程文件、四类 canonical Authority
-模板、Role Skill / Contract / Brain host 入口，以及 `packages/runtime/test/` 中的
-Runtime 测试与 fixtures；不含任何历史 Stage 数据或机器事实（`.proofloop/`）。
+模板、Role Skill / Contract / Brain host 入口，以及 `packages/runtime/` 的
+Runtime 实现（src 代码）；不含任何历史 Stage 数据或机器事实（`.proofloop/`），
+也不携带测试组件/用例（保持干净可复用的框架仓库）。
 
 **用途**：把本仓库复制到新项目，按 `MIGRATION.md` 改写需求文档并初始化。
 
