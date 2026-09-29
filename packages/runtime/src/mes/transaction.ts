@@ -61,7 +61,9 @@ import {
   verifyProjectReadySuccessionGraphError,
   isDurableAcceptedStageSupport,
   duplicateAcceptedStageSupportError,
+  resolveHumanRequiredResolutionError,
 } from './terminal';
+import { resolveHumanRequiredConditions } from './human-required-oracle';
 import {
   IntegrationStateError,
   validateCandidateFact,
@@ -122,7 +124,11 @@ function isImmutableDurableKind(kind: MesFactKind): boolean {
     kind === 'planning_verification_result' ||
     kind === 'plan_acceptance' ||
     kind === 'project_ready' ||
-    kind === 'recovery_baseline'
+    kind === 'recovery_baseline' ||
+    // (A4) A HUMAN_REQUIRED condition closure is a durable Brain arbitration
+    // decision: once materialized it never changes; byte-identical replay is
+    // the only legal re-submission (conflict resolution fails closed).
+    kind === 'human_required_resolution'
   );
 }
 
@@ -444,6 +450,11 @@ export function resolveTransactionBindingError(
     if (err !== undefined) return err;
   }
   for (const fact of facts) {
+    if (fact.fact_kind !== 'human_required_resolution') continue;
+    const err = resolveHumanRequiredResolutionError(fact, facts);
+    if (err !== undefined) return err;
+  }
+  for (const fact of facts) {
     if (fact.fact_kind !== 'project_ready') continue;
     const err = verifyProjectReadySupportError(fact, facts);
     if (err !== undefined) return err;
@@ -608,6 +619,20 @@ export class MesTransactionLayer {
         // no binding-critical identity to compare and pass (their own
         // kind/binding rules still apply).
         for (const fact of submitted) {
+          // (Reviewer Finding 1 / H1+H4 composition) A `human_required_resolution`
+          // of kind RESUME is a HISTORICAL condition-closure relation, NOT a new
+          // execution authorization fact: it must bind the source disposition's
+          // ORIGIN generation (which an unrelated Replan g2 has since superseded),
+          // so the generic "must equal the current canonical tip" gate would
+          // deadlock H1 (condition stays OPEN across g2) with H4 (RESUME binds
+          // origin). Its binding correctness is FULLY proven by the shared HR
+          // legality predicate (resolveHumanRequiredResolutionLegalityError:
+          // source F/D, origin generation, stage/cycle, exact origin binding) —
+          // skip the exact-match gate here and let that predicate be the single
+          // authority for RESUME binding. REPLAN keeps the exact-match gate: it
+          // IS the mechanical guarantee that the resolution binds the fresh PA
+          // target.
+          if (fact.fact_kind === 'human_required_resolution' && fact.resolution_kind === 'RESUME') continue;
           const planBinding = fact.plan_binding;
           if (!planBinding || planBinding.binding_stage !== 'accepted') continue;
           const exactMatchError = exactMatchBindingCriticalIdentityError(resulting, fact);
@@ -639,6 +664,43 @@ export class MesTransactionLayer {
           }
           if (fact.supersedes_work_ref !== null && (typeof fact.supersedes_work_ref !== 'string' || fact.supersedes_work_ref.length === 0)) {
             txFail('invalid-fact', `submitted Work fact ${JSON.stringify(fact.fact_id)} carries a malformed supersedes_work_ref（no-write）`);
+          }
+        }
+        // (A4 / contracts.md §2.2.4) REPLAN atomic causal rule: a REPLAN
+        // resolution and its target fresh PLAN_ACCEPTANCE must be materialized
+        // in the SAME semantic transaction (same submitted event). Target PA
+        // must be submitted here (never a pre-existing / retained PA), same
+        // Stage / same delivery_cycle_id as the resolution, and be the fresh
+        // generation whose PVR support / supersedes-tip / unique-current-tip
+        // are closed by resolveTransactionBindingError on the resulting set
+        // (verifyPlanAcceptanceSupport / verifyPlanAcceptanceSuccessionGraphError).
+        for (const fact of submitted) {
+          if (fact.fact_kind !== 'human_required_resolution' || fact.resolution_kind !== 'REPLAN') continue;
+          const paRef = fact.resolution_plan_acceptance_ref;
+          const pa = submitted.find((f) => f.fact_id === paRef && f.fact_kind === 'plan_acceptance');
+          if (pa === undefined || !materializedSet.has(pa.fact_id)) {
+            txFail('binding-mismatch', `REPLAN resolution ${JSON.stringify(fact.fact_id)} must target a fresh PLAN_ACCEPTANCE ${JSON.stringify(paRef)} materialized in the SAME semantic transaction — pre-existing / unrelated PA cannot close a HUMAN_REQUIRED condition（A4 atomic causal rule，no-write）`);
+          }
+          const resStage = fact.scope?.stage_id;
+          const paStage = pa.scope?.stage_id;
+          const resCycle = fact.plan_binding !== undefined && fact.plan_binding.binding_stage === 'accepted' ? fact.plan_binding.delivery_cycle_id : undefined;
+          const paCycle = pa.plan_binding !== undefined && pa.plan_binding.binding_stage === 'accepted' ? pa.plan_binding.delivery_cycle_id : undefined;
+          if (resStage !== paStage || resCycle !== paCycle) {
+            txFail('binding-mismatch', `REPLAN resolution ${JSON.stringify(fact.fact_id)} target PA ${JSON.stringify(pa.fact_id)} mismatches scope.stage_id / delivery_cycle_id（A4 atomic causal rule，same Stage/same cycle required，no-write）`);
+          }
+        }
+        // (A4 / contracts.md §2.2.4 / §5.1) Terminal interaction: a PROJECT_READY
+        // materialization for the CURRENT cycle requires NO open HUMAN_REQUIRED
+        // condition in that cycle (terminal relation closure, not a Project Gate).
+        // The cycle being terminated is the submitted project_ready's top-level
+        // delivery_cycle_id; the shared condition oracle evaluates the resulting
+        // set. Historical-cycle conditions never count into a new cycle's guard.
+        for (const fact of submitted) {
+          if (fact.fact_kind !== 'project_ready') continue;
+          const cycle = fact.delivery_cycle_id;
+          const openConditions = resolveHumanRequiredConditions(resulting, { currentCycleId: cycle });
+          if (openConditions.length > 0) {
+            txFail('binding-mismatch', `PROJECT_READY for cycle ${JSON.stringify(cycle)} cannot materialize while open HUMAN_REQUIRED conditions exist: ${openConditions.map((c) => c.finding.fact_id).join(', ')}（contracts §2.2.4 terminal interaction；terminal relation closure，no-write）`);
           }
         }
         resolveBinding();

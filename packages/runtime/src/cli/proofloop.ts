@@ -357,15 +357,39 @@ function projectCurrentCycleEnvelope(
     // a Stage or picks the next one (Brain + Map own next-Stage selection).
     if (current.observation === 'between-stage') {
       const detail = projectCycleFilteredDetail(facts);
-      const result = options.jsonOutput
-        ? detail
-        : (detail.project_terminal !== undefined
-            ? formatProjectTerminalAdjunct(detail.project_terminal)
-            : 'project_terminal=PRE_TERMINAL') +
-          (detail.accepted_stage_support_ids !== undefined && detail.accepted_stage_support_ids.length > 0
-            ? `\naccepted_stage_support_ids=${detail.accepted_stage_support_ids.join(' ')}`
-            : '');
-      return okEnvelope(command, result);
+      // (Reviewer Finding 2) Public-surface L1/L2 boundary: plain status
+      // carries the L1 counters (terminal + accepted supports + anomaly
+      // counters); --detail additionally carries the open condition locality
+      // (L2). JSON plain must NOT unconditionally leak open_human_required —
+      // only --detail does.
+      if (options.jsonOutput) {
+        // (final review / contracts §2.3.1) The projection-only
+        // `project_terminal` adjunct must appear in BOTH JSON result forms
+        // (plain AND --detail) — stage-scoped JSON already carries it; the
+        // between-stage JSON plain must not drop it. L2
+        // `open_human_required` stays --detail-only.
+        const result = options.detail
+          ? detail
+          : {
+              accepted_stage_support_ids: detail.accepted_stage_support_ids ?? [],
+              ...(detail.counters !== undefined ? { counters: detail.counters } : {}),
+              ...(detail.project_terminal !== undefined ? { project_terminal: detail.project_terminal } : {}),
+            };
+        return okEnvelope(command, result);
+      }
+      const terminalLine =
+        detail.project_terminal !== undefined
+          ? formatProjectTerminalAdjunct(detail.project_terminal)
+          : 'project_terminal=PRE_TERMINAL';
+      // (final review) `formatDetailStatus` ALREADY renders the
+      // project_terminal line (plus accepted supports, counters and the L2
+      // open_human_required locality) — prepending `terminalLine` there
+      // would duplicate the terminal line. Only the PLAIN human form
+      // prepends it once.
+      const human = options.detail
+        ? formatDetailStatus(detail)
+        : [terminalLine, formatSparseStatus(detail)].filter((line) => line.length > 0).join('\n');
+      return okEnvelope(command, human);
     }
     // (M2-1B / Change F) Thread the DERIVED L1 counters from the durable facts
     // through to the sparse tuple (projectSparseStatus surfaces non-zero ones).

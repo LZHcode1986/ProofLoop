@@ -30,6 +30,7 @@ export {
   MES_ROUTE_CODES,
   MES_RESUME_TARGETS,
   MES_GIT_SUBKINDS,
+  MES_RESOLUTION_KINDS,
 } from './types';
 export type {
   MesFactKind,
@@ -47,6 +48,7 @@ export type {
   MesRouteCode,
   MesResumeTarget,
   MesGitSubkind,
+  MesResolutionKind,
 } from './types';
 // Envelope validator — fail-closed closed-set schema validation.
 export { validateMesFactEnvelope, SchemaValidationError, isLegacyS01Result, isExecuteResult } from './validate';
@@ -138,7 +140,17 @@ export {
   isDurableAcceptedStageSupport,
   verifyProjectReadySupportError,
   resolveFindingDispositionRefError,
+  resolveHumanRequiredResolutionError,
 } from './terminal';
+
+// A4 HUMAN_REQUIRED condition oracle (pure projection, no durable open fact).
+export {
+  resolveHumanRequiredConditions,
+  countOpenHumanRequiredFindings,
+  isHistoricallyValidHumanRequiredOrigin,
+  uniqueFindingClassification,
+} from './human-required-oracle';
+export type { HumanRequiredOpenCondition } from './human-required-oracle';
 
 // Pure status / bounded detail projections (read-only, no next action).
 export {

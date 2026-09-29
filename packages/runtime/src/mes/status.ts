@@ -45,6 +45,8 @@ import {
   MES_GIT_SUBKINDS,
 } from './types';
 import type { MesFactEnvelope, MesTaskStatus } from './types';
+import { countOpenHumanRequiredFindings, resolveHumanRequiredConditions, uniqueFindingClassification } from './human-required-oracle';
+import type { HumanRequiredOpenCondition } from './human-required-oracle';
 import { duplicateAcceptedStageSupportError, isDurableAcceptedStageSupport, verifyProjectReadySupportError, verifyProjectReadySuccessionGraphError } from './terminal';
 import { resolvePlanAcceptanceGenerationTips, resolveWorkLineageTips, workLineageKeyOf } from './binding';
 import { validateMesFactEnvelope, SchemaValidationError } from './validate';
@@ -194,6 +196,15 @@ export interface MesDetailStatus extends MesSparseStatus {
    */
   readonly slices?: readonly MesSliceExecuteState[];
   readonly tasks?: readonly MesTaskExecuteState[];
+  /**
+   * (Reviewer Finding 3 / A4 §4.2) Cycle-level OPEN HUMAN_REQUIRED
+   * conditions (same projection `projectExecuteDetail` emits) carried on
+   * EVERY public detail observation — stage-scoped AND between-stage — so
+   * `proofloop status --detail` can always tell the Brain WHICH Finding /
+   * origin work / Stage-Slice locality is waiting for a human decision,
+   * even when the open condition belongs to a prior Stage.
+   */
+  readonly open_human_required?: readonly MesOpenHumanRequired[];
 }
 
 /** Validate the Brain-supplied status tuple shape (fail closed). */
@@ -346,8 +357,16 @@ export function projectDetailStatus(input: unknown): MesDetailStatus {
  * (mes.md normal example: `S01 / EXECUTE`, `skill=proofloop-execute`,
  * then one `key=value` line per non-zero counter).
  */
-export function formatSparseStatus(projection: MesSparseStatus): string {
-  const lines = [`${projection.scope} / ${projection.phase}`, `skill=${projection.required_skill}`];
+export function formatSparseStatus(projection: MesSparseStatus & { readonly accepted_stage_support_ids?: readonly string[] }): string {
+  // (Reviewer Finding 2) Project-level between-Stage observation: no unique
+  // in-flight Stage → no Stage tuple. Render accepted supports + L1 counters
+  // instead of a fabricated `undefined / undefined` line.
+  const lines: string[] = [];
+  if (projection.scope !== undefined && projection.phase !== undefined) {
+    lines.push(`${projection.scope} / ${projection.phase}`, `skill=${projection.required_skill}`);
+  } else if (projection.accepted_stage_support_ids !== undefined && projection.accepted_stage_support_ids.length > 0) {
+    lines.push(`accepted_stage_support_ids=${projection.accepted_stage_support_ids.join(' ')}`);
+  }
   if (projection.counters !== undefined) {
     for (const key of MES_ANOMALY_COUNTERS) {
       const value = projection.counters[key];
@@ -413,6 +432,19 @@ export function formatDetailStatus(projection: MesDetailStatus): string {
   for (const task of projection.tasks ?? []) {
     const bits = [`task=${task.task_id}:${task.task_status}`];
     if (task.blocked_by !== undefined) bits.push(`blocked_by=${task.blocked_by}`);
+    lines.push(bits.join(' '));
+  }
+  // (Reviewer Finding 3) Human parity for the cycle-level open conditions:
+  // one `human_required=` line per OPEN Finding with its qualifying
+  // disposition refs (canonical sorted), origin work provenance and Stage/Slice
+  // locality — the Brain can recover WHICH condition is waiting from public
+  // detail alone.
+  for (const cond of projection.open_human_required ?? []) {
+    const bits = [`human_required=${cond.finding_ref}`];
+    bits.push(`dispositions=${cond.disposition_refs.join(',')}`);
+    if (cond.work_id !== undefined) bits.push(`work=${cond.work_id}`);
+    if (cond.stage_id !== undefined) bits.push(`stage=${cond.stage_id}`);
+    if (cond.slice_id !== undefined) bits.push(`slice=${cond.slice_id}`);
     lines.push(bits.join(' '));
   }
   return lines.join('\n');
@@ -483,15 +515,46 @@ export interface MesSliceExecuteState {
   readonly candidate_ref?: string;
   /** candidate_ref of the slice's integration git fact, when present. */
   readonly integration_ref?: string;
+  /**
+   * (A4 §4.2 / Reviewer Finding 3) Qualifying ACCEPTED + USER_DECISION_REQUIRED
+   * disposition refs of OPEN HUMAN_REQUIRED conditions bound to this Slice's
+   * locality (finding.scope.slice_id === this slice). Appears only with an
+   * open condition; the slice's semantic_owner/waiting_for then project
+   * brain/human_decision (derived pause — Task status is never rewritten,
+   * no fake blocked_by, no accepted Result revocation).
+   */
+  readonly human_required_disposition_refs?: readonly string[];
 }
 
 /**
  * Bounded execute L2 detail view: slices + tasks projected deterministically
  * from the durable MES facts (S03-A-T02).
  */
+/**
+ * (A4 §4.2 / Reviewer Finding 3) One OPEN HUMAN_REQUIRED condition projected
+ * for public consumption: finding + qualifying disposition refs (canonical
+ * sorted — no insertion-order winner, F4), affected-work provenance
+ * (finding.work_id — the ORIGIN work, never rebound to a successor) and
+ * locality (finding.scope: Stage, optionally Slice). Stage-only Findings
+ * appear with slice_id omitted and are NOT forced into any Slice.
+ */
+export interface MesOpenHumanRequired {
+  readonly finding_ref: string;
+  readonly disposition_refs: readonly string[];
+  readonly work_id?: string;
+  readonly stage_id?: string;
+  readonly slice_id?: string;
+}
+
 export interface MesExecuteDetail {
   readonly slices: readonly MesSliceExecuteState[];
   readonly tasks: readonly MesTaskExecuteState[];
+  /**
+   * (A4 §4.2 / Reviewer Finding 3) Cycle-scoped OPEN HUMAN_REQUIRED
+   * conditions over the facts this projection derives from (cycle-level L1
+   * counter counterpart at detail level).
+   */
+  readonly open_human_required?: readonly MesOpenHumanRequired[];
 }
 
 /**
@@ -712,13 +775,18 @@ function buildCurrentOperationalBasis(typed: readonly MesFactEnvelope[]): Curren
  *       dispositions; successor accepted generation / currentness closes them
  *       via the shared operational predicate.
  *
- * `repair` / `human_required` / `recovery` are NOT implemented (no closed
- * durable opening + closing predicate; a missing key means "no authorized
- * durable projection", NOT a proven zero). Zero counters are omitted.
+ * `repair` / `recovery` are NOT implemented (no closed durable opening +
+ * closing predicate; a missing key means "no authorized durable projection",
+ * NOT a proven zero). `human_required` is a CYCLE-level counter computed by
+ * the caller from the FULL current-cycle facts (Reviewer Finding 2) and
+ * merged into every public observation — deliberately NOT derived here, so
+ * an unrelated in-flight Stage can never hide an open condition. Zero
+ * counters are omitted.
  */
 function deriveStageAnomalyCounters(
   typed: readonly MesFactEnvelope[],
   stageId: string,
+  currentCycleId: string | undefined,
 ): Readonly<Partial<Record<MesAnomalyCounterKey, number>>> | undefined {
   const basis = buildCurrentOperationalBasis(typed);
   const counters: Partial<Record<MesAnomalyCounterKey, number>> = {};
@@ -762,20 +830,56 @@ function deriveStageAnomalyCounters(
       if (disps === undefined || disps.length === 0) pendingFindings += 1;
     }
     // replan: distinct findings behind current accepted PLAN_GAP dispositions.
+    // (A4 / F1 / H8) Consumes the SHARED finding-classification rule: a finding
+    // whose historically-valid ACCEPTED dispositions are ambiguous (distinct
+    // accepted_route_code > 1) is not counted for replan either (fail closed;
+    // never pick one route, never newest-wins). Same-route duplicates collapse.
     for (const d of current) {
       if (d.fact_kind !== 'finding_disposition') continue;
       if (!basis.isCurrentOperationalFact(d)) continue;
       if (d.accepted_route_code !== 'PLAN_GAP') continue;
-      if (typeof d.finding_ref === 'string') replanFindings.add(d.finding_ref);
+      if (typeof d.finding_ref !== 'string') continue;
+      const f = typed.find((x) => x.fact_kind === 'finding' && x.fact_id === d.finding_ref);
+      if (f === undefined) continue;
+      const classification = uniqueFindingClassification(f, typed, typed);
+      if (classification !== 'PLAN_GAP') continue; // ambiguity / other route → fail closed
+      replanFindings.add(d.finding_ref);
     }
   }
   if (blockedSlices > 0) counters.blocked = blockedSlices;
   if (cleanupSlices > 0) counters.cleanup = cleanupSlices;
   if (pendingFindings > 0) counters.finding = pendingFindings;
   if (replanFindings.size > 0) counters.replan = replanFindings.size;
+  // (Reviewer Finding 2) `human_required` is NOT stage-scoped: an affected
+  // Work may pause while unrelated Stages / Work continue. The L1 counter
+  // must be computed CYCLE-level from the full current-cycle facts and
+  // merged into every public observation (stage-scoped / STAGE_ACCEPTED /
+  // between-stage / PRE_TERMINAL) by the caller — see
+  // projectCycleFilteredStatus. It is deliberately absent here.
   return Object.keys(counters).length > 0 ? counters : undefined;
 }
 
+
+/**
+ * (A4 §4.2 / Reviewer Finding 3+4) Shared projection of OPEN HUMAN_REQUIRED
+ * conditions into the public detail shape: canonical sorted qualifying
+ * disposition refs (never one insertion-order winner), origin work_id
+ * provenance (never rebound) and Stage/Slice locality (stage-only Findings
+ * keep Stage locality, slice_id omitted). Consumed by projectExecuteDetail
+ * AND projectCycleFilteredDetail so internal and public surfaces project the
+ * SAME shape.
+ */
+function projectOpenHumanRequired(
+  conditions: readonly HumanRequiredOpenCondition[],
+): readonly MesOpenHumanRequired[] {
+  return conditions.map((c) => ({
+    finding_ref: c.finding.fact_id,
+    disposition_refs: [...new Set(c.qualifyingDispositionRefs)].sort(),
+    ...(typeof c.finding.work_id === 'string' ? { work_id: c.finding.work_id } : {}),
+    ...(typeof c.finding.scope?.stage_id === 'string' ? { stage_id: c.finding.scope.stage_id } : {}),
+    ...(typeof c.finding.scope?.slice_id === 'string' ? { slice_id: c.finding.scope.slice_id } : {}),
+  }));
+}
 export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExecuteDetail {
   if (!Array.isArray(facts)) {
     statusFail('execute detail input must be an array of validated MES facts');
@@ -886,6 +990,15 @@ export function projectExecuteDetail(facts: readonly MesFactEnvelope[]): MesExec
   const basis = buildCurrentOperationalBasis(typed);
   const { isAuthorizing, isCurrentAttemptFact, isCurrentOperationalFact, sliceFacts, sliceOrder, effectiveBlocked, currentTaskFacts } = basis;
 
+  // (A4 §4.2 / Reviewer Finding 3) OPEN HUMAN_REQUIRED conditions over the
+  // SAME validated facts this projection derives from: origin Finding +
+  // qualifying disposition + affected-work provenance (finding.work_id —
+  // ORIGIN work, never rebound) + locality (finding.scope). Cycle is NOT
+  // re-filtered here: the input facts are already stage/cycle scoped by the
+  // caller (stageCycleFacts) or a single-cycle fixture; the L1 cycle-level
+  // counter stays the authoritative cycle filter (Reviewer Finding 2).
+  const openConditions = resolveHumanRequiredConditions(typed);
+
 /**
  * (M2-2 / Change G / M2-F4) Closed semantic ownership / wait condition
  * implied by the current durable slice state (contracts §2.4). This is a
@@ -982,11 +1095,24 @@ function semanticOwnerOf(
     // opaque fact_id-renaming can never flip the state.
     const authorizingFindings = findings.filter((f) => isCurrentOperationalFact(f));
     const cvPass = authorizingFindings.length > 0 && authorizingFindings.every((f) => f.verifier_verdict === 'PASS');
-    // (M1-F3) Disposition verdict likewise: anywhere a current-attempt
-    // authorizing disposition is PLAN_GAP the slice is REPLAN (a reroute the
-    // Brain must take), independent of fact_id order.
+    // (M1-F3 / Reviewer Finding 3) Disposition verdict consumes the SHARED
+    // finding-classification rule: a slice is REPLAN only when the PLAN_GAP
+    // disposition's Finding classifies UNIQUELY as PLAN_GAP over its
+    // historically-valid ACCEPTED dispositions. A Finding with conflicting
+    // routes (e.g. USER_DECISION_REQUIRED + PLAN_GAP) is ambiguous → fail
+    // closed: neither REPLAN nor the human/pause projection is produced
+    // (L1 and L2 stay consistent, H8).
     const authorizingDispositions = dispositions.filter((f) => isCurrentOperationalFact(f));
-    const replan = authorizingDispositions.length > 0 && authorizingDispositions.some((f) => f.accepted_route_code === 'PLAN_GAP');
+    const replan = authorizingDispositions.some((d) => {
+      if (d.accepted_route_code !== 'PLAN_GAP') return false;
+      if (typeof d.finding_ref !== 'string') return false;
+      const f = typed.find((x) => x.fact_kind === 'finding' && x.fact_id === d.finding_ref);
+      if (f === undefined) return false;
+      // The shared classification predicate needs the FULL typed set (the
+      // bound accepted generation / PVR-PA closure live outside the slice's
+      // local facts) — same call shape as the L1 replan counter.
+      return uniqueFindingClassification(f, typed, typed) === 'PLAN_GAP';
+    });
 
     const firstBlockedTask = tasksInSlice.find((fact) => {
       const taskId = fact.scope?.task_id;
@@ -1025,6 +1151,17 @@ function semanticOwnerOf(
     // (M2-2 / Change G) Semantic owner / waiting-for: closed projection of the
     // durable slice state (contracts §2.4) — never process/pane state.
     const semantic = semanticOwnerOf(state, blockedBy);
+    // (A4 §4.2 / Reviewer Finding 3) Derived HUMAN_REQUIRED pause on THIS
+    // Slice: any open condition whose Finding locality binds this slice
+    // (finding.scope.slice_id === sliceId). The slice then projects
+    // semantic_owner=brain / waiting_for=human_decision and the qualifying
+    // disposition refs — never a new state, never a fake blocked_by, never
+    // Task-status rewrite, never a rebind to a successor Work.
+    const sliceOpenConditions = openConditions.filter((c) => c.finding.scope?.slice_id === sliceId);
+    const humanSemantic =
+      sliceOpenConditions.length > 0
+        ? { owner: 'brain' as const, waiting: 'human_decision' }
+        : semantic;
 
     // (M2-F3) Current L2 refs come ONLY from current operational facts:
     // a relation-invalid (misbound / superseded-generation) git/result/finding
@@ -1044,7 +1181,8 @@ function semanticOwnerOf(
       slice_id: sliceId,
       state,
       ...(currentWorkRef !== undefined ? { current_work_ref: currentWorkRef } : {}),
-      ...(semantic !== undefined ? { semantic_owner: semantic.owner, waiting_for: semantic.waiting } : {}),
+      ...(humanSemantic !== undefined ? { semantic_owner: humanSemantic.owner, waiting_for: humanSemantic.waiting } : {}),
+      ...(sliceOpenConditions.length > 0 ? { human_required_disposition_refs: [...new Set(sliceOpenConditions.flatMap((c) => c.qualifyingDispositionRefs))].sort() } : {}),
       ...(blockedBy !== undefined ? { blocked_by: blockedBy } : {}),
       ...(authorizingIntegrationFact !== undefined && authorizingCleanupFact === undefined ? { cleanup_pending: true } : {}),
       ...(resultRefs.length === 1 ? { latest_result_ref: resultRefs[0] } : resultRefs.length > 1 ? { result_refs: resultRefs } : {}),
@@ -1055,7 +1193,17 @@ function semanticOwnerOf(
     return out;
   });
 
-  return { slices, tasks };
+  // (A4 §4.2 / Reviewer Finding 3) Detail-level open conditions: full
+  // projection with affected-work provenance (finding.work_id — ORIGIN,
+  // never rebound) and locality (finding.scope; stage-only Findings keep
+  // Stage locality, slice_id omitted).
+  const openHumanRequired = openConditions.length > 0 ? projectOpenHumanRequired(openConditions) : undefined;
+
+  return {
+    slices,
+    tasks,
+    ...(openHumanRequired !== undefined ? { open_human_required: openHumanRequired } : {}),
+  };
 }
 
 /**
@@ -1373,11 +1521,17 @@ export interface MesCycleFilteredStatus {
   readonly accepted_stage_support_ids?: string[];
   /**
    * (M2-1B / Change F) Sparse L1 anomaly counters DERIVED from the durable
-   * facts for the current Stage (stage-scoped observation only): `blocked` /
-   * `cleanup` / `finding` / `replan`. Never read from the seed tuple; `repair`
-   * / `human_required` / `recovery` are intentionally not implemented (their
-   * durable closing predicates are not closed — a missing key means "no
-   * authorized projection", NOT zero). Zero counters are omitted.
+   * (M2-1B / Change F) Sparse L1 anomaly counters DERIVED from the durable
+   * facts: stage-local `blocked` / `cleanup` / `finding` / `replan` over the
+   * current Stage's same-cycle current-attempt facts, merged with the
+   * CYCLE-level `human_required` (distinct OPEN Finding count over the FULL
+   * current-cycle facts — Reviewer Finding 2: an unrelated in-flight Stage
+   * must never hide an open condition), so every public observation
+   * (stage-scoped / STAGE_ACCEPTED / between-stage) carries it. Never read
+   * from the seed tuple; `repair` / `recovery` are intentionally not
+   * implemented (their durable closing predicates are not closed — a missing
+   * key means "no authorized projection", NOT zero). Zero counters are
+   * omitted.
    */
   readonly counters?: Readonly<Partial<Record<MesAnomalyCounterKey, number>>>;
 }
@@ -1409,6 +1563,18 @@ export function projectCycleFilteredStatus(
       statusAuthorityGap(`same-cycle fact ${JSON.stringify(fact.fact_id)} carries no canonical stage provenance (scope.stage_id must match /^S\d+$/)`);
     }
   }
+
+  // (Reviewer Finding 2) `human_required` is a CYCLE-level L1 counter: the
+  // affected Work may pause while unrelated Stages / Work continue, and the
+  // current in-flight Stage changes even when prior Stages still carry open
+  // conditions. Compute it ONCE over the FULL current-cycle facts and merge
+  // into every public observation below (stage-scoped / STAGE_ACCEPTED /
+  // between-stage / PRE_TERMINAL) so the read side sees it no matter which
+  // Stage is currently in flight.
+  const cycleHumanRequired = countOpenHumanRequiredFindings(sameCycle, currentCycle);
+  const cycleHumanRequiredCounters:
+    | Readonly<Partial<Record<MesAnomalyCounterKey, number>>>
+    | undefined = cycleHumanRequired > 0 ? { human_required: cycleHumanRequired } : undefined;
 
   // (S06 post-recovery Authority update; supersedes the EC-3 distinct-plan-
   // identity check) Accepted-Plan currentness is decided by the (stage, cycle)
@@ -1483,19 +1649,34 @@ export function projectCycleFilteredStatus(
     // (M2-1B / Change F) Derived sparse L1 anomaly counters for this Stage
     // over its same-cycle current-attempt facts (never the seed tuple).
     const stageCycleFacts = sameCycle.filter((fact) => fact.scope!.stage_id === stage);
-    const counters = deriveStageAnomalyCounters(stageCycleFacts, stage);
+    const counters = deriveStageAnomalyCounters(stageCycleFacts, stage, currentCycle);
+    // (Reviewer Finding 2) merge the CYCLE-level human_required counter
+    // (computed over the full current-cycle facts) with the Stage-local
+    // blocked/cleanup/finding/replan set.
+    const mergedCounters =
+      counters === undefined
+        ? cycleHumanRequiredCounters
+        : cycleHumanRequiredCounters === undefined
+          ? counters
+          : { ...counters, ...cycleHumanRequiredCounters };
     return {
       cycle_id: currentCycle,
       scope: stage,
       phase,
       required_skill: requiredSkill,
-      ...(counters !== undefined ? { counters } : {}),
+      ...(mergedCounters !== undefined ? { counters: mergedCounters } : {}),
     };
   }
   if (inFlight.length === 0 && candidateStages.length === 1) {
     // The unique in-flight stage now carries a same-cycle accepted-stage
     // support (contracts §5.1 STAGE_ACCEPTED).
-    return { cycle_id: currentCycle, scope: candidateStages[0], phase: 'STAGE_ACCEPTED', required_skill: 'stage-reviewer' };
+    return {
+      cycle_id: currentCycle,
+      scope: candidateStages[0],
+      phase: 'STAGE_ACCEPTED',
+      required_skill: 'stage-reviewer',
+      ...(cycleHumanRequiredCounters !== undefined ? { counters: cycleHumanRequiredCounters } : {}),
+    };
   }
   if (inFlight.length === 0 && candidateStages.length > 1) {
     // (Change D / STATIC-35) Legitimate Stage-to-Stage Rolling-Wave boundary:
@@ -1512,6 +1693,10 @@ export function projectCycleFilteredStatus(
         cycle_id: currentCycle,
         observation: 'between-stage',
         accepted_stage_support_ids: [...acceptedStages].sort(),
+        // (Reviewer Finding 2) between-Stage / PRE_TERMINAL still exposes
+        // the cycle-level human_required counter (unrelated Stage progress
+        // must not hide an open condition).
+        ...(cycleHumanRequiredCounters !== undefined ? { counters: cycleHumanRequiredCounters } : {}),
       };
     }
   }
@@ -1543,8 +1728,17 @@ export function projectCycleFilteredDetail(
   // adjunct; MES never invents a Stage or chooses the next one.
   if (current.observation === 'between-stage') {
     const adjunct = projectTerminalAdjunct(typed, opts);
+    // (Reviewer Finding 3) The public PRE_TERMINAL detail must NOT swallow
+    // the cycle-level human_required counter NOR the open conditions (a
+    // prior Stage's HUMAN_REQUIRED pause stays visible while unrelated
+    // Stages continue). Compute open conditions over the FULL current-cycle
+    // facts — same cycle filter as the L1 counter.
+    const openConditions = resolveHumanRequiredConditions(typed, { currentCycleId: current.cycle_id });
+    const openHumanRequired = openConditions.length > 0 ? projectOpenHumanRequired(openConditions) : undefined;
     return {
       accepted_stage_support_ids: current.accepted_stage_support_ids ?? [],
+      ...(current.counters !== undefined ? { counters: current.counters } : {}),
+      ...(openHumanRequired !== undefined ? { open_human_required: openHumanRequired } : {}),
       ...(adjunct !== undefined ? { project_terminal: adjunct } : {}),
     };
   }
@@ -1624,11 +1818,17 @@ export function projectCycleFilteredDetail(
       fact.fact_kind !== 'project_ready',
   );
   const execute = projectExecuteDetail(stageCycleFacts);
+  // (Reviewer Finding 3) Stage-scoped detail ALSO carries the cycle-level
+  // open conditions (a prior Stage's HUMAN_REQUIRED pause must stay visible
+  // even though the observed Stage is unrelated and in flight).
+  const openConditions = resolveHumanRequiredConditions(typed, { currentCycleId: current.cycle_id });
+  const openHumanRequired = openConditions.length > 0 ? projectOpenHumanRequired(openConditions) : undefined;
   return {
     ...base,
     ...(current.counters !== undefined ? { counters: current.counters } : {}),
     slices: execute.slices,
     tasks: execute.tasks,
+    ...(openHumanRequired !== undefined ? { open_human_required: openHumanRequired } : {}),
     ...(extra as Partial<MesDetailStatus>),
     ...(adjunct !== undefined ? { project_terminal: adjunct } : {}),
   };

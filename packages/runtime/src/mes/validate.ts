@@ -46,6 +46,7 @@ import {
   MES_ROUTE_CODES,
   MES_RESUME_TARGETS,
   MES_GIT_SUBKINDS,
+  MES_RESOLUTION_KINDS,
 } from './types';
 import type {
   MesFactEnvelope,
@@ -228,6 +229,12 @@ const ENVELOPE_KNOWN_FIELDS = new Set([
   // Change C: closed Work-attempt successor edge (work fact only; null = new
   // lineage root, exact ref = preceding Work lineage chain-tip fact_id).
   'supersedes_work_ref',
+  // A4 HUMAN_REQUIRED: closed Finding-level condition-resolution payload
+  // (human_required_resolution kind only).
+  'source_finding_ref',
+  'source_disposition_ref',
+  'resolution_kind',
+  'resolution_plan_acceptance_ref',
 ]);
 
 const SCOPE_KNOWN_FIELDS = new Set(['stage_id', 'slice_id', 'task_id']);
@@ -459,6 +466,14 @@ function validateKindBinding(
       'basis_refs',
       'reason',
       'resume_target',
+    ],
+    human_required_resolution: [
+      'source_finding_ref',
+      'source_disposition_ref',
+      'resolution_kind',
+      'resolution_plan_acceptance_ref',
+      'basis_refs',
+      'reason',
     ],
     project_ready: ['planned_stage_ids'],
     recovery_baseline: [
@@ -1055,6 +1070,60 @@ function validateKindBinding(
     }
     if (envelope.git_basis === undefined) {
       errors.push({ path: 'git_basis', message: 'finding_disposition fact requires a git_basis' });
+    }
+    return;
+  }
+  if (kind === 'human_required_resolution') {
+    // A4 / contracts.md §2.2.4: Brain-owned Finding-level HUMAN_REQUIRED
+    // condition closure. REPLAN requires an exact fresh PA target; RESUME
+    // forbids any Plan target (the resolution record itself is the closure
+    // evidence). Reference resolution (source_disposition_ref → qualifying
+    // disposition with finding_ref == source_finding_ref; REPLAN target PA
+    // atomicity) is binding-critical and validated in binding/transaction.
+    expectNonEmptyString(envelope.source_finding_ref, 'mes_fact.source_finding_ref', errors);
+    expectNonEmptyString(envelope.source_disposition_ref, 'mes_fact.source_disposition_ref', errors);
+    const rkind = envelope.resolution_kind;
+    if (typeof rkind !== 'string' || !(MES_RESOLUTION_KINDS as readonly string[]).includes(rkind)) {
+      errors.push({
+        path: 'mes_fact.resolution_kind',
+        message: `Expected one of: ${MES_RESOLUTION_KINDS.map((k) => JSON.stringify(k)).join(', ')}`,
+      });
+    }
+    const rTarget = envelope.resolution_plan_acceptance_ref;
+    if (rkind === 'REPLAN') {
+      if (typeof rTarget !== 'string' || rTarget.length === 0 || hasControlCharacter(rTarget)) {
+        errors.push({ path: 'mes_fact.resolution_plan_acceptance_ref', message: 'resolution_kind REPLAN requires a non-empty resolution_plan_acceptance_ref without control characters' });
+      }
+    } else if (rkind === 'RESUME') {
+      if (rTarget !== undefined) {
+        errors.push({ path: 'mes_fact.resolution_plan_acceptance_ref', message: 'resolution_kind RESUME must not carry resolution_plan_acceptance_ref (the resolution record itself is the closure evidence)' });
+      }
+    }
+    if (envelope.basis_refs !== undefined) {
+      if (!Array.isArray(envelope.basis_refs)) {
+        errors.push({ path: 'mes_fact.basis_refs', message: 'basis_refs must be an array of refs' });
+      } else {
+        envelope.basis_refs.forEach((ref, i) => {
+          if (typeof ref !== 'string' || ref.length === 0 || hasControlCharacter(ref)) {
+            errors.push({ path: `mes_fact.basis_refs[${i}]`, message: 'expected a non-empty ref without control characters' });
+          }
+        });
+      }
+    }
+    const rReason = envelope.reason;
+    if (typeof rReason !== 'string' || rReason.length === 0 || hasControlCharacter(rReason)) {
+      errors.push({ path: 'mes_fact.reason', message: 'reason must be a non-empty string without control characters' });
+    }
+    const resolutionScope = envelope.scope as Record<string, unknown> | undefined;
+    if (resolutionScope === undefined || !isObject(resolutionScope) || typeof resolutionScope.stage_id !== 'string') {
+      errors.push({ path: 'mes_fact.scope', message: 'human_required_resolution fact requires a canonical stage scope' });
+    }
+    const resolutionBinding = envelope.plan_binding as MesPlanBinding | undefined;
+    if (resolutionBinding === undefined || !isObject(resolutionBinding) || resolutionBinding.binding_stage !== 'accepted') {
+      errors.push({ path: 'plan_binding', message: 'human_required_resolution fact must bind an accepted Plan (binding_stage: "accepted")' });
+    }
+    if (envelope.git_basis === undefined) {
+      errors.push({ path: 'git_basis', message: 'human_required_resolution fact requires a git_basis' });
     }
     return;
   }
