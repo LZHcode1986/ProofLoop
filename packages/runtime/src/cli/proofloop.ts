@@ -191,11 +191,10 @@ export function runStatusDomain(root: string, options: StatusCliOptions): CliEnv
     // projections (contracts §2.3 / Change F) — never projected from the seed
     // tuple, and `repair / human_required / recovery` have no closed durable
     // opening+closing predicate. The legacy fallback therefore projects the
-    // seed's scope/phase/required_skill only; no counters are invented.
+    // seed's scope/phase only; no counters are invented.
     const seedStatusNoCounters: MesStatusTuple = {
       scope: seedRecord.status.scope,
       phase: seedRecord.status.phase,
-      required_skill: seedRecord.status.required_skill,
     };
     const sparseBase = projectSparseStatus(seedStatusNoCounters);
     const detailBase = projectDetailStatus({ ...seedRecord, status: seedStatusNoCounters });
@@ -396,7 +395,6 @@ function projectCurrentCycleEnvelope(
     const tuple: MesStatusTuple = {
       scope: current.scope as string,
       phase: current.phase as string,
-      required_skill: current.required_skill as string,
       ...(current.counters !== undefined ? { counters: current.counters } : {}),
     };
     // (PO-S06-B-01) The projection-only `project_terminal` adjunct (contracts

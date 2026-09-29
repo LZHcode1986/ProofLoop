@@ -10,7 +10,7 @@ Brain and every Agent MUST NOT integrate by running `git merge`, `git cherry-pic
 
 ## Use when
 
-CV `PASS` + durable canonical candidate ref current（`READY_TO_INTEGRATE`）后，Brain 决定把该 candidate 集成：`NORMAL` 进入当前 Stage 工作树；`MES_MAINTENANCE` 进入对应 isolated Git evidence worktree，均由本 Contract 执行机械事务。完整上游顺序由 `.agents/skills/proofloop-execute/SKILL.md` 定义，本 Contract 只消费其产物、不复制上游流程：
+CV `PASS` + durable canonical candidate ref current（`READY_TO_INTEGRATE`）后，Brain 决定把该 candidate 集成：`NORMAL` 进入当前 Stage 工作树；`MES_MAINTENANCE` 进入对应 isolated Git evidence worktree，均由本 Contract 执行机械事务。完整上游顺序由 Execute Flow Contract（`.agents/contracts/brain/execute.md`）定义，本 Contract 只消费其产物、不复制上游流程：
 
 ```text
 CV basis：`NORMAL` = live Slice worktree basis；`MES_MAINTENANCE` = recovery candidate + live maintenance Git basis + frozen/forensic/audit binding
@@ -115,7 +115,7 @@ Brain 必须：
 
 1. 把结果与 fresh-re-read 的 Git 事实核对（`git status`、`git diff`、`git diff --cached`、HEAD、changed-files）；
 2. 对 `NORMAL` 把 `commit_sha`、`changed_files`、`candidate_ref` / `candidate_base_ref` 交给 MES transaction layer materialize 对应 normal Integration facts；对 `MES_MAINTENANCE` 仅写入 Git + Git-tracked Plan/evidence，maintenance 不写 MES、不产生 `INTEGRATED`/`CLEANED` 或任何 Stage/terminal fact；
-3. `NORMAL` 从当前 MES status + Skill 继续；`MES_MAINTENANCE` 从 Git + Plan/evidence（maintenance 另含 frozen/forensic/audit tuple）继续，不从 Receipt 链或 derived next action 继续。
+3. `NORMAL` 从当前 MES/Git facts + current canonical Flow/Contract continuation 继续（MES status 只作 observation，不选择 Skill 或 route）；`MES_MAINTENANCE` 从 Git + Plan/evidence（maintenance 另含 frozen/forensic/audit tuple）继续，不从 Receipt 链或 derived next action 继续。
 
 ## Recovery 与返回码
 

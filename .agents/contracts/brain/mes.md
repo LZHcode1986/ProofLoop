@@ -150,7 +150,7 @@ created_by: brain
 ## status 一级视图
 
 status 是 MES 对 Brain / Agent / PM 的最小默认暴露面，只反映已发生的 operational 事实，不复制 Project Stage Map 的 entry criteria 作为 mutable readiness cache，不输出“建议下一步”，也不生成 Stage graph 或 next-stage 决策。
-status 的 phase/scope/required_skill 只描述 current operational cycle；新 cycle 未开始时可附带历史 `PROJECT_READY` detail。历史 terminal 不生成 route/next action，只有新用户工作或实质变更才触发 Propose。
+status 的 phase/scope 只描述 current operational cycle；新 cycle 未开始时可附带历史 `PROJECT_READY` detail。历史 terminal 不生成 route/next action，只有新用户工作或实质变更才触发 Propose。`required_skill` 已从 status surface 退役（Phase 2D）：不再出现在 status 输出、不引导 Brain 加载 Skill；旧 seed / 旧 status tuple 仍含该字段时只作历史 observation（legacy compatibility，见 `tech-spec/contracts.md` §2.3）。
 status 先从当前唯一 in-flight candidate/accepted Plan binding 的 `delivery_cycle_id` 与 stage-only `scope.stage_id` 取得 current Stage，再过滤 facts：stage-only Review `work`/`result`/`finding` → `REVIEW`；task 或 slice/task-scoped execution fact → `EXECUTE`；否则 current planning binding → `PLANNING`。唯一 in-flight 候选必须是同 cycle 且尚无同 cycle accepted-stage support；缺失、重复、跨 cycle 或无 stage provenance 均 fail closed。`task` fact 必须参与 current scope 候选；current `PROJECT_READY` 只接受匹配 cycle ID 的唯一 terminal；历史 terminal 不参与 current phase/route。详细 scope-role 与 Review relation 以 Technical Authority refs 为准。
 status 选取某个 Stage 的 current accepted generation 时只看该 (stage, cycle) 的 generation 链 tip，不看任何 candidate PVR。status 也不解释 Plan 语义（例如 Task 级 `obligation_state`）：Plan 声明的 `EXISTING_SEAM` readiness 属 Brain/agent level 判定，不进入 status，也不新增 public Slice state。
 
@@ -164,7 +164,6 @@ Brain / Agent 默认只看到：
 ```text
 scope
 phase
-required_skill
 non-zero anomaly counters
 ```
 
@@ -172,14 +171,12 @@ non-zero anomaly counters
 
 ```text
 S03 / EXECUTE
-skill=proofloop-execute
 ```
 
 存在偏离时才追加非零计数：
 
 ```text
 S03 / EXECUTE
-skill=proofloop-execute
 replan=1
 blocked=1
 ```

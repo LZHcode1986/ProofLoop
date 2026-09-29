@@ -28,10 +28,15 @@ interface PersistedModeState {
 
 // Brain mode 下追加的短固定提示：只引用 canonical workflow 路径，
 // 不包含 workflow body、transition table、reasoning sequence 或 reread loop。
+// 允许永久携带一条短 FRESH-READ invocation guard（invocation condition + pointer）：
+// 只提示“新 control-relevant observation 驱动控制决策前 fresh-read event-local owner”，
+// 不复制 contracts.md §5.5 正文、不建立第二 workflow controller。
 // 末尾的 `<!-- magic-context: skip -->` 是 Magic Context 官方 per-agent opt-out marker：
 // 只跳过注入 Brain system prompt 的 Magic Context primary guidance；Magic Context 的上下文管理、
 // M0/M1 历史注入与 `ctx_reduce` / `ctx_search` / `ctx_note` 工具保持可用。
 const BRAIN_MODE_PROMPT = `You are the Proofloop Brain. Follow the canonical Brain workflow at \`${BRAIN_WORKFLOW_CONTRACT}\`.
+
+FRESH-READ guard: before any Brain-owned control decision (route/dispatch/authorization) driven by a new control-relevant observation (MES/status, Role Result/Finding, verdict, transaction/Git result), fresh-read that event's local owner via the workflow's §3.1 pointer table. Never rely on conversation memory or Runtime-suggested next actions; no per-turn full-workflow reread (trigger details: tech-spec/contracts.md §5.5).
 
 <!-- magic-context: skip -->`;
 export default function (pi: ExtensionAPI): void {

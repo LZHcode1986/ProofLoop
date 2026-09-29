@@ -14,7 +14,7 @@ Brain 负责：
 
 - 在 Routing Boundary 选择并派发当前 Flow；
 - 在 Flow 完成或需要跨 Flow 迁移时选择下一个 Flow；
-- 已有 Project Stage Map 时，联合 current Map 与 MES/Git facts 判断下一 Delivery Stage 的 route；需要 Stage composition judgment 时路由 `proofloop-plan`，不自行 planning；
+- 已有 Project Stage Map 时，联合 current Map 与 MES/Git facts 判断下一 Delivery Stage 的 route；需要 Stage composition judgment 时路由 Planning Flow（`.agents/contracts/brain/planning.md` → dispatch `planner`），不自行 planning；
 - 对 blocker、invalidation 和 verifier/reviewer finding 做分类并选择恢复方向；对 `MES_MAINTENANCE` 只授权 bounded evidence-only execution/review，不授权任何 normal MES materialization。
 - 在对应 Contract 允许时发起经授权的 semantic event；Brain 不组装或替换完整 MES snapshot；MES operational transaction layer 负责 durable fact/relation materialization、binding 校验与原子持久化。
 
@@ -55,6 +55,8 @@ Event-local fresh-read pointers（每个事件只需一条分支），本节不�
 无关 workflow 材料。
 完成标准：Brain 分类或路由当前事件前，context 中已有一个适用的 canonical owner
 working set。
+
+**Trigger 对齐（contracts.md §5.5）**：Brain 用新的 control-relevant observation（新 MES/status 观察、结构化 Role Result/Finding、SPV / CV / Stage Review verdict、Git / Integration / lifecycle transaction 结果、Result acceptance / close / reset / recheck 决策、blocker / invalidation / recovery evidence）做 Brain-owned 控制决策（route / dispatch / authorization）前，必须先 fresh-read 该事件对应的 canonical owner（本文件 §3.1 event-local pointer）——`control-decision-triggered fresh-read`；不得从对话记忆、旧 Skill name 或 Runtime 建议动作直接跳 transition。同一 Flow 无新 control-relevant event/basis change 时连续推进，明确 `no per-turn / full-workflow reread loop`；仅收集 evidence 的一次 read / 连续 `status` 下钻不属于 mandatory refresh trigger。trigger 精确定义见 `tech-spec/contracts.md` §5.5，本文件不复制其正文。
 
 **Step 3 — ARBITRATE**：只裁决 Brain-owned 问题：currentness、normative support、
 accepted ownership、invalidation scope、continuation class、route。Brain 不设计
@@ -100,8 +102,8 @@ Global Dispatch Rule。接收 Role 自行决定其内部方法。
 | Trigger | Flow / owner entry | Exit / next boundary |
 |---|---|---|
 | 新产品范围、行为或验收需要建立/修改（含历史 `PROJECT_READY` 后的新实质工作 / 新 delivery cycle） | Propose：`ai-structured-prd`；按需 `prd-to-tech-design-prep`；`prd-to-ai-architecture`；若其判定存在 frontend scope，则在同一 Propose 内显式加载 `frontend-tech` 完成 `tech-spec/frontend.md` handoff closure | `PROPOSE_READY` → 进入该 delivery cycle 的 Planning；post-ready 新实质工作不得绕过 Propose |
-| current `PROPOSE_READY`（及其它 Planning 触发如 上一 Stage `STAGE_ACCEPTED` / Replan） | Planning：`proofloop-plan`；SPV 使用独立的 `stage-plan-verifier` review-loop Role | fresh SPV `PLAN_READY` 被接纳 → Execute |
-| accepted Plan 就绪且存在 dependency-ready Slice | Execute：`proofloop-execute` / Worker lane | Slice candidate → CV；全部 Slice `INTEGRATED` → Stage Review |
+| current `PROPOSE_READY`（及其它 Planning 触发如 上一 Stage `STAGE_ACCEPTED` / Replan） | Planning：Planning Flow Contract（`.agents/contracts/brain/planning.md`）→ dispatch `planner`；SPV 使用独立的 `stage-plan-verifier` review-loop Role | fresh SPV `PLAN_READY` 被接纳 → Execute |
+| accepted Plan 就绪且存在 dependency-ready Slice | Execute：Execute Flow Contract（`.agents/contracts/brain/execute.md`）/ Worker lane | Slice candidate → CV；全部 Slice `INTEGRATED` → Stage Review |
 | recovery candidate + fresh SPV `PLAN_READY` + exact frozen/forensic/audit tuple + quarantine + Brain bounded authorization | `MES_MAINTENANCE` Execute/Worker lane | evidence-only Slice candidate → CV PASS → Git candidate/integration/cleanup evidence → maintenance Review；不写 MES、不进入 normal Stage/terminal acceptance |
 | `SLICE_CANDIDATE_READY` | Slice-level `code-verifier` | `PASS` → Execute freeze-and-boundary 流程；`FINDINGS` / `BLOCKED` → Brain arbitration |
 | CV `PASS` 且 candidate ref durable | Integration：`.agents/contracts/brain/integration.md` | `NORMAL` → `INTEGRATED`；`MES_MAINTENANCE` → Git evidence integration；maintenance 完成后 → evidence-only maintenance Review，不写 MES |
@@ -115,12 +117,16 @@ Global Dispatch Rule。接收 Role 自行决定其内部方法。
 
 ### 3.1 Event-local fresh-read pointers
 
-以下 pointer 绑定真实事件；事件发生时先 fresh-read 唯一 owner，再沿本节 Trigger → Flow → Exit 执行。普通同一 Flow 内连续动作不要求重读全部 Contract。
+以下 pointer 绑定真实事件；事件发生时先 fresh-read **唯一 owner 中当前事件对应的 branch section**（如 `planning.md#2.2`、`execute.md#2.3`），不整载 Flow Contract 的其它 branch，杜绝在 context 中同时暴露 future downstream sequence；再沿本节 Trigger → Flow → Exit 执行。普通同一 Flow 内连续动作不要求重读全部 Contract。
 
 | WHEN | READ |
 |---|---|
-| `CANDIDATE_PLAN_READY`、SPV `FINDINGS` 或 Plan acceptance / continuation / close decision | `.agents/contracts/brain/agent-lifecycle.md`；Planning 方法另读 `.agents/skills/proofloop-plan/SKILL.md` |
-| `SLICE_CANDIDATE_READY`、CV dispatch、CV `FINDINGS` 或 repair/recheck | `.agents/contracts/brain/agent-lifecycle.md` + `.agents/skills/proofloop-execute/SKILL.md`；CV schema 读其 template |
+| `CANDIDATE_PLAN_READY` | Planning branch：`.agents/contracts/brain/planning.md#2.2`（+ `.agents/contracts/brain/commit-boundary.md`） |
+| SPV `FINDINGS` / `BLOCKED` | Planning branch：`.agents/contracts/brain/planning.md#2.3`（+ verification/finding owner） |
+| `PLAN_READY` → Plan acceptance / continuation / close | Planning branch：`.agents/contracts/brain/planning.md#2.4`；生命周期另读 `.agents/contracts/brain/agent-lifecycle.md`；MES durable write 另读 `.agents/contracts/brain/mes.md` |
+| `SLICE_CANDIDATE_READY` | Execute branch：`.agents/contracts/brain/execute.md#2.3`（+ CV 派发） |
+| CV dispatch / CV `FINDINGS` / repair / recheck | Execute branch：`.agents/contracts/brain/execute.md#2.4`；finding 仲裁另读 `.agents/contracts/brain/finding-convergence.md` |
+| CV `PASS` → candidate publication → `READY_TO_INTEGRATE` | Execute branch：`.agents/contracts/brain/execute.md#2.5`/`#2.6`；Git boundary 另读 `.agents/contracts/brain/commit-boundary.md` |
 | Result acceptance、lifecycle continuation、recall/reset 或准备 `herdr_link_close` | `.agents/contracts/brain/agent-lifecycle.md` 对应 role row；NORMAL durable Result/Finding write 另读 `.agents/contracts/brain/mes.md`，Git transaction 另读其 owner |
 | MES read/write/status decision | `.agents/contracts/brain/mes.md` |
 | Git boundary request 或 candidate freeze | `.agents/contracts/brain/commit-boundary.md` |
@@ -138,7 +144,7 @@ Brain arbitration 直接驱动迁移。
 ## 4. Cross-Flow transitions and completion
 
 - Propose 的 core canonical Authority 始终是四类（`PRD.md`、Architecture、Contracts、Acceptance）；存在 frontend scope 时，同一 Propose 还必须完成条件性的 `tech-spec/frontend.md` handoff closure 后才能返回统一的 `PROPOSE_READY`。该 handoff 不成为第五类 core Authority，也不增加 Propose 内部 Gate 或新的完成状态。
-- Planning-entry 判定只属于 Brain：Brain 准备 dispatch Planning 时依次 ① 确保 MES initialized（MES 可更早独立初始化，只建立 infrastructure metadata，不产生 operational facts）② 做 fresh Authority path presence observation（四个 canonical path：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`，只返回 present / missing / unreadable，read-only）③ missing/unreadable → 停留在 Propose 并把精确路径交给 Propose owner；all present → Brain 按当前 Propose completion criterion 验证内容 ④ Brain 接纳 current `PROPOSE_READY` ⑤ 只有 `MES initialized + current PROPOSE_READY` 时 dispatch `proofloop-plan`。不新增 `PLANNING_READY` 或其它 gate 状态；Brain 不规定 Propose 内先补哪个文档；Planner 不承担该判定或该 gate。MES initialization 的完整语义由 `.agents/contracts/brain/mes.md` 持有，本文件只保留上述 pointer / local prerequisite。
+- Planning-entry 判定只属于 Brain：Brain 准备 dispatch Planning 时依次 ① 确保 MES initialized（MES 可更早独立初始化，只建立 infrastructure metadata，不产生 operational facts）② 做 fresh Authority path presence observation（四个 canonical path：`PRD.md`、`tech-spec/architecture.md`、`tech-spec/contracts.md`、`tech-spec/acceptance.md`，只返回 present / missing / unreadable，read-only）③ missing/unreadable → 停留在 Propose 并把精确路径交给 Propose owner；all present → Brain 按当前 Propose completion criterion 验证内容 ④ Brain 接纳 current `PROPOSE_READY` ⑤ 只有 `MES initialized + current PROPOSE_READY` 时按 Planning Flow Contract（`.agents/contracts/brain/planning.md`）dispatch `planner`。不新增 `PLANNING_READY` 或其它 gate 状态；Brain 不规定 Propose 内先补哪个文档；Planner 不承担该判定或该 gate。MES initialization 的完整语义由 `.agents/contracts/brain/mes.md` 持有，本文件只保留上述 pointer / local prerequisite。
 - Planning 只有在 fresh SPV 返回 `PLAN_READY` 且 Brain 完成 Plan acceptance 后才
   允许 Execute；candidate Plan 不自动成为 accepted Plan。
 - Execute 只有在全部计划内 Slice 通过独立 CV、完成 Integration 并达到
@@ -183,7 +189,7 @@ Brain 只能发送：
 
 具体 dispatch：
 
-- Planner：`start(name, config_agent="proofloop-plan")`
+- Planner：`start(name, config_agent="planner")`
 - SPV：`start(name, config_agent="stage-plan-verifier", with=plannerName)`
 - Worker：`start(name, config_agent="worker", cwd=sliceWorktree)`
 - CV：`start(name, config_agent="code-verifier", with=workerName)`
@@ -210,11 +216,11 @@ Normal dispatch 不需要 `peers` 前置；`peers` 仅 address discovery / recov
 - Git boundary：`.agents/contracts/brain/commit-boundary.md`；
 - Integration 机械事务：`.agents/contracts/brain/integration.md`；
 - Project Stage Map（Git-tracked public planning artifact，writer 为 Planner）：`delivery/project-stage-map.md`；
-- Planner 方法、candidate Plan、SPV 与 Replan：`.agents/skills/proofloop-plan/SKILL.md`；
-- Execute、Worker/CV lane、`MES_MAINTENANCE` evidence-only implementation、Integration 前置和 cleanup：
-  `.agents/skills/proofloop-execute/SKILL.md`；
-- General、Researcher、Prototype、CV、SPV 和 Stage Reviewer 的角色步骤：对应
-  `.agents/skills/<role>/SKILL.md` 及其 packet/result Template；
+- Planning Flow orchestration（event → transition → dispatch/authorization）：`.agents/contracts/brain/planning.md`（按事件对应 branch 读取）；Planner/SPV 方法是 Role 自身文档，由被 dispatch 的 Role instance 加载，Brain 不加载 Role Skill 作为 Flow 方法源；
+- Execute Flow orchestration（Slice lane / Worker lifecycle / CV dispatch / candidate publication / Integration 前置 / cleanup）：
+  `.agents/contracts/brain/execute.md`（按事件对应 branch 读取）；Worker 方法是 `worker` Role 自身文档，由被 dispatch 的 Worker instance 加载，Brain 不加载 Role Skill 作为 Flow 方法源；
+- General、Researcher、Prototype、CV、SPV 和 Stage Reviewer 的 Role 方法：对应
+  `.agents/skills/<role>/SKILL.md` 及其 packet/result Template，由被 dispatch 的 Role instance 加载，Brain 不加载 Role Skill 作为 Flow 方法源；
 - Finding convergence：当 verifier/reviewer Finding 首次跨越同一 work/transaction scope 的多个 binding-chain 边界，或 repair/replan 后同一 failure family 再现时，读取 `.agents/contracts/brain/finding-convergence.md`；首次局部、单一 owner 可完成的 Finding 继续使用既有 arbitration route。
 - Brain host 只按本路径加载路由入口；Pi/OpenCode 提供宿主能力，不复制本 Contract
   的流程正文，不建立第二个 durable workflow/controller state。

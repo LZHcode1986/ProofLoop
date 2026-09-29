@@ -18,8 +18,8 @@ discovery path.
 ## Role Skill
 
 - Path: `.agents/skills/<role-name>/SKILL.md`.
-- Seven canonical roles: `general`, `worker`, `researcher`, `prototype`,
-  `code-verifier`, `stage-plan-verifier`, `stage-reviewer`.
+- Eight canonical roles: `general`, `worker`, `researcher`, `prototype`,
+  `planner`, `code-verifier`, `stage-plan-verifier`, `stage-reviewer`.
 - One Role Skill is the single source for its role's goal, entry conditions,
   procedure, modes/branches, mutation boundary, forbidden actions, capability
   skills, and completion criteria. A single-role Role Skill is the norm: one per
@@ -31,8 +31,8 @@ discovery path.
   host entry (`.pi/extensions/proofloop-mode.ts`). Both host entries point at
   the canonical shared workflow Contract `.agents/contracts/brain/workflow.md`.
 - The Brain selects the Flow at the Routing Boundary per
-  `.agents/contracts/brain/workflow.md`, loads the selected Skill's JIT
-  Read Set, and initiates dispatch via Herdr Link configured start.
+  `.agents/contracts/brain/workflow.md`, uses the active Flow Contract to prepare
+  the bounded dispatch/JIT input, and initiates dispatch via Herdr Link configured start.
 - Carries no model, runtime, or lifecycle definition — runtime and model configuration
   live in `.agents/agent_config.json` (where dispatch identity maps 1:1 to config key),
   mechanical dispatch order is owned by `.agents/contracts/brain/workflow.md`, and
@@ -54,12 +54,13 @@ own procedure and completion criteria; roles reach for it, they do not copy it.
 | `frontend-execute` | Frontend handoff → self-verified production UI implementation |
 | `frontend-review` | Independent read-only frontend quality review against handoff and runtime evidence |
 
-## Phase / Orchestration Skill
+## Brain phase capabilities
 
-Brain-owned procedures for a process phase — product definition, architecture,
-stage planning, stage execution, and large-effort wayfinding. The Brain loads
-them for the active phase; they define that phase's steps and completion, not any
-single role's behavior.
+Brain-owned capability Skills for a process phase — product definition,
+architecture, and large-effort wayfinding. The Brain loads them for the active
+phase; they define that phase's capability steps and completion, not any single
+role's method behavior. Role Skill methods (e.g. `planner`, `worker`) are loaded
+only by the dispatched role instance, never by the Brain's own context.
 
 | Skill | Phase |
 |---|---|
@@ -67,14 +68,22 @@ single role's behavior.
 | `prd-to-tech-design-prep` | Post-PRD technical clarification |
 | `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
 | `frontend-tech` | Conditional frontend technical handoff → `tech-spec/frontend.md` |
-| `proofloop-plan` | Candidate Plan, SPV dispatch, Plan acceptance into MES |
-| `proofloop-execute` | Stage/Slice lane management and role dispatch |
 | `wayfinder` | Chart and work a shared map for an oversized effort |
 
-`proofloop-plan` also serves as the Planning dispatch skill / runtime Planner input: a
-PLANNING dispatch uses `dispatch_skill=proofloop-plan` (runtime label `planner`) and loads
-`.agents/skills/proofloop-plan/SKILL.md`; it is not an eighth Role Skill. All seven canonical
-Role Skills keep their fixed role bindings. The dispatch key for planning is `proofloop-plan`,
+## Brain Flow Contracts
+
+Brain-owned orchestration Contracts for a process flow. Flow Contracts are not Skills:
+Brain reads them directly as orchestration Contracts when it routes/dispatches the flow;
+Role Agents never load them as Role methods. Role Skills never restate
+these contracts.
+
+| Contract | Flow |
+|---|---|
+| `.agents/contracts/brain/planning.md` | Brain-owned Planning orchestration（candidate boundary / SPV dispatch / acceptance authorization） |
+| `.agents/contracts/brain/execute.md` | Stage/Slice lane orchestration、Worker/CV dispatch、candidate publication authorization |
+`planner` is the eighth canonical Role Skill（Planning dispatch 的 runtime label）: PLANNING dispatch uses `dispatch_skill=planner`（runtime label `planner`）and loads
+`.agents/skills/planner/SKILL.md`；Planning Flow orchestration（candidate boundary / SPV dispatch / acceptance）belongs to `.agents/contracts/brain/planning.md`. All seven other canonical
+Role Skills keep their fixed role bindings. The dispatch key for planning is `planner`,
 matching its key in `.agents/agent_config.json` (`role_skill == config_agent`).
 ## Where each fact lives
 
@@ -95,6 +104,7 @@ matching its key in `.agents/agent_config.json` (`role_skill == config_agent`).
 - Herdr Link configured-start configuration (dispatch identity maps 1:1 to config key):
   `.agents/agent_config.json`.
 
-Brain/host entry loads a skill on demand; no `.opencode/` or `.pi/` role file
-restates role procedure. Keep each meaning in one place: change a role's procedure in
+Brain may load Brain capability/phase Skills on demand; Role Skills are loaded only by
+dispatched Role instances — never by the Brain's own context — and no `.opencode/` or
+`.pi/` role file restates role procedure. Keep each meaning in one place: change a role's
 its Role Skill, a runtime/model/placement configuration in `.agents/agent_config.json`, a dispatch rule in `.agents/contracts/brain/workflow.md`, and a lifecycle rule in `.agents/contracts/brain/agent-lifecycle.md`.

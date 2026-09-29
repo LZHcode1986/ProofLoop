@@ -10,7 +10,7 @@
  *
  *   - `seedMesBootstrap` accepts ONLY canonical Authority refs, an accepted
  *     Git Plan ref and the baseline/current Git basis, plus the Brain-supplied
- *     first-`NORMAL` status tuple (`scope` / `phase` / `required_skill` and
+ *     first-`NORMAL` status tuple (`scope` / `phase` and
  *     applicable non-zero anomaly counters). It validates everything
  *     fail-closed, persists the accepted Plan binding + Git basis into the
  *     MES snapshot store, and writes the root-bound ONE seed record carrying
@@ -81,7 +81,7 @@ export type MesStatusPhase = (typeof MES_STATUS_PHASES)[number];
 export interface MesStatusTuple {
   readonly scope: string;
   readonly phase: string;
-  readonly required_skill: string;
+  readonly required_skill?: string; // legacy seed field (Phase 2D retirement); new tuples omit it
   readonly counters?: Readonly<Partial<Record<MesAnomalyCounterKey, number>>>;
 }
 
@@ -195,12 +195,14 @@ function expectGitBasis(value: unknown, code: MesBootstrapErrorCode = 'invalid-s
 }
 
 /** Closed fields a status tuple may carry (unknown fails closed). */
+// `required_skill` retained ONLY for legacy seed tolerance (Phase 2D retirement):
+// old tuples may still carry it, but new seeds/projections never require or emit it.
 const STATUS_KNOWN_FIELDS = ['scope', 'phase', 'required_skill', 'counters'] as const;
 
 /** Validate the Brain-supplied status tuple (fail closed on unknown fields). */
 function expectStatusTuple(value: unknown, code: MesBootstrapErrorCode = 'invalid-seed'): MesStatusTuple {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    seedFail(code, 'status must be an object with scope/phase/required_skill');
+    seedFail(code, 'status must be an object with scope/phase/counters');
   }
   const status = value as Record<string, unknown>;
   for (const key of Object.keys(status)) {
@@ -220,8 +222,13 @@ function expectStatusTuple(value: unknown, code: MesBootstrapErrorCode = 'invali
       `status.phase must be one of the closed per-stage phase set: ${MES_STATUS_PHASES.join(' / ')} (got ${JSON.stringify(status.phase)})`,
     );
   }
-  if (typeof status.required_skill !== 'string' || status.required_skill.length === 0) {
-    seedFail(code, 'status.required_skill must be a non-empty string');
+  if (status.required_skill !== undefined && (typeof status.required_skill !== 'string' || status.required_skill.length === 0)) {
+    seedFail(code, 'status.required_skill must be a non-empty string when present (legacy seed field)');
+  }
+  // (Phase 2D legacy tolerance) same control-char discipline as status.ts
+  // expectSafeText: a present legacy field must be a safe text string.
+  if (status.required_skill !== undefined && /[\u0000-\u001f\u2028\u2029]/.test(status.required_skill)) {
+    seedFail(code, 'status.required_skill must not contain control characters (legacy seed field)');
   }
   if (status.counters !== undefined) {
     if (typeof status.counters !== 'object' || status.counters === null || Array.isArray(status.counters)) {

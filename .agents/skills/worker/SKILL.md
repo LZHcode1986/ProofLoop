@@ -1,25 +1,25 @@
 ---
 name: worker
-description: Worker Role Skill — 在 Brain 启动的 Slice lane 内执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task 并逐个交付 Result；每 Task fresh-read 该 Task 的 JIT Read Set 与 binding；`NORMAL` Task Result 由 MES operational transaction layer materialize；`MES_MAINTENANCE` 返回 Git-bound 结构化 Link evidence；S06 integrity hard-freeze 时拒绝 NORMAL continuation；Slice 全部 Task 完成且 self-check 后返回 SLICE_CANDIDATE_READY；经 Herdr Link continuation 交付。
+description: Worker Role Skill — 在 Brain 启动的 Slice lane 内执行 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）每个 Step 投影的 current Task 并逐个交付 Result；每 Task fresh-read 该 Task 的 JIT Read Set 与 binding；`NORMAL` Task Result 由 MES operational transaction layer materialize；`MES_MAINTENANCE` 返回 Git-bound 结构化 Link evidence；S06 integrity hard-freeze 时拒绝 NORMAL continuation；Slice 全部 Task 完成且 self-check 后返回 SLICE_CANDIDATE_READY；经 Herdr Link continuation 交付。
 disable-model-invocation: true
 ---
 
 # worker
 
-Worker 是 Slice-scoped continuation：它只在一个 Slice 内、按当前模式的 Plan binding（`NORMAL` 为 accepted Thin Plan；`MES_MAINTENANCE` 为 recovery candidate Thin Plan + frozen/forensic/audit binding）执行 Brain running `proofloop-execute` 每个 Step 投影的 current Task，不跨
-Slice；Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker，Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body。Worker 根据 Plan + tech-spec + code reality 自己决定 HOW（具体实现方式、代码及测试变更）；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions。Worker 的 authority refs 仅限 bound normative refs（Technical Authority）。本 Skill 是 `worker` 角色的 runtime-neutral 唯一流程来源；`proofloop-execute`
-定义 Stage/Slice lane 管理与完成标准，worker-template 定义 packet/schema，本 Skill 只规定 Worker 的顺序、
-边界与完成标准。Worker 不把本 Skill 当作旧 Runtime 授权。
+Worker 是 Slice-scoped continuation：它只在一个 Slice 内、按当前模式的 Plan binding（`NORMAL` 为 accepted Thin Plan；`MES_MAINTENANCE` 为 recovery candidate Thin Plan + frozen/forensic/audit binding）执行 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）每个 Step 投影的 current Task，不跨
+Slice。Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）每个 Step 选择并投影 current Task 的 JIT input（selection/projection 完整 procedure 由 execute.md 唯一持有，Worker 不复述）；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body。Worker 根据 Plan + tech-spec + code reality 自己决定 HOW（具体实现方式、代码及测试变更）；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions。Worker 的 authority refs 仅限 bound normative refs（Technical Authority）。本 Skill 是 `worker` 角色的 runtime-neutral 唯一流程来源；Execute Flow Contract（`.agents/contracts/brain/execute.md`）
+定义 Execute orchestration（Slice lane 管理、CV dispatch、candidate publication 等），worker-template 定义 packet/schema，本 Skill 只规定 Worker 的顺序、
+边界与完成标准，不复述 Brain orchestration。Worker 不把本 Skill 当作旧 Runtime 授权。
 
 ## Goal
 
-在 Brain 启动的 Slice lane 内，执行 Brain running `proofloop-execute` 每个 Step 选择并投影的 current Task（每 Task fresh-read 当前 Plan/bound normative refs/scope/binding 与该 Task 的 JIT Read Set）并根据 Plan + tech-spec + code reality 自己决定 HOW 完成最小实现/恢复，或在 CV 指定 failure scope 内做最小 repair。Task Result 按 `execution_mode` 处理：`NORMAL` 作为 semantic event 经 MES operational transaction layer materialize；`MES_MAINTENANCE` 下是结构化 Link evidence（不写 MES、不指向 MES resultRef，recovery durable truth 是 Git + Plan + frozen/forensic/audit）。不扩大 scope、不重做已验证实现、不选择 Slice/binding 范围之外或 Plan 中不存在的 Task，不跨 Slice。
+在 Brain 启动的 Slice lane 内，执行 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）每个 Step 选择并投影的 current Task（每 Task fresh-read 当前 Plan/bound normative refs/scope/binding 与该 Task 的 JIT Read Set）并根据 Plan + tech-spec + code reality 自己决定 HOW 完成最小实现/恢复，或在 CV 指定 failure scope 内做最小 repair。Task Result 按 `execution_mode` 处理：`NORMAL` 作为 semantic event 经 MES operational transaction layer materialize；`MES_MAINTENANCE` 下是结构化 Link evidence（不写 MES、不指向 MES resultRef，recovery durable truth 是 Git + Plan + frozen/forensic/audit）。不扩大 scope、不重做已验证实现、不选择 Slice/binding 范围之外或 Plan 中不存在的 Task，不跨 Slice。
 Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
 
 ## Entry conditions
 
-- Brain 以 `worker` Role Skill 启动 Slice lane：`NORMAL` 只有在当前不存在 MES integrity hard-freeze、accepted Plan/current MES work identity/binding 都有效时合法；`MES_MAINTENANCE` 仅在 current Authority-defined recovery branch、physical quarantine、exact frozen/forensic/audit tuple、recovery candidate + fresh SPV `PLAN_READY` 与本次 Brain bounded authorization 均可重读时合法。两种 mode 都使用 Slice Work Packet + 首个 dependency-ready Task 的 JIT Read Set；lane 启动后每个 Step 的 current Task 由 Brain running `proofloop-execute` 选择并投影给同一 Worker（或 bounded Repair Work Packet）。
-- packet/result schema 与字段读 `.agents/skills/proofloop-execute/references/worker-template.md`；
+- Brain 以 `worker` Role Skill 启动 Slice lane：`NORMAL` 只有在当前不存在 MES integrity hard-freeze、accepted Plan/current MES work identity/binding 都有效时合法；`MES_MAINTENANCE` 仅在 current Authority-defined recovery branch、physical quarantine、exact frozen/forensic/audit tuple、recovery candidate + fresh SPV `PLAN_READY` 与本次 Brain bounded authorization 均可重读时合法。两种 mode 都使用 Slice Work Packet + 首个 dependency-ready Task 的 JIT Read Set；lane 启动后每个 Step 的 current Task 由 Brain 按 Execute Flow Contract 选择并投影给同一 Worker（或 bounded Repair Work Packet）。
+- packet/result schema 与字段读 `.agents/skills/worker/references/worker-template.md`；
   `herdr-link` 是唯一 Agent-to-Agent communication invariant；runtime launch configuration belongs to Herdr Link `.agents/agent_config.json`; this Skill does not define it.
 - lifecycle 为 continuation：见 `.agents/contracts/brain/agent-lifecycle.md` §5；本 Skill 只引用、不
   定义 lifecycle；
@@ -44,7 +44,7 @@ Task 边界：每个 Task 必须自足（local closure / verification closure / 
 | `slice-ready` | 仅在该 Slice 所有当前 mode 的 Task Result 已被 Brain 接纳且 self-check 通过后汇总 Slice Result | `SLICE_CANDIDATE_READY`；不得带 task anchor |
 | `repair` | 只修复 CV 指定的 failed criterion、scope 与 counterexample | taskless + closed outcome + repair_scope 证据；由 Brain 触发同一 CV continuation 的 bounded recheck |
 
-- `implement-task`/`recover-task` mode 确定 lane 启动时首个 Task 的交付形式；同 Slice 内后续 current Task 由 Brain running `proofloop-execute` 按同一 mode 语义逐个选择并投影给同一 Worker，Worker 逐个执行并逐个交付 `completed` Result。`MES_MAINTENANCE` 的每个 Result/ACK 只形成 Brain 接纳的 evidence，不形成 MES Task completion。
+- `implement-task`/`recover-task` mode 确定 lane 启动时首个 Task 的交付形式；同 Slice 内后续 current Task 由 Brain 按 Execute Flow Contract 按同一 mode 语义逐个选择并投影给同一 Worker，Worker 逐个执行并逐个交付 `completed` Result。`MES_MAINTENANCE` 的每个 Result/ACK 只形成 Brain 接纳的 evidence，不形成 MES Task completion。
 - “同一 lane 内逐 Task 推进”不等于“一次 dispatch 批量实现多个 Task”；逐 Task 推进是同一 Slice lane 内的正常模式，批量实现仍是 `SCOPE_VIOLATION`。
 未在 Read Set 中出现的 mode、跨 Task 批量实现和未授权的文件都属于 `OWNER_MISMATCH`/`SCOPE_VIOLATION`，
 立即返回，不猜测兼容语义。
@@ -59,11 +59,11 @@ Task 边界：每个 Task 必须自足（local closure / verification closure / 
    Result；当前执行环境无法运行该 seam 时返回既有 typed blocker，不把 Task 投影为完成。
    下游 CV 与 integrated Stage verification 独立再证相关行为，不替代 producer GREEN。
 4. **Task Result**：按 worker-template 写 Result（`NORMAL` 为 semantic event input，包含 PO 结果、commands、actual result、changed files、test/seam validity、risk/regression 与 remaining unknowns；`MES_MAINTENANCE` 为结构化 Link evidence，不写 MES、不指向 MES resultRef），并为每次提交携带 Slice-lane `actionToken` 与唯一 `resultId`。
-5. **返回、等待接纳并继续**：按 template 通过 Herdr Link 发送当前 Result 后，必须等待 Brain 对同一 `resultId` 返回闭集 `TASK_RESULT_ACK`；只有 `ACCEPTED + CONTINUE` 才表示同一 lane 继续，`ACCEPTED + PAUSE` 或 `REJECTED + PAUSE` 停止并等待 Brain recovery/route，禁止 `REJECTED + CONTINUE`。下一 current Task 由 Brain running `proofloop-execute` 从稳定 task order 选择并只投影该 Task 的 JIT input，Worker 接收投影的下一 Task JIT Read Set 后执行，全部 Task 完成且 self-check 通过后进入 `slice-ready` 返回 `SLICE_CANDIDATE_READY`；不自行派发 CV、不跨 Slice。
+5. **返回、等待接纳并继续**：按 template 通过 Herdr Link 发送当前 Result 后，必须等待 Brain 对同一 `resultId` 返回闭集 `TASK_RESULT_ACK`；只有 `ACCEPTED + CONTINUE` 才表示同一 lane 继续，`ACCEPTED + PAUSE` 或 `REJECTED + PAUSE` 停止并等待 Brain recovery/route，禁止 `REJECTED + CONTINUE`。下一 current Task 由 Brain 按 Execute Flow Contract 从稳定 task order 选择并只投影该 Task 的 JIT input，Worker 接收投影的下一 Task JIT Read Set 后执行，全部 Task 完成且 self-check 通过后进入 `slice-ready` 返回 `SLICE_CANDIDATE_READY`；不自行派发 CV、不跨 Slice。
 
 ## slice-ready 顺序
 
-1. 核对本 Slice 全部 Task 已交付，且逐 Task Result 已由 Brain 校验并按当前 mode 接纳（`NORMAL` 经 transaction layer materialize；`MES_MAINTENANCE` 经 Git-tracked Plan/evidence 复核），当前 Git basis 未变；Brain 只接纳 semantic event/ACK，下一 current Task 的选择与投影由 Brain running `proofloop-execute` 每个 Step 执行。
+1. 核对本 Slice 全部 Task 已交付，且逐 Task Result 已由 Brain 校验并按当前 mode 接纳（`NORMAL` 经 transaction layer materialize；`MES_MAINTENANCE` 经 Git-tracked Plan/evidence 复核），当前 Git basis 未变；Brain 只接纳 semantic event/ACK，下一 current Task 的选择与投影由 Brain 按 Execute Flow Contract 每个 Step 执行。
 2. 复核 Task Result 的闭环与 changed-file scope，生成/汇总本 Slice Result；保留 concrete test/oracle 事实，
    不复制全局 Authority。
 3. 返回 `SLICE_CANDIDATE_READY`（taskId omitted）；不带 `task_id`，不声称 CV PASS、Commit 或 Integration

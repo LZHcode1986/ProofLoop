@@ -100,7 +100,6 @@ export interface SliceWorkPacket {
   readonly execution_mode: WorkPacketExecutionMode;
   readonly target_agent: 'worker';
   readonly caller: 'brain';
-  readonly skill: 'proofloop-execute';
   readonly stage_id: string;
   readonly slice_id: string;
   readonly project_root: string;
@@ -473,7 +472,6 @@ export function validateSliceWorkPacket(value: unknown): SliceWorkPacket {
     'execution_mode',
     'target_agent',
     'caller',
-    'skill',
     'stage_id',
     'slice_id',
     'project_root',
@@ -502,7 +500,6 @@ export function validateSliceWorkPacket(value: unknown): SliceWorkPacket {
   const mode = executionMode(packet.execution_mode, 'work_packet.execution_mode');
   if (packet.target_agent !== 'worker') fail('RESULT_INVALID', 'work_packet.target_agent must be "worker"');
   if (packet.caller !== 'brain') fail('RESULT_INVALID', 'work_packet.caller must be "brain"');
-  if (packet.skill !== 'proofloop-execute') fail('RESULT_INVALID', 'work_packet.skill must be "proofloop-execute"');
   const stage = stageId(packet.stage_id, 'work_packet.stage_id');
   const slice = sliceId(packet.slice_id, 'work_packet.slice_id', mode);
   if (slice.slice(0, slice.indexOf('-')) !== stage) {
@@ -544,7 +541,6 @@ export function validateSliceWorkPacket(value: unknown): SliceWorkPacket {
     execution_mode: mode,
     target_agent: 'worker',
     caller: 'brain',
-    skill: 'proofloop-execute',
     stage_id: stage,
     slice_id: slice,
     project_root: projectRoot,

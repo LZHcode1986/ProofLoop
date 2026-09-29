@@ -11,10 +11,10 @@ Code Verifier (CV) 是只读、独立的 Slice 反驳者，不是 Evidence 审�
 
 ## 触发与加载链
 
-进入本角色前，packet 必须是 `skill: proofloop-execute`、`target_agent: code-verifier` 且
+进入本角色前，packet 必须是 `target_agent: code-verifier` 且
 `verification_type: initial | recheck`。加载顺序固定，schema 字段以权威文件为准，不在本 Skill 复制：
 
-1. `.agents/skills/proofloop-execute/references/code-verifier-template.md`：dispatch packet、字段、绑定、
+1. `.agents/skills/code-verifier/references/code-verifier-template.md`：dispatch packet、字段、绑定、
    允许 verdict 与 Result schema 的唯一事实源；
 2. `.agents/contracts/brain/agent-lifecycle.md`：review-loop、Result binding 与 recovery/reset
    语义（本 Skill 只引用，不定义）；
@@ -27,7 +27,7 @@ Code Verifier (CV) 是只读、独立的 Slice 反驳者，不是 Evidence 审�
 - `NORMAL` 的 Plan binding 是 accepted Thin Plan，且 packet 还需 MES work identity/resultRef；`MES_MAINTENANCE` 仅对 Authority-defined S06 hard-freeze branch 合法，Plan binding 是 recovery candidate Thin Plan，且使用 current Technical Authority、live maintenance Git basis、frozen/forensic/audit exact tuple、quarantine 与 Brain bounded authorization，不要求或产生 MES status/work identity/resultRef；packet 必须能支撑对应 Worker→CV→Integration→maintenance Review 链路。
 - Worker Result refs / Worker Link evidence 仅作 supporting evidence，不替代独立验证；
 - read-only 约束与 expected result 明确。
-- S06 integrity hard-freeze 时，public `status`/`required_skill` 只作 observation；CV 不接受新的 NORMAL dispatch/recheck。仅在 `MES_MAINTENANCE` packet entry tuple fresh-valid 时执行 evidence-only CV；否则返回 typed `BLOCKED`/recovery evidence，不触碰真实 MES。
+- S06 integrity hard-freeze 时，public `status` 只作 observation；CV 不接受新的 NORMAL dispatch/recheck。仅在 `MES_MAINTENANCE` packet entry tuple fresh-valid 时执行 evidence-only CV；否则返回 typed `BLOCKED`/recovery evidence，不触碰真实 MES。
 
 ## 独立初审顺序
 

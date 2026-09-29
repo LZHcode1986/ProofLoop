@@ -7,7 +7,7 @@
  * tech-spec/contracts.md §2.3 / §2.4):
  *
  *   - `projectSparseStatus` — the primary view exposes ONLY `scope` /
- *     `phase` / `required_skill` and the non-zero sparse anomaly counters
+ *     `phase` and the non-zero sparse anomaly counters
  *     (ADR-009 minimal exposure). Zero counters are omitted, and a counter
  *     set with nothing non-zero is omitted entirely.
  *   - `projectDetailStatus` — the bounded detail view re-reads the SAME
@@ -118,6 +118,8 @@ function expectSafeText(field: unknown, label: string): string {
 }
 
 /** Closed fields a status tuple may carry (unknown fails closed). */
+// `required_skill` retained ONLY for legacy seed tolerance (Phase 2D retirement):
+// old tuples may still carry it, but new projections never emit it.
 const TUPLE_KNOWN_FIELDS = ['scope', 'phase', 'required_skill', 'counters'] as const;
 
 /** Closed fields the durable seed record (detail input) may carry. */
@@ -137,19 +139,18 @@ const SEED_RECORD_KNOWN_FIELDS = [
 const GIT_BASIS_KNOWN_FIELDS = ['head', 'branch', 'worktree'] as const;
 
 /**
- * Primary (L1) status view: scope / phase / required_skill plus the
+ * Primary (L1) status view: scope / phase plus the
  * non-zero sparse anomaly counters, in canonical counter order. The
  * `counters` field is omitted entirely when nothing is non-zero.
  */
 export interface MesSparseStatus {
   /**
-   * Per-Stage scope / phase / required_skill. Omitted on a project-level
+   * Per-Stage scope / phase. Omitted on a project-level
    * between-Stage observation (STATIC-35) where no unique in-flight Stage
    * exists and the legal PRE_TERMINAL frontier is reported instead.
    */
   readonly scope?: string;
   readonly phase?: string;
-  readonly required_skill?: string;
   readonly counters?: Readonly<Partial<Record<MesAnomalyCounterKey, number>>>;
 }
 
@@ -210,7 +211,7 @@ export interface MesDetailStatus extends MesSparseStatus {
 /** Validate the Brain-supplied status tuple shape (fail closed). */
 function expectStatusTuple(value: unknown): MesStatusTuple {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    statusFail('status must be an object with scope/phase/required_skill');
+    statusFail('status must be an object with scope/phase/counters');
   }
   const status = value as Record<string, unknown>;
   for (const key of Object.keys(status)) {
@@ -231,7 +232,11 @@ function expectStatusTuple(value: unknown): MesStatusTuple {
   ) {
     statusFail(`status.phase must be one of the closed per-stage phase set: ${MES_STATUS_PHASES.join(' / ')} (got ${JSON.stringify(status.phase)})`);
   }
-  expectSafeText(status.required_skill, 'status.required_skill');
+  // (Phase 2D legacy tolerance) A present legacy `required_skill` is accepted
+  // as input but never projected; it must still be a safe text string.
+  if (status.required_skill !== undefined) {
+    expectSafeText(status.required_skill, 'status.required_skill');
+  }
   if (status.counters !== undefined) {
     if (typeof status.counters !== 'object' || status.counters === null || Array.isArray(status.counters)) {
       statusFail('status.counters must be an object');
@@ -297,7 +302,6 @@ export function projectSparseStatus(input: unknown): MesSparseStatus {
   return {
     scope: tuple.scope,
     phase: tuple.phase,
-    required_skill: tuple.required_skill,
     ...(counters !== undefined ? { counters } : {}),
   };
 }
@@ -354,8 +358,7 @@ export function projectDetailStatus(input: unknown): MesDetailStatus {
 
 /**
  * Deterministic human-readable rendering of the primary projection
- * (mes.md normal example: `S01 / EXECUTE`, `skill=proofloop-execute`,
- * then one `key=value` line per non-zero counter).
+ * (mes.md normal example: `S01 / EXECUTE`, then one `key=value` line per non-zero counter).
  */
 export function formatSparseStatus(projection: MesSparseStatus & { readonly accepted_stage_support_ids?: readonly string[] }): string {
   // (Reviewer Finding 2) Project-level between-Stage observation: no unique
@@ -363,7 +366,7 @@ export function formatSparseStatus(projection: MesSparseStatus & { readonly acce
   // instead of a fabricated `undefined / undefined` line.
   const lines: string[] = [];
   if (projection.scope !== undefined && projection.phase !== undefined) {
-    lines.push(`${projection.scope} / ${projection.phase}`, `skill=${projection.required_skill}`);
+    lines.push(`${projection.scope} / ${projection.phase}`);
   } else if (projection.accepted_stage_support_ids !== undefined && projection.accepted_stage_support_ids.length > 0) {
     lines.push(`accepted_stage_support_ids=${projection.accepted_stage_support_ids.join(' ')}`);
   }
@@ -1474,7 +1477,7 @@ function resolveCurrentCycle(
 /**
  * Cycle-filtered status currentness (S05-C-T01 / PO-S05-C-01).
  *
- * Derives the current scope / phase / required_skill of the current NORMAL
+ * Derives the current scope / phase of the current NORMAL
  * delivery cycle from the DURABLE MES facts alone (mes.md status 一级视图,
  * contracts.md §2.3, architecture delivery-cycle-semantics "Current phase is
  * cycle-filtered"):
@@ -1514,8 +1517,6 @@ export interface MesCycleFilteredStatus {
   readonly scope?: string;
   /** Cycle-filtered per-stage phase: PLANNING / EXECUTE / REVIEW / STAGE_ACCEPTED. */
   readonly phase?: MesStatusPhase;
-  /** Required skill of the projected phase (never invented). */
-  readonly required_skill?: string;
   /** Ascending canonical accepted-stage support ids (between-Stage observation only). */
   /** Ascending canonical accepted-stage support ids (between-Stage observation only). */
   readonly accepted_stage_support_ids?: string[];
@@ -1645,7 +1646,6 @@ export function projectCycleFilteredStatus(
       );
     });
     const phase: MesStatusPhase = reviewFact ? 'REVIEW' : executeFact ? 'EXECUTE' : 'PLANNING';
-    const requiredSkill = phase === 'REVIEW' ? 'stage-reviewer' : phase === 'EXECUTE' ? 'proofloop-execute' : 'proofloop-plan';
     // (M2-1B / Change F) Derived sparse L1 anomaly counters for this Stage
     // over its same-cycle current-attempt facts (never the seed tuple).
     const stageCycleFacts = sameCycle.filter((fact) => fact.scope!.stage_id === stage);
@@ -1663,7 +1663,6 @@ export function projectCycleFilteredStatus(
       cycle_id: currentCycle,
       scope: stage,
       phase,
-      required_skill: requiredSkill,
       ...(mergedCounters !== undefined ? { counters: mergedCounters } : {}),
     };
   }
@@ -1674,7 +1673,6 @@ export function projectCycleFilteredStatus(
       cycle_id: currentCycle,
       scope: candidateStages[0],
       phase: 'STAGE_ACCEPTED',
-      required_skill: 'stage-reviewer',
       ...(cycleHumanRequiredCounters !== undefined ? { counters: cycleHumanRequiredCounters } : {}),
     };
   }
@@ -1745,7 +1743,6 @@ export function projectCycleFilteredDetail(
   const base: MesDetailStatus = {
     scope: current.scope,
     phase: current.phase,
-    required_skill: current.required_skill,
   };
   // (EC-4 / CV S05-C-cv-1) The detail binding facts are resolved from the
   // SELECTED current stage + cycle only: a same-cycle PA/PVR of another

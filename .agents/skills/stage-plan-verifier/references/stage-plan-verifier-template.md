@@ -1,9 +1,10 @@
 # Stage Plan Verifier Dispatch Template
 
 本模板是 SPV dispatch packet、Result schema 与必要 binding 的唯一事实源，供 Planning flow 的
-`proofloop-plan` 为 Brain 直接调度 `stage-plan-verifier`（SPV）使用。
+本模板是 SPV dispatch packet、Result schema 与必要 binding 的唯一事实源，供 Planning flow 的
+Planning Flow Contract（`.agents/contracts/brain/planning.md`）为 Brain 直接调度 `stage-plan-verifier`（SPV）使用。
 SPV 是 review-loop Role，Brain 以 `role_skill/config_agent = stage-plan-verifier` 经 Herdr Link configured start 启动；
-`proofloop-plan` 仅表示 Planning caller。独立审查 procedure（验证顺序、challenge 方法、结果纪律）唯一来源是
+`planning` 仅表示 Planning caller（Planning Flow Contract）。独立审查 procedure（验证顺序、challenge 方法、结果纪律）唯一来源是
 `.agents/skills/stage-plan-verifier/SKILL.md`；本模板统一以 Skill pointer 引用，不形成第二方法源，
 也不教 Planner 如何修复或生成 producer instruction。
 SPV 是只读的独立 falsifier，对按 `execution_mode` 绑定的 pre-accept candidate Thin Plan（三种 mode 均尚未被 Brain 接纳）做全量 structural closure 与高风险 edge counterexample challenge。
@@ -15,7 +16,6 @@ SPV 是只读的独立 falsifier，对按 `execution_mode` 绑定的 pre-accept 
 execution_mode: NORMAL | RECOVERY_REBASELINE
 target_agent: stage-plan-verifier
 caller: brain
-skill: proofloop-plan
 stage_id: <stage-id>
 project_root: <canonical-trust-root>
 project_stage_map_ref: <delivery/project-stage-map.md#<stage-entry>>   # current Stage Map entry；candidate Plan 与 Map entry 处于同一 candidate Git basis；Map 正文不复制进 packet
@@ -62,7 +62,7 @@ binding 按 `execution_mode` 判别，三种 mode 都验证 pre-accept candidate
 - Result binding 按 mode 显式：`NORMAL` 是 pre-accept `PLANNING_VERIFICATION_RESULT` Link reply，由 Brain 接纳/授权并交 MES transaction layer materialize；`RECOVERY_REBASELINE` 是结构化 Link evidence，`PLAN_READY` 在 maintenance/recovery closure 前不写 MES。各 mode 下 SPV 都全程 read-only。
 - 本模型无 Manifest/Evidence skeleton/Receipt/admission；SPV 输入不需要任何 digest helper 或
   Runtime admission Receipt。缺任一输入、ref 无法解析或 scope 不闭合时返回 `BLOCKED`，不降级为猜测。
-- S06 integrity hard-freeze 时，public status/required_skill 不授权 NORMAL planning verification；SPV 只可在 Authority-defined remediation candidate 已具备 current maintenance/recovery basis 后验证，并不写 NORMAL MES facts。
+- S06 integrity hard-freeze 时，public status 不授权 NORMAL planning verification；SPV 只可在 Authority-defined remediation candidate 已具备 current maintenance/recovery basis 后验证，并不写 NORMAL MES facts。
 
 ## 验证（只读、独立）
 
@@ -119,7 +119,7 @@ BLOCKED
 
 - `PLAN_READY`：无闭环缺口，Brain 采纳并进入 Execute；它本身不授予执行权。
 - `FINDINGS`：带 concrete counterexample 与 structural gap；由 Brain 决定 owner/route（典型为回
-  `proofloop-plan` 修复）。
+  `planner` 修复）。
 - `BLOCKED`：缺输入、ref 无法解析、Authority 缺口或环境阻塞，带结构化 blocker 回 Brain。
 
 非成功结果必须包含：
@@ -134,10 +134,10 @@ affected_artifacts: []
 affected_plan_entities: []
 evidence: <description>
 reason: <description>
-suggested_owner: Brain | proofloop-plan | User
+suggested_owner: Brain | planner | User
 invalidation_scope: []
 resume_target:
-  owner: Brain | proofloop-plan | User
+  owner: Brain | planner | User
   phase: STAGE_PLANNING | AUTHORITY_READINESS | RECOVERY_OR_EXCEPTION
   stage: <stage-id | none>
 ```

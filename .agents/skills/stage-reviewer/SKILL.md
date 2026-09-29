@@ -26,7 +26,7 @@ Reviewer 若返回 finding，按 `stage-review.md` Contract 提供 `finding_evid
 - `review_scope: stage`：required fields 齐全（Stage identity、accepted Plan ref、Technical Authority refs（tech-spec）、integrated snapshot、Slice composition facts）；`review_scope: maintenance`：required fields 齐全（S06 identity、`MES_MAINTENANCE` recovery candidate Plan ref、current Technical Authority refs、maintenance Git candidate/integration evidence、frozen/forensic/audit exact binding）。packet 采用 ref-first，审查依据由 scope 决定，不包含 Brain 预设的目标摘要、产品层解读或 Brain acceptance criteria；Reviewer 从 stable refs 独立自读并重建目标与验收要求；
 - 默认 capability `[]`；明确安全需求时按 packet 加载 `security-and-hardening`；
 - clean-room 与 read-only 约束明确。
-- S06 integrity hard-freeze 时，public `EXECUTE`/`proofloop-execute` projection 不能授权新的 NORMAL Stage Review；仅当 maintenance evidence-only lifecycle 已闭合、packet 为 `review_scope: maintenance` + `execution_mode: MES_MAINTENANCE` 且 frozen/forensic/audit tuple fresh-valid 时，Reviewer 可进行 maintenance Review，不修改真实 MES。
+- S06 integrity hard-freeze 时，public `EXECUTE` phase projection 不能授权新的 NORMAL Stage Review；仅当 maintenance evidence-only lifecycle 已闭合、packet 为 `review_scope: maintenance` + `execution_mode: MES_MAINTENANCE` 且 frozen/forensic/audit tuple fresh-valid 时，Reviewer 可进行 maintenance Review，不修改真实 MES。
 
 ## 三轴独立审查顺序
 

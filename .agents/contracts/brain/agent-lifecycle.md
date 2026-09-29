@@ -2,8 +2,8 @@
 
 ## 1. 目的、角色与生命周期归属
 
-本 Contract 统一定义七个 Role Skill 以及 Planning dispatch skill
-`proofloop-plan` 的 `one-shot`、`continuation`、`review-loop`、`recovery`、
+本 Contract 统一定义八个 Role Skill（含 `planner`）的
+`one-shot`、`continuation`、`review-loop`、`recovery`、
 `recall/reset` 语义。它定义生命周期分支的校验和迁移，不规定模型推理、tool
 顺序或每轮读取节奏。
 
@@ -18,8 +18,8 @@
 | `code-verifier` | `review-loop` | Slice 独立初审、finding、repair 后有界复查；`MES_MAINTENANCE` 下 evidence-only CV |
 | `stage-plan-verifier` | `review-loop` | candidate Plan 与 referenced Map entry 独立验证；Plan 或 Map material revision 时 fresh full initial |
 | `stage-reviewer` | `review-loop` | normal Stage 三轴初审、repair 后复查或 reset；`MES_MAINTENANCE` 下 evidence-only maintenance Review |
-`proofloop-plan` 不是第八个 Role；它是 Planning dispatch skill，runtime label 为
-`planner`，使用 `continuation`。Planning 的 candidate Plan 在接纳前不要求
+`planner` 是第八个 Role Skill（Planning dispatch 的 runtime label），使用
+`continuation`。Planning 的 candidate Plan 在接纳前不要求
 accepted Plan；SPV 严格绑定 candidate Plan + referenced Map entry + Authority + exact candidate Git tuple，任何 Plan 或 Map material revision，或 candidate Plan / referenced Map entry / Authority / Git tuple 变化都要求新的 SPV fresh full initial 验证。
 
 ## 2. Branch-scoped validation
@@ -34,7 +34,7 @@ currentness basis：
 | Result acceptance | role template schema、`actionToken`、Result identity、Stage/Slice/Task/Plan binding、mode-specific digest/binding、scope 与该 Result 的 Git/事实 basis；`NORMAL` durable materialization 由 MES transaction layer 完成，`MES_MAINTENANCE` 只由 Git/Plan/evidence 复核 | Brain + 对应 Result Contract + MES transaction owner |
 | review `RECHECK` | reviewer identity、review target/basis、repair scope、repair diff、required criterion、mode/maintenance binding（如适用）与 read-only 条件 | lifecycle + 对应 Reviewer Skill |
 | `RECOVERY` | 受影响的 durable facts、binding、scope、Git reality、Result/Finding 与当前 peer 能力；`MES_MAINTENANCE` 另须 frozen snapshot exact digest/count、forensic/audit refs 与 quarantine | Brain + 本 Contract |
-| Worker continuation | 同一 Slice lane、mode-specific Plan/Authority/Git basis、scope 和上一个 Result/ACK 状态；Task JIT Read Set 由 Brain running `proofloop-execute` 每个 Step 投影、Worker 只消费；`MES_MAINTENANCE` 还须 maintenance binding 与 Brain bounded authorization current | Worker/Execute Skill |
+| Worker continuation | 同一 Slice lane、mode-specific Plan/Authority/Git basis、scope 和上一个 Result/ACK 状态；Task JIT Read Set 由 Brain 按 Execute Flow Contract 每个 Step 投影、Worker 只消费；`MES_MAINTENANCE` 还须 maintenance binding 与 Brain bounded authorization current | Worker Skill + Execute Flow Contract |
 | Planner continuation | 同一语义 Planning basis：Project Stage Map 路径（`delivery/project-stage-map.md`）及当前 Git basis 下的 current Stage entry、Stage / dependency-ready 选择、candidate Plan target / binding、Authority refs、相关 code reality、branch、trust root 和合法 planning write scope | Planning Skill + 本 Contract |
 Planner lifecycle 只能由已经满足 Planning-entry predicate 的 Brain dispatch 启动（predicate = `MES initialized + current PROPOSE_READY`，判定只属于 Brain；Planner 不重复检查该 gate）。Planning-entry 的完整语义与 presence observation 由 `.agents/contracts/brain/mes.md` 与 `.agents/contracts/brain/workflow.md` 持有，本文件只保留该 dispatch prerequisite，不复制其正文。
 
@@ -52,7 +52,7 @@ User presence is not a lifecycle condition: a user who stops sending messages do
 - Integration 验证当前 Git/current binding；
 - recovery 重建受影响 durable facts 与 binding；
 - Plan 或 Map material revision，或 candidate Plan + referenced Map entry + Authority + exact candidate Git tuple 发生任何变化，SPV 对新 tuple 执行 fresh full initial；
-- Worker 每个 Task 的 JIT Read Set 由 Brain running `proofloop-execute` 每个 Step 投影，Worker 只消费。
+- Worker 每个 Task 的 JIT Read Set 由 Brain 按 Execute Flow Contract 每个 Step 投影，Worker 只消费。
 
 ## 3. Lifecycle policy matrix
 
@@ -60,9 +60,9 @@ User presence is not a lifecycle condition: a user who stops sending messages do
 |---|---|---|---|---|
 | `general` | legal Result 被 Brain 接纳 | —（one-shot） | legal Result 经 schema/binding 校验并被接纳 | binding、identity 或 Result 失败 |
 | `researcher` | legal Result 被 Brain 接纳 | —（one-shot） | legal Result 经校验并被接纳 | binding、identity 或 Result 失败 |
-| `proofloop-plan`（`planner`） | Brain 接纳 `PLAN_READY`/accepted Plan，或 Planning cancel/reset/binding 失效 | bounded Planning/revision；SPV `FINDINGS` 被归类且语义 basis 仍 current | 仅 retain 终点成立时关闭 | 语义 Planning basis、identity 或 snapshot 失效 |
+| `planner` | Brain 接纳 `PLAN_READY`/accepted Plan，或 Planning cancel/reset/binding 失效 | bounded Planning/revision；SPV `FINDINGS` 被归类且语义 basis 仍 current | 仅 retain 终点成立时关闭 | 语义 Planning basis、identity 或 snapshot 失效 |
 | `worker` | 整个 Slice：Task loop、candidate ready、CV finding/repair/recheck 直到当前 mode 的 CV PASS 被接纳且 candidate ref durable | 每个 accepted Task Result/ACK，在同一 Slice lane 内继续至 `SLICE_CANDIDATE_READY`；CV dispatch、finding 和 bounded repair 不关闭 Worker lifecycle；`MES_MAINTENANCE` 的 ACK/Result 只接纳 evidence | Brain 接纳 CV PASS、candidate ref durable，达到对应 mode 的 `READY_TO_INTEGRATE`，且无 pending repair/recovery；maintenance 不写 MES；或显式 cancel/reset/binding invalidation | binding、identity、snapshot 或 maintenance tuple 失效 |
-| `proofloop-execute (MES_MAINTENANCE)` | maintenance branch：全部 evidence-only Slice lifecycle 到 maintenance Review | dependency-ready Slice lane；Worker/CV/Integration/cleanup 均按 maintenance binding 继续 | Brain 接纳全部 maintenance Review evidence，且无 pending Slice/repair/recovery；随后进入 controlled-recovery decision，不写 MES | recovery tuple、Plan/Authority/Git basis、quarantine 或 Brain authorization 失效 |
+| Execute Flow Contract（`MES_MAINTENANCE`） | maintenance branch：全部 evidence-only Slice lifecycle 到 maintenance Review | dependency-ready Slice lane；Worker/CV/Integration/cleanup 均按 maintenance binding 继续 | Brain 接纳全部 maintenance Review evidence，且无 pending Slice/repair/recovery；随后进入 controlled-recovery decision，不写 MES | recovery tuple、Plan/Authority/Git basis、quarantine 或 Brain authorization 失效 |
 | `prototype` | Prototype continuation 或 Researcher detour 期间 | technical result 后 Prototype basis 仍 current | legal terminal technical Result 被接纳 | binding、identity 或 snapshot 失效 |
 | `code-verifier` | finding → repair/recheck 全程 | bounded repair 后，在同一 review basis 下继续；`MES_MAINTENANCE` 保持 frozen/forensic/audit + live Git basis | Brain 接纳 CV PASS 且 candidate ref durable，达到对应 mode 的 `READY_TO_INTEGRATE`，且无 pending repair/recheck；maintenance PASS 只形成 evidence，不写 MES；或显式 cancel/reset/binding invalidation | binding、identity、review basis 或 maintenance tuple 失效 |
 | `stage-plan-verifier` | 当前 candidate verification cycle | Plan 或 Map material revision 仅复用 transport identity，必须对新 tuple（candidate Plan + referenced Map entry + Authority + exact candidate Git basis）fresh full initial | Brain 接纳 `PLAN_READY` 并建立 accepted Plan | binding、identity、referenced Map entry 或 candidate tuple 失效 |
@@ -102,7 +102,7 @@ Stage Reviewer envelope 按 `.agents/contracts/brain/stage-review.md` 作为 Bra
 
 ### 4.1 Worker Task Result ACK
 
-Worker 在 Slice lane 内执行被投影的 current Task。每个 Step 由 Brain running `proofloop-execute` 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body。Brain 只接纳 Result 并返回非 durable、
+Worker 在 Slice lane 内执行被投影的 current Task。每个 Step 由 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）选择并投影 current Task（完整 selection/projection 由 execute.md 唯一持有）；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body。Brain 只接纳 Result 并返回非 durable、
 closed `TASK_RESULT_ACK`：
 
 ```yaml
@@ -127,13 +127,13 @@ reasonCode: <required for REJECTED or PAUSE>
 不同 payload 返回 `RESULT_INVALID`；stale token 返回 `RESULT_BINDING_MISMATCH`。
 ACK 丢失或 Brain 重启时，`NORMAL` 从 MES 重建等价 ACK；`MES_MAINTENANCE` 从 recovery Plan、Git refs/commits、frozen digest/count 与 forensic/audit 重建，不创建 ack-log、maintenance result store 或第二 result store。
 
-每个 Step 由 Brain running `proofloop-execute` 从当前 mode 绑定的 Plan 当前 Slice 的稳定 task order 选择第一个 incomplete 且 dependencies 已有被当前 mode 接纳的 outputs、scope/binding current 的 Task，并只把该 Task 的 JIT input 投影给同一 Worker；`NORMAL` predecessor output 来自 MES durable facts，`MES_MAINTENANCE` predecessor evidence 从 Git + Plan/evidence 重建；不得越过未接纳 predecessor。Brain 不在 ACK 中携带下一 Task 指令。
+每个 Step 由 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）选择并投影下一 current Task（selection/projection 完整 procedure 唯一 owner 是 execute.md，稳定 task order / predecessor-output-ready 判定见 execute.md 与 `successor-barrier` 机械 seam）；`NORMAL` predecessor output 来自 MES durable facts，`MES_MAINTENANCE` predecessor evidence 从 Git + Plan/evidence 重建；不得越过未接纳 predecessor。Brain 不在 ACK 中携带下一 Task 指令。
 
 ## 5. Continuation branches
 
 ### 5.1 Worker
 
-Brain 只启动一次 Slice lane，按当前 mode 投影 Slice-level Work Packet 和首个 dependency-ready Task 的 JIT Read Set；lane 启动后，Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、并只把该 Task 的 JIT input 投影给同一 Worker。Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 开始时读取 Execute 投影的 JIT Read Set、Plan/Authority/Git basis 与依赖输出，提交 Result 并等待 Brain 的 closed ACK。`NORMAL` 的 ACK/Result 由 MES transaction layer materialize；`MES_MAINTENANCE` 的 ACK/Result 只接纳 Git/Link evidence。ACK 接纳后 Worker 继续，直到 self-check 通过返回 `SLICE_CANDIDATE_READY`；Brain 随后按 mode 路由 CV。Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
+Brain 只启动一次 Slice lane，按当前 mode 投影 Slice-level Work Packet 和首个 dependency-ready Task 的 JIT Read Set；lane 启动后每个 Step 的 current Task 由 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）选择并投影（完整 procedure 由 execute.md 唯一持有）。Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 开始时读取 Execute 投影的 JIT Read Set、Plan/Authority/Git basis 与依赖输出，提交 Result 并等待 Brain 的 closed ACK。`NORMAL` 的 ACK/Result 由 MES transaction layer materialize；`MES_MAINTENANCE` 的 ACK/Result 只接纳 Git/Link evidence。ACK 接纳后 Worker 继续，直到 self-check 通过返回 `SLICE_CANDIDATE_READY`；Brain 随后按 mode 路由 CV。Task 边界：每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。
 
 Worker 有 durable code、Evidence 或 projection 而 Agent 丢失时，Brain 使用当前 mode 的 `recover-task`，保留已有成果，重新校验 root-bound scope/binding，不重新实现已有工作；`MES_MAINTENANCE` 还必须重建 frozen/forensic/audit tuple 与 maintenance authorization。Result 缺失或未接纳时 lane 暂停，不得自主越过 barrier。
 

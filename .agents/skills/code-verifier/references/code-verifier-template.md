@@ -1,6 +1,6 @@
 # Code Verifier 派发模板
 
-本模板供 `proofloop-execute` 由 Brain 直接调度 Slice-level Code Verifier（CV）使用。CV 是只读的独立反驳者，验证 Worker 形成的 `SLICE_CANDIDATE_READY` 是否真实满足 Slice Goal。它不做 Task-level review，不调用任何旧 CLI，不写 Receipt/Manifest/Evidence/Context。本模型无 Context Evidence gate、无 admission、无 digest 链；finding 只是 evidence，route 由 Brain 决定。`MES_MAINTENANCE` 下 CV 仍只读验证 recovery candidate/Git evidence，不写 MES。
+本模板供 Execute Flow Contract（`.agents/contracts/brain/execute.md`）由 Brain 直接调度 Slice-level Code Verifier（CV）使用。CV 是只读的独立反驳者，验证 Worker 形成的 `SLICE_CANDIDATE_READY` 是否真实满足 Slice Goal。它不做 Task-level review，不调用任何旧 CLI，不写 Receipt/Manifest/Evidence/Context。本模型无 Context Evidence gate、无 admission、无 digest 链；finding 只是 evidence，route 由 Brain 决定。`MES_MAINTENANCE` 下 CV 仍只读验证 recovery candidate/Git evidence，不写 MES。
 
 ## 派发数据包
 
@@ -8,7 +8,6 @@
 execution_mode: NORMAL | MES_MAINTENANCE
 target_agent: code-verifier
 caller: brain
-skill: proofloop-execute
 verification_type: initial | recheck
 stage_id: <stage-id>
 slice_id: <slice-id>
@@ -49,7 +48,7 @@ expected_result: PASS | FINDINGS | BLOCKED
 - Worker Result refs / Worker Link evidence 仅作 supporting evidence，不替代独立验证；
 - 验证 basis 按 mode 显式：`NORMAL` 是 live Slice worktree basis（`candidate_ref` 指向当前 live worktree branch/ref，`head` 绑定该 worktree 当前 HEAD，`diff_ref` 绑定当前待验证 worktree diff）；这不是 durable canonical `proofloop-<stage>-<slice>` candidate ref（后者只在 post-PASS `slice-output` 建立，作为 Integration 输入）；`MES_MAINTENANCE` 使用 recovery candidate Plan ref + live maintenance worktree basis + frozen/forensic/audit binding；后者不在 PASS 前发明 durable MES result 或第二 candidate store。
 - read-only 约束与 expected result；`MES_MAINTENANCE` 下 CV 可只读核对 frozen snapshot exact digest/count、forensic/audit refs、quarantine 与 isolated fixture 结果，但不得写真实 project MES。
-- S06 integrity hard-freeze 时，public `status` 的 `EXECUTE`/`proofloop-execute` 仅是 observation；CV 不接受 NORMAL dispatch/recheck。只有 maintenance packet 的 entry tuple fresh-valid 且 `execution_mode: MES_MAINTENANCE` 时执行 evidence-only CV；否则返回 typed blocker/recovery evidence，不触碰真实 project MES。
+- S06 integrity hard-freeze 时，public `status` 的 `EXECUTE` phase 仅是 observation；CV 不接受 NORMAL dispatch/recheck。只有 maintenance packet 的 entry tuple fresh-valid 且 `execution_mode: MES_MAINTENANCE` 时执行 evidence-only CV；否则返回 typed blocker/recovery evidence，不触碰真实 project MES。
 - Result binding 按 mode 显式：`NORMAL` 是正式 CV verdict input，由 Brain 接纳/授权后交 MES operational transaction layer materialize；`MES_MAINTENANCE` 是结构化 Link evidence（binding = execution_mode + authority_refs + recovery candidate Plan ref + git_basis + maintenance_binding + actionToken），不写 MES、不指向 MES resultRef。各 mode 下 CV 都全程 read-only、独立反驳。
 
 本模型无 Manifest/Evidence skeleton/Receipt/admission/Context gate；CV 输入不需要任何 digest helper 或

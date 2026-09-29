@@ -36,7 +36,7 @@
  * Selection is deterministic: replay / recovery recomputes the identical
  * result from the same durable facts + task order. The seam produces no
  * next-task directive: the returned list is the pure selection input that
- * Brain running `proofloop-execute` consumes per Step — Brain selects the
+ * Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）consumes per Step — Brain selects the
  * current dependency-ready Task and only projects that Task's JIT input to the
  * same Worker, which never selects or reorders a successor and never receives a
  * future Task body. Task-order changes and replan classification are S03-F
