@@ -13,7 +13,6 @@ Task 开始时生成/投影；是 derived execution input，不是 Authority。`
 execution_mode: NORMAL | MES_MAINTENANCE
 target_agent: worker
 caller: brain
-skill: proofloop-execute
 stage_id: <stage-id>
 slice_id: <slice-id>
 project_root: <canonical-trust-root>
@@ -46,11 +45,11 @@ expected_result: SLICE_CANDIDATE_READY
 - Worker 的 downstream authority 仅限 bound normative refs；Brain 提供 binding/refs/mutation boundary，不提供重写后的 semantic implementation instructions；Worker 根据 Plan + tech-spec + code reality 决定 HOW。
 - 三种 mode 共享本模板的单一 packet/result/ACK schema；本模板不发明第二 durable result store、状态机或 maintenance result store。
 - `NORMAL` packet/result 不要求、也不得携带 full snapshot、retention assembly 或 caller 拼接的 canonical binding；这些由 MES transaction layer 在 semantic event transaction 内解析/校验。S06 integrity hard-freeze 时不得启动该 NORMAL lane。
-- `slice_task_ids` 是当前 Slice 的 canonical Task ID 集合（仅 ID，不是 Task body）；Slice Work Packet 只携带 Slice 级输入，per-Task JIT Read Set 由 Brain running `proofloop-execute` 每个 Step 投影给同一 Worker 且恰含一个 current Task 的 `task_id`。
+- `slice_task_ids` 是当前 Slice 的 canonical Task ID 集合（仅 ID，不是 Task body）；Slice Work Packet 只携带 Slice 级输入，per-Task JIT Read Set 由 Brain 按 Execute Flow Contract 每个 Step 投影给同一 Worker 且恰含一个 current Task 的 `task_id`。
 
 ## per-Task JIT Read Set
 
-Brain running `proofloop-execute` 每个 Step 读取完整 accepted Plan、选择当前 dependency-ready Task、只把该 Task 的 JIT input 投影给同一 Worker；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。每 Task 实现前必须 fresh-read 当前 Read Set、对应 canonical Technical Authority 与 Slice binding（Plan/scope/Git basis/dependency outputs）：
+Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）每个 Step 选择并投影 current Task（完整 selection/projection procedure 由 execute.md 唯一持有，本模板不复述）；Worker 只执行被投影的 current Task，不自行选择或重排 successor，不接收 future Task body；每个 Task 必须自足（local closure / verification closure / future-HOW independence），自然 TDD（RED → 最小实现 → GREEN）属同一 Task 的 HOW，不跨 Task 切碎。每 Task 实现前必须 fresh-read 当前 Read Set、对应 canonical Technical Authority 与 Slice binding（Plan/scope/Git basis/dependency outputs）：
 
 ```yaml
 execution_mode: NORMAL | MES_MAINTENANCE
@@ -149,7 +148,7 @@ validatedGitBasis: <validated Result/evidence basis>
 reasonCode: <required when REJECTED or PAUSE; otherwise omitted>
 ```
 
-只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`；`REJECTED + CONTINUE` 无效。`acceptedResultRef`、`validatedGitBasis` 与 `reasonCode` 的闭集规则、unknown-key rejection、actionToken lane 生命周期、resultId 幂等重放/修正 retry、lost-ACK recovery 与 successor barrier 以 `tech-spec/contracts.md` 和 lifecycle Contract 为准。对 `MES_MAINTENANCE`，ACK 只表示 Brain 接纳 evidence，不表示 MES Task completion。ACK 不得携带 `next_task_id`、`next_action` 或 producer instruction；`ACCEPTED + CONTINUE` 后由 Brain running `proofloop-execute` 从当前 mode 绑定的 stable task order 选择下一个 dependency-ready Task 并只把该 Task 的 JIT input 投影给同一 Worker，Worker 不自行选择 successor。
+只允许 `ACCEPTED + CONTINUE`、`ACCEPTED + PAUSE`、`REJECTED + PAUSE`；`REJECTED + CONTINUE` 无效。`acceptedResultRef`、`validatedGitBasis` 与 `reasonCode` 的闭集规则、unknown-key rejection、actionToken lane 生命周期、resultId 幂等重放/修正 retry、lost-ACK recovery 与 successor barrier 以 `tech-spec/contracts.md` 和 lifecycle Contract 为准。对 `MES_MAINTENANCE`，ACK 只表示 Brain 接纳 evidence，不表示 MES Task completion。ACK 不得携带 `next_task_id`、`next_action` 或 producer instruction；`ACCEPTED + CONTINUE` 后下一 current Task 由 Brain 按 Execute Flow Contract 选择并投影（完整 selection/projection 见 execute.md），Worker 不自行选择 successor。
 
 - Task 完成：`outcome: completed` + `taskId` + 当前 Task 的 `changedFiles`/`verificationRuns`；Task Result 按 `executionMode` 处理：`NORMAL` 是 semantic event input，由 MES operational transaction layer materialize execution record；`MES_MAINTENANCE` 为结构化 Subagent transport evidence（binding = executionMode + authorityRefs + recovery candidate Plan ref + gitBasis + maintenanceBinding + stage/slice/task + actionToken），不写 MES、不指向 MES resultRef。
 - Slice 全部 Task 完成且 self-check 通过：返回 `SLICE_CANDIDATE_READY`（taskId omitted），表示候选 Slice

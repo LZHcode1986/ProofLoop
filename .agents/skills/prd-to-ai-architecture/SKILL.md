@@ -11,7 +11,7 @@ disable-model-invocation: true
 - 定位: 统一 Propose 的收尾部分（不拥有独立 ARCHITECTURE phase，不做 artifact-by-artifact 用户确认，不发独立完成 Gate）
 - Prerequisite: 同一 Propose 内 PRD contribution 就绪；需要的产品级技术澄清已并入（按需 `prd-to-tech-design-prep`）
 - Completion: canonical Propose 包完整 → 最终完成信号 `PROPOSE_READY`
-- Handoff: same Propose 内完成四类 core Authority；存在 frontend scope 时，显式加载 `frontend-tech` 完成条件性的 `tech-spec/frontend.md` handoff，然后才返回 `PROPOSE_READY`；Stage/Slice/Task/dependency execution planning 全部交 `proofloop-plan`（STAGE_PLANNING）；`codebase-design` 仅作为按需加载的 module/seam/domain-boundary capability
+- Handoff: same Propose 内完成四类 core Authority；存在 frontend scope 时，显式加载 `frontend-tech` 完成条件性的 `tech-spec/frontend.md` handoff，然后才返回 `PROPOSE_READY`；Stage/Slice/Task/dependency execution planning 全部交 `planner` Role Skill（Planning Flow，`.agents/contracts/brain/planning.md`）；`codebase-design` 仅作为按需加载的 module/seam/domain-boundary capability
 - Rollback: 架构需要修改时继续本 skill；PRD 需要修改时回到 `ai-structured-prd`
 
 ## Purpose
@@ -82,7 +82,7 @@ Optional:
 5. **Acceptance Mapping**
    - Create `tech-spec/acceptance.md`.
    - Map every PRD must-implement item to acceptance criteria and evidence checks; record non-goals and forbidden shortcuts.
-   - No task breakdown, no dependency ordering, and no work-item decomposition here — `proofloop-plan` owns Stage/Slice/Task execution planning.
+   - No task breakdown, no dependency ordering, and no work-item decomposition here — `planner` Role Skill owns Stage/Slice/Task execution planning.
 
 ## Conditional frontend handoff closure
 
@@ -106,7 +106,7 @@ No artifact-by-artifact user confirmation and no package-wide user checkpoint ar
 A user-requested bounded update may touch only the requested owner (e.g. only `tech-spec/architecture.md`); the four core Authority owners stay fixed. `PROPOSE_READY` is emitted only when all four core owners are current and consistent and, when frontend scope exists, `tech-spec/frontend.md` is current with no blocking frontend handoff gap.
 A formal `AUTHORITY_GAP` from Planning/SPV or a blocking frontend handoff gap returns to this current Propose owner when canonical Technical Authority is missing, contradictory, or invalidated by grounded current reality under unchanged Product intent. Complete the bounded Authority update, rerun the affected `frontend-tech` closure when applicable, keep the four-file package current/consistent, and let Brain accept the exact path set before the `authority-update` mechanical boundary; ordinary Technical Authority repair does not require a separate user approval checkpoint.
 
-Stage/Slice/Task/dependency execution planning belongs to `proofloop-plan`（STAGE_PLANNING）, not to this skill. Brain enters PLANNING directly after `PROPOSE_READY`（proofloop-plan → stable Git boundary → fresh SPV → `PLAN_READY` → accepted Plan → proofloop-execute）. `codebase-design` may be loaded on demand by Planner/Architecture as a module/seam/domain-boundary capability; it never emits a workflow status.
+Stage/Slice/Task/dependency execution planning belongs to `planner` Role Skill（Planning Flow，`.agents/contracts/brain/planning.md`）, not to this skill. Brain enters PLANNING directly after `PROPOSE_READY`（planning.md → dispatch `planner` → stable Git boundary → fresh SPV → `PLAN_READY` → accepted Plan → Execute Flow Contract）. `codebase-design` may be loaded on demand by Planner/Architecture as a module/seam/domain-boundary capability; it never emits a workflow status.
 
 If the user requests architecture changes, continue in this skill; if the PRD must change, return to `ai-structured-prd`.
 

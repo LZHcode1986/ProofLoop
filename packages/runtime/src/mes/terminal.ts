@@ -39,6 +39,7 @@
 import { CANONICAL_STAGE_ID_RE } from '@proofloop/kernel';
 import { projectReadyClosedGitBasisError } from './binding';
 import { classifyInvalidHistory } from './history-oracle';
+import { resolveHumanRequiredResolutionLegalityError } from './human-required-oracle';
 import type { MesFactEnvelope } from './types';
 
 /**
@@ -289,6 +290,48 @@ export function resolveFindingDispositionRefError(
   }
   return undefined;
 }
+
+/**
+ * (A4 / contracts.md §2.2.4) Binding-critical resolution validation for a
+ * `human_required_resolution` fact over the WHOLE resulting set (submitted
+ * ∪ retained facts).
+ *
+ *   - `source_finding_ref` must exact-resolve by fact_id to exactly one
+ *     durable `finding` fact (missing / ambiguous / non-finding fail closed);
+ *   - `source_disposition_ref` must exact-resolve by fact_id to exactly one
+ *     durable `finding_disposition` fact D, and D must be a QUALIFYING
+ *     disposition: D.finding_disposition = ACCEPTED, D.accepted_route_code
+ *     = USER_DECISION_REQUIRED, D.finding_ref === resolution.source_finding_ref
+ *     (the resolution closes the Finding-level HUMAN_REQUIRED condition that
+ *     D opened; a resolution whose disposition does not qualify, or whose
+ *     disposition belongs to a different Finding, fails closed);
+ *   - a Finding has AT MOST ONE valid resolution outcome: if the resulting
+ *     set already contains another `human_required_resolution` with the same
+ *     `source_finding_ref`, the conflict fails closed (no insertion order /
+ *     newest-wins winner).
+ *
+ * REPLAN target PA atomicity (resolution + fresh PLAN_ACCEPTANCE in the same
+ * semantic transaction, same Stage/cycle, fresh PVR support, supersedes the
+ * pre-transaction tip, unique current tip) is validated in transaction.ts
+ * where the submitted set and the generation graph are both available.
+ *
+ * @returns `undefined` when the mapping is unique and closed, or a
+ *   fail-closed message.
+ */
+export function resolveHumanRequiredResolutionError(
+  resolution: MesFactEnvelope,
+  resultingFacts: readonly MesFactEnvelope[],
+): string | undefined {
+  // (Reviewer Finding 1) The write boundary and the read projections must
+  // consume the SAME resolution-legality predicate: exact source refs, a
+  // historically-valid qualifying origin disposition (binding identity /
+  // PVR-PA closure / stage-cycle match), shared classification == USER_DECISION_REQUIRED,
+  // and one-outcome conflict closure. Delegated to the shared oracle so a
+  // malformed / ghost-bound resolution can never be accepted by one seam and
+  // rejected by another.
+  return resolveHumanRequiredResolutionLegalityError(resolution, resultingFacts);
+}
+
 
 /**
  * Machine-closed terminal succession graph validation (S06-D-T01 /

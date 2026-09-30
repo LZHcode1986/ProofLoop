@@ -22,8 +22,8 @@ Propose / 规划 → PROPOSE_READY
 |---|---|---|
 | `packages/kernel` / `packages/runtime` | 校验核心、MES、Task Result/CV/Finding/Integration 与 public CLI | 直接复制 |
 | `.agents/contracts/` | 共享 MES、Result、Finding、生命周期和领域 Contract | 直接复制 |
-| `.agents/skills/proofloop-plan/references/` | Planning/SPV packet 与 schema references | 直接复制 |
-| `.agents/skills/proofloop-execute/` | Execute lane 与 Work Packet/CV template | 直接复制 |
+| `.agents/skills/*/references/` | Role/capability Skill references（`planner`、`worker`、`code-verifier`、`stage-plan-verifier` 等各自的 packet/template/schema references） | 直接复制 |
+| `.agents/contracts/brain/planning.md` / `execute.md` | Brain Flow Contracts：Planning / Execute orchestration（dispatch、authorization、event → transition）；`proofloop-execute` 已退役，Execute orchestration 唯一 owner 是 `execute.md` | 直接复制 |
 | `.opencode/agents/*.md` | OpenCode 独立加载的 Brain/Role 工作流程与权限 | 按 OpenCode 配置调整 |
 | `.pi/agents/*.md` | Pi 独立加载的 Role 工作流程与 Host 配置 | 按 Pi 配置调整 |
 | `.pi/brain-workflow.md` | Pi Brain 独立加载的 Brain 工作流程 | 按 Pi 入口调整 |

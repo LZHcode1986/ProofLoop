@@ -9,7 +9,7 @@ disable-model-invocation: true
 ## 定位（capability，不是 phase）
 
 - 定位: 按需加载的 module/seam/domain-boundary/Slice-decomposition capability（capability-only：不承担独立规划 phase、不持有完成状态、不发 workflow status；decomposition ownership 仍归 Planner）
-- 加载方: 由 `proofloop-plan`（或在 Propose 架构步骤中）按需加载；decomposition ownership 仍归 Planner
+- 加载方: 由 `planner` Role Skill（或在 Propose 架构步骤中）按需加载；decomposition ownership 仍归 Planner
 - 两级 composition 判断输入: `Project Stage boundary test`（Project Stage Map 的 Stage 边界 / depends_on / entry criteria / exit outcome）与 `Vertical Slice boundary test`（选定 Stage 内的 Stage→Slice 分解）；capability 只返回判断输入，不写 Project Stage Map、不声明 Stage readiness、不发 workflow status/route
 - Rollback: 不适用——capability 不持有状态
 

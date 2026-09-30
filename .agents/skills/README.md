@@ -10,7 +10,7 @@ Role procedure、entry、mode、mutation boundary、forbidden actions、completi
 - Pi：`.pi/agents/<role>.md`
 
 两个 Host 都必须保持 `role_skill == subagent_type`，但各自独立加载自己的 Agent 文档。不要新增共享 Role Skill、第二个 Role controller 或跨 Host workflow pointer。MES、Result、Finding、lifecycle 和 packet 字段仍由 `.agents/contracts/brain/` 与 templates 定义。
-角色包括 `general`、`worker`、`researcher`、`prototype`、`code-verifier`、`stage-plan-verifier`、`stage-reviewer`、`frontend-execute` 和 `frontend-review`；`proofloop-plan` 是 Planning dispatch label，不是共享 Role Skill。
+角色包括 `general`、`worker`、`researcher`、`prototype`、`planner`、`code-verifier`、`stage-plan-verifier` 和 `stage-reviewer`（`planner` 是第八个 canonical Role Skill，Planning dispatch 的 runtime label）。
 
 ## Capability Skill
 
@@ -26,9 +26,13 @@ Capability 是角色按 packet/Contract 按需加载的技术方法，不拥有 
 | `handoff` | Conversation handoff |
 
 
-## Phase / Orchestration references
+## Brain phase capabilities
 
-`proofloop-execute` 仍是 Execute 的 capability/orchestration method source；`proofloop-plan` 仅保留 Planning packet/schema 与 SPV references，Planning procedure 由两个 Host Planner system prompt 直接拥有：
+Brain-owned capability Skills for a process phase — product definition,
+architecture, and large-effort wayfinding. The Brain loads them for the active
+phase; they define that phase's capability steps and completion, not any
+single role's method behavior. Role Skill methods (e.g. `planner`, `worker`) are loaded
+only by the dispatched role instance, never by the Brain's own context.
 
 | Skill | Phase |
 |---|---|
@@ -36,11 +40,19 @@ Capability 是角色按 packet/Contract 按需加载的技术方法，不拥有 
 | `prd-to-tech-design-prep` | Post-PRD technical clarification |
 | `prd-to-ai-architecture` | Architecture package under `tech-spec/` |
 | `frontend-tech` | Propose 中按 frontend scope 条件显式加载，生成 `tech-spec/frontend.md` conditional handoff |
-| `proofloop-plan` | Planning packet/schema 与 SPV references（dispatch label；Planning method 在 Host Planner 文档） |
-| `proofloop-execute` | Stage/Slice lane management and Work Packet projection |
 | `wayfinder` | Oversized-effort map |
 
-`proofloop-plan` 的 packet/schema 与 SPV references 保留在 `references/`；Planner 工作步骤只在 `.pi/agents/proofloop-plan.md` 与 `.opencode/agents/proofloop-plan.md`。
+## Brain Flow Contracts
+
+Brain-owned orchestration Contracts for a process flow. Flow Contracts 不是 Skills：
+Brain 在 routing/dispatch 时直接读取它们作为 orchestration Contracts；Role Agent 从不把它们当作 Role method 加载，Role 文档也不复述这些 contracts。
+
+| Contract | Flow |
+|---|---|
+| `.agents/contracts/brain/planning.md` | Brain-owned Planning orchestration（candidate boundary / SPV dispatch / acceptance authorization） |
+| `.agents/contracts/brain/execute.md` | Stage/Slice lane orchestration、Worker/CV dispatch、candidate publication authorization |
+
+`planner` 是第八个 canonical Role Skill（Planning dispatch 的 runtime label）：PLANNING dispatch 使用 `planner`，Role method 由两个 Host Planner 文档（`.pi/agents/planner.md` / `.opencode/agents/planner.md`）独立拥有；Planning Flow orchestration（candidate boundary / SPV dispatch / acceptance）属于 `.agents/contracts/brain/planning.md`。`proofloop-plan` / `proofloop-execute` 不再是 active skill 或 orchestration source；Execute orchestration 的唯一 owner 是 `.agents/contracts/brain/execute.md`。
 
 ## Fact ownership
 

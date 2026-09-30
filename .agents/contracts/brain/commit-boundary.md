@@ -113,7 +113,7 @@ Brain must re-read and establish, before invoking the CLI:
 - the selected boundary's exact mechanical scope and no unresolved scope decision;
 - for `slice-output`: `expected_head`, `stage`, `slice`, the Work Packet
   committable `paths` and (when other Slices have declared dirty output)
-  `other_slice_declared_files`；该 boundary 的调用前置（post-final-CV-PASS freeze、Brain 已 fresh-read current worktree diff）由 `.agents/skills/proofloop-execute/SKILL.md` 上游保证，本 Contract 只做机械校验，不复制 Execute 流程。
+  `other_slice_declared_files`；该 boundary 的调用前置（post-final-CV-PASS freeze、Brain 已 fresh-read current worktree diff）由 Execute Flow Contract（`.agents/contracts/brain/execute.md`）上游保证，本 Contract 只做机械校验，不复制 Execute 流程。
 - `slice-output` 在 `MES_MAINTENANCE` 上游只固化 isolated maintenance Git evidence；candidate commit/ref 不产生 MES Git fact、不进入 normal `READY_TO_INTEGRATE`/`INTEGRATED` 状态，后续 mode-specific Integration/maintenance Review 仍须由 Brain 以 recovery binding 复核。
 - for `artifact-archive`: exactly one tracked source and one absent
   destination inside the same Stage directory, with the
@@ -212,8 +212,9 @@ A successful boundary result is a Git fact, not business admission. Brain must:
 1. verify the result against the freshly re-read Git facts;
    `tolerated_paths` is supporting mechanical evidence and is never a committable scope.
 2. 对 `NORMAL` 把 `commit_sha`、`changed_files` 和 `dirty_after` 作为 boundary-result semantic event 交给 MES transaction layer materialize；对 `MES_MAINTENANCE` 仅记入 Git + Git-tracked Plan/evidence，不写 MES；
-3. continue to the next action from the current MES status + Skill (not from a
-   Receipt chain or a derived Primary Next Action).
+3. continue from the current MES/Git facts plus the applicable canonical
+   workflow / Flow Contract owner, not from a Receipt chain, a derived next
+   action, or a status-carried Skill pointer.
 
 ## Recovery and return codes
 

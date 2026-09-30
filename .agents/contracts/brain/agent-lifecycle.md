@@ -18,7 +18,7 @@
 - `Host dispatch count ≠ MES work_id count`。同一 Worker Slice lane 可以经历多次 continuation，仍保持同一个合法 MES Work identity。
 - Subagent 默认语义是：`dispatch → one bounded action → Result → 当前 invocation 结束`。`continuation` 只表示 Brain 下一次可以授权同一 logical owner 接收新的 bounded action，不表示 Agent 继续持有业务状态。
 
-本 Contract 不把 `proofloop-execute (MES_MAINTENANCE)` 当作 Role。它是 orchestration branch；其 entry、execution、termination、recovery 由 `proofloop-execute` 和 MES/recovery Contracts 拥有。本 Contract 只约束该 branch 中实际被 dispatch 的 Worker、CV 和 Stage Reviewer。
+本 Contract 不把 Execute Flow Contract（`MES_MAINTENANCE`）当作 Role。它是 orchestration branch；其 entry、execution、termination、recovery 由 `.agents/contracts/brain/execute.md` 和 MES/recovery Contracts 拥有。本 Contract 只约束该 branch 中实际被 dispatch 的 Worker、CV 和 Stage Reviewer。
 
 ## 2. 四种 lifecycle mode
 
@@ -28,7 +28,7 @@
 | `researcher` | `one-shot` | 不存在业务 continuation；每个 external question 是独立 request | 新问题、版本/约束/basis 变化、Result 缺失/无效 |
 | `frontend-execute` | `one-shot` | repair 由 Brain 创建新的 bounded request；不沿用原 executor action | 新的初始实现或 repair request、handoff/scope/snapshot/Authority/Git basis 变化 |
 | `worker` | `continuation` | 同一 Slice lane；Plan/Authority/Git basis、root-bound scope、identity 与上一个 Result/ACK 仍 current；Brain 已有下一个 bounded Task 或已授权 repair | lane/binding/scope/basis 失效、Result/ACK barrier 无法重建、需要新 Slice 或新 Work identity |
-| `proofloop-plan` | `continuation` | 同一语义 Planning basis；Brain 已授权新的 bounded planning/revision action | Stage/Map/Authority/code reality/branch/trust root/planning scope 等语义 basis 变化，或 Planner Result 无法重读 |
+| `planner` | `continuation` | 同一语义 Planning basis；Brain 已授权新的 bounded planning/revision action | Stage/Map/Authority/code reality/branch/trust root/planning scope 等语义 basis 变化，或 Planner Result 无法重读 |
 | `prototype` | `continuation` | 同一 Prototype/Hard Part、worktree、Base Ref、question、Plan/snapshot 仍 current；Researcher Result 已被 Brain 接纳 | Prototype binding、实验 basis、question 或 snapshot 变化，或 Result 无法重建 |
 | `code-verifier` | `recheck` | fresh `INITIAL_REVIEW` 后，Brain 接纳 finding 并授权 bounded repair；review target/basis、identity/trust、read-only 条件仍 current | target、Plan/Authority/Git snapshot、scope、identity/trust、clean-room 或 Result binding 变化 |
 | `stage-reviewer` | `recheck` | fresh `INITIAL_REVIEW` 后，Stage/maintenance target、review basis、identity/trust 和 read-only 条件仍 current；repair 已被 Brain 接纳 | Goal、Authority、Plan decomposition、integrated/maintenance snapshot、review scope、trust 或 binding 变化 |
@@ -201,8 +201,8 @@ reasonCode: <required for REJECTED or PAUSE>
 
 Role procedure is owned by the selected Pi/OpenCode Role document and the corresponding Skill. This Contract does not repeat RED/GREEN, Planner ordered steps, review-axis HOW, repair HOW or Result field schemas.
 
-- `worker` continuation eligibility requires the same Slice lane, current Plan/Authority/Git basis, root-bound scope and accepted Result/ACK barrier. Successor Task and repair routing remain Brain/Execute decisions; multiple bounded actions do not create a new MES `work_id`.
-- `proofloop-plan` continuation eligibility requires the same semantic Planning basis: current Map entry, Stage/dependency-ready choice, candidate Plan binding, Authority refs, code reality, branch, trust root and planning scope. A mechanical boundary for the same candidate blob does not by itself invalidate the basis.
+- `worker` continuation eligibility requires the same Slice lane, current Plan/Authority/Git basis, root-bound scope and accepted Result/ACK barrier. Successor Task selection/projection and repair routing are Brain decisions under the Execute Flow Contract (`.agents/contracts/brain/execute.md`); multiple bounded actions do not create a new MES `work_id`.
+- `planner` continuation eligibility requires the same semantic Planning basis: current Map entry, Stage/dependency-ready choice, candidate Plan binding, Authority refs, code reality, branch, trust root and planning scope. A mechanical boundary for the same candidate blob does not by itself invalidate the basis.
 - Planner lifecycle 只能由已经满足 Planning-entry predicate 的 Brain dispatch 启动（predicate = `MES initialized + current PROPOSE_READY`，判定只属于 Brain；Planner 不重复检查该 gate）。Planning-entry 的完整语义与 presence observation 由 `.agents/contracts/brain/mes.md` 与两个 Host Brain 文档（`.opencode/agents/brain.md` / `.pi/brain-workflow.md`）持有，本文件只保留该 dispatch prerequisite，不复制其正文。
 - `prototype` continuation eligibility requires the same Prototype/Hard Part, worktree, Base Ref, question, Plan/snapshot and an accepted Researcher Result.
 - `code-verifier`、`stage-reviewer`、`frontend-review` use their Role procedure for `INITIAL_REVIEW` or bounded `RECHECK`; finding disposition, repair routing and fresh/recheck eligibility remain Brain plus this Contract.

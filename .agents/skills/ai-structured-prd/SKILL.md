@@ -78,7 +78,7 @@ Use the smallest mode that fits the request:
 
 6. **Propose 内交接**
    - PRD contribution（PRD.md）就绪后，同一 Propose 内继续：产品级技术问题阻塞架构步骤时按需加载 `prd-to-tech-design-prep`；最终 canonical 包（tech-spec/architecture.md、tech-spec/contracts.md、tech-spec/acceptance.md）由 `prd-to-ai-architecture` 产出。
-   - 本 Skill 不输出 Stage Candidates 或 Stage decomposition；Stage/Slice/Task 分解由 `proofloop-plan` 负责。
+   - 本 Skill 不输出 Stage Candidates 或 Stage decomposition；Stage/Slice/Task 分解由 `planner` Role Skill（Planning Flow，`.agents/contracts/brain/planning.md`）负责。
    - 用户要求修改 PRD 时继续在本 Skill；Propose 的最终完成信号是 `PROPOSE_READY`（由收尾 Skill 给出），不是本 Skill 单独确认。
 ## Clarification question format
 

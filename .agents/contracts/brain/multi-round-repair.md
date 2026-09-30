@@ -4,13 +4,13 @@
 
 本 Contract 是通用 `.agents/contracts/brain/finding-convergence.md` 在 Worker/CV pair 上的 adapter。通用 Contract 负责 currentness、failure family、history synthesis、`recheck_basis`、owner/route 与停止判断；本文件只负责 Worker/CV 的历史事实来源、repair 绑定语义和 CV recheck 入口。
 
-Worker 的 repair packet/result schema 由 `.agents/skills/proofloop-execute/references/worker-template.md` 唯一拥有，Worker 的 repair 步骤由两个 Host 的 `worker.md` 文档分别拥有。本 adapter 不复制这些 schema 或步骤，不定义新的 Runtime action、MES fact kind、状态、route、Gate、Receipt、Context schema 或独立 result store。
+Worker 的 repair packet/result schema 由 `.agents/skills/worker/references/worker-template.md` 唯一拥有，Worker 的 repair 步骤由两个 Host 的 `worker.md` 文档分别拥有。本 adapter 不复制这些 schema 或步骤，不定义新的 Runtime action、MES fact kind、状态、route、Gate、Receipt、Context schema 或独立 result store。
 
 ## 2. 使用条件
 
 - 当前 Slice 的 CV Finding 已由 Brain 按当前 binding 接纳，且既有 route 需要 Worker 执行 bounded `repair`；
 - 当前 Slice、Plan、Authority、Git basis、scope 和 CV review identity 可由现有 Work Packet/JIT Read Set、durable facts（`NORMAL` 经 MES transaction layer / `MES_MAINTENANCE` 经 Git + Plan + frozen/forensic/audit evidence）复核；
-- 首次局部 repair 继续使用 `proofloop-execute`、canonical `worker` Skill 和 worker template 的正常语义；本 adapter 在跨轮 history 或 convergence 已触发时提供补充绑定。
+- 首次局部 repair 继续使用 Execute Flow Contract（`.agents/contracts/brain/execute.md`）、canonical `worker` Role 和 worker template 的正常语义；本 adapter 在跨轮 history 或 convergence 已触发时提供补充绑定。
 
 同族 Finding 的识别、首次跨边界 Finding 的 synthesis，以及 synthesis 后同族失败的停止规则统一由 `finding-convergence.md` 决定。本文件不按 CV 轮次定义 failure family，也不定义通用 round cap。
 
@@ -32,9 +32,9 @@ Adapter 必须向 Brain synthesis 声明两个分析来源：
 
 ## 4. Canonical repair packet、Result 与 procedure
 
-- bounded Repair Work Packet **唯一**读取 `.agents/skills/proofloop-execute/references/worker-template.md#bounded Repair Work Packet`；本 adapter 不重新列出 packet 字段。
+- bounded Repair Work Packet **唯一**读取 `.agents/skills/worker/references/worker-template.md#bounded Repair Work Packet`；本 adapter 不重新列出 packet 字段。
 - Worker repair procedure **唯一**读取所选 Host 的 `worker.md#repair` 顺序；本 adapter 不重复 RED、复现、最小修复、测试或 scope 操作。
-- Repair Result envelope **唯一**读取 `.agents/skills/proofloop-execute/references/worker-template.md#Result envelope schema`；字段名、大小写、枚举、`actionToken`、`resultId`、`gitBasis` 和 `taskId` 规则均以该模板为准。本 adapter 不增加 `mode`、替代 `executionMode` 或其他 Result 字段。
+- Repair Result envelope **唯一**读取 `.agents/skills/worker/references/worker-template.md#Result envelope schema`；字段名、大小写、枚举、`actionToken`、`resultId`、`gitBasis` 和 `taskId` 规则均以该模板为准。本 adapter 不增加 `mode`、替代 `executionMode` 或其他 Result 字段。
 - Adapter-specific 语义只有：Brain synthesis 的完整 failure-family scope 通过 canonical `repair_scope` 交给 Worker；taskless repair Result 经 Brain 接纳后交给下一次 CV review action，不形成 Task、CV、Slice 或 Stage completion；`agent-lifecycle.md` 决定该 action 是 `RECHECK` 还是 fresh `INITIAL_REVIEW`。
 
 ## 5. Repair history

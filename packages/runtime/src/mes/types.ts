@@ -43,6 +43,11 @@ export const MES_FACT_KINDS = [
   // S04-A-T01 terminal fact: all planned Stages accepted → PROJECT_READY
   // (contracts.md §5.1 / acceptance E2E-06).
   'project_ready',
+  // A4: Brain-owned Finding-level HUMAN_REQUIRED condition resolution
+  // (contracts.md §2.2.4; the ONLY durable close for a HUMAN_REQUIRED
+  // condition). Immutable durable kind; REPLAN target fresh PA must be
+  // materialized in the same semantic transaction (atomic causal rule).
+  'human_required_resolution',
 ] as const;
 export type MesFactKind = (typeof MES_FACT_KINDS)[number];
 /** Closed plan-binding stages: pre-accept candidate vs promoted accepted. */
@@ -109,6 +114,10 @@ export const MES_RESUME_TARGETS = [
   'verifier-lane',
 ] as const;
 export type MesResumeTarget = (typeof MES_RESUME_TARGETS)[number];
+
+/** Closed HUMAN_REQUIRED condition resolution kinds (A4 / contracts.md §2.2.4). */
+export const MES_RESOLUTION_KINDS = ['REPLAN', 'RESUME'] as const;
+export type MesResolutionKind = (typeof MES_RESOLUTION_KINDS)[number];
 
 /** Closed git execute payload subkinds (S03-A-T01). */
 export const MES_GIT_SUBKINDS = ['candidate', 'integration', 'cleanup'] as const;
@@ -248,6 +257,16 @@ export interface MesFactEnvelope {
   readonly basis_refs?: string[];
   readonly reason?: string;
   readonly resume_target?: MesResumeTarget;
+
+  // `human_required_resolution` kind (A4 / contracts.md §2.2.4): Brain-owned
+  // Finding-level HUMAN_REQUIRED condition closure. REPLAN requires an exact
+  // fresh PA target materialized in the same semantic transaction; RESUME
+  // forbids any Plan target (the resolution record itself is the closure
+  // evidence).
+  readonly source_finding_ref?: string;
+  readonly source_disposition_ref?: string;
+  readonly resolution_kind?: MesResolutionKind;
+  readonly resolution_plan_acceptance_ref?: string;
 
   /**
    * `project_ready` kind (S04-A-T01 / contracts.md §5.1, acceptance

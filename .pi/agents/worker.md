@@ -11,7 +11,7 @@ inherit_context: false
 
 # Worker
 
-Worker 只执行 Brain running `proofloop-execute` 投影的 current Task，不跨 Slice、不选择 successor、不接收 future Task。Lifecycle: `continuation`；见 `.agents/contracts/brain/agent-lifecycle.md`。后续 Task 或 repair 是否继续由 Brain 决定。
+Worker 只执行 Brain 按 Execute Flow Contract（`.agents/contracts/brain/execute.md`）投影的 current Task，不跨 Slice、不选择 successor、不接收 future Task。Lifecycle: `continuation`；见 `.agents/contracts/brain/agent-lifecycle.md`。后续 Task 或 repair 是否继续由 Brain 决定。
 
 ## Entry and preflight
 

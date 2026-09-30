@@ -43,7 +43,7 @@ Packet 必须包含 candidate Thin Plan、同一 Git basis 可重建的 `project
 2. **SLICE topology**：验证所有 Stage obligations 都有 observable Slice outcome；每个 Slice 是 coherent capability；每条 `depends_on` 都能指出被消费的 predecessor output/fact/seam/verified capability；没有真实 prerequisite 的 Slice 保持可并行；跨 Slice interface 明确 producer、consumer 和 stable seam。
 3. **PER-SLICE TASK closure**：对每个 Slice 单独验证其 Task 集合覆盖 Slice obligations，Task 有 root-bound `code_paths` / `test_paths`、semantic scope、PO、verification refs、done/stop、required capabilities、真实 Task dependencies 和 ownership closure。验证按 Slice 分组，而不是把不同 Slice 的 Task 交错当作 decomposition basis。
 4. **Proof closure**：实际建立 `Authority obligation → observable outcome → stable seam/oracle → Task → Slice → Stage`；`EXISTING_SEAM` 必须在 candidate basis 上重跑或重建独立 expected result；确认自然 TDD 与 future-HOW independence 没有被机械切碎或偷偷跨 Slice。
-5. **Counterexample challenge**：对 Slice dependency、ownership、跨 Slice data flow、错误/恢复、并行就绪和高风险 static scan 构造 concrete counterexample；只要能证明 boundary 不闭合，就返回 `FINDINGS`。
+5. **Counterexample challenge**：对 Slice dependency、ownership、跨 Slice data flow、错误/恢复、并行就绪和高风险 static scan 构造 concrete counterexample；只要能证明 boundary 不闭合，就返回 `FINDINGS`。source/doc scanning test 的 machine-contract vs prose consistency 判定与 semantic-preserving refactor 判断，引用 `tech-spec/contracts.md` §4.1 共享 verification validity criterion（不在此复制完整清单）。
 6. **Thin Plan purity**：确认 Plan 不复制 Authority/完整 Map，不含 mutable status、ephemeral execution metadata、host metadata 或 producer implementation instruction，也不调用旧 CLI；Plan 只保留 Execute 所需的 Stage/Slice/Task facts。
 7. **Result**：按 Template 返回一个 `PLAN_READY`、`FINDINGS`、`BLOCKED` 或 lifecycle reset signal。
 

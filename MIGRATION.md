@@ -9,8 +9,9 @@
 | `packages/kernel/`、`packages/runtime/` | 校验核心、MES、Task Result/CV/Finding/Integration 与 public CLI |
 | `package.json`、`package-lock.json`、`tsconfig.json` | 构建配置 |
 | `.agents/contracts/brain/` | 共享 Contract：MES、Result、Finding、生命周期、Integration、Recovery |
-| `.agents/skills/proofloop-plan/references/` | Planning/SPV packet 和 schema references |
-| `.agents/skills/proofloop-execute/` | Execute lane、Work Packet 与 CV templates |
+| `.agents/skills/planner/references/`、`.agents/skills/stage-plan-verifier/references/` | Planning/SPV packet 和 schema references（`planner` Role Skill + stage-plan-verifier-template） |
+| `.agents/skills/worker/references/`、`.agents/skills/code-verifier/references/` | Execute lane、Work Packet、CV templates（worker-template / code-verifier-template） |
+| `.agents/contracts/brain/planning.md` + `execute.md` | Brain Flow Contracts：Planning / Execute orchestration（Flow owner；`proofloop-execute` 退役后 Execute orchestration 唯一 owner） |
 | `.opencode/agents/*.md` | OpenCode 独立的 Brain/Role 文档；包含流程、边界和 native permission |
 | `.pi/agents/*.md`、`.pi/brain-workflow.md` | Pi 独立的 Role/Brain 文档；包含流程、边界和 Host 配置 |
 | `.pi/extensions/proofloop-mode.ts` | Pi mode/session 入口 |
