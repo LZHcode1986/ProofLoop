@@ -8,7 +8,7 @@ establish a write Git boundary by running `git add`, `git mv`, or `git commit`
 directly. The ONE explicit exception is `artifact-archive`: Brain pre-executes
 the exact `git mv` (the pure rename) so that the CLI only validates the
 already-staged rename and commits it; no other Agent may run any write Git
-command.
+- NORMAL Brain/Agent 不得自行运行 `git worktree add/remove/prune`，也不得自行拼接 `.pi/git/worktrees/...` 等 worktree path；NORMAL worktree lifecycle mutation 只经 public mechanical worktree seam（`proofloop worktree create|list|remove`）执行；Worker/CV/Prototype 不拥有 worktree lifecycle mutation；
 
 For `artifact-archive`, Brain also owns WHAT is archived and WHY:
 the CLI never interprets the archive's business rationale or credential — it
@@ -18,9 +18,11 @@ index/blob-mode).
 ## Use when
 
 Use this contract whenever an authorized change must become a Git commit.
-Current Runtime CLI surface: the only active domain/operation is
-`boundary close` (all legacy business-control domains were removed — see
-`packages/runtime/src/cli/proofloop.ts` header). Boundary types:
+This Contract owns the public `boundary close` mechanical seam; it does not
+define the global public CLI surface (owner: `tech-spec/contracts.md` §1.1 /
+§1.2 — current active domains `boundary`, `integration`, `worktree`). Other
+active mechanical domains (`integration`, `worktree`) are owned by their
+respective Contracts and are not redefined here. Boundary types:
 
 - `baseline-authority` — seed authority documents;
 - `stage-plan` — close a candidate Plan (+ canonical Project Stage Map) boundary before fresh SPV;
@@ -46,6 +48,7 @@ The request is a closed object sent to the public Runtime CLI:
   "boundary_type": "<Boundary Type>",
   "expected_head": "<40-char sha>",
   "expected_branch": "<branch>",
+  "expected_worktree": "<root-relative worktree identity | '.' (ordinary-boundary default)>",
   "stage": "S<digits>",
   "slice": "<slice-id>",
   "paths": ["<explicit root-relative paths>"],
@@ -77,6 +80,7 @@ The digest/path fields are type-scoped and closed:
   GONE from the closed schema; the retired artifact-archive digest request
   field is GONE as well. Sending any of them is rejected as unknown fields
   (`RUNTIME.INPUT_INVALID`). They are not replaced.
+- `expected_worktree` — canonical root-relative Git worktree identity；本 boundary 的 mechanical transaction root。普通 boundary 缺省 `.`（canonical Project Root）；`slice-output` / `prototype-checkpoint` 是 worktree-targeted boundary，REQUIRE 显式非空值。CLI 以 canonical Project Root 为锚解析并验证：root-relative / no escape；realpath readable directory；exact Git toplevel（`git rev-parse --show-toplevel` resolved-path equality）；同一 Git common repository。非 `.` `expected_worktree` 用于其它 boundary type → `BOUNDARY.REQUEST_INVALID` fail closed（Git write 前）。该值从不从 cwd 或目录名推断。
 
 For `slice-output`, Brain MUST send `stage`, `slice` and `expected_head` (the
 current HEAD is pinned so a mismatch fails before any Git write).
@@ -116,6 +120,7 @@ Brain must re-read and establish, before invoking the CLI:
   `other_slice_declared_files`；该 boundary 的调用前置（post-final-CV-PASS freeze、Brain 已 fresh-read current worktree diff）由 Execute Flow Contract（`.agents/contracts/brain/execute.md`）上游保证，本 Contract 只做机械校验，不复制 Execute 流程。
 - `slice-output` 在 `MES_MAINTENANCE` 上游只固化 isolated maintenance Git evidence；candidate commit/ref 不产生 MES Git fact、不进入 normal `READY_TO_INTEGRATE`/`INTEGRATED` 状态，后续 mode-specific Integration/maintenance Review 仍须由 Brain 以 recovery binding 复核。
 - for `artifact-archive`: exactly one tracked source and one absent
+- worktree-targeted boundary（`slice-output` / `prototype-checkpoint`）：Brain MUST send explicit root-relative `expected_worktree`；`slice-output` 的 `expected_worktree` 必须精确等于 canonical Runtime-owned lane identity `.proofloop/worktrees/<stage>-<slice>`（lane identity binding，以 request `stage`/`slice` 计算，Authority 见 `tech-spec/contracts.md` §5.3）；`prototype-checkpoint` 的 `expected_worktree` 必须是 Prototype lane（`.proofloop/worktrees/` 下、basename 以 `prototype-` 开头）。CLI 以 canonical Project Root 为锚验证 `expected_worktree` 是同一 Git common repository 内的 exact Git toplevel，并以该 toplevel 作为 transaction root 执行 `closeGitBoundary`。Same-repository predicate：`realpath(expected_worktree) == git rev-parse --show-toplevel(expected_worktree)`，且 `git common repository identity(expected_worktree) == git common repository identity(Project Root)`。具体 helper/命令实现由 Runtime owner 决定，不把源码算法复制进 Contract。
   destination inside the same Stage directory, with the
   `git mv` already staged by Brain.
 

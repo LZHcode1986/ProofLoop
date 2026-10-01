@@ -102,6 +102,7 @@ When Prototype returns `TECHNICAL_UNKNOWN / RESEARCH_REQUIRED`, Brain dispatches
 - Experiment code stays in the packet-specified `prototype/<hard-part-id>` worktree/branch and does not enter the production branch.
 - Prototype does not write PRD, Tech Spec, MES, Git boundary, or another Agent's result; Brain and the current owner absorb validated evidence.
 - Prototype does not call Runtime CLI, merge, clean up outside the packet, or dispatch another Agent.
+- Prototype checkpoint（`prototype-checkpoint`）使用 canonical Project Root + current prototype `expected_worktree`（`.proofloop/worktrees/prototype-<hard-part-id>`）经同一 mechanical worktree seam / `boundary close` 执行，语义按 `.agents/contracts/brain/commit-boundary.md`；本文件不复制 Slice lifecycle 规则。
 - Cross-agent communication uses only Subagent host adapter. No fallback, retry, or second transport.
 
 ## Completion criteria
