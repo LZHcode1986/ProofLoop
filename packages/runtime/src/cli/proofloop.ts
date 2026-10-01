@@ -22,12 +22,14 @@
  * (authority/plan/context/stage/review/project/doctor/gate/recovery/cutover)
  * and its handlers/routes were removed — no fallback/compatibility alias
  * remains.  The two active mechanical routes are the deterministic Git
- * boundary adapter (`boundary close`) and the dedicated mechanical
- * Integration adapter (`integration apply`).
+ * boundary adapter (`boundary close`), the dedicated mechanical
+ * Integration adapter (`integration apply`) and the mechanical Git
+ * worktree seam (`worktree create|list|remove`).
  */
 
 import { runBoundaryDomain } from './proofloop-boundary';
 import { runIntegrationDomain } from './proofloop-integration';
+import { runWorktreeDomain } from './proofloop-worktree';
 import { readMesSeedRecord, isMesSeeded, readMesSnapshotFacts, isMesInitialized } from '../mes/bootstrap';
 import type { MesStatusTuple } from '../mes/bootstrap';
 import {
@@ -613,6 +615,18 @@ export function proofloopCli(
   // ready (CV PASS + durable candidate ref) and all recovery decisions.
   if (domain === 'integration') {
     const envelope = runIntegrationDomain(root, command, requestValidation.request);
+    emitEnvelope(envelope);
+    return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
+      ? CLI_EXIT.USAGE
+      : envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
+  }
+
+  // worktree: the mechanical Git worktree seam adapter. It exposes the
+  // existing git-worktree primitives (create/list/remove) as the ONLY
+  // agent-facing lane seam; it owns no Execute lifecycle decision. Brain
+  // still decides WHEN/WHICH Slice lane and the cleanup timing.
+  if (domain === 'worktree') {
+    const envelope = runWorktreeDomain(root, command, requestValidation.request);
     emitEnvelope(envelope);
     return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
       ? CLI_EXIT.USAGE

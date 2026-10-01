@@ -119,3 +119,74 @@ export function readGitHead(gitRoot: string): string {
   }
   return head;
 }
+
+/**
+ * Resolve `candidate` as the EXACT Git toplevel of its work tree
+ * (`git rev-parse --show-toplevel` with resolved-path equality). A non-git
+ * directory, a subdirectory of a work tree, or an unresolvable path fails
+ * closed with `GitSourceError` — never guessed, never tolerated.
+ */
+export function resolveExactGitToplevel(candidate: string): string {
+  const resolved = path.resolve(candidate);
+  let toplevel: string;
+  try {
+    toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: resolved,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch (err) {
+    if (isExecutableMissing(err)) {
+      throw new GitSourceError(`git executable is unavailable; cannot resolve a git toplevel for ${resolved}`);
+    }
+    throw new GitSourceError(`${resolved} is not inside a git work tree`);
+  }
+  if (toplevel.length === 0) {
+    throw new GitSourceError(`${resolved} is not inside a git work tree`);
+  }
+  let realTop: string;
+  let realCandidate: string;
+  try {
+    realTop = fs.realpathSync(toplevel);
+    realCandidate = fs.realpathSync(resolved);
+  } catch {
+    throw new GitSourceError(`cannot resolve the git toplevel for ${resolved}`);
+  }
+  if (realTop !== realCandidate) {
+    throw new GitSourceError(`${resolved} is not the exact git toplevel (git toplevel is ${toplevel})`);
+  }
+  return toplevel;
+}
+
+/**
+ * True when two paths belong to the SAME Git common repository
+ * (`git rev-parse --git-common-dir` resolved equality). Used to prove an
+ * `expected_worktree` belongs to the canonical Project Root's repository
+ * (STATIC-40 N1: a foreign repository fails closed before any Git write).
+ */
+export function sameGitCommonRepository(a: string, b: string): boolean {
+  const commonA = gitCommonRepositoryDir(a);
+  const commonB = gitCommonRepositoryDir(b);
+  return commonA !== null && commonA === commonB;
+}
+
+function gitCommonRepositoryDir(candidate: string): string | null {
+  const resolved = path.resolve(candidate);
+  let commonDir: string;
+  try {
+    commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: resolved,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null;
+  }
+  if (commonDir.length === 0) return null;
+  const abs = path.isAbsolute(commonDir) ? commonDir : path.resolve(resolved, commonDir);
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    return null;
+  }
+}

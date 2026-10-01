@@ -66,10 +66,12 @@ export const CLI_EXIT = {
 // ============================================================
 
 export const CANONICAL_DOMAINS = [
-  // CLI cutover: the only remaining domains are the mechanical deterministic
-  // Git boundary adapter and the dedicated mechanical Integration adapter.
+  // CLI cutover: the remaining domains are the mechanical deterministic
+  // Git boundary adapter, the dedicated mechanical Integration adapter and
+  // the mechanical Git worktree seam (create/list/remove).
   'boundary',
   'integration',
+  'worktree',
 ] as const;
 
 export type CanonicalDomain = (typeof CANONICAL_DOMAINS)[number];
@@ -82,6 +84,7 @@ export interface DomainRegistryEntry {
 export const DOMAIN_REGISTRY: Readonly<Record<CanonicalDomain, DomainRegistryEntry>> = {
   boundary: { domain: 'boundary', operations: ['close'] },
   integration: { domain: 'integration', operations: ['apply'] },
+  worktree: { domain: 'worktree', operations: ['create', 'list', 'remove'] },
 };
 
 export function isCanonicalDomain(value: string): value is CanonicalDomain {
@@ -475,6 +478,8 @@ export interface CliRequestInput {
     | undefined;
   readonly expected_worktree?: string | undefined;
   readonly maintenance_binding?: Record<string, unknown> | undefined;
+  /** Worktree create field: durable/plan-derived base ref for the detached lane. */
+  readonly base_ref?: string | undefined;
 }
 
 /**
@@ -501,6 +506,7 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
     'paths',
     'description',
     'expected_branch',
+    'expected_worktree',
   ]),
   // Integration apply (dedicated mechanical Integration transaction):
   // candidate_ref / candidate_base_ref are Git refs of the CV `PASS`
@@ -519,6 +525,23 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
     'expected_worktree',
     'maintenance_binding',
   ]),
+  worktree: new Set([
+    'domain',
+    'operation',
+  ]),
+};
+
+/**
+ * Operation-scoped closed field sets: `worktree` create/list/remove each
+ * register their own mutation surface. `worktree create` accepts only
+ * durable/plan-derived identity (`stage`/`slice`/`base_ref`) — there is NO
+ * caller-defined target-path field; `remove` accepts only `stage`/`slice`;
+ * `list` takes no mutation request body.
+ */
+const REQUEST_KNOWN_FIELDS_BY_OPERATION: Readonly<Record<string, ReadonlySet<string>>> = {
+  'worktree:create': new Set(['domain', 'operation', 'stage', 'slice', 'base_ref']),
+  'worktree:remove': new Set(['domain', 'operation', 'stage', 'slice']),
+  'worktree:list': new Set(['domain', 'operation']),
 };
 
 const REQUEST_BASE_FIELDS = new Set(['domain', 'operation']);
@@ -557,7 +580,7 @@ function validateMaintenanceBindingShape(value: unknown): string | undefined {
   return undefined;
 }
 
-function parseClosedRequestObject(value: unknown, domain: string): CliRequestValidation {
+function parseClosedRequestObject(value: unknown, domain: string, operation: string): CliRequestValidation {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return {
       ok: false,
@@ -566,7 +589,10 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     };
   }
   const record = value as Record<string, unknown>;
-  const known = REQUEST_KNOWN_FIELDS_BY_DOMAIN[domain] ?? REQUEST_BASE_FIELDS;
+  const known =
+    REQUEST_KNOWN_FIELDS_BY_OPERATION[`${domain}:${operation}`] ??
+    REQUEST_KNOWN_FIELDS_BY_DOMAIN[domain] ??
+    REQUEST_BASE_FIELDS;
   const unknownFields = Object.keys(record).filter((key) => !known.has(key));
   if (unknownFields.length > 0) {
     return {
@@ -660,6 +686,7 @@ function parseClosedRequestObject(value: unknown, domain: string): CliRequestVal
     maintenance_binding: record.maintenance_binding === undefined
       ? undefined
       : record.maintenance_binding as Record<string, unknown>,
+    base_ref: record.base_ref as string | undefined,
   };
   return { ok: true, request };
 }
@@ -739,7 +766,7 @@ export function resolveRequestInput(
     };
   }
   const domain = command.domain as string;
-  const parsedRequest = parseClosedRequestObject(value, domain);
+  const parsedRequest = parseClosedRequestObject(value, domain, command.operation as string);
   if (!parsedRequest.ok) return parsedRequest;
 
   if (parsedRequest.request.domain !== undefined && parsedRequest.request.domain !== command.domain) {

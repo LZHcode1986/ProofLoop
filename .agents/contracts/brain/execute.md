@@ -16,7 +16,7 @@
 ### 2.1 EXECUTE_ENTRY
 
 - Brain 解析 dependency-ready Slice（accepted Plan binding + bound normative refs + current MES/Git/operational basis）；缺口返回 `PLAN_GAP` / `TECHNICAL_UNKNOWN` / `EVIDENCE_GAP` / `RUNTIME_BLOCKER`（不直接 claim Product→Technical `AUTHORITY_GAP`）。
-- 确认 lane 输入闭合（dependency outputs 就绪、worktree 与 Git basis 有效、required skills 明确）后 start / reuse Worker lane：`start(name, config_agent="worker", cwd=sliceWorktree)`。
+- 确认 lane 输入闭合（dependency outputs 就绪、Git basis 有效、required skills 明确）后，经 public mechanical worktree seam 发起 closed `worktree create` request（`--json` / `--request <root-relative-json>`，必填 `stage` / `slice` / `base_ref`；CLI envelope schema 唯一属于 `.agents/contracts/brain/commit-boundary.md`，本文件不复制第二套格式）create / reuse Slice lane；Runtime 返回 canonical `relative_path`（`.proofloop/worktrees/<stage>-<slice>`），Brain 原样使用该 identity 作为 Worker cwd 并一路绑定 CV basis：`start(name, config_agent="worker", cwd=<Runtime-returned relative_path>)`。
 - Brain 投影 Slice Work Packet（accepted Thin Plan + MES/Git/current dependency outputs → execution input）；由 plugin `worker` Role Skill 启动 lane；Brain 提供 binding/refs/mutation boundary，不提供 rewrite 后的 semantic implementation instructions。
 - 不变式：one Slice = one Worker lifecycle = one isolated worktree = one Herdr tab。
 
@@ -47,7 +47,7 @@
 
 - **Canonical candidate publication 只在 final current CV PASS 后由 Execute Flow Contract 授权**（S05-D/F regression）：pre-CV、CV `FINDINGS`、bounded repair、CV recheck（final PASS 前）都不属于 publication 时机。
 - Brain 立即 freeze producer writes，fresh-read live basis（worktree HEAD、branch、git status、git diff、changed path set）并与刚被 CV 验证的 target/basis 核对；PASS 后若又发生 producer write，CV PASS 不再自动 current，按 CV lifecycle 判断 bounded recheck 或 fresh CV。
-- 核对 current 后经 `slice-output` 把最终 CV 已通过且仍 current 的 Slice worktree 内容机械固定为 candidate commit，建立/确认 durable canonical candidate ref（`proofloop-<stage>-<slice>`）；机械语义按 `.agents/contracts/brain/commit-boundary.md`。ref 已存在且指向其他 commit → fail closed 返回 typed recovery blocker，不覆盖、不删除重建。
+- 核对 current 后经 `slice-output` 把最终 CV 已通过且仍 current 的 Slice worktree 内容机械固定为 candidate commit，建立/确认 durable canonical candidate ref（`proofloop-<stage>-<slice>`）；机械语义按 `.agents/contracts/brain/commit-boundary.md`。该 boundary 使用同一 current lane identity 作为 `expected_worktree`：live CV basis.worktree → final PASS freeze basis → boundary `expected_worktree` 必须是同一 lane identity，candidate freeze 时不得临时换 worktree。ref 已存在且指向其他 commit → fail closed 返回 typed recovery blocker，不覆盖、不删除重建。
 - slice-output 成功后 Brain fresh-read 并 exact 解析 canonical candidate ref → commit SHA，且 candidate Git fact（ref / base / changed_files）与 slice-output 结果匹配；全部成立后 `candidateRefDurable=true`，状态进入 `READY_TO_INTEGRATE`。
 - Worker/CV retain/close 决策处 fresh-read `.agents/contracts/brain/agent-lifecycle.md` 对应 matrix row。
 
@@ -59,7 +59,7 @@
 ### 2.7 INTEGRATED / ALL_SLICES_INTEGRATED
 
 - Integration 成功 → `INTEGRATED`；conflict/composition failure 形成 durable finding 回 Brain，不直接回滚整个 Stage；仅纯机械且无语义选择的冲突可 bounded resolve。
-- `INTEGRATED` → `CLEANUP_PENDING` → 清理 Slice worktree → `CLEANED`；cleanup failure 不回退 `INTEGRATED`。
+- `INTEGRATED` → `CLEANUP_PENDING` → Brain 经 public mechanical worktree seam 发起 closed `worktree remove` request（`--json` / `--request <root-relative-json>`，必填 `stage` / `slice`；CLI envelope schema 唯一属于 `.agents/contracts/brain/commit-boundary.md`）清理 Slice worktree（Runtime clean-only remove + postcondition）→ `CLEANED`；cleanup failure 不回退 `INTEGRATED`。
 - 全部 planned Slices `INTEGRATED`（或 `EXISTING_SEAM`-only 且 seam 已由 pre-accept SPV 复核）→ Brain 重新读取 Git 与 MES facts → `EXECUTION_READY_FOR_REVIEW`。
 
 ## 3. MES_MAINTENANCE branch override（仅 S06 hard-freeze）
@@ -91,3 +91,4 @@ Worker 的 producer method 唯一 owner 是 `.agents/skills/worker/SKILL.md`；R
 - Execute 与 Worker 严格消费当前 mode 的 candidate/accepted Thin Plan planning facts，不重新设计 Stage/Slice/Task 目标、依赖图或 Project Stage Map；发现 `PLAN_GAP` 统一回退 Brain 路由 Planning Flow 进行 Replan；Execute downstream 不 claim Product→Technical `AUTHORITY_GAP`。
 - JIT Work Packet 与 per-Task JIT Read Set 的 projection owner 保持 Execute Flow Contract，不回流给 Planner，也不新增 Map packet 字段。
 - 不调用旧 Runtime CLI、不写旧 Runtime-owned 制品；Brain 是 semantic event authorization owner，MES transaction layer 是 NORMAL durable operational fact 的唯一写入者。
+- NORMAL Slice worktree create/list/remove 只经 public mechanical worktree seam（`proofloop worktree create|list|remove`）执行；Brain 拥有何时调用与传哪一个 current lane identity（`stage` / `slice` / `base_ref`），Runtime 返回的 `relative_path`（`.proofloop/worktrees/<stage>-<slice>`）原样用于 Worker cwd → CV live basis.worktree → final PASS fresh-read basis → boundary `expected_worktree` → cleanup remove。NORMAL Brain 不自行运行 raw `git worktree add/remove/prune`、不自行拼接 `.pi/...` 或其它 worktree path；Worker/CV 不获得 worktree create/remove ownership。same-repo Git 验证算法、path canonicalization、CLI schema 与 boundary type table 属于 `.agents/contracts/brain/commit-boundary.md`，本文件不复制。
