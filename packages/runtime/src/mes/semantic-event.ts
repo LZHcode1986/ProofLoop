@@ -37,6 +37,11 @@ import {
   taskResultAcceptHandler,
 } from './semantic-event-task-result';
 import {
+  TASK_START_ENTRY,
+  TASK_START_EVENT_KIND,
+  taskStartHandler,
+} from './semantic-event-task-start';
+import {
   CV_RESULT_ENTRY,
   CV_RESULT_EVENT_KIND,
   cvResultHandler,
@@ -257,6 +262,7 @@ const MES_SEMANTIC_EVENT_CATALOG_ENTRIES: readonly MesSemanticEventCatalogEntry[
   PLANNING_ACCEPTANCE_ENTRY,
   LANE_START_ENTRY,
   TASK_RESULT_ACCEPT_ENTRY,
+  TASK_START_ENTRY,
   CV_RESULT_ENTRY,
   FINDING_DISPOSITION_ENTRY,
   GIT_CANDIDATE_ENTRY,
@@ -274,6 +280,7 @@ const MES_SEMANTIC_EVENT_HANDLERS: ReadonlyMap<string, MesSemanticEventHandler> 
   [PLANNING_ACCEPTANCE_EVENT_KIND, planningAcceptanceHandler],
   [LANE_START_EVENT_KIND, laneStartHandler],
   [TASK_RESULT_ACCEPT_EVENT_KIND, taskResultAcceptHandler],
+  [TASK_START_EVENT_KIND, taskStartHandler],
   [CV_RESULT_EVENT_KIND, cvResultHandler],
   [FINDING_DISPOSITION_EVENT_KIND, findingDispositionHandler],
   [GIT_CANDIDATE_EVENT_KIND, gitCandidateHandler],

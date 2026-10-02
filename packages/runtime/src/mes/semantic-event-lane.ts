@@ -35,6 +35,8 @@
  */
 import { createHash } from 'node:crypto';
 import { canonicalStringify } from '../cli/proofloop-common';
+import * as path from 'node:path';
+import { canonicalWorktreePath } from '../git-worktree';
 import {
   isCycleBearingPlanAcceptanceGeneration,
   resolvePlanAcceptanceGenerationTips,
@@ -209,6 +211,33 @@ export const laneStartHandler: MesSemanticEventHandler = (event, context): MesSe
   if (typeof gitBasisHead !== 'string' || !/^[0-9a-f]{40}$/.test(gitBasisHead)) {
     materializeFail('binding-mismatch', `semantic event ${eventKind} accepted generation ${JSON.stringify(generation.fact_id)} has no canonical Git basis — no-write`, eventKind);
   }
+  // (Authority §5.3 / E2E-19 Git-basis negative) the NORMAL lane base_ref is
+  // the current accepted Git basis — primary-HEAD advancement never
+  // substitutes it: framework/runtime sync that moves primary HEAD ≠
+  // automatically changing the NORMAL lane base_ref.
+  if (gitBasis.head !== gitBasisHead) {
+    materializeFail(
+      'binding-mismatch',
+      `semantic event ${eventKind} submitted event Git basis head does not equal the current accepted generation Git basis (NORMAL lane base_ref = current accepted Git basis; primary HEAD advancement never substitutes, no-write; §5.3)`,
+      eventKind,
+    );
+  }
+  // (Authority §5.3 / E2E-19) the NORMAL lane worktree identity must be the
+  // canonical Runtime-owned lane `.proofloop/worktrees/<stage>-<slice>` —
+  // never the primary worktree (`.`) or a caller-defined path. Reuse the
+  // canonical worktree oracle (no reinvented path rules).
+  const canonicalWorktree = path
+    .relative(path.resolve(gitRoot), canonicalWorktreePath(path.resolve(gitRoot), stageId, sliceId))
+    .split(path.sep)
+    .join('/');
+  if (gitBasis.worktree !== canonicalWorktree) {
+    materializeFail(
+      'binding-mismatch',
+      `semantic event ${eventKind} submitted event Git basis worktree ${JSON.stringify(gitBasis.worktree)} does not equal the canonical lane worktree ${JSON.stringify(canonicalWorktree)} (NORMAL lane worktree = .proofloop/worktrees/<stage>-<slice>; primary worktree / caller-defined path never substitutes, no-write; §5.3)`,
+      eventKind,
+    );
+  }
+
 
   // Bounded accepted-Plan execution-graph reader: same-process WeakSet brand.
   const graph = readAcceptedPlanExecutionGraph({

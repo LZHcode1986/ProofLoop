@@ -355,13 +355,13 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
       eventKind,
     );
   }
+  // (Authority §5.3 / §7) the accepted generation's Git basis head is used
+  // ONLY for exact accepted-Plan blob reconstruction; the Result basis
+  // relation owner is the current Work attempt (validated in the fresh
+  // path), NOT the planning generation — no Result↔generation comparison.
   const gitBasisHead = generation.git_basis?.head;
-  if (typeof gitBasisHead !== 'string' || validated.gitBasis.head !== gitBasisHead) {
-    materializeFail(
-      'binding-mismatch',
-      `semantic event ${eventKind} submitted Git basis head does not equal the current accepted generation Git basis (stale Git basis, no-write)`,
-      eventKind,
-    );
+  if (typeof gitBasisHead !== 'string' || !/^[0-9a-f]{40}$/.test(gitBasisHead)) {
+    materializeFail('binding-mismatch', `semantic event ${eventKind} accepted generation ${JSON.stringify(generation.fact_id)} has no canonical Git basis — no-write`, eventKind);
   }
 
   // Replay stability: deterministic durable identities from the semantic
@@ -396,6 +396,40 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
     gitBasisHead,
   });
 
+  // (Authority §5.3 / §4.3) BEFORE any replay shortcut, resolve the current
+  // Work lineage tip, verify the lane token resolves to it, and verify the
+  // FULL execution Git basis tuple (head/branch/worktree) is equal across
+  // submitted Result.gitBasis == event binding.git_basis == current Work.
+  // A stale lane (fresh/recovery/rebind successor) is typed no-write even
+  // when the same result identity was accepted earlier.
+  const workTip = resolveCurrentWorkTip(eventKind, context.current, stageId, sliceId, acceptedBinding as unknown as MesPlanBinding & { accepted_plan_ref: string; plan_digest: string });
+  const workId = workTip.work_id as string;
+  const expectedWorkTag = sourceIdentityDigest([stageId, sliceId, cycle, acceptedBinding.verification_result_ref, laneActionToken]);
+  const expectedWorkId = `mes:work:${stageId}:${sliceId}:${expectedWorkTag}`;
+  if (workId !== expectedWorkId) {
+    materializeFail('binding-mismatch', `semantic event ${eventKind} lane action token does not resolve to the current Work attempt (stale token / non-current lane, no-write; §4.3)`, eventKind);
+  }
+  const workBasis = workTip.git_basis;
+  const eventBasis = event.binding.git_basis;
+  if (workBasis === undefined || eventBasis === undefined || typeof eventBasis !== 'object' || eventBasis === null) {
+    materializeFail('binding-mismatch', `semantic event ${eventKind} requires a full execution Git basis on submitted Result, event binding and current Work — no-write（§5.3）`, eventKind);
+  }
+  const eventBasisRec = eventBasis as unknown as Record<string, unknown>;
+  if (
+    validated.gitBasis.head !== workBasis.head ||
+    validated.gitBasis.branch !== workBasis.branch ||
+    validated.gitBasis.worktree !== workBasis.worktree ||
+    eventBasisRec.head !== workBasis.head ||
+    eventBasisRec.branch !== workBasis.branch ||
+    eventBasisRec.worktree !== workBasis.worktree
+  ) {
+    materializeFail(
+      'binding-mismatch',
+      `semantic event ${eventKind} execution Git basis mismatch: submitted Result.gitBasis, event binding.git_basis and current Work.git_basis must be equal on head+branch+worktree (relation owner: Result → current Work; no-write; §5.3)`,
+      eventKind,
+    );
+  }
+
   // Idempotent replay: the EXACT acceptance (same durable identity) is
   // already materialized. Return the already-durable fact pair plus the
   // equivalent closed ACK over the durable state — the transaction dedups
@@ -404,6 +438,18 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
     (fact) => fact.fact_kind === 'result' && fact.fact_id === resultFactId,
   );
   if (existingResult !== undefined) {
+    // (Authority §4.3 / review) the accepted result must belong to the
+    // CURRENT Work attempt — a stale-lane replay of a previous attempt's
+    // accepted result is no-write. The durable result identity is
+    // lane-independent, so the token gate alone cannot prevent cross-attempt
+    // identity reuse: the durable work_id is the same-attempt check.
+    if (existingResult.work_id !== workId) {
+      materializeFail(
+        'binding-mismatch',
+        `semantic event ${eventKind} durable result ${JSON.stringify(resultFactId)} belongs to Work attempt ${JSON.stringify(existingResult.work_id)}, not the current Work attempt ${JSON.stringify(workId)} — stale-lane replay, no-write（§4.3）`,
+        eventKind,
+      );
+    }
     if (existingResult.result_payload_digest !== validated.resultPayloadDigest) {
       materializeFail(
         'conflict',
@@ -456,8 +502,8 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
     };
   }
 
-  // (fresh path) the branded accepted-Plan graph was already rebuilt above.
-  const workTip = resolveCurrentWorkTip(eventKind, context.current, stageId, sliceId, acceptedBinding as unknown as MesPlanBinding & { accepted_plan_ref: string; plan_digest: string });
+  // (fresh path) current Work tip + full execution basis were resolved and
+  // validated above (before the replay gate) — no second resolution here.
   const currentTask = resolveCurrentTaskStatus(eventKind, context.current, taskId, workTip.work_id as string);
   if (currentTask === undefined) {
     materializeFail(
@@ -473,15 +519,18 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
       eventKind,
     );
   }
-  // (S03-A-T01 migration table) TASK_COMPLETE is ONLY reachable from a
-  // durable TASK_RESULT_SUBMITTED Task of the current attempt (the ordered
-  // progression PLANNED → IN_PROGRESS → TASK_RESULT_SUBMITTED → TASK_COMPLETE
-  // is the single closed path; neither PLANNED nor IN_PROGRESS can jump
-  // straight to COMPLETE).
-  if (currentTask.task_status !== 'TASK_RESULT_SUBMITTED') {
+  // (Authority §4.3 / §5.1) the closed progression is PLANNED → IN_PROGRESS
+  // → TASK_RESULT_SUBMITTED → TASK_COMPLETE. A fresh NORMAL Task at
+  // IN_PROGRESS is advanced by this acceptance to TASK_RESULT_SUBMITTED +
+  // Result + TASK_COMPLETE in ONE atomic transaction (not a skipped state);
+  // a retained historical Task already durably at TASK_RESULT_SUBMITTED only
+  // gains Result + TASK_COMPLETE (no migration required). PLANNED and any
+  // other status are no-write.
+  const isFreshProgression = currentTask.task_status === 'IN_PROGRESS';
+  if (!isFreshProgression && currentTask.task_status !== 'TASK_RESULT_SUBMITTED') {
     materializeFail(
       'binding-mismatch',
-      `semantic event ${eventKind} Task ${JSON.stringify(taskId)} is at ${JSON.stringify(currentTask.task_status)} — TASK_COMPLETE requires the durable predecessor TASK_RESULT_SUBMITTED of the current attempt, no-write`,
+      `semantic event ${eventKind} Task ${JSON.stringify(taskId)} is at ${JSON.stringify(currentTask.task_status)} — task_result.accept requires the durable predecessor IN_PROGRESS (fresh NORMAL) or retained TASK_RESULT_SUBMITTED of the current attempt, no-write`,
       eventKind,
     );
   }
@@ -507,6 +556,39 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
     result_id: validated.resultId,
     result_payload_digest: validated.resultPayloadDigest,
   } as MesFactEnvelope;
+
+
+  // (Authority §4.3) fresh NORMAL progression materializes the
+  // TASK_RESULT_SUBMITTED Task fact in the SAME atomic acceptance
+  // transaction as the Result + TASK_COMPLETE — the full chain
+  // PLANNED → IN_PROGRESS → TASK_RESULT_SUBMITTED → TASK_COMPLETE stays
+  // durable without a separate Brain step. Retained historical facts at
+  // TASK_RESULT_SUBMITTED never mint a duplicate (isFreshProgression is
+  // false → no SUBMITTED fact here).
+  let submittedTaskFact: MesFactEnvelope | undefined;
+  if (isFreshProgression) {
+    try {
+      submittedTaskFact = buildTaskFact({
+        task_id: taskId,
+        task_status: 'TASK_RESULT_SUBMITTED',
+        depends_on_task_ids: currentTask.depends_on_task_ids ?? [],
+        ...(currentTask.blocked_by_task_id !== undefined
+          ? { blocked_by_task_id: currentTask.blocked_by_task_id }
+          : {}),
+        work_id: workTip.work_id,
+        fact_id: `mes:fact:task:${taskId}:${identity}:TASK_RESULT_SUBMITTED`,
+        authority_refs: [...event.binding.authority_refs],
+        plan_binding: planBinding,
+        git_basis: gitBasis,
+      });
+    } catch (error) {
+      materializeFail(
+        'invalid-derived-fact',
+        `semantic event ${eventKind} TASK_RESULT_SUBMITTED construction failed: ${error instanceof Error ? error.message : String(error)}`,
+        eventKind,
+      );
+    }
+  }
 
   let completedTaskFact: MesFactEnvelope;
   try {
@@ -547,7 +629,7 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
         acceptedResultRef: resultRef,
         ...(typeof reasonCode === 'string' ? { reasonCode } : {}),
       },
-      durableFacts: [...context.current, resultFact, completedTaskFact],
+      durableFacts: [...context.current, ...(submittedTaskFact !== undefined ? [submittedTaskFact] : []), resultFact, completedTaskFact],
     });
   } catch (error) {
     if (error instanceof TaskResultAckError) {
@@ -565,7 +647,7 @@ export const taskResultAcceptHandler: MesSemanticEventHandler = (
   }
 
   return {
-    facts: [resultFact, completedTaskFact],
+    facts: [...(submittedTaskFact !== undefined ? [submittedTaskFact] : []), resultFact, completedTaskFact],
     acceptedPlanTaskGraph: graph,
     ack,
   };
