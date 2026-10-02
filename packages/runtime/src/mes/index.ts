@@ -1,18 +1,20 @@
 /**
  * @proofloop/runtime — MES seam public surface (S01-C-T02).
  *
- * Assembles the S01 MES persistence seam for Runtime consumers: the
- * versioned fact envelope + validation (types/validate), the fact-kind
- * binding (binding), the atomic root-bound snapshot store (store), the
- * one-time bootstrap seed (bootstrap) and the pure status/detail
- * projections (status).
+ * Assembles the MES seam public surface for Runtime consumers: the versioned
+ * fact envelope + validation (types/validate), the fact-kind binding
+ * (binding), the atomic root-bound snapshot store (store), the one-time
+ * bootstrap seed (bootstrap), the pure status/detail projections (status) and
+ * the NORMAL Brain-facing semantic-event seam (semantic-event / materialize).
  *
  * Every name is re-exported EXACTLY ONCE with an explicit list (no
  * `export *`) so consumers cannot bypass the fail-closed validators or
- * accidentally shadow a canonical declaration. This seam is NOT a CLI
- * domain and does not add anything to DOMAIN_REGISTRY / CANONICAL_DOMAINS
- * (tech-spec/contracts.md §1.1 / §1.2): `proofloop status` is a top-level
- * read-only observation entry handled by the public dispatcher.
+ * accidentally shadow a canonical declaration. The low-level fact-delta
+ * transaction construction API is deliberately absent here (STATIC-41): it
+ * stays on the internal module path `mes/transaction`. `proofloop mes
+ * materialize` (tech-spec/contracts.md §1.1 / §1.2) is the shared public
+ * adapter for this seam; `proofloop status` remains a top-level read-only
+ * observation entry handled by the public dispatcher.
  */
 // Schema + fact envelope types — canonical declarations.
 export {
@@ -74,24 +76,48 @@ export type {
   MesFactBindRecord,
 } from './binding';
 
-// MES operational transaction layer (S06-R-A-T01) — the ONLY normal durable
-// mutator. The raw full-snapshot store (MesSnapshotStore) is internal and
-// NOT exposed as a Brain-facing API (STATIC-32 / architecture
-// mes-operational-transaction-boundary): callers submit bounded semantic
-// events through this seam only; the store stays importable from the
-// internal module path for Runtime-internal consumers.
+// MES semantic-event materializer — the ONE NORMAL Brain-facing durable
+// mutation seam (ADR-026 / E2E-33 / STATIC-41). Brain/Host submit a
+// high-level semantic event; the materializer resolves the current durable
+// relation and composes the internal fact-delta transaction engine. The
+// low-level transaction construction API (`MesTransactionLayer` /
+// `createMesTransactionLayer` / the fact-delta input) is deliberately NOT
+// re-exported here: it stays importable from the internal module path
+// `mes/transaction` for the materializer, Runtime-internal consumers, tests
+// and explicit recovery tooling, but it is no longer the normal application
+// seam. The raw full-snapshot store stays internal too (STATIC-32).
 export {
-  MesTransactionLayer,
-  createMesTransactionLayer,
-  MesTransactionError,
-  resolveTransactionBindingError,
-} from './transaction';
+  MesSemanticEventMaterializer,
+  createMesSemanticEventMaterializer,
+  MesMaterializationError,
+} from './materialize';
 export type {
-  MesTransactionErrorCode,
-  MesTransactionBinding,
+  MesMaterializationErrorCode,
+  MesMaterializationResult,
+  MesMaterializedRef,
+} from './materialize';
+
+// The ONE mechanical semantic-event catalog + the closed Brain-facing event
+// schema (the machine mapping owner; no second Authority, no router, no
+// next-action source).
+export {
+  MES_SEMANTIC_EVENT_CATALOG,
+  MES_FORBIDDEN_CALLER_FIELDS,
+  MES_SEMANTIC_EVENT_KEYS,
+  MES_SEMANTIC_EVENT_BINDING_KEYS,
+  MES_SEMANTIC_EVENT_OUTPUT_MUTABILITIES,
+} from './semantic-event';
+export type {
   MesSemanticEvent,
-  MesTransactionResult,
-} from './transaction';
+  MesSemanticEventBinding,
+  MesSemanticEventCatalog,
+  MesSemanticEventCatalogEntry,
+  MesSemanticEventHandler,
+  MesSemanticEventMaterialization,
+  MesSemanticEventMaterializationContext,
+  MesSemanticEventOutput,
+  MesSemanticEventOutputMutability,
+} from './semantic-event';
 
 // One-time bootstrap seed (Brain-supplied first-NORMAL status tuple).
 export {

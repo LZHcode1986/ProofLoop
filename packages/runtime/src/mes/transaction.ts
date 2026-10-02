@@ -1,11 +1,14 @@
 /**
  * @proofloop/runtime — MES operational transaction layer (S06-R-A-T01).
  *
- * The ONLY normal durable operational-state mutator (contracts.md §2.1.2 /
+ * The Runtime-internal durable fact-delta engine (contracts.md §2.1.2 /
  * architecture #/entities/mes-operational-transaction-boundary / acceptance
- * E2E-25 / STATIC-32). Brain/Host submits a BOUNDED semantic event (facts +
- * current binding), never a full snapshot / retention list / caller-assembled
- * `submitted ∪ retained` state; the layer:
+ * E2E-25 / STATIC-32). It is NOT the Brain-facing seam: Brain/Host submit a
+ * high-level semantic event to the materializer (`mes/materialize.ts`), which
+ * derives the delta from current durable state. The engine receives a BOUNDED
+ * already-materialized fact delta (facts + current binding), never a full
+ * snapshot / retention list / caller-assembled `submitted ∪ retained` state;
+ * the layer:
  *
  *   1. validates the event shape and binding (NORMAL mode only) — unknown
  *      keys, non-NORMAL execution modes and malformed authority refs fail
@@ -384,13 +387,26 @@ export interface MesTransactionBinding {
   readonly git_basis?: MesGitBasis;
 }
 
-/** A bounded semantic event: the facts to materialize + current binding. */
-export interface MesSemanticEvent {
+/**
+ * A bounded low-level DURABLE FACT-DELTA transaction input: the already
+ * materialized facts + the current execution binding.
+ *
+ * This is the Runtime-internal engine input. The Brain-facing seam is the
+ * semantic-event materializer (`mes/materialize.ts`), which derives this delta
+ * from current durable state + an accepted high-level event. The historical
+ * name `MesSemanticEvent` was a naming trap — the value is not a semantic
+ * event but a pre-materialized fact delta — and survives only as a deprecated
+ * alias for the bounded compatibility window (deep-path consumers).
+ */
+export interface MesFactDeltaTransactionInput {
   readonly facts: readonly MesFactEnvelope[];
   readonly binding: MesTransactionBinding;
   /** Forwarded for new/changed `task` facts (store durable write-through). */
   readonly acceptedPlanTaskGraph?: unknown;
 }
+
+/** @deprecated Runtime-internal fact-delta alias; Brain-facing seam = `mes/materialize.ts`. */
+export type MesSemanticEvent = MesFactDeltaTransactionInput;
 
 /** Transaction result: only materialized refs + Git/basis facts. */
 export interface MesTransactionResult {
@@ -497,7 +513,7 @@ export class MesTransactionLayer {
    * Materialize a bounded semantic event durably (see module doc for the
    * full order). Any failure is no-write byte-stable with no auto retry.
    */
-  commit(event: MesSemanticEvent): MesTransactionResult {
+  commit(event: MesFactDeltaTransactionInput): MesTransactionResult {
     // 1) Closed event shape: a semantic event carries facts + binding only
     //    (plus the forwarded task graph). Unknown keys — a full snapshot
     //    container, a retention list, a caller-assembled submitted∪retained

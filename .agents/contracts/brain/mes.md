@@ -56,6 +56,7 @@ Plan binding 经 accepted / candidate Plan 的 `project_stage_map_ref` + `git_ba
 <!-- proofloop:entity id="mes-operational-transaction-boundary" kind="seam" -->
 ### MES operational transaction boundary
 - Brain/Host 只提交有界 semantic event 与必要 binding；不提交完整 snapshot、retention set 或由 caller 组装的 `submitted ∪ retained` state。Role Agent/Worker/Verifier 不直接写 MES。
+- Brain 的 NORMAL 持久化调用路径是共享适配器 `proofloop mes materialize`（`node packages/runtime/dist/cli/proofloop.js mes materialize --json <event>` 或 `--request <root-relative-json>`），只接受已注册 semantic event kind；`execution_mode: MES_MAINTENANCE`、未知 kind、未知字段、root mismatch / path escape 全部 fail closed（exit 2，不自动 retry）。
 - transaction layer 是唯一 normal durable mutator：读取并锁定 root-bound current snapshot，按 fact kind 校验，解析 current durable relation 的 canonical binding，materialize facts/relations，preserve unrelated facts，执行 idempotency/完整结果校验，再调用内部 `MesSnapshotStore` atomic persist。
 - 任何 validation、binding、relation、permission、conflict 或 persistence failure 都 no-write；不自动 retry；正常 caller 少提交 facts 不代表删除旧 durable IDs。transaction result 只报告 materialized refs/basis，不输出 route、next action 或 reasoning。
 

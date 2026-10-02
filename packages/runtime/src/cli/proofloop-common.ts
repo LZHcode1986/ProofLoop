@@ -67,11 +67,14 @@ export const CLI_EXIT = {
 
 export const CANONICAL_DOMAINS = [
   // CLI cutover: the remaining domains are the mechanical deterministic
-  // Git boundary adapter, the dedicated mechanical Integration adapter and
-  // the mechanical Git worktree seam (create/list/remove).
+  // Git boundary adapter, the dedicated mechanical Integration adapter, the
+  // mechanical Git worktree seam (create/list/remove) and the mechanical MES
+  // persistence adapter (`mes materialize`; high-level semantic events only —
+  // never routing, dispatch or next action).
   'boundary',
   'integration',
   'worktree',
+  'mes',
 ] as const;
 
 export type CanonicalDomain = (typeof CANONICAL_DOMAINS)[number];
@@ -85,6 +88,7 @@ export const DOMAIN_REGISTRY: Readonly<Record<CanonicalDomain, DomainRegistryEnt
   boundary: { domain: 'boundary', operations: ['close'] },
   integration: { domain: 'integration', operations: ['apply'] },
   worktree: { domain: 'worktree', operations: ['create', 'list', 'remove'] },
+  mes: { domain: 'mes', operations: ['materialize'] },
 };
 
 export function isCanonicalDomain(value: string): value is CanonicalDomain {
@@ -480,6 +484,15 @@ export interface CliRequestInput {
   readonly maintenance_binding?: Record<string, unknown> | undefined;
   /** Worktree create field: durable/plan-derived base ref for the detached lane. */
   readonly base_ref?: string | undefined;
+  /**
+   * MES semantic-event adapter fields (ADR-026 / E2E-33 / STATIC-41): the
+   * high-level event kind + its closed caller-owned payload + the NORMAL
+   * execution binding. There is deliberately NO `facts` field — the durable
+   * fact delta never appears in a request.
+   */
+  readonly event_kind?: string | undefined;
+  readonly payload?: Record<string, unknown> | undefined;
+  readonly binding?: Record<string, unknown> | undefined;
 }
 
 /**
@@ -529,6 +542,10 @@ const REQUEST_KNOWN_FIELDS_BY_DOMAIN: Readonly<Record<string, ReadonlySet<string
     'domain',
     'operation',
   ]),
+  // MES semantic-event adapter (`mes materialize`): the closed request carries
+  // the high-level event kind, its caller-owned payload and the NORMAL
+  // execution binding only — the durable fact delta never appears in a request.
+  mes: new Set(['domain', 'operation', 'event_kind', 'payload', 'binding']),
 };
 
 /**
@@ -643,6 +660,19 @@ function parseClosedRequestObject(value: unknown, domain: string, operation: str
       }
       continue;
     }
+    // MES semantic-event adapter: the high-level payload and the NORMAL
+    // execution binding are closed objects, never raw strings.
+    if (key === 'payload' || key === 'binding') {
+      const value = record[key];
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return {
+          ok: false,
+          code: 'RUNTIME.INPUT_INVALID',
+          message: `request field "${key}" must be a closed JSON object`,
+        };
+      }
+      continue;
+    }
     if (typeof record[key] !== 'string') {
       return {
         ok: false,
@@ -687,6 +717,9 @@ function parseClosedRequestObject(value: unknown, domain: string, operation: str
       ? undefined
       : record.maintenance_binding as Record<string, unknown>,
     base_ref: record.base_ref as string | undefined,
+    event_kind: record.event_kind as string | undefined,
+    payload: record.payload === undefined ? undefined : (record.payload as Record<string, unknown>),
+    binding: record.binding === undefined ? undefined : (record.binding as Record<string, unknown>),
   };
   return { ok: true, request };
 }

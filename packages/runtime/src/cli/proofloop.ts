@@ -21,15 +21,18 @@
  * CLI cutover (bootstrap unlock): every legacy business-control domain
  * (authority/plan/context/stage/review/project/doctor/gate/recovery/cutover)
  * and its handlers/routes were removed — no fallback/compatibility alias
- * remains.  The two active mechanical routes are the deterministic Git
- * boundary adapter (`boundary close`), the dedicated mechanical
- * Integration adapter (`integration apply`) and the mechanical Git
- * worktree seam (`worktree create|list|remove`).
+ * remains. The active mechanical routes are the deterministic Git boundary
+ * adapter (`boundary close`), the dedicated mechanical Integration adapter
+ * (`integration apply`), the mechanical Git worktree seam
+ * (`worktree create|list|remove`) and the mechanical MES persistence adapter
+ * (`mes materialize`; high-level semantic events only — never routing,
+ * dispatch or next action).
  */
 
 import { runBoundaryDomain } from './proofloop-boundary';
 import { runIntegrationDomain } from './proofloop-integration';
 import { runWorktreeDomain } from './proofloop-worktree';
+import { runMesDomain } from './proofloop-mes';
 import { readMesSeedRecord, isMesSeeded, readMesSnapshotFacts, isMesInitialized } from '../mes/bootstrap';
 import type { MesStatusTuple } from '../mes/bootstrap';
 import {
@@ -627,6 +630,18 @@ export function proofloopCli(
   // still decides WHEN/WHICH Slice lane and the cleanup timing.
   if (domain === 'worktree') {
     const envelope = runWorktreeDomain(root, command, requestValidation.request);
+    emitEnvelope(envelope);
+    return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
+      ? CLI_EXIT.USAGE
+      : envelope.ok ? CLI_EXIT.OK : CLI_EXIT.BLOCKED;
+  }
+
+  // mes: the mechanical MES persistence adapter. It owns only the
+  // deterministic high-level-semantic-event → durable-fact materialization and
+  // the atomic transaction; Brain owns accept/arbitrate/transition and all
+  // routing / recovery decisions.
+  if (domain === 'mes') {
+    const envelope = runMesDomain(root, command, requestValidation.request);
     emitEnvelope(envelope);
     return !envelope.ok && envelope.findings.some((finding) => finding.code === 'USAGE')
       ? CLI_EXIT.USAGE
