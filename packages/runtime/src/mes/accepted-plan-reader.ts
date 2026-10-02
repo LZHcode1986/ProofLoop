@@ -66,6 +66,67 @@ interface ExecGraphTask {
 /** The closed per-marker vocabulary is what the reader understands; see module doc. */
 const EXECUTION_SEMANTIC_KEY_RE = /depend|block|order|parallel|sequen|successor|edge|graph|run/i;
 
+/**
+ * One legacy Markdown structural-heading classification shared by grammar
+ * detection AND the legacy parser — the SAME judgement, no detector/parser
+ * drift (R2-B / G6 remediation).
+ *
+ *   - structural Slice: `### Slice <canonical MES_SLICE_ID_RE id>`
+ *   - structural Task : `#### <canonical MES_TASK_ID_RE id>`
+ *   - malformed structural-looking: heading carries an id-shaped token that
+ *     starts like a canonical structural id (`S<digits>…`, case-insensitive)
+ *     but is NOT canonical → typed no-write (never silently prose)
+ *   - ordinary heading: `#`/`##`/`###`/`####`/`#####`/`######` lines carry their
+ *     heading level for the Markdown hierarchy scope transition (1–3 exit Task+Slice,
+ *     4 exits Task keeps Slice, 5–6 keep both); `### Slice <non-canonical-non-S-d>…`
+ *     and `#### <non-canonical-non-S-d>…` are ordinary headings of that level,
+ *     never structural and never prose-without-level
+ *   - prose: any non-heading line (bullets, paragraphs) is ordinary explanatory
+ *     Markdown; interpreted only inside an owning structural scope
+ */
+type LegacyHeadingKind =
+  | { readonly kind: 'slice'; readonly id: string }
+  | { readonly kind: 'task'; readonly id: string }
+  | { readonly kind: 'malformed-slice'; readonly id: string }
+  | { readonly kind: 'malformed-task'; readonly id: string }
+  | { readonly kind: 'heading'; readonly level: 1 | 2 | 3 | 4 | 5 | 6 }
+  | { readonly kind: 'prose' };
+
+/** A token that begins like a canonical structural id (`S<digits>…`, case-insensitive). */
+const STRUCTURAL_LOOKING_RE = /^S\d/i;
+
+function classifyLegacyHeading(line: string): LegacyHeadingKind {
+  // Structural Slice namespace first: a heading that declares a canonical
+  // structural identity is structural; a structural-looking-but-malformed
+  // identity is typed no-write, never demoted to an ordinary heading level.
+  const slice = /^###\s+Slice\s+(\S+)/.exec(line);
+  if (slice !== null) {
+    const id = slice[1];
+    if (MES_SLICE_ID_RE.test(id)) return { kind: 'slice', id };
+    if (STRUCTURAL_LOOKING_RE.test(id)) return { kind: 'malformed-slice', id };
+    // `### Slice …` whose declared id is neither canonical nor structural-looking
+    // is an ordinary level-3 Markdown heading (hierarchy transition, not prose).
+    return { kind: 'heading', level: 3 };
+  }
+  // Structural Task namespace (same ordering).
+  const task = /^####\s+(\S+)/.exec(line);
+  if (task !== null) {
+    const id = task[1];
+    if (MES_TASK_ID_RE.test(id)) return { kind: 'task', id };
+    if (STRUCTURAL_LOOKING_RE.test(id)) return { kind: 'malformed-task', id };
+    // `#### …` whose declared id is neither canonical nor structural-looking
+    // is an ordinary level-4 Markdown heading (hierarchy transition).
+    return { kind: 'heading', level: 4 };
+  }
+  // Other Markdown ATX headings: carry their hierarchy level. This is what
+  // drives the scope state machine — levels 1–3 exit Task+Slice, level 4 exits
+  // Task only, levels 5–6 keep both. Non-heading lines are ordinary prose.
+  const heading = /^(#{1,6})\s+/.exec(line);
+  if (heading !== null) {
+    return { kind: 'heading', level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6 };
+  }
+  return { kind: 'prose' };
+}
 function isFencedYamlStart(line: string): boolean {
   return /^```yaml\s*$/i.test(line);
 }
@@ -274,27 +335,50 @@ function parseLegacyGraph(text: string, acceptedPlanRef: string): readonly ExecG
     const line = raw.trim();
     if (line.length === 0) continue;
 
-    const sliceHeading = /^###\s+Slice\s+(\S+)/.exec(line);
-    if (sliceHeading) {
-      const id = sliceHeading[1];
-      if (!MES_SLICE_ID_RE.test(id)) {
-        materializeFail('invalid-derived-fact', `accepted Plan legacy grammar carries a non-canonical slice id ${JSON.stringify(id)} (${acceptedPlanRef})`);
-      }
+    const heading = classifyLegacyHeading(line);
+    //
+    // Malformed structural identity is invalid input, never explanatory prose
+    // and never an ordinary heading level — checked before any hierarchy
+    // transition so `### Slice S0X` is never swallowed as a level-3 heading.
+    if (heading.kind === 'malformed-slice') {
+      materializeFail('invalid-derived-fact', `accepted Plan legacy grammar carries a non-canonical slice id ${JSON.stringify(heading.id)} (${acceptedPlanRef})`);
+    }
+    if (heading.kind === 'malformed-task') {
+      materializeFail('invalid-derived-fact', `accepted Plan legacy grammar carries a non-canonical task id ${JSON.stringify(heading.id)} (${acceptedPlanRef})`);
+    }
+
+    if (heading.kind === 'slice') {
       pushSlice();
-      currentSlice = id;
+      currentSlice = heading.id;
+      continue;
+    }
+    if (heading.kind === 'task') {
+      if (currentSlice === null) {
+        // A valid structural Task outside any active Slice is invalid input,
+        // not silently dropped (contracts §4.1.1: typed no-write).
+        materializeFail('invalid-derived-fact', `accepted Plan legacy grammar declares task ${JSON.stringify(heading.id)} outside an active Slice (${acceptedPlanRef}) — no-write`);
+      }
+      pushTask();
+      currentTask = { task: heading.id, dependencies: [] };
       continue;
     }
 
-    const taskHeading = /^####\s+(\S+)/.exec(line);
-    if (taskHeading && currentSlice !== null) {
-      const id = taskHeading[1];
-      if (!MES_TASK_ID_RE.test(id)) {
-        materializeFail('invalid-derived-fact', `accepted Plan legacy grammar carries a non-canonical task id ${JSON.stringify(id)} (${acceptedPlanRef})`);
+    // Ordinary Markdown heading → Markdown hierarchy scope transition
+    // (contracts §4.1.1): ordinary `#`/`##`/`###` exit the Task scope AND the
+    // Slice scope; ordinary `####` exits the Task scope but keeps the Slice
+    // scope; ordinary `#####`/`######` keep both.
+    if (heading.kind === 'heading') {
+      if (heading.level <= 3) {
+        pushSlice();          // collects the current Slice/Task if any
+        currentSlice = null;  // actual scope exit — not just collected
+        currentTask = null;   // pushSlice→pushTask already nulls it; explicit
+      } else if (heading.level === 4) {
+        pushTask();           // close the Task scope, keep the Slice scope
       }
-      pushTask();
-      currentTask = { task: id, dependencies: [] };
+      // levels 5–6 keep the current Task/Slice scope
       continue;
     }
+
     // R2-B / G6 fail-closed: between a Slice heading and its first Task
     // heading, an execution-semantic field this legacy grammar does not
     // understand at the Slice level is a typed no-write — never silently
@@ -375,7 +459,22 @@ function normalizeExecGraph(text: string, acceptedPlanRef: string): { slices: re
     block.split('\n').some((line) => /^\s*slices:\s*$/.test(line)) &&
     /(^|\n)\s*-\s+slice\s*:/m.test(block);
   const graphBlocks = fencedBlocks.filter(isGraphBlock);
-  const hasLegacy = /^###\s+Slice\s+(\S+)/m.test(text) && /^####\s+S\d+-[A-Z]+-T\d+/m.test(text);
+  // Legacy signal detection uses the SAME structural-heading classifier as
+  // parseLegacyGraph — no detector/parser drift: an explanatory prose heading
+  // (`### Slice Proof Obligations`) is never a legacy slice signal.
+  const legacySliceSignal = text
+    .split('\n')
+    .some((raw) => {
+      const h = classifyLegacyHeading(raw.trim());
+      return h.kind === 'slice' || h.kind === 'malformed-slice';
+    });
+  const legacyTaskSignal = text
+    .split('\n')
+    .some((raw) => {
+      const h = classifyLegacyHeading(raw.trim());
+      return h.kind === 'task' || h.kind === 'malformed-task';
+    });
+  const hasLegacy = legacySliceSignal && legacyTaskSignal;
 
   if (graphBlocks.length > 1) {
     materializeFail(
